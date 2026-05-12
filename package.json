@@ -1,0 +1,12 @@
+{
+  "name": "qua-reader",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "description": "Card-style reader over the qua vault (book / paper / author / topic)",
+  "scripts": {
+    "build": "node scripts/build-index.mjs",
+    "serve": "node serve.mjs",
+    "dev": "node scripts/build-index.mjs && node serve.mjs"
+  }
+}

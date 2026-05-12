@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<title>qua schema preview · v0.1.0-draft</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; }
+  pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .yaml-line { display: block; padding: 0 8px; line-height: 1.65; }
+  .yaml-del   { background: #fef2f2; color: #991b1b; text-decoration: line-through; }
+  .yaml-empty { background: #fefce8; color: #854d0e; }
+  .yaml-add   { background: #ecfdf5; color: #065f46; }
+  .yaml-norm  { background: #eff6ff; color: #1e40af; }
+  .yaml-key   { color: #6b21a8; }
+  .pill { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; line-height: 1.4; }
+</style>
+</head>
+<body class="bg-stone-100 text-stone-900">
+<div id="app"></div>
+
+<script type="module">
+import { h, render } from 'https://esm.sh/preact@10.22.0';
+import { useState } from 'https://esm.sh/preact@10.22.0/hooks';
+import htm from 'https://esm.sh/htm@3.1.1';
+const html = htm.bind(h);
+
+// ---- spec data ----
+
+const PRIMITIVES = {
+  Title:   { sig: 'string(2..280)',                          },
+  Authors: { sig: 'string[]  (强制数组,≥1 元素)',          },
+  Year:    { sig: 'number(1500..2030) | null',               },
+  Themes:  { sig: 'string[] (空数组 lint warn)',              },
+  Rating:  { sig: 'number 1..5  (reader 显示时 → "★".repeat(n))',  },
+};
+
+const TYPES = {
+  author: {
+    label: '作者',
+    accent: 'sky',
+    accentClasses: { tab: 'bg-sky-600 text-white', dot: 'bg-sky-500', border: 'border-sky-300', headBg: 'bg-sky-50/40', headText: 'text-sky-700' },
+    count: 229,
+    fromType: 'author-profile',
+    pathPattern: 'vault/authors/<slug>.md',
+    description: '学者档案。一个作者一份。',
+    fields: [
+      { name: 'type',   kind: '"author"', req: true, note: '判别符,固定字面量' },
+      { name: 'title',  kind: 'Title',    req: true, note: '作者全名(展示名)' },
+      { name: 'themes', kind: 'Themes',   req: true, note: '研究方向标签数组' },
+      { name: 'rating', kind: 'Rating?',  req: false, note: '整体学术评分(数字 1..5,前端渲染 ★)' },
+    ],
+    removed: [
+      { name: 'author',      count: 229, why: '与 title 冗余;wikilink 由路径派生(vault/authors/<slug>.md → [[slug|Display]])' },
+      { name: 'year',        count: 19,  why: '8% 非空,语义不清(出生年?出道年?发表年?)' },
+      { name: 'source',      count: 15,  why: '7% 非空,作者档案级别的 source 含义不明' },
+      { name: 'has-profile', count: 8,   why: '孤儿字段,无消费方,疑似早期 LLM 旁注' },
+    ],
+    renamed: [],
+    normalized: [
+      { from: 'rating: ★★★★ (str)',  to: 'rating: 4 (number)',     count: 10 },
+      { from: 'themes: "STS" (str)',  to: 'themes: [STS]',         count: 5  },
+    ],
+    example: {
+      title: 'Sara Ahmed',
+      current: [
+        ['key', 'type: author-profile', { rename: 'type: author' }],
+        ['empty', 'rating:'],
+        ['empty', 'themes: []'],
+        ['del', 'author: "Sara Ahmed"'],
+        ['key', 'title: "Sara Ahmed"'],
+        ['del', 'year:'],
+        ['del', 'source:'],
+      ],
+      proposed: [
+        ['key', 'type: author'],
+        ['key', 'title: "Sara Ahmed"'],
+        ['add', 'themes: [affect-theory, queer-phenomenology, feminist-theory]'],
+        ['add', 'rating: 5'],
+      ],
+      note: 'author 字段删除 — title 已经是作者全名,wikilink [[sara-ahmed|Sara Ahmed]] 由 reader 从路径派生。rating 改用数字,reader 渲染为 ★★★★★。themes 现在为空,迁移时 fix-agent 从正文推断补全。',
+    },
+    bodySchema: [
+      { h2: '思想肖像',  req: true,  kind: 'paragraph',         coverage: '31% (新)', note: 'agent 0.9.0 新增' },
+      { h2: '代表著作',  req: false, kind: 'paragraph',         coverage: '31% (新)', note: 'aliases: 代表作概览 (旧 69%);没有专著的作者跳过' },
+      { h2: '学术轨迹',  req: true,  kind: 'paragraph',         coverage: '100%' },
+      { h2: '关键概念',  req: true,  kind: 'table',             coverage: '100%', highlight: '100% table', note: '原 "核心概念谱系" → 跟 book/chapter/paper 同名,kind 按 type 分(author 用 table)' },
+      { h2: '理论网络',  req: true,  kind: 'bullet-list',       coverage: '100%' },
+      { h2: '金句要点',  req: true,  kind: 'blockquote-list',   coverage: '100%', note: '原 "可引用观点" (5→4) · kind 跨 type 统一为 blockquote-list · 当前 59% numbered-list,迁移期 numbered → blockquote(机械转换)' },
+      { h2: '项目关联',  req: true,  kind: 'h3-project-tabs',   childKind: 'paragraph', coverage: '98%+', note: '原 "与本项目主题的关联" (8→4) · H3 per project' },
+    ],
+  },
+
+  book: {
+    label: '书',
+    accent: 'emerald',
+    accentClasses: { tab: 'bg-emerald-600 text-white', dot: 'bg-emerald-500', border: 'border-emerald-300', headBg: 'bg-emerald-50/40', headText: 'text-emerald-700' },
+    count: 779,
+    fromType: 'book-overview',
+    pathPattern: 'vault/books/<slug>/00-overview.md',
+    description: '一本书的整体分析。',
+    fields: [
+      { name: 'type',       kind: '"book"',  req: true },
+      { name: 'title',      kind: 'Title',   req: true, note: '书名(含副标题)' },
+      { name: 'authors',    kind: 'Authors', req: true, note: '作者或编者(角色由 category 决定;永远数组)' },
+      { name: 'year',       kind: 'Year',    req: true, note: '出版年' },
+      { name: 'publisher',  kind: 'string',  req: true, note: 'Phase 1 lint warn;Phase 2 严格必填' },
+      { name: 'isbn',       kind: 'string?', req: false, note: 'ISBN (lint 校验格式)' },
+      { name: 'category',   kind: 'enum?',   req: false, note: 'monograph / edited-volume / handbook / other,默认 monograph' },
+      { name: 'themes',     kind: 'Themes?', req: false },
+      { name: 'rating',     kind: 'Rating?', req: false, note: 'number 1..5,前端渲染 ★' },
+    ],
+    removed: [
+      { name: 'topic',             count: 657, why: '84% 在用,但是工作流字段,污染 entity schema;通过 themes / topic-synthesis 表达' },
+      { name: 'chapters_analyzed', count: 648, why: '83% 在用,但 reader 从子章节 count 派生即可' },
+      { name: 'source',            count: 70,  why: '与 title 信息重叠;publisher 独立字段已替代' },
+      { name: 'edition',           count: 1,   why: '极 rare,需要时写入 note' },
+      { name: 'has-overview / analyzed / status / confidence / version / supersedes', count: '~30', why: '孤儿字段,均 <2% 出现率' },
+      { name: 'selection_note / scope_note / source_note / source_file / source_type / structure', count: '~10', why: '一次性 LLM 备注,正文里有冗余' },
+      { name: 'slug / overall_rating / avg_relevance / date / concepts / book / topics / chapters_missing / relevance', count: '~10', why: '低频或可推导' },
+    ],
+    renamed: [
+      { from: 'book_title / book_author / book_year', to: 'title / authors / year', why: '"book_*" 是冗余前缀(本就在 book schema 里)' },
+      { from: 'author (string)', to: 'authors (string[])', why: '永远数组,消费端不用分支处理' },
+      { from: 'editors', to: 'authors + category: edited-volume', why: '编者并入 authors,由 category 区分角色;BibTeX export 时自动 emit @collection + editor=' },
+      { from: 'tags', to: 'themes', why: '语义重合,统一 themes' },
+      { from: 'analyzed_chapters / processed_chapters / total_chapters / chapters_total / chapters_available / chapters_in_vault / chapters_in_volume / chapters_selected', to: '(全部删除)', why: 'chapters_analyzed 整体派生于子章节 count,9 个变体一并删' },
+    ],
+    normalized: [
+      { from: 'rating ★ 字符串', to: 'rating number 1..5', count: 27 },
+      { from: 'author "Anne Allison"', to: 'authors ["Anne Allison"]', count: 33, note: '单作者也包成数组' },
+      { from: 'publisher 缺失', to: 'fix-agent 调 WorldCat / OpenAlex 批量补', count: '~729 (94%)' },
+    ],
+    example: {
+      title: 'Allison · Nightwork (1994)',
+      current: [
+        ['key', 'type: book-overview', { rename: 'type: book' }],
+        ['key', 'title: "Nightwork: Sexuality, Pleasure, and Corporate Masculinity in a Tokyo Hostess Club (Anne Allison, 1994)"', { rename: 'title 简化为书名,作者/年份移到独立字段' }],
+        ['key', 'chapters_analyzed: 15'],
+        ['key', 'topic: "Body, Technology and Society — 数字技术、AI、媒介如何重塑身体的边界、表征、体验与治理"'],
+      ],
+      proposed: [
+        ['key', 'type: book'],
+        ['key', 'title: "Nightwork: Sexuality, Pleasure, and Corporate Masculinity in a Tokyo Hostess Club"'],
+        ['add', 'authors: ["Anne Allison"]'],
+        ['add', 'year: 1994'],
+        ['add', 'publisher: "University of Chicago Press"'],
+        ['add', 'isbn: "978-0226014876"'],
+        ['add', 'category: monograph'],
+        ['add', 'rating: 4'],
+        ['add', 'themes: [japan-studies, gender, corporate-masculinity, ethnography]'],
+      ],
+      note: '当前 Nightwork 的 title 字段把"作者+年份"塞进去了 → autofix 拆出 author/year。publisher / identifier / category / themes / rating 由 fix-agent 调 WorldCat 或从正文推断补全。topic / chapters_analyzed / edition / source 这些原有字段全部删除 —— topic 是工作流字段,chapters_analyzed 可派生,edition rare,source 与 title 重叠。',
+    },
+    bodySchema: [
+      { h2: '核心论点',  req: true,  kind: 'paragraph',       coverage: '84%', note: 'aliases: 全书核心论点 / 一、全书核心论点' },
+      { h2: '章节逻辑',  req: true,  kind: 'paragraph',       coverage: '84%', note: '原 "章节间逻辑" (5→4)' },
+      { h2: '关键概念',  req: true,  kind: 'table',           coverage: '85%', highlight: '100% table · 跨 vault union → 整库概念图谱', note: '原 "关键概念表" (5→4) · book.关键概念 用 table,paper/chapter 同名用 paragraph (Q2: A 跨 type 同名,kind 按 type 分)' },
+      { h2: '理论贡献',  req: true,  kind: 'paragraph',       coverage: '83%', note: 'aliases: 核心理论贡献' },
+      { h2: '精读章节',  req: true,  kind: 'numbered-list',   coverage: '83%', note: '原 "推荐精读章节" (6→4) · 当前 67% list / 24% mixed,迁移期归一' },
+      { h2: '项目关联',  req: false, kind: 'h3-project-tabs', childKind: 'paragraph', coverage: '~50%', note: '原 "与 {topic} 的关联" → H3 per project · 收编长尾' },
+    ],
+  },
+
+  chapter: {
+    label: '章节',
+    accent: 'teal',
+    accentClasses: { tab: 'bg-teal-600 text-white', dot: 'bg-teal-500', border: 'border-teal-300', headBg: 'bg-teal-50/40', headText: 'text-teal-700' },
+    count: 8093,
+    fromType: 'chapter-summary',
+    pathPattern: 'vault/books/<slug>/chXX-*.md',
+    description: '一本书的一个章节分析。',
+    fields: [
+      { name: 'type',    kind: '"chapter"', req: true },
+      { name: 'title',   kind: 'Title',     req: true, note: '章节标题(含"第N章 XXX")' },
+      { name: 'authors', kind: 'Authors',   req: true, note: '章作者(永远数组;编著作里可与 book.authors 不同)' },
+      { name: 'year',    kind: 'Year',      req: true, note: '通常等于父书 year' },
+      { name: 'book',    kind: 'string',    req: true, note: '父书 slug;vault-wide lint 校验存在性' },
+      { name: 'doi',     kind: 'string?',   req: false, note: '部分章节(论文集里的)有 DOI' },
+      { name: 'themes',  kind: 'Themes?',   req: false, note: '章节级主题(31% 非空 = 经常没有)' },
+      { name: 'rating',  kind: 'Rating?',   req: false, note: 'number 1..5' },
+    ],
+    removed: [
+      { name: 'source',          count: 8049, why: '重命名为 book,且从书名字符串改为 slug' },
+      { name: 'chapter',         count: 5472, why: '68% 在用,但从 path / title 抽不稳定' },
+      { name: 'slot',            count: 2578, why: '32% 在用,字符串版章节序号,冗余' },
+      { name: 'relevance',       count: 7812, why: '99% 填但有异常值 0..1968,数据 bug;章节级"相关度"语义不清' },
+      { name: 'book / book_title (旧)', count: '~45', why: '与新 book(slug)冲突' },
+      { name: 'chapter_title / chapter_label', count: '~3', why: '冗余于 title' },
+      { name: 'chapter-author / editors', count: '~2', why: '并入 authors 数组,角色由父书 category 决定' },
+      { name: 'publisher / pages / tags / topic / topics / word_count_est / status', count: '~10', why: '低频(<0.1%)孤儿字段' },
+    ],
+    renamed: [
+      { from: 'source (string, 书名)', to: 'book (string, slug)', why: '稳定不易出错;path 派生;vault-wide lint 可校验存在' },
+      { from: 'author (string)', to: 'authors (string[])', why: '永远数组' },
+      { from: 'tags', to: 'themes', why: '语义重合' },
+    ],
+    normalized: [
+      { from: 'rating ★ 字符串', to: 'rating number 1..5', count: 1234 },
+      { from: 'author "[编] Anne Allison"', to: 'authors ["Anne Allison"]', count: '~编纂本章节', note: '"[编]" 前缀去掉 —— 编者身份由父书 category: edited-volume 表达' },
+      { from: 'year 字符串', to: 'year number', count: 13 },
+      { from: 'themes 99% 填 / 31% 非空', to: '保持 optional,空数组允许', note: '章节级主题经常没有是正常的' },
+    ],
+    example: {
+      title: 'Allison · Nightwork · ch01 一种地方类型',
+      current: [
+        ['key', 'type: chapter-summary', { rename: 'type: chapter' }],
+        ['key', 'rating: ★', { norm: '→ rating: 1 (number)' }],
+        ['empty', 'themes: []'],
+        ['key', 'author: "[编] Anne Allison"', { norm: '→ authors: ["Anne Allison"](去 [编],包数组)' }],
+        ['key', 'title: "第1章 一种地方类型"'],
+        ['key', 'year: 1994'],
+        ['key', 'source: "Nightwork: Sexuality, Pleasure, ..."', { norm: '→ book: "allison-nightwork-1994"(slug)' }],
+        ['del', 'relevance: 1'],
+        ['del', 'slot: "01"'],
+      ],
+      proposed: [
+        ['key', 'type: chapter'],
+        ['key', 'title: "第1章 一种地方类型"'],
+        ['key', 'authors: ["Anne Allison"]'],
+        ['key', 'year: 1994'],
+        ['key', 'book: "allison-nightwork-1994"'],
+        ['empty', 'themes: []'],
+        ['key', 'rating: 1'],
+      ],
+      note: 'source → book 是最关键的迁移 —— 从书名长串变成 slug,字符串匹配变稳定引用。reader lint 可以校验"slug 真的存在"(像 TS 的 cannot find module)。authors 永远数组;[编] 前缀去掉(身份由父书 category 表达)。chapter / slot / relevance 全删:序号不稳定,字符串版冗余,相关度有 data bug。',
+    },
+    bodySchema: [
+      { h2: '核心论点',  req: true,  kind: 'paragraph',       coverage: '87%' },
+      { h2: '理论框架',  req: true,  kind: 'paragraph',       coverage: '80%' },
+      { h2: '分节摘要',  req: true,  kind: 'h3-sections',     childKind: 'paragraph', coverage: '83%', note: 'H3 是原文小节' },
+      { h2: '关键概念',  req: true,  kind: 'table',           coverage: '86%', note: '⚠️ 当前 98% paragraph · 一次性 autofix via 迁移 agent(每文件一次 LLM 调用,把 **term**: 描述 转 | 概念 | 英文 | 定义 | 表)' },
+      { h2: '核心引用',  req: true,  kind: 'numbered-list',   coverage: '79%', note: '原 "核心引用文献" (6→4) · 当前 95% mixed,归一' },
+      { h2: '金句要点',  req: false, kind: 'blockquote-list', coverage: '<1%', note: '跨 type 同名同 kind;留 opt' },
+      { h2: '项目关联',  req: false, kind: 'h3-project-tabs', childKind: 'numbered-list', coverage: '39%+', note: '原 "与 X 的关联"' },
+    ],
+  },
+
+  paper: {
+    label: '论文',
+    accent: 'amber',
+    accentClasses: { tab: 'bg-amber-600 text-white', dot: 'bg-amber-500', border: 'border-amber-300', headBg: 'bg-amber-50/40', headText: 'text-amber-700' },
+    count: 1651,
+    fromType: 'paper-analysis · journal-article-analysis · article-analysis · paper-summary',
+    pathPattern: 'vault/papers/*.md · vault/journals/<slug>/<doi>.md',
+    description: '论文分析(含期刊论文)。',
+    fields: [
+      { name: 'type',    kind: '"paper"', req: true },
+      { name: 'title',   kind: 'Title',   req: true },
+      { name: 'authors', kind: 'Authors', req: true, note: '永远数组' },
+      { name: 'year',    kind: 'Year',    req: true },
+      { name: 'journal', kind: 'string',  req: true, note: '期刊名(paper = 期刊论文)' },
+      { name: 'doi',     kind: 'string?', req: false, note: 'regex /^10\\.\\d+\\//' },
+      { name: 'themes',  kind: 'Themes',  req: true, note: '论文应有主题(不允许空数组)' },
+      { name: 'rating',  kind: 'Rating?', req: false, note: 'number 1..5' },
+    ],
+    removed: [
+      { name: 'source',     count: 1359, why: '语义收紧:paper = 期刊论文;来源就是 journal。~140 条 source=书名的需迁去 vault/books/' },
+      { name: 'reviewed_book / reviewed_author / terminal', count: '~9', why: '<0.5% 出现,语义不明' },
+      { name: 'volume / pages / citations / translators', count: '~4', why: '低频书目细节,可写正文' },
+      { name: 'notes / note / status / source_type / round / concepts / topic / relevance', count: '~80', why: '低频孤儿字段' },
+    ],
+    renamed: [
+      { from: 'author / authors', to: 'authors',    why: '统一为 Authors 原语(永远数组)' },
+      { from: 'source (期刊场景)',  to: 'journal',  why: '语义明确化' },
+      { from: 'tags',             to: 'themes',   why: '语义重合' },
+      { from: 'paper_title',      to: 'title',    why: '冗余前缀' },
+      { from: 'score',            to: 'rating',   why: '统一字段名,数字 1..5' },
+      { from: 'date',             to: 'year',     why: '⚠️ 需人工 review:50 条 date 可能是"分析日期"或"发表日期";autofix 默认按发表年处理,人工挑出误用' },
+    ],
+    normalized: [
+      { from: 'rating ★ 字符串',   to: 'rating number 1..5', count: 515 },
+      { from: 'author "Sara"',     to: 'authors ["Sara"]',    count: 1241, note: '单作者也包数组' },
+      { from: 'themes "affect theory"', to: 'themes "affect-theory"', count: '~500 unique', note: '多词主题统一 hyphen-joined' },
+      { from: 'doi 空字符串',      to: 'undefined',           count: '~30' },
+      { from: 'doi 格式不符',      to: '人工 review',         count: '~5' },
+      { from: 'source = 书名',     to: '迁移到 vault/books/ 转 chapter', count: '~140', note: '需人工 review 后批量挪文件' },
+    ],
+    example: {
+      title: 'Ahmed · Happy Objects (2010)',
+      current: [
+        ['key', 'type: paper-analysis', { rename: 'type: paper' }],
+        ['key', 'rating: ★★', { norm: '→ rating: 2 (number)' }],
+        ['key', 'themes: [affect theory, happiness, queer theory, feminist killjoy, sticky affect]', { norm: '多词主题 → hyphen-joined' }],
+        ['key', 'author: "Sara Ahmed"', { norm: '→ authors: ["Sara Ahmed"]' }],
+        ['key', 'title: "Happy Objects"'],
+        ['key', 'year: 2010'],
+        ['key', 'source: "The Affect Theory Reader"', { norm: '⚠️ 这是书名而非期刊 —— 建议迁移到 chapter 类型' }],
+        ['key', 'doi: "10.1215/9780822393047-001"'],
+      ],
+      proposed: [
+        ['key', 'type: paper'],
+        ['key', 'title: "Happy Objects"'],
+        ['key', 'authors: ["Sara Ahmed"]'],
+        ['key', 'year: 2010'],
+        ['key', 'journal: "The Affect Theory Reader"'],
+        ['key', 'themes: [affect-theory, happiness, queer-theory, feminist-killjoy, sticky-affect]'],
+        ['key', 'rating: 2'],
+        ['key', 'doi: "10.1215/9780822393047-001"'],
+      ],
+      note: '⚠️ Happy Objects 实际是论文集 Reader 里的章节,不是严格意义上的期刊论文。按你"paper = 期刊"的定义,这条应迁去 vault/books/affect-theory-reader/ 转 chapter。autofix 启发式扫描会标出这 ~140 条边界条目让你 review。当前 proposed 假设保留为 paper —— 现实可能是 chapter。',
+    },
+    bodySchema: [
+      { h2: '核心论点',  req: true,  kind: 'paragraph',       coverage: '60%' },
+      { h2: '理论框架',  req: true,  kind: 'paragraph',       coverage: '58%' },
+      { h2: '分节摘要',  req: true,  kind: 'h3-sections',     childKind: 'paragraph', coverage: '49%', note: 'H3 是原文小节' },
+      { h2: '关键概念',  req: true,  kind: 'table',           coverage: '62%', note: '⚠️ 当前 88% paragraph · 一次性 autofix via 迁移 agent' },
+      { h2: '核心引用',  req: true,  kind: 'numbered-list',   coverage: '59%', note: '原 "核心引用文献" (6→4) · 当前 75% mixed,归一' },
+      { h2: '金句要点',  req: false, kind: 'blockquote-list', coverage: '1%',  highlight: '100% blockquote · BibTeX 友好', note: '原 "可引用段落" (5→4) · 跨 type 同名同 kind' },
+      { h2: '项目关联',  req: false, kind: 'h3-project-tabs', childKind: 'numbered-list', coverage: '~25%', note: '原 "与 X 的关联"' },
+    ],
+  },
+};
+
+// ---- components ----
+
+const KIND_COLORS = {
+  'paragraph':       'bg-stone-100 text-stone-700',
+  'bullet-list':     'bg-blue-100  text-blue-800',
+  'numbered-list':   'bg-indigo-100 text-indigo-800',
+  'table':           'bg-emerald-100 text-emerald-800',
+  'blockquote-list': 'bg-purple-100 text-purple-800',
+  'definition-list': 'bg-pink-100 text-pink-800',
+  'h3-project-tabs': 'bg-orange-100 text-orange-800',
+  'h3-sections':     'bg-rose-100 text-rose-800',
+  'mixed':           'bg-yellow-100 text-yellow-800',
+};
+
+function BodySchemaRow({ s }) {
+  const reqDot = s.req
+    ? html`<span class="pill bg-rose-100 text-rose-700">req</span>`
+    : html`<span class="pill bg-stone-100 text-stone-500">opt</span>`;
+  const kindClass = KIND_COLORS[s.kind] || 'bg-stone-100 text-stone-700';
+  return html`
+    <div class="grid grid-cols-[1fr_60px_160px_70px_1fr] gap-3 py-1.5 text-[12px] border-b border-stone-100 last:border-0 items-center">
+      <div class="font-mono text-purple-800">## ${s.h2}</div>
+      <div>${reqDot}</div>
+      <div>
+        <span class="pill ${kindClass} font-mono">${s.kind}${s.childKind ? html` <span class="opacity-60">/ ${s.childKind}</span>` : ''}</span>
+      </div>
+      <div class="text-stone-500 tabular-nums text-right">${s.coverage}</div>
+      <div class="text-stone-600 text-[11px]">
+        ${s.highlight && html`<div class="text-emerald-700 font-medium mb-0.5">${s.highlight}</div>`}
+        ${s.note || ''}
+      </div>
+    </div>
+  `;
+}
+
+function FieldRow({ f }) {
+  const reqDot = f.req
+    ? html`<span class="pill bg-rose-100 text-rose-700">req</span>`
+    : html`<span class="pill bg-stone-100 text-stone-500">opt</span>`;
+  return html`
+    <div class="grid grid-cols-[140px_180px_1fr] gap-3 py-1 text-[13px] border-b border-stone-100 last:border-0">
+      <div class="font-mono text-purple-800">${f.name}</div>
+      <div class="font-mono text-stone-600">${f.kind}</div>
+      <div class="flex items-center gap-2 text-stone-600">
+        ${reqDot}
+        <span>${f.note || ''}</span>
+      </div>
+    </div>
+  `;
+}
+
+function YamlBlock({ lines, label, side }) {
+  // Each line: ['key' | 'del' | 'empty' | 'add', text, { rename, norm }?]
+  return html`
+    <div>
+      <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold mb-2">${label}</div>
+      <pre class="bg-white border border-stone-200 rounded-md text-[12px] leading-relaxed py-2 overflow-auto">${lines.map(([kind, text, meta]) => {
+        const cls = ({
+          key: 'yaml-line',
+          del: 'yaml-line yaml-del',
+          empty: 'yaml-line yaml-empty',
+          add: 'yaml-line yaml-add',
+        })[kind];
+        return html`
+          <span class=${cls}>${text}${meta && (meta.rename || meta.norm) && html`<span class="text-[10px] text-stone-500 ml-3">// ${meta.rename || meta.norm}</span>`}</span>
+        `;
+      })}</pre>
+    </div>
+  `;
+}
+
+function TypePanel({ t, tKey }) {
+  return html`
+    <div class="bg-white rounded-lg border border-stone-200 overflow-hidden">
+      <div class="px-6 py-4 border-b border-stone-200 ${t.accentClasses.border} border-l-4 ${t.accentClasses.headBg}">
+        <div class="flex items-baseline gap-3 flex-wrap">
+          <div class="font-mono text-lg font-semibold ${t.accentClasses.headText}">${tKey}</div>
+          <div class="text-stone-700">${t.label}</div>
+          <div class="text-[11px] text-stone-500">·</div>
+          <div class="text-[12px] text-stone-500 tabular-nums">${t.count} 条</div>
+          <div class="text-[11px] text-stone-500">·</div>
+          <div class="text-[12px] text-stone-500 font-mono">${t.pathPattern}</div>
+        </div>
+        <div class="text-[12px] text-stone-600 mt-1">
+          ${t.description}
+          <span class="text-stone-400 ml-2">迁移自</span>
+          <span class="font-mono text-stone-600">${t.fromType}</span>
+        </div>
+      </div>
+
+      <div class="px-6 py-5 space-y-6">
+        <!-- Schema fields -->
+        <section>
+          <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold mb-2">Schema</div>
+          <div class="bg-stone-50 rounded-md border border-stone-200 px-4 py-2">
+            ${t.fields.map(f => html`<${FieldRow} f=${f} />`)}
+          </div>
+        </section>
+
+        <!-- Removed fields -->
+        ${t.removed.length > 0 && html`
+          <section>
+            <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold mb-2">删除字段</div>
+            <ul class="space-y-1 text-[12px]">
+              ${t.removed.map(r => html`
+                <li class="grid grid-cols-[1fr_60px_2fr] gap-3 py-1 border-b border-stone-100 last:border-0">
+                  <div class="font-mono text-rose-700 line-through">${r.name}</div>
+                  <div class="text-stone-400 tabular-nums text-right">${r.count} 条</div>
+                  <div class="text-stone-600">${r.why}</div>
+                </li>
+              `)}
+            </ul>
+          </section>
+        `}
+
+        <!-- Renamed fields -->
+        ${t.renamed.length > 0 && html`
+          <section>
+            <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold mb-2">字段重命名 / 合并</div>
+            <ul class="space-y-2 text-[12px]">
+              ${t.renamed.map(r => html`
+                <li class="py-1 border-b border-stone-100 last:border-0">
+                  <div class="flex items-baseline gap-2 flex-wrap">
+                    <span class="font-mono text-amber-700">${r.from}</span>
+                    <span class="text-stone-400">→</span>
+                    <span class="font-mono text-emerald-700">${r.to}</span>
+                  </div>
+                  <div class="text-stone-600 text-[11px] mt-0.5">${r.why}</div>
+                </li>
+              `)}
+            </ul>
+          </section>
+        `}
+
+        <!-- Normalized -->
+        ${t.normalized.length > 0 && html`
+          <section>
+            <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold mb-2">格式归一化</div>
+            <ul class="space-y-1 text-[12px]">
+              ${t.normalized.map(n => html`
+                <li class="grid grid-cols-[1fr_30px_1fr_60px] gap-3 py-1 border-b border-stone-100 last:border-0 items-center">
+                  <div class="font-mono text-blue-700">${n.from}</div>
+                  <div class="text-stone-400 text-center">→</div>
+                  <div class="font-mono text-blue-700">${n.to}</div>
+                  <div class="text-stone-400 tabular-nums text-right text-[11px]">${n.count} 条${n.note ? ' *' : ''}</div>
+                </li>
+              `)}
+            </ul>
+            ${t.normalized.some(n => n.note) && html`
+              <div class="text-[11px] text-stone-500 mt-2 pl-2 border-l-2 border-stone-200">
+                * ${t.normalized.filter(n => n.note).map(n => n.note).join(' / ')}
+              </div>
+            `}
+          </section>
+        `}
+
+        <!-- Body schema -->
+        ${t.bodySchema && t.bodySchema.length > 0 && html`
+          <section>
+            <div class="flex items-baseline gap-3 mb-2">
+              <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold">Body Schema</div>
+              <div class="text-[11px] text-stone-500">正文 H2 结构 · lint 只查"必填 H2 是否存在 + 形状对不对"</div>
+            </div>
+            <div class="bg-stone-50 rounded-md border border-stone-200 px-4 py-2">
+              <div class="grid grid-cols-[1fr_60px_160px_70px_1fr] gap-3 pb-1.5 mb-1 border-b border-stone-200 text-[10px] uppercase tracking-wider text-stone-500 font-semibold">
+                <div>H2 标题</div>
+                <div>必填</div>
+                <div>block kind</div>
+                <div class="text-right">vault 覆盖</div>
+                <div>说明</div>
+              </div>
+              ${t.bodySchema.map(s => html`<${BodySchemaRow} s=${s} />`)}
+            </div>
+          </section>
+        `}
+
+        <!-- Live example -->
+        <section>
+          <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold mb-2">
+            真实例子:<span class="text-stone-700 normal-case font-normal ml-2">${t.example.title}</span>
+          </div>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <${YamlBlock} lines=${t.example.current}  label="现在 (vault 实际)" side="current" />
+            <${YamlBlock} lines=${t.example.proposed} label="迁移后 (SPEC 形态)" side="proposed" />
+          </div>
+          ${t.example.note && html`
+            <div class="mt-3 text-[12px] text-stone-600 bg-stone-50 border-l-4 border-stone-300 px-3 py-2">
+              ${t.example.note}
+            </div>
+          `}
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+function App() {
+  const keys = Object.keys(TYPES);
+  const [active, setActive] = useState(keys[0]);
+
+  return html`
+    <div class="min-h-screen">
+      <header class="bg-white border-b border-stone-200 sticky top-0 z-20">
+        <div class="max-w-6xl mx-auto px-6 py-3 flex items-center gap-4 flex-wrap">
+          <div class="font-semibold text-base">qua schema preview</div>
+          <div class="text-[11px] text-stone-500">v0.1.0-draft · 4 entity types · 评审中</div>
+          <div class="flex-1"></div>
+          <a href="/reader/" class="text-[11px] text-sky-700 hover:underline">← 回 reader</a>
+        </div>
+        <div class="max-w-6xl mx-auto px-6 pb-3 flex gap-1 flex-wrap">
+          ${keys.map(k => html`
+            <button
+              onClick=${() => setActive(k)}
+              class="px-3 py-1.5 rounded text-[13px] transition ${active === k ? TYPES[k].accentClasses.tab : 'text-stone-600 hover:bg-stone-100'}">
+              ${k} <span class="opacity-60 text-[11px] tabular-nums ml-1">${TYPES[k].count}</span>
+            </button>
+          `)}
+        </div>
+      </header>
+
+      <main class="max-w-6xl mx-auto px-6 py-6 space-y-6">
+        <!-- Primitives panel (always visible) -->
+        <section class="bg-white rounded-lg border border-stone-200 px-6 py-4">
+          <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold mb-2">Primitives (共享原语 · primitives.ts)</div>
+          <div class="text-[11px] text-stone-500 mb-3">值层面的小工具,被各 schema 按需复用。不是继承基类。</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-[12px]">
+            ${Object.entries(PRIMITIVES).map(([name, p]) => html`
+              <div class="font-mono">
+                <span class="text-purple-800">${name}</span>
+                <span class="text-stone-400 mx-2">=</span>
+                <span class="text-stone-700">${p.sig}</span>
+              </div>
+            `)}
+          </div>
+        </section>
+
+        <!-- Body schema design principles + kind legend -->
+        <section class="bg-white rounded-lg border border-stone-200 px-6 py-4">
+          <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold mb-2">Body Schema 设计原则 + Block Kind 图例</div>
+          <ul class="text-[12px] text-stone-700 space-y-1 mb-3 list-disc pl-5">
+            <li><strong>H2 标题 4 字中文</strong> —— canonical 标题强制 4 字(部分待你拍 Q1/Q2/Q3)</li>
+            <li><strong>跨 type 同名 H2 复用</strong> —— 如 <span class="font-mono">关键概念</span> 在 book / chapter / paper 都用,kind 按 type 分(book = table,其余 = paragraph)</li>
+            <li><strong>项目名不进 H2</strong> —— 用固定 H2 <span class="font-mono">项目关联</span> + H3 per project,reader 渲染为 tabs(kind: <span class="font-mono">h3-project-tabs</span>)</li>
+            <li><strong>原文小节用 H3</strong> —— <span class="font-mono">分节摘要</span> 之下的 H3 是原文 sub-section(kind: <span class="font-mono">h3-sections</span>),不是项目 tab</li>
+          </ul>
+          <div class="text-[10px] uppercase tracking-wider text-stone-500 font-semibold mb-1.5">Block kinds</div>
+          <div class="flex flex-wrap gap-1.5 text-[11px]">
+            ${Object.entries(KIND_COLORS).map(([k, cls]) => html`
+              <span class="pill ${cls} font-mono">${k}</span>
+            `)}
+          </div>
+        </section>
+
+        <${TypePanel} t=${TYPES[active]} tKey=${active} />
+
+        <div class="text-[11px] text-stone-500 text-center py-4">
+          spec 全文 → <a href="/reader/schemas/SPEC.md" class="text-sky-700 hover:underline font-mono">reader/schemas/SPEC.md</a>
+        </div>
+      </main>
+    </div>
+  `;
+}
+
+render(html`<${App} />`, document.getElementById('app'));
+</script>
+</body>
+</html>
