@@ -110,6 +110,10 @@ export function PropertyPanel({
           </button>
         </div>
       )}
+
+      {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
+        <ActionsRow entry={entry} />
+      )}
       <dl class={`space-y-2 ${saving ? 'opacity-60 pointer-events-none' : ''}`}>
         <RatingRow value={entry.rating_score} save={save} />
         <TextRow label="年份" value={entry.year} field="year" parse={parseYear} save={save} />
@@ -171,6 +175,71 @@ export function PropertyPanel({
           {backlinks.similar.map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
         </Section>
       )}
+    </div>
+  );
+}
+
+// Build a markdown-style citation string for paper / book entries.
+// Format: "Author (year). *Title*. Source. https://doi.org/DOI"
+// Missing fields are skipped gracefully.
+function buildCitation(entry: Entry): string {
+  const parts: string[] = [];
+  const author = entry.author?.trim();
+  const year = entry.year != null ? String(entry.year).trim() : '';
+  const title = entry.title?.trim();
+  const source = entry.source?.trim();
+  const doi = entry.doi?.trim();
+
+  if (author && year)      parts.push(`${author} (${year}).`);
+  else if (author)         parts.push(`${author}.`);
+  else if (year)           parts.push(`(${year}).`);
+
+  if (title)               parts.push(`*${title}*.`);
+  if (source)              parts.push(`${source}.`);
+  if (doi)                 parts.push(`https://doi.org/${doi}`);
+
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function ActionsRow({ entry }: { entry: Entry }) {
+  const [copied, setCopied] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const copyCitation = async () => {
+    setErr(null);
+    const text = buildCitation(entry);
+    if (!text) { setErr('引用字段不全（缺 author/title/year/source/doi）'); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '复制失败');
+    }
+  };
+
+  const openPdf = () => {
+    if (!entry.pdf_slug) return;
+    window.open(`/sources/${entry.pdf_slug}.pdf`, '_blank', 'noopener');
+  };
+
+  return (
+    <div class="flex items-center gap-2 -mt-1 text-[11px] flex-wrap">
+      <button
+        onClick={copyCitation}
+        class="px-2 py-1 rounded border border-stone-200 bg-white hover:border-stone-400 text-stone-700 hover:text-stone-900 transition"
+        title={`复制 markdown 引用\n\n预览：${buildCitation(entry).slice(0, 200)}`}
+      >
+        {copied ? '✓ 已复制' : '复制引用'}
+      </button>
+      {entry.has_pdf && entry.pdf_slug && (
+        <button
+          onClick={openPdf}
+          class="px-2 py-1 rounded border border-stone-200 bg-white hover:border-stone-400 text-stone-700 hover:text-stone-900 transition"
+          title={`打开 sources/${entry.pdf_slug}.pdf`}
+        >打开 PDF</button>
+      )}
+      {err && <span class="text-red-600 text-[10px]">{err}</span>}
     </div>
   );
 }

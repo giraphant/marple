@@ -5,6 +5,7 @@ import { buildWikiIndex, splitAuthors } from './wiki';
 import { ListView } from './components/ListView';
 import { DocView } from './components/DocView';
 import { TrashView } from './components/TrashView';
+import { ThemesView } from './components/ThemesView';
 import { SettingsPanel } from './components/SettingsPanel';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
@@ -149,6 +150,14 @@ export function App() {
   const activeDocEntry: Entry | null =
     activeTabContent && activeTabContent.kind === 'doc' ? entryByPath.get(activeTabContent.path) ?? null : null;
   const trashActive = activeTabContent?.kind === 'trash';
+  const themesActive = activeTabContent?.kind === 'themes';
+
+  const themesCount = useMemo(() => {
+    if (!entries) return 0;
+    const s = new Set<string>();
+    for (const e of entries) for (const t of (e.themes ?? [])) if (t) s.add(t);
+    return s.size;
+  }, [entries]);
 
   useEffect(() => { setLimit(300); setThemeFilter(null); }, [activeListType]);
 
@@ -314,6 +323,10 @@ export function App() {
     navigateInActiveTab({ kind: 'trash' });
   }, [navigateInActiveTab]);
 
+  const openThemes = useCallback(() => {
+    navigateInActiveTab({ kind: 'themes' });
+  }, [navigateInActiveTab]);
+
   // After a successful trash restore, the restored file is back under
   // vault/notes/. We don't have it in our in-memory entries until the index
   // rebuilds; show a hint that the page can be reloaded to see it.
@@ -416,8 +429,11 @@ export function App() {
         counts={counts}
         activeType={activeListType}
         trashActive={trashActive}
+        themesActive={themesActive}
+        themesCount={themesCount}
         onSelectType={openListType}
         onOpenTrash={openTrash}
+        onOpenThemes={openThemes}
         onOpenSettings={() => setSettingsOpen(true)}
         onNewIdeaNote={onNewIdeaNote}
       />
@@ -480,6 +496,10 @@ export function App() {
 
         {activeTabContent?.kind === 'trash' && (
           <TrashView onRestored={onTrashRestored} />
+        )}
+
+        {activeTabContent?.kind === 'themes' && (
+          <ThemesView entries={entries} onThemeClick={applyThemeFilter} />
         )}
       </div>
 

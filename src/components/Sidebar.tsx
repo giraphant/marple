@@ -2,6 +2,7 @@ import type { Entry, EntryType, TypeMeta } from '../types';
 import { TYPES } from '../types';
 import { TypeIcon } from './TypeIcon';
 import { Icon } from './Icon';
+import PhTag from '~icons/ph/tag';
 
 interface Props {
   entries: Entry[];
@@ -10,14 +11,20 @@ interface Props {
   activeType: EntryType | null;
   /** True when the active tab is the trash view. */
   trashActive: boolean;
+  /** True when the active tab is the themes index view. */
+  themesActive: boolean;
+  /** Total distinct themes across the vault. */
+  themesCount: number;
   onSelectType: (id: EntryType) => void;
   onOpenTrash: () => void;
+  onOpenThemes: () => void;
   onOpenSettings: () => void;
   onNewIdeaNote: () => void;
 }
 
 export function Sidebar({
-  counts, activeType, trashActive, onSelectType, onOpenTrash, onOpenSettings, onNewIdeaNote,
+  counts, activeType, trashActive, themesActive, themesCount,
+  onSelectType, onOpenTrash, onOpenThemes, onOpenSettings, onNewIdeaNote,
 }: Props) {
   return (
     <aside class="w-60 shrink-0 bg-stone-50 border-r border-stone-200 flex flex-col text-stone-800">
@@ -58,6 +65,26 @@ export function Sidebar({
             </button>
           );
         })}
+
+        <div class="text-[10px] uppercase tracking-wider text-stone-500 font-semibold px-2 mt-4 mb-1.5">横切视图</div>
+        <button
+          onClick={onOpenThemes}
+          class={`w-full text-left px-2 py-1.5 rounded text-[12px] flex items-center gap-2 transition ${
+            themesActive
+              ? 'bg-stone-900 text-white'
+              : 'text-stone-700 hover:bg-stone-200/60'
+          }`}
+        >
+          <span
+            class={`shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-amber-100 text-amber-700`}
+            style={{ minHeight: '1.3em', minWidth: '1.3em', height: '1.3em', width: '1.3em' }}
+            aria-hidden="true"
+          >
+            <PhTag width="0.94em" height="0.94em" style={{ padding: '0.05em' }} />
+          </span>
+          <span class="flex-1 truncate">主题</span>
+          <span class={`text-[11px] tabular-nums ${themesActive ? 'text-white/70' : 'text-stone-400'}`}>{themesCount}</span>
+        </button>
       </nav>
 
       <div class="border-t border-stone-200 p-2 space-y-0.5">

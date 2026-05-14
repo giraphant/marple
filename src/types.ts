@@ -24,6 +24,10 @@ export interface Entry {
   annotates: string | null;
   /** For notes: ISO date in frontmatter. */
   created: string | null;
+  /** True when sources/<pdf_slug>.pdf exists for this entry. Filled by build-index. */
+  has_pdf?: boolean;
+  /** Filename stem under sources/ (paper basename, or book directory slug). */
+  pdf_slug?: string | null;
   preview: string;
 }
 
@@ -60,7 +64,8 @@ export const TYPE_BY_ID: Record<string, TypeMeta> = Object.fromEntries(
 export type TabContent =
   | { kind: 'list'; type: EntryType }
   | { kind: 'doc'; path: string }
-  | { kind: 'trash' };
+  | { kind: 'trash' }
+  | { kind: 'themes' };
 
 /** A tab in the top tab bar. Holds a back/forward history of TabContent
  *  plus a cursor pointing at the current entry. */
@@ -78,6 +83,6 @@ export function tabKey(tab: Tab): string {
   const c = activeContent(tab);
   if (c.kind === 'list') return `list:${c.type}`;
   if (c.kind === 'doc') return `doc:${c.path}`;
-  return 'trash';
+  return c.kind; // 'trash' | 'themes'
 }
 

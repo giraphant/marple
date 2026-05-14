@@ -11,7 +11,20 @@ import { parse as yamlParse } from 'yaml';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../..');
 const VAULT = path.join(ROOT, 'vault');
+const SOURCES = path.join(ROOT, 'sources');
 const OUT = path.resolve(__dirname, '../data');
+
+/** Scan sources/ for top-level .pdf files; return a set of filename stems. */
+async function loadSourceSlugs() {
+  const slugs = new Set();
+  try {
+    const files = await readdir(SOURCES);
+    for (const f of files) {
+      if (/\.pdf$/i.test(f)) slugs.add(f.slice(0, -4));
+    }
+  } catch {}
+  return slugs;
+}
 
 async function walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -109,6 +122,9 @@ function canonicalType(t) {
   const files = await walk(VAULT);
   console.log(`found ${files.length} md files`);
 
+  const sourceSlugs = await loadSourceSlugs();
+  if (sourceSlugs.size > 0) console.log(`sources/ has ${sourceSlugs.size} PDFs`);
+
   const entries = [];
   let bad = 0;
   for (const f of files) {
@@ -119,6 +135,18 @@ function canonicalType(t) {
     if (!type) continue;
     const rel = path.relative(ROOT, f).split(path.sep).join('/');
     const bookMatch = type === 'chapter-summary' && rel.match(/^vault\/books\/([^/]+)\//);
+
+    // PDF lookup: papers use their filename stem; book overviews use the
+    // containing book-directory slug.
+    let pdf_slug = null;
+    if (type === 'paper-analysis') {
+      pdf_slug = path.basename(f, '.md');
+    } else if (type === 'book-overview') {
+      const m = rel.match(/^vault\/books\/([^/]+)\//);
+      pdf_slug = m ? m[1] : null;
+    }
+    const has_pdf = pdf_slug ? sourceSlugs.has(pdf_slug) : false;
+
     entries.push({
       path: rel,
       type,
@@ -135,6 +163,8 @@ function canonicalType(t) {
       chapters_analyzed: fm.chapters_analyzed ?? null,
       annotates: fm.annotates || null,
       created: fm.created != null ? String(fm.created) : null,
+      pdf_slug,
+      has_pdf,
       preview: firstParagraph(body),
     });
   }
