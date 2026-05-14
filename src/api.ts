@@ -114,6 +114,46 @@ export function newAnnotationDraft(target: Entry): { path: string; body: string;
   return { path, body, title };
 }
 
+/** Build the {path, body} for a fresh standalone idea note (no `annotates`). */
+export function newIdeaDraft(): { path: string; body: string; title: string } {
+  const today = new Date().toISOString().slice(0, 10);
+  const stamp = Date.now().toString(36).slice(-4);
+  const path = `${NOTES_DIR}${today}-idea-${stamp}.md`;
+  const title = `${today} — 新笔记`;
+  const body =
+    `---\n` +
+    `type: note\n` +
+    `title: ${JSON.stringify(title)}\n` +
+    `created: ${today}\n` +
+    `themes: []\n` +
+    `---\n\n` +
+    `# ${title}\n\n`;
+  return { path, body, title };
+}
+
+/** Build an Entry row for a freshly-posted standalone idea note. */
+export function ideaEntryFromDraft(path: string, title: string): Entry {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    path,
+    type: 'note',
+    book: null,
+    title,
+    author: null,
+    year: null,
+    rating: null,
+    rating_score: 0,
+    themes: [],
+    topic: null,
+    source: null,
+    doi: null,
+    chapters_analyzed: null,
+    annotates: null,
+    created: today,
+    preview: '',
+  };
+}
+
 /** Build an Entry row matching the freshly-posted note, so the UI can show it without re-indexing. */
 export function entryFromDraft(path: string, target: Entry, title: string): Entry {
   const today = new Date().toISOString().slice(0, 10);

@@ -3,7 +3,9 @@ import { TYPE_BY_ID } from '../types';
 
 interface Props {
   entry: Entry;
-  onClick: (entry: Entry) => void;
+  /** Receives the entry and the mouse event so callers can read modifier keys
+   *  (e.g. Cmd/Ctrl to open in a new tab). */
+  onClick: (entry: Entry, ev: MouseEvent) => void;
 }
 
 export function Card({ entry, onClick }: Props) {
@@ -16,7 +18,7 @@ export function Card({ entry, onClick }: Props) {
   return (
     <div
       class="card bg-white border border-stone-200 rounded-md p-3 hover:border-stone-400 hover:shadow-sm cursor-pointer flex flex-col gap-1.5 transition"
-      onClick={() => onClick(entry)}
+      onClick={(ev: MouseEvent) => onClick(entry, ev)}
     >
       <div class="flex items-center justify-between text-[11px]">
         <span class={`px-1.5 py-0.5 rounded border ${t.accent}`}>{t.label}</span>

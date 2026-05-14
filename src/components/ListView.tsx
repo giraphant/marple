@@ -1,0 +1,116 @@
+import type { Entry, EntryType } from '../types';
+import { TYPE_BY_ID } from '../types';
+import { Card } from './Card';
+import { Dashboard } from './Dashboard';
+
+interface Props {
+  entries: Entry[];
+  type: EntryType;
+  typeEntries: Entry[];
+  filtered: Entry[];
+  query: string;
+  minRating: number;
+  themeFilter: string | null;
+  limit: number;
+  onQueryChange: (q: string) => void;
+  onMinRatingChange: (n: number) => void;
+  onClearTheme: () => void;
+  onLoadMore: () => void;
+  onCardClick: (entry: Entry, modifiers: { meta: boolean }) => void;
+  onThemeClick: (theme: string) => void;
+}
+
+export function ListView({
+  entries: _entries, type, typeEntries, filtered, query, minRating, themeFilter, limit,
+  onQueryChange, onMinRatingChange, onClearTheme, onLoadMore, onCardClick, onThemeClick,
+}: Props) {
+  void _entries;
+  const typeMeta = TYPE_BY_ID[type];
+  const isFiltered = !!(query || themeFilter || minRating);
+  const visible = query ? filtered : filtered.slice(0, limit);
+
+  return (
+    <div class="flex-1 flex flex-col min-h-0">
+      <header class="bg-white/95 backdrop-blur border-b border-stone-200 sticky top-0 z-10">
+        <div class="px-6 py-3 flex items-center gap-4 flex-wrap">
+          <div class="flex items-baseline gap-2 min-w-0">
+            <div class="text-[18px] font-semibold tracking-tight text-stone-900 truncate">
+              {typeMeta?.label ?? type}
+            </div>
+            <div class="text-[11px] text-stone-400 tabular-nums">
+              {filtered.length}{filtered.length !== typeEntries.length && <span> / {typeEntries.length}</span>}
+            </div>
+          </div>
+
+          <input
+            type="search"
+            placeholder="搜索 标题 / 作者 / 主题 / 正文摘要…"
+            value={query}
+            onInput={e => onQueryChange((e.target as HTMLInputElement).value)}
+            class="flex-1 min-w-[200px] max-w-[420px] px-3 py-1.5 border border-stone-300 rounded text-[13px] focus:outline-none focus:border-stone-500 bg-white"
+          />
+
+          <div class="flex items-center gap-1 text-[11px] text-stone-600">
+            <span>评分 ≥</span>
+            {[0, 1, 2, 3, 4].map(n => (
+              <button
+                key={n}
+                onClick={() => onMinRatingChange(n)}
+                class={`px-1.5 py-0.5 rounded ${minRating === n ? 'bg-stone-900 text-white' : 'hover:bg-stone-100'}`}
+              >{n || '·'}</button>
+            ))}
+          </div>
+        </div>
+        {themeFilter && (
+          <div class="px-6 pb-2 flex items-center gap-2">
+            <span class="text-[11px] text-stone-500">主题筛选</span>
+            <button
+              onClick={onClearTheme}
+              class="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-200 transition"
+            >
+              {themeFilter} <span class="text-amber-600 ml-1">✕</span>
+            </button>
+          </div>
+        )}
+      </header>
+
+      <main class="flex-1 overflow-auto scrollbar-thin px-6 py-4">
+        {!isFiltered && (
+          <Dashboard
+            type={type}
+            typeEntries={typeEntries}
+            onThemeClick={onThemeClick}
+            onOpen={e => onCardClick(e, { meta: false })}
+          />
+        )}
+        {filtered.length === 0
+          ? <div class="text-sm text-stone-500 py-20 text-center">没有匹配的条目</div>
+          : (
+            <>
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {visible.map(e => (
+                  <Card
+                    entry={e}
+                    onClick={(entry, ev) => onCardClick(entry, { meta: ev.metaKey || ev.ctrlKey })}
+                    key={e.path}
+                  />
+                ))}
+              </div>
+              {!query && !themeFilter && filtered.length > limit && (
+                <div class="text-center mt-6">
+                  <button
+                    onClick={onLoadMore}
+                    class="px-4 py-2 bg-white border border-stone-300 rounded text-sm hover:bg-stone-50"
+                  >
+                    再加载 500 ( 已显示 {limit} / {filtered.length} )
+                  </button>
+                </div>
+              )}
+            </>
+          )
+        }
+      </main>
+    </div>
+  );
+}
+

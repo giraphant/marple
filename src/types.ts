@@ -55,3 +55,26 @@ export const TYPES: TypeMeta[] = [
 export const TYPE_BY_ID: Record<string, TypeMeta> = Object.fromEntries(
   TYPES.map(t => [t.id, t])
 );
+
+/** What a tab is currently showing. Tabs hold a history of these. */
+export type TabContent =
+  | { kind: 'list'; type: EntryType }
+  | { kind: 'doc'; path: string };
+
+/** A tab in the top tab bar. Holds a back/forward history of TabContent
+ *  plus a cursor pointing at the current entry. */
+export interface Tab {
+  history: TabContent[];
+  cursor: number;
+  pinned?: boolean;
+}
+
+export function activeContent(tab: Tab): TabContent {
+  return tab.history[tab.cursor];
+}
+
+export function tabKey(tab: Tab): string {
+  const c = activeContent(tab);
+  return c.kind === 'list' ? `list:${c.type}` : `doc:${c.path}`;
+}
+

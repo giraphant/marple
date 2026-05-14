@@ -1,24 +1,95 @@
 import { useState, useEffect, useMemo, useCallback } from 'preact/hooks';
-import type { Entry, EntryType } from './types';
-import { TYPES } from './types';
+import type { Entry, EntryType, Tab, TabContent } from './types';
+import { activeContent } from './types';
 import { buildWikiIndex, splitAuthors } from './wiki';
-import { Card } from './components/Card';
-import { Dashboard } from './components/Dashboard';
-import { Reader } from './components/Reader';
+import { ListView } from './components/ListView';
+import { DocView } from './components/DocView';
 import { SettingsPanel } from './components/SettingsPanel';
-import { postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry } from './api';
+import { Sidebar } from './components/Sidebar';
+import { TabBar } from './components/TabBar';
+import {
+  postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
+  newIdeaDraft, ideaEntryFromDraft,
+} from './api';
 import { loadSettings, saveSettings, type Settings } from './settings';
+
+const TABS_KEY = 'qua-reader-tabs-v3';
+const ACTIVE_KEY = 'qua-reader-active-tab';
+const MAX_TABS = 16;
+const MAX_HISTORY = 50;
+const DEFAULT_TYPE: EntryType = 'paper-analysis';
+
+function defaultTab(): Tab {
+  return { history: [{ kind: 'list', type: DEFAULT_TYPE }], cursor: 0 };
+}
+
+function loadTabs(): Tab[] {
+  try {
+    const raw = localStorage.getItem(TABS_KEY);
+    if (!raw) return [defaultTab()];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return [defaultTab()];
+    const clean = parsed.filter((t: unknown): t is Tab => {
+      if (!t || typeof t !== 'object') return false;
+      const obj = t as Record<string, unknown>;
+      if (!Array.isArray(obj.history) || typeof obj.cursor !== 'number') return false;
+      return obj.history.every((c: unknown) => {
+        if (!c || typeof c !== 'object') return false;
+        const cc = c as Record<string, unknown>;
+        return (cc.kind === 'list' && typeof cc.type === 'string')
+            || (cc.kind === 'doc' && typeof cc.path === 'string');
+      });
+    });
+    return clean.length > 0 ? clean : [defaultTab()];
+  } catch {
+    return [defaultTab()];
+  }
+}
+
+function loadActiveIndex(): number {
+  try {
+    const raw = localStorage.getItem(ACTIVE_KEY);
+    const n = raw == null ? 0 : parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch { return 0; }
+}
+
+/** Push a new content to a tab's history at `cursor + 1`, truncating any
+ *  forward history (browser-style). No-op if it's the same as current. */
+function pushContent(tab: Tab, content: TabContent): Tab {
+  const cur = tab.history[tab.cursor];
+  if (cur && contentEq(cur, content)) return tab;
+  const truncated = tab.history.slice(0, tab.cursor + 1);
+  truncated.push(content);
+  // Cap history length by dropping oldest entries; cursor stays at the end.
+  while (truncated.length > MAX_HISTORY) truncated.shift();
+  return { ...tab, history: truncated, cursor: truncated.length - 1 };
+}
+
+function contentEq(a: TabContent, b: TabContent): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'list' && b.kind === 'list') return a.type === b.type;
+  if (a.kind === 'doc' && b.kind === 'doc') return a.path === b.path;
+  return false;
+}
 
 export function App() {
   const [entries, setEntries] = useState<Entry[] | null>(null);
-  const [type, setType] = useState<EntryType>('paper-analysis');
   const [query, setQuery] = useState('');
   const [minRating, setMinRating] = useState(0);
   const [themeFilter, setThemeFilter] = useState<string | null>(null);
-  const [open, setOpen] = useState<Entry | null>(null);
   const [limit, setLimit] = useState(300);
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tabs, setTabs] = useState<Tab[]>(() => loadTabs());
+  const [activeIndex, setActiveIndex] = useState<number>(() => loadActiveIndex());
+
+  useEffect(() => {
+    try { localStorage.setItem(TABS_KEY, JSON.stringify(tabs)); } catch {}
+  }, [tabs]);
+  useEffect(() => {
+    try { localStorage.setItem(ACTIVE_KEY, String(activeIndex)); } catch {}
+  }, [activeIndex]);
 
   const updateSettings = useCallback((next: Settings) => {
     setSettings(next);
@@ -37,7 +108,6 @@ export function App() {
 
   const wikiIndex = useMemo(() => buildWikiIndex(entries ?? []), [entries]);
 
-  // target-path → notes that annotate it. Empty array if none.
   const annotationIndex = useMemo(() => {
     const m = new Map<string, Entry[]>();
     if (!entries) return m;
@@ -64,13 +134,28 @@ export function App() {
     return m;
   }, [entries]);
 
+  const entryByPath = useMemo(() => {
+    const m = new Map<string, Entry>();
+    if (entries) for (const e of entries) m.set(e.path, e);
+    return m;
+  }, [entries]);
+
+  const activeTab: Tab | null = tabs[activeIndex] ?? tabs[0] ?? null;
+  const activeTabContent: TabContent | null = activeTab ? activeContent(activeTab) : null;
+  const activeListType: EntryType | null =
+    activeTabContent && activeTabContent.kind === 'list' ? activeTabContent.type : null;
+  const activeDocEntry: Entry | null =
+    activeTabContent && activeTabContent.kind === 'doc' ? entryByPath.get(activeTabContent.path) ?? null : null;
+
+  useEffect(() => { setLimit(300); setThemeFilter(null); }, [activeListType]);
+
   const typeEntries = useMemo(
-    () => (entries ?? []).filter(e => e.type === type),
-    [entries, type]
+    () => activeListType ? (entries ?? []).filter(e => e.type === activeListType) : [],
+    [entries, activeListType]
   );
 
   const filtered = useMemo(() => {
-    if (!entries) return [];
+    if (!activeListType) return [];
     const q = query.trim().toLowerCase();
     return typeEntries.filter(e => {
       if (minRating && (e.rating_score || 0) < minRating) return false;
@@ -82,23 +167,173 @@ export function App() {
       ].filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
-  }, [typeEntries, query, minRating, themeFilter, entries]);
+  }, [typeEntries, query, minRating, themeFilter, activeListType]);
 
-  const visible = query ? filtered : filtered.slice(0, limit);
-  const isFiltered = !!(query || themeFilter || minRating);
+  // --- tab navigation: per-tab back/forward via history cursor ---
 
-  const switchType = useCallback((id: EntryType) => {
-    setType(id); setLimit(300); setThemeFilter(null);
+  const navigateInActiveTab = useCallback((content: TabContent) => {
+    setTabs(prev => {
+      const cur = prev[activeIndex];
+      if (!cur) return prev;
+      const next = prev.slice();
+      next[activeIndex] = pushContent(cur, content);
+      return next;
+    });
+  }, [activeIndex]);
+
+  const openInNewTab = useCallback((content: TabContent) => {
+    setTabs(prev => {
+      // Dedupe DocTabs by path — list-tabs may reasonably be duplicated by user
+      if (content.kind === 'doc') {
+        const existing = prev.findIndex(t => {
+          const c = activeContent(t);
+          return c.kind === 'doc' && c.path === content.path;
+        });
+        if (existing >= 0) { setActiveIndex(existing); return prev; }
+      }
+      const next = [...prev, { history: [content], cursor: 0 } as Tab];
+      if (next.length > MAX_TABS) next.splice(0, next.length - MAX_TABS);
+      setActiveIndex(next.length - 1);
+      return next;
+    });
   }, []);
+
+  const back = useCallback(() => {
+    setTabs(prev => {
+      const cur = prev[activeIndex];
+      if (!cur || cur.cursor <= 0) return prev;
+      const next = prev.slice();
+      next[activeIndex] = { ...cur, cursor: cur.cursor - 1 };
+      return next;
+    });
+  }, [activeIndex]);
+
+  const forward = useCallback(() => {
+    setTabs(prev => {
+      const cur = prev[activeIndex];
+      if (!cur || cur.cursor >= cur.history.length - 1) return prev;
+      const next = prev.slice();
+      next[activeIndex] = { ...cur, cursor: cur.cursor + 1 };
+      return next;
+    });
+  }, [activeIndex]);
+
+  const canBack = !!activeTab && activeTab.cursor > 0;
+  const canForward = !!activeTab && activeTab.cursor < activeTab.history.length - 1;
+
+  // Cmd+[ / Cmd+] keyboard shortcuts for back/forward.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === '[') { e.preventDefault(); back(); }
+      else if (e.key === ']') { e.preventDefault(); forward(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [back, forward]);
+
+  // --- tab management actions ---
+
+  const closeTab = useCallback((index: number) => {
+    setTabs(prev => {
+      if (prev.length <= 1) return prev;
+      if (prev[index]?.pinned) return prev;
+      const next = prev.filter((_, i) => i !== index);
+      setActiveIndex(curIdx => {
+        if (index === curIdx) return Math.max(0, index - 1);
+        if (index < curIdx) return curIdx - 1;
+        return curIdx;
+      });
+      return next;
+    });
+  }, []);
+
+  const togglePin = useCallback((index: number) => {
+    setTabs(prev => {
+      const target = prev[index];
+      if (!target) return prev;
+      const toggled: Tab = { ...target, pinned: !target.pinned };
+      const without = prev.filter((_, i) => i !== index);
+      let insertAt: number;
+      if (toggled.pinned) {
+        insertAt = without.findIndex(t => !t.pinned);
+        if (insertAt < 0) insertAt = without.length;
+      } else {
+        const lastPinned = (() => {
+          for (let i = without.length - 1; i >= 0; i--) if (without[i].pinned) return i;
+          return -1;
+        })();
+        insertAt = lastPinned + 1;
+      }
+      const next = [...without.slice(0, insertAt), toggled, ...without.slice(insertAt)];
+      setActiveIndex(insertAt);
+      return next;
+    });
+  }, []);
+
+  const reorderTab = useCallback((from: number, to: number) => {
+    setTabs(prev => {
+      if (from === to || from < 0 || from >= prev.length || to < 0 || to >= prev.length) return prev;
+      const next = prev.slice();
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      setActiveIndex(curIdx => {
+        if (curIdx === from) return to;
+        if (from < curIdx && curIdx <= to) return curIdx - 1;
+        if (to <= curIdx && curIdx < from) return curIdx + 1;
+        return curIdx;
+      });
+      return next;
+    });
+  }, []);
+
+  const newTab = useCallback(() => {
+    setTabs(prev => {
+      const next = [...prev, { history: [{ kind: 'list', type: DEFAULT_TYPE }], cursor: 0 } as Tab];
+      if (next.length > MAX_TABS) next.splice(0, next.length - MAX_TABS);
+      setActiveIndex(next.length - 1);
+      return next;
+    });
+    setQuery('');
+  }, []);
+
+  const activateTab = useCallback((index: number) => setActiveIndex(index), []);
+
+  // --- semantic actions called by views ---
+
+  // Sidebar type pick: replace current tab content (push to history).
+  const openListType = useCallback((type: EntryType) => {
+    navigateInActiveTab({ kind: 'list', type });
+    setQuery('');
+  }, [navigateInActiveTab]);
+
+  // Card click: navigate in current tab. Cmd/Ctrl+click opens a new tab.
+  // Matches Obsidian / browser muscle memory; consistent with how sidebar
+  // type clicks and in-doc links behave.
+  const openDoc = useCallback((entry: Entry, modifiers: { meta: boolean }) => {
+    if (modifiers.meta) openInNewTab({ kind: 'doc', path: entry.path });
+    else navigateInActiveTab({ kind: 'doc', path: entry.path });
+  }, [openInNewTab, navigateInActiveTab]);
+
+  // In-doc navigation (wikilink, chapter rail, back-to-book button): replace
+  // current tab content so back/forward works as expected.
+  const navigateInTab = useCallback((entry: Entry, _modifiers: { meta: boolean }) => {
+    void _modifiers;
+    navigateInActiveTab({ kind: 'doc', path: entry.path });
+  }, [navigateInActiveTab]);
+
+  // --- entry-level actions ---
 
   const applyThemeFilter = useCallback((th: string, fromType?: EntryType) => {
-    if (fromType) setType(fromType);
-    setThemeFilter(th); setQuery(''); setLimit(300);
-  }, []);
+    const targetType = fromType ?? activeListType;
+    if (targetType) navigateInActiveTab({ kind: 'list', type: targetType });
+    setThemeFilter(th);
+    setQuery('');
+    setLimit(300);
+  }, [navigateInActiveTab, activeListType]);
 
   const onUpdated = useCallback((updated: Entry) => {
     setEntries(prev => prev ? prev.map(e => e.path === updated.path ? updated : e) : prev);
-    setOpen(prev => prev && prev.path === updated.path ? updated : prev);
   }, []);
 
   const onCreateAnnotation = useCallback(async (target: Entry) => {
@@ -106,115 +341,125 @@ export function App() {
     await postEntryText(path, body);
     const draftEntry = entryFromDraft(path, target, title);
     setEntries(prev => prev ? [...prev, draftEntry] : prev);
-    setOpen(draftEntry);
-  }, []);
+    openInNewTab({ kind: 'doc', path });
+  }, [openInNewTab]);
+
+  const onNewIdeaNote = useCallback(async () => {
+    try {
+      const { path, body, title } = newIdeaDraft();
+      await postEntryText(path, body);
+      const draft = ideaEntryFromDraft(path, title);
+      setEntries(prev => prev ? [...prev, draft] : prev);
+      openInNewTab({ kind: 'doc', path });
+    } catch (e) {
+      window.alert('新建 note 失败：' + (e instanceof Error ? e.message : String(e)));
+    }
+  }, [openInNewTab]);
 
   const onDelete = useCallback(async (target: Entry) => {
     await deleteEntry(target.path);
     setEntries(prev => prev ? prev.filter(e => e.path !== target.path) : prev);
-    setOpen(null);
+    // Close any tab whose *current* content is the deleted entry. (We keep tabs
+    // that merely reference it in history — back/forward will show StaleTab.)
+    setTabs(prev => {
+      const idx = prev.findIndex(t => {
+        const c = activeContent(t);
+        return c.kind === 'doc' && c.path === target.path;
+      });
+      if (idx < 0) return prev;
+      if (prev.length <= 1) return [defaultTab()];
+      const next = prev.filter((_, i) => i !== idx);
+      setActiveIndex(curIdx => {
+        if (idx === curIdx) return Math.max(0, idx - 1);
+        if (idx < curIdx) return curIdx - 1;
+        return curIdx;
+      });
+      return next;
+    });
   }, []);
 
-  const editable = open
-    ? (open.type === 'note' || settings.allowEditLLMBody)
+  const editable = activeDocEntry
+    ? (activeDocEntry.type === 'note' || settings.allowEditLLMBody)
     : false;
+  const editorTheme = useMemo(
+    () => ({
+      fontFamily: settings.fontFamily,
+      fontSize: settings.fontSize,
+      lineHeight: settings.lineHeight,
+    }),
+    [settings.fontFamily, settings.fontSize, settings.lineHeight],
+  );
 
   if (!entries) return <div class="p-10 text-stone-500">加载索引中…</div>;
 
   return (
-    <div class="min-h-screen">
-      <header class="bg-white/90 backdrop-blur border-b border-stone-200 sticky top-0 z-20">
-        <div class="max-w-[1600px] mx-auto px-5 py-3 flex items-center gap-4 flex-wrap">
-          <div class="font-semibold text-base tracking-tight">qua <span class="text-stone-400">reader</span></div>
-          <nav class="flex gap-1">
-            {TYPES.map(t => (
-              <button
-                onClick={() => switchType(t.id)}
-                class={`px-2.5 py-1 rounded text-[12px] transition ${type === t.id ? 'bg-stone-900 text-white' : 'text-stone-600 hover:bg-stone-100'}`}
-              >
-                {t.label} <span class="opacity-60 tabular-nums">{counts[t.id] ?? 0}</span>
-              </button>
-            ))}
-          </nav>
-          <input
-            type="search"
-            placeholder="搜索 标题 / 作者 / 主题 / 正文摘要…"
-            value={query}
-            onInput={e => setQuery((e.target as HTMLInputElement).value)}
-            class="flex-1 min-w-[200px] px-3 py-1.5 border border-stone-300 rounded text-[13px] focus:outline-none focus:border-stone-500 bg-white"
-          />
-          <div class="flex items-center gap-1 text-[11px] text-stone-600">
-            <span>评分 ≥</span>
-            {[0, 1, 2, 3, 4].map(n => (
-              <button
-                onClick={() => setMinRating(n)}
-                class={`px-1.5 py-0.5 rounded ${minRating === n ? 'bg-stone-900 text-white' : 'hover:bg-stone-100'}`}
-              >{n || '·'}</button>
-            ))}
-          </div>
-          <div class="text-[11px] text-stone-500 tabular-nums">{filtered.length} / {counts[type] ?? 0}</div>
-          <button
-            onClick={() => setSettingsOpen(true)}
-            class="text-stone-500 hover:text-stone-900 px-1.5 py-0.5 rounded hover:bg-stone-100"
-            title="设置"
-          >⚙</button>
-        </div>
-        {themeFilter && (
-          <div class="max-w-[1600px] mx-auto px-5 pb-2 flex items-center gap-2">
-            <span class="text-[11px] text-stone-500">主题筛选</span>
-            <button
-              onClick={() => setThemeFilter(null)}
-              class="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-200 transition"
-            >
-              {themeFilter} <span class="text-amber-600 ml-1">✕</span>
-            </button>
-          </div>
-        )}
-      </header>
-      <main class="max-w-[1600px] mx-auto px-5 py-4">
-        {!isFiltered && (
-          <Dashboard
-            type={type}
-            typeEntries={typeEntries}
-            onThemeClick={(th) => applyThemeFilter(th, type)}
-            onOpen={setOpen}
-          />
-        )}
-        {filtered.length === 0
-          ? <div class="text-sm text-stone-500 py-20 text-center">没有匹配的条目</div>
-          : (
-            <>
-              <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
-                {visible.map(e => <Card entry={e} onClick={setOpen} key={e.path} />)}
-              </div>
-              {!query && !themeFilter && filtered.length > limit && (
-                <div class="text-center mt-6">
-                  <button
-                    onClick={() => setLimit(limit + 500)}
-                    class="px-4 py-2 bg-white border border-stone-300 rounded text-sm hover:bg-stone-50"
-                  >
-                    再加载 500 ( 已显示 {limit} / {filtered.length} )
-                  </button>
-                </div>
-              )}
-            </>
-          )
-        }
-      </main>
-      <Reader
-        entry={open}
+    <div class="h-screen flex bg-white">
+      <Sidebar
         entries={entries}
-        authorIndex={authorIndex}
-        annotationIndex={annotationIndex}
-        wikiIndex={wikiIndex}
-        editable={editable}
-        onClose={() => setOpen(null)}
-        onNavigate={setOpen}
-        onThemeClick={applyThemeFilter}
-        onUpdated={onUpdated}
-        onCreateAnnotation={onCreateAnnotation}
-        onDelete={onDelete}
+        counts={counts}
+        activeType={activeListType}
+        onSelectType={openListType}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onNewIdeaNote={onNewIdeaNote}
       />
+
+      <div class="flex-1 min-w-0 flex flex-col">
+        <TabBar
+          tabs={tabs}
+          activeIndex={activeIndex}
+          entryByPath={entryByPath}
+          onActivate={activateTab}
+          onClose={closeTab}
+          onNewTab={newTab}
+          onTogglePin={togglePin}
+          onReorder={reorderTab}
+          onBack={back}
+          onForward={forward}
+          canBack={canBack}
+          canForward={canForward}
+        />
+
+        {activeTabContent?.kind === 'list' && (
+          <ListView
+            entries={entries}
+            type={activeTabContent.type}
+            typeEntries={typeEntries}
+            filtered={filtered}
+            query={query}
+            minRating={minRating}
+            themeFilter={themeFilter}
+            limit={limit}
+            onQueryChange={setQuery}
+            onMinRatingChange={setMinRating}
+            onClearTheme={() => setThemeFilter(null)}
+            onLoadMore={() => setLimit(limit + 500)}
+            onCardClick={openDoc}
+            onThemeClick={(th) => applyThemeFilter(th, activeTabContent.type)}
+          />
+        )}
+
+        {activeTabContent?.kind === 'doc' && (
+          activeDocEntry
+            ? (
+              <DocView
+                entry={activeDocEntry}
+                entries={entries}
+                authorIndex={authorIndex}
+                annotationIndex={annotationIndex}
+                wikiIndex={wikiIndex}
+                editable={editable}
+                editorTheme={editorTheme}
+                onNavigate={navigateInTab}
+                onThemeClick={applyThemeFilter}
+                onUpdated={onUpdated}
+                onCreateAnnotation={onCreateAnnotation}
+                onDelete={onDelete}
+              />
+            )
+            : <StaleTab path={activeTabContent.path} onClose={() => closeTab(activeIndex)} />
+        )}
+      </div>
+
       {settingsOpen && (
         <SettingsPanel
           settings={settings}
@@ -222,6 +467,17 @@ export function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+function StaleTab({ path, onClose }: { path: string; onClose: () => void }) {
+  return (
+    <div class="flex-1 flex items-center justify-center text-stone-500 text-sm">
+      <div class="text-center">
+        <div class="mb-2">{path} 已不在索引中</div>
+        <button onClick={onClose} class="text-stone-700 underline">关闭 tab</button>
+      </div>
     </div>
   );
 }
