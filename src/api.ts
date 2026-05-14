@@ -1,0 +1,173 @@
+import type { Entry } from './types';
+import { parseFile, serializeFile } from './frontmatter';
+
+const NOTES_DIR = 'vault/notes/';
+
+/** Fetch a vault md file as text. */
+export async function fetchEntryText(path: string): Promise<string> {
+  const r = await fetch('/' + path);
+  if (!r.ok) throw new Error(`fetch ${path} failed: ${r.status}`);
+  return r.text();
+}
+
+/** Write a vault md file back via PUT /vault/...md. Returns the new body text. */
+export async function putEntryText(path: string, text: string): Promise<void> {
+  const r = await fetch('/' + path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+    body: text,
+  });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`PUT ${path} failed: ${r.status} ${msg}`);
+  }
+}
+
+/**
+ * Read the file, apply `mutate` to the parsed frontmatter, re-serialize and
+ * PUT it back. Returns the new fm so callers can refresh their local index.
+ */
+export async function patchFrontmatter(
+  path: string,
+  mutate: (fm: Record<string, unknown>) => Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const text = await fetchEntryText(path);
+  const { fm, body } = parseFile(text);
+  const next = mutate(fm ?? {});
+  const out = serializeFile(next, body);
+  await putEntryText(path, out);
+  return next;
+}
+
+/** Soft-delete a note via DELETE. Server moves it into vault/notes/.trash/ with
+ *  a timestamped basename so successive deletions of same-name files don't
+ *  collide. Returns the trash path written by the server. */
+export async function deleteEntry(path: string): Promise<string> {
+  const r = await fetch('/' + path, { method: 'DELETE' });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`DELETE ${path} failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { trash?: string }));
+  return json.trash ?? '';
+}
+
+/**
+ * Re-assemble the file from an existing raw markdown text and a new body
+ * string, preserving the frontmatter fence and content exactly. Used by the
+ * auto-saving body editor.
+ */
+export function replaceBody(rawText: string, newBody: string): string {
+  const m = rawText.match(/^(---\r?\n[\s\S]*?\r?\n---\r?\n?)([\s\S]*)$/);
+  if (!m) {
+    // No frontmatter — file is rare in this vault but we still allow editing.
+    return newBody;
+  }
+  // Capture group 1 already includes the newline after the closing fence;
+  // newBody is what came out of parseFile, so any leading blank line in it is
+  // the user's original spacing. Concatenate as-is — stripping would lose it.
+  return m[1] + newBody;
+}
+
+/** Create a new note file via POST. The path must live under vault/notes/. */
+export async function postEntryText(path: string, text: string): Promise<void> {
+  if (!path.startsWith(NOTES_DIR)) {
+    throw new Error(`POST only allowed under ${NOTES_DIR}, got ${path}`);
+  }
+  const r = await fetch('/' + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+    body: text,
+  });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`POST ${path} failed: ${r.status} ${msg}`);
+  }
+}
+
+/** Slugify a title-ish string for a filename. ASCII letters/digits/dashes only. */
+function slugify(s: string): string {
+  return s.toLowerCase()
+    .replace(/[^\w\-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 60) || 'note';
+}
+
+/** Build the {path, body} for a new annotation note targeting `target`. */
+export function newAnnotationDraft(target: Entry): { path: string; body: string; title: string } {
+  const targetSlug = target.path.split('/').pop()!.replace(/\.md$/, '');
+  const baseSlug = slugify(targetSlug);
+  const stamp = Date.now().toString(36).slice(-4);
+  const path = `${NOTES_DIR}${baseSlug}-note-${stamp}.md`;
+  const today = new Date().toISOString().slice(0, 10);
+  const title = `对《${target.title || targetSlug}》的批注`;
+  const body =
+    `---\n` +
+    `type: note\n` +
+    `title: ${JSON.stringify(title)}\n` +
+    `annotates: ${target.path}\n` +
+    `created: ${today}\n` +
+    `themes: []\n` +
+    `---\n\n` +
+    `# ${title}\n\n`;
+  return { path, body, title };
+}
+
+/** Build an Entry row matching the freshly-posted note, so the UI can show it without re-indexing. */
+export function entryFromDraft(path: string, target: Entry, title: string): Entry {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    path,
+    type: 'note',
+    book: null,
+    title,
+    author: null,
+    year: null,
+    rating: null,
+    rating_score: 0,
+    themes: [],
+    topic: null,
+    source: null,
+    doi: null,
+    chapters_analyzed: null,
+    annotates: target.path,
+    created: today,
+    preview: '',
+  };
+}
+
+/** Merge frontmatter changes back into the in-memory Entry row. */
+export function applyFmToEntry(entry: Entry, fm: Record<string, unknown>): Entry {
+  const next: Entry = { ...entry };
+  if ('rating' in fm) next.rating = fm.rating as Entry['rating'];
+  if ('year' in fm) next.year = fm.year as Entry['year'];
+  if ('author' in fm) next.author = flattenAuthor(fm.author);
+  if ('title' in fm) next.title = fm.title as Entry['title'];
+  if ('source' in fm) next.source = fm.source as Entry['source'];
+  if ('topic' in fm) next.topic = fm.topic as Entry['topic'];
+  if ('doi' in fm) next.doi = fm.doi as Entry['doi'];
+  if ('themes' in fm) next.themes = Array.isArray(fm.themes) ? fm.themes as string[] : null;
+  if ('annotates' in fm) next.annotates = (fm.annotates as string | null) ?? null;
+  if ('created' in fm) next.created = fm.created != null ? String(fm.created) : null;
+  // Recompute rating_score from the new rating value.
+  next.rating_score = scoreRating(next.rating);
+  return next;
+}
+
+function scoreRating(r: unknown): number {
+  if (typeof r === 'number') return r;
+  if (typeof r === 'string') {
+    const stars = (r.match(/★/g) || []).length;
+    if (stars) return stars;
+    const n = parseInt(r, 10);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+function flattenAuthor(v: unknown): string | null {
+  if (v == null) return null;
+  if (Array.isArray(v)) return v.map(String).filter(Boolean).join(', ');
+  return typeof v === 'string' ? v : String(v);
+}

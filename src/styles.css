@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; }
+}
+
+@layer components {
+  .card { content-visibility: auto; contain-intrinsic-size: 220px; }
+
+  .prose-body h1 { font-size: 1.5rem; font-weight: 600; margin: 1.2em 0 0.6em; }
+  .prose-body h2 { font-size: 1.2rem; font-weight: 600; margin: 1.1em 0 0.5em; border-bottom: 1px solid #e7e5e4; padding-bottom: 0.2em; }
+  .prose-body h3 { font-size: 1.05rem; font-weight: 600; margin: 1em 0 0.4em; }
+  .prose-body p { margin: 0.6em 0; line-height: 1.75; }
+  .prose-body ul, .prose-body ol { margin: 0.6em 0; padding-left: 1.5em; }
+  .prose-body li { margin: 0.2em 0; line-height: 1.7; }
+  .prose-body blockquote { border-left: 3px solid #d6d3d1; padding-left: 1em; color: #57534e; margin: 0.8em 0; }
+  .prose-body code { background: #f5f5f4; padding: 0 0.3em; border-radius: 3px; font-size: 0.9em; }
+  .prose-body strong { font-weight: 600; color: #1c1917; }
+  .prose-body hr { border: none; border-top: 1px solid #e7e5e4; margin: 1.4em 0; }
+
+  .line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .line-clamp-4 { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 3px; }
+
+  .wiki-link { color: #0369a1; cursor: pointer; border-bottom: 1px dotted #0369a1; }
+  .wiki-link:hover { background: #f0f9ff; }
+  .wiki-broken { color: #a8a29e; text-decoration: line-through; cursor: help; }
+
+  /* Editable field hover affordance in PropertyPanel. */
+  .editable-row:hover .edit-hint { opacity: 1; }
+  .edit-hint { opacity: 0; transition: opacity 120ms; }
+}
