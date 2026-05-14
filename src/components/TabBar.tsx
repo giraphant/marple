@@ -4,6 +4,7 @@ import { TYPE_BY_ID, activeContent } from '../types';
 import { TypeIcon } from './TypeIcon';
 import { Icon } from './Icon';
 import PhTag from '~icons/ph/tag';
+import PhChartLineUp from '~icons/ph/chart-line-up';
 import type { JSX } from 'preact';
 
 interface Props {
@@ -63,6 +64,20 @@ function tabDisplay(tab: Tab, entryByPath: Map<string, Entry>): {
       type: null,
     };
   }
+  if (content.kind === 'activity') {
+    return {
+      icon: (
+        <span
+          class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-amber-100 text-amber-700"
+          style={{ minWidth: '1.2em', minHeight: '1.2em', height: '1.2em', width: '1.2em' }}
+        >
+          <PhChartLineUp width="0.85em" height="0.85em" />
+        </span>
+      ),
+      title: '活动',
+      type: null,
+    };
+  }
   const entry = entryByPath.get(content.path);
   if (entry) {
     return {
@@ -118,10 +133,11 @@ export function TabBar({
           const showRightIndicator = dropSlot === i + 1 && i === tabs.length - 1 && dragFrom !== null && dragFrom !== i;
           const cur = activeContent(tab);
           const tabK =
-            cur.kind === 'list'   ? `list:${cur.type}:${i}` :
-            cur.kind === 'doc'    ? `doc:${cur.path}:${i}`  :
-            cur.kind === 'themes' ? `themes:${i}`           :
-                                    `trash:${i}`;
+            cur.kind === 'list'     ? `list:${cur.type}:${i}` :
+            cur.kind === 'doc'      ? `doc:${cur.path}:${i}`  :
+            cur.kind === 'themes'   ? `themes:${i}`           :
+            cur.kind === 'activity' ? `activity:${i}`         :
+                                      `trash:${i}`;
           return (
             <div
               key={tabK}

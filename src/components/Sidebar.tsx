@@ -3,6 +3,7 @@ import { TYPES } from '../types';
 import { TypeIcon } from './TypeIcon';
 import { Icon } from './Icon';
 import PhTag from '~icons/ph/tag';
+import PhChartLineUp from '~icons/ph/chart-line-up';
 
 interface Props {
   entries: Entry[];
@@ -15,16 +16,20 @@ interface Props {
   themesActive: boolean;
   /** Total distinct themes across the vault. */
   themesCount: number;
+  /** True when the active tab is the activity heatmap view. */
+  activityActive: boolean;
   onSelectType: (id: EntryType) => void;
   onOpenTrash: () => void;
   onOpenThemes: () => void;
+  onOpenActivity: () => void;
   onOpenSettings: () => void;
   onNewIdeaNote: () => void;
 }
 
 export function Sidebar({
-  counts, activeType, trashActive, themesActive, themesCount,
-  onSelectType, onOpenTrash, onOpenThemes, onOpenSettings, onNewIdeaNote,
+  counts, activeType, trashActive, themesActive, themesCount, activityActive,
+  onSelectType, onOpenTrash, onOpenThemes, onOpenActivity,
+  onOpenSettings, onNewIdeaNote,
 }: Props) {
   return (
     <aside class="w-60 shrink-0 bg-stone-50 border-r border-stone-200 flex flex-col text-stone-800">
@@ -84,6 +89,23 @@ export function Sidebar({
           </span>
           <span class="flex-1 truncate">主题</span>
           <span class={`text-[11px] tabular-nums ${themesActive ? 'text-white/70' : 'text-stone-400'}`}>{themesCount}</span>
+        </button>
+        <button
+          onClick={onOpenActivity}
+          class={`w-full text-left px-2 py-1.5 rounded text-[12px] flex items-center gap-2 transition ${
+            activityActive
+              ? 'bg-stone-900 text-white'
+              : 'text-stone-700 hover:bg-stone-200/60'
+          }`}
+        >
+          <span
+            class={`shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-amber-100 text-amber-700`}
+            style={{ minHeight: '1.3em', minWidth: '1.3em', height: '1.3em', width: '1.3em' }}
+            aria-hidden="true"
+          >
+            <PhChartLineUp width="0.94em" height="0.94em" style={{ padding: '0.05em' }} />
+          </span>
+          <span class="flex-1 truncate">活动</span>
         </button>
       </nav>
 

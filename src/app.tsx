@@ -6,7 +6,9 @@ import { ListView } from './components/ListView';
 import { DocView } from './components/DocView';
 import { TrashView } from './components/TrashView';
 import { ThemesView } from './components/ThemesView';
+import { ActivityView } from './components/ActivityView';
 import { SettingsPanel } from './components/SettingsPanel';
+import { CommandPalette } from './components/CommandPalette';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import {
@@ -86,6 +88,19 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tabs, setTabs] = useState<Tab[]>(() => loadTabs());
   const [activeIndex, setActiveIndex] = useState<number>(() => loadActiveIndex());
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Cmd/Ctrl+K opens the global search palette.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     try { localStorage.setItem(TABS_KEY, JSON.stringify(tabs)); } catch {}
@@ -151,6 +166,7 @@ export function App() {
     activeTabContent && activeTabContent.kind === 'doc' ? entryByPath.get(activeTabContent.path) ?? null : null;
   const trashActive = activeTabContent?.kind === 'trash';
   const themesActive = activeTabContent?.kind === 'themes';
+  const activityActive = activeTabContent?.kind === 'activity';
 
   const themesCount = useMemo(() => {
     if (!entries) return 0;
@@ -327,6 +343,10 @@ export function App() {
     navigateInActiveTab({ kind: 'themes' });
   }, [navigateInActiveTab]);
 
+  const openActivity = useCallback(() => {
+    navigateInActiveTab({ kind: 'activity' });
+  }, [navigateInActiveTab]);
+
   // After a successful trash restore, the restored file is back under
   // vault/notes/. We don't have it in our in-memory entries until the index
   // rebuilds; show a hint that the page can be reloaded to see it.
@@ -431,9 +451,11 @@ export function App() {
         trashActive={trashActive}
         themesActive={themesActive}
         themesCount={themesCount}
+        activityActive={activityActive}
         onSelectType={openListType}
         onOpenTrash={openTrash}
         onOpenThemes={openThemes}
+        onOpenActivity={openActivity}
         onOpenSettings={() => setSettingsOpen(true)}
         onNewIdeaNote={onNewIdeaNote}
       />
@@ -501,6 +523,10 @@ export function App() {
         {activeTabContent?.kind === 'themes' && (
           <ThemesView entries={entries} onThemeClick={applyThemeFilter} />
         )}
+
+        {activeTabContent?.kind === 'activity' && (
+          <ActivityView entries={entries} />
+        )}
       </div>
 
       {settingsOpen && (
@@ -510,6 +536,13 @@ export function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+
+      <CommandPalette
+        open={paletteOpen}
+        entries={entries}
+        onClose={() => setPaletteOpen(false)}
+        onPick={openDoc}
+      />
     </div>
   );
 }

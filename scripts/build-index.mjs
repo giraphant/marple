@@ -3,7 +3,7 @@
 // emit reader/data/index.json (one row per file, with a `preview` derived
 // from the first body paragraph).
 
-import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as yamlParse } from 'yaml';
@@ -128,7 +128,10 @@ function canonicalType(t) {
   const entries = [];
   let bad = 0;
   for (const f of files) {
-    const text = await readFile(f, 'utf8');
+    const [text, fStat] = await Promise.all([
+      readFile(f, 'utf8'),
+      stat(f).catch(() => null),
+    ]);
     const { fm, body } = parseFile(text);
     if (!fm || !fm.type) { if (fm) bad++; continue; }
     const type = canonicalType(fm.type);
@@ -165,6 +168,7 @@ function canonicalType(t) {
       created: fm.created != null ? String(fm.created) : null,
       pdf_slug,
       has_pdf,
+      mtime: fStat ? Math.floor(fStat.mtimeMs) : null,
       preview: firstParagraph(body),
     });
   }

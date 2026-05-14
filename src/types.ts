@@ -28,6 +28,8 @@ export interface Entry {
   has_pdf?: boolean;
   /** Filename stem under sources/ (paper basename, or book directory slug). */
   pdf_slug?: string | null;
+  /** File mtime in epoch ms. Used for the activity heatmap. */
+  mtime?: number | null;
   preview: string;
 }
 
@@ -65,7 +67,8 @@ export type TabContent =
   | { kind: 'list'; type: EntryType }
   | { kind: 'doc'; path: string }
   | { kind: 'trash' }
-  | { kind: 'themes' };
+  | { kind: 'themes' }
+  | { kind: 'activity' };
 
 /** A tab in the top tab bar. Holds a back/forward history of TabContent
  *  plus a cursor pointing at the current entry. */
@@ -83,6 +86,6 @@ export function tabKey(tab: Tab): string {
   const c = activeContent(tab);
   if (c.kind === 'list') return `list:${c.type}`;
   if (c.kind === 'doc') return `doc:${c.path}`;
-  return c.kind; // 'trash' | 'themes'
+  return c.kind; // 'trash' | 'themes' | 'activity'
 }
 
