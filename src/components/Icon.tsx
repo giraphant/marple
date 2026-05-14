@@ -1,11 +1,23 @@
 /**
- * Single source of truth for global UI icons. All Phosphor-regular paths
- * normalized to viewBox 0 0 256 256, drawn with `currentColor` so callers
- * control color via Tailwind text-* classes.
+ * Single source of truth for global UI icons.
  *
- * Type-specific colored chips (Articles, Books, Authors…) live in TypeIcon.
- * This file is for chromeless monoline icons: ＋ × ⚙ 🗑 ⋯ ✎ ← → 📌.
+ * Backed by unplugin-icons + @iconify-json/ph (Phosphor regular). Each
+ * imported icon becomes its own Preact component compiled at build time —
+ * no runtime fetch, only used icons enter the bundle.
+ *
+ * Add a new icon: pick from https://phosphoricons.com, then add one
+ * `import ... from '~icons/ph/<name>'` line and a case below.
  */
+import PhPlus from '~icons/ph/plus';
+import PhX from '~icons/ph/x';
+import PhGear from '~icons/ph/gear';
+import PhTrash from '~icons/ph/trash';
+import PhDotsThree from '~icons/ph/dots-three';
+import PhPencil from '~icons/ph/pencil';
+import PhCaretLeft from '~icons/ph/caret-left';
+import PhCaretRight from '~icons/ph/caret-right';
+import PhPushPin from '~icons/ph/push-pin';
+import PhPushPinFill from '~icons/ph/push-pin-fill';
 
 export type IconName =
   | 'plus'
@@ -19,27 +31,17 @@ export type IconName =
   | 'pin'
   | 'pin-fill';
 
-const PATHS: Record<IconName, string> = {
-  plus:
-    'M224 128a8 8 0 0 1-8 8H136v80a8 8 0 0 1-16 0v-80H40a8 8 0 0 1 0-16h80V40a8 8 0 0 1 16 0v80h80a8 8 0 0 1 8 8Z',
-  x:
-    'M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128 50.34 61.66a8 8 0 0 1 11.32-11.32L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128Z',
-  gear:
-    'M128 80a48 48 0 1 0 48 48 48.05 48.05 0 0 0-48-48Zm0 80a32 32 0 1 1 32-32 32 32 0 0 1-32 32Zm88-29.84q.06-2.16 0-4.32l14.92-18.64a8 8 0 0 0 1.48-7.06 107.21 107.21 0 0 0-10.88-26.25 8 8 0 0 0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186 40.54a8 8 0 0 0-3.94-6 107.71 107.71 0 0 0-26.25-10.87 8 8 0 0 0-7.06 1.49L130.16 40q-2.16-.06-4.32 0L107.2 25.11a8 8 0 0 0-7.06-1.48A107.6 107.6 0 0 0 73.89 34.51a8 8 0 0 0-3.93 6l-2.64 23.72q-1.56 1.49-3 3L40.54 70a8 8 0 0 0-6 3.94 107.71 107.71 0 0 0-10.87 26.25 8 8 0 0 0 1.49 7.06L40 125.84q-.06 2.16 0 4.32l-14.92 18.64a8 8 0 0 0-1.48 7.06 107.21 107.21 0 0 0 10.88 26.25 8 8 0 0 0 6 3.93l23.72 2.64q1.49 1.56 3 3L70 215.46a8 8 0 0 0 3.94 6 107.71 107.71 0 0 0 26.25 10.87 8 8 0 0 0 7.06-1.49L125.84 216q2.16.06 4.32 0l18.64 14.92a8 8 0 0 0 7.06 1.48 107.21 107.21 0 0 0 26.25-10.88 8 8 0 0 0 3.93-6l2.64-23.72q1.56-1.48 3-3L215.46 186a8 8 0 0 0 6-3.94 107.71 107.71 0 0 0 10.87-26.25 8 8 0 0 0-1.49-7.06ZM208.61 200.6l-22.74 2.53a8 8 0 0 0-5.06 2.65 80.6 80.6 0 0 1-6.31 6.32 8 8 0 0 0-2.64 5.06l-2.53 22.74a91.43 91.43 0 0 1-16.65 6.86l-17.92-14.29a8 8 0 0 0-5-1.74h-.34a80.94 80.94 0 0 1-8.94 0 8 8 0 0 0-5.34 1.74L97.21 213.61a91.43 91.43 0 0 1-16.65-6.86l-2.53-22.74a8 8 0 0 0-2.65-5.06 80.6 80.6 0 0 1-6.32-6.31 8 8 0 0 0-5.06-2.64l-22.74-2.53a91.43 91.43 0 0 1-6.86-16.65l14.29-17.92a8 8 0 0 0 1.74-5.34c-.13-3-.13-6 0-8.94a8 8 0 0 0-1.74-5.34L34.4 97.21a91.43 91.43 0 0 1 6.86-16.65l22.74-2.53a8 8 0 0 0 5.06-2.65 80.6 80.6 0 0 1 6.31-6.32 8 8 0 0 0 2.64-5.06l2.53-22.74a91.43 91.43 0 0 1 16.65-6.86l17.92 14.29a8 8 0 0 0 5.34 1.74c3-.13 6-.13 8.94 0a8 8 0 0 0 5.34-1.74l17.92-14.29a91.43 91.43 0 0 1 16.65 6.86l2.53 22.74a8 8 0 0 0 2.65 5.06 80.6 80.6 0 0 1 6.32 6.31 8 8 0 0 0 5.06 2.64l22.74 2.53a91.43 91.43 0 0 1 6.86 16.65l-14.29 17.92a8 8 0 0 0-1.74 5.34c.13 3 .13 6 0 8.94a8 8 0 0 0 1.74 5.34l14.29 17.92a91.43 91.43 0 0 1-6.86 16.65Z',
-  trash:
-    'M216 48h-40v-8a24 24 0 0 0-24-24h-48a24 24 0 0 0-24 24v8H40a8 8 0 0 0 0 16h8v144a16 16 0 0 0 16 16h128a16 16 0 0 0 16-16V64h8a8 8 0 0 0 0-16ZM96 40a8 8 0 0 1 8-8h48a8 8 0 0 1 8 8v8H96Zm96 168H64V64h128Zm-80-104v64a8 8 0 0 1-16 0v-64a8 8 0 0 1 16 0Zm48 0v64a8 8 0 0 1-16 0v-64a8 8 0 0 1 16 0Z',
-  'dots-three':
-    'M156 128a28 28 0 1 1-28-28 28 28 0 0 1 28 28Zm-92-28a28 28 0 1 0 28 28 28 28 0 0 0-28-28Zm128 0a28 28 0 1 0 28 28 28 28 0 0 0-28-28Z',
-  pencil:
-    'M227.31 73.37 182.63 28.68a16 16 0 0 0-22.63 0L36.69 152A15.86 15.86 0 0 0 32 163.31V208a16 16 0 0 0 16 16h44.69a15.86 15.86 0 0 0 11.31-4.69L227.31 96a16 16 0 0 0 0-22.63ZM92.69 208H48v-44.69l88-88L180.69 120ZM192 108.68 147.31 64l24-24L216 84.68Z',
-  'caret-left':
-    'M165.66 202.34a8 8 0 0 1-11.32 11.32l-80-80a8 8 0 0 1 0-11.32l80-80a8 8 0 0 1 11.32 11.32L91.31 128Z',
-  'caret-right':
-    'M181.66 133.66l-80 80a8 8 0 0 1-11.32-11.32L164.69 128 90.34 53.66a8 8 0 0 1 11.32-11.32l80 80a8 8 0 0 1 0 11.32Z',
-  pin:
-    'M235.5 81.45 174.55 20.5a17.85 17.85 0 0 0-25.27 0L122.07 47.7a31.85 31.85 0 0 0-8.41 30.43L82.27 109.5l-12.61-8.82a17.85 17.85 0 0 0-22.66 2.13l-3.78 3.78a17.85 17.85 0 0 0 0 25.27l34 34L34 244.34a8 8 0 0 0 11.31 11.31l45.27-45.27 34 34a17.85 17.85 0 0 0 25.27 0l3.78-3.78a17.85 17.85 0 0 0 2.13-22.66l-8.82-12.61 31.37-31.39a31.85 31.85 0 0 0 30.43-8.41l27.2-27.2a17.85 17.85 0 0 0 0-25.28Zm-87.34 78.62a8 8 0 0 0-1.39 9.55l11.92 17a1.85 1.85 0 0 1-.22 2.35l-3.78 3.78a1.85 1.85 0 0 1-2.61 0L65.66 117a1.85 1.85 0 0 1 0-2.61l3.78-3.78a1.85 1.85 0 0 1 2.35-.22l17 11.92a8 8 0 0 0 9.55-1.39l37.13-37.13a8 8 0 0 0 2-7.82A15.86 15.86 0 0 1 141 60.74l30.69-30.69 54.27 54.27-30.69 30.69a15.86 15.86 0 0 1-15.23 4.15 8 8 0 0 0-7.82 2.06Z',
-  'pin-fill':
-    'M236 100c0-9.41-4.46-18.21-12.24-24.16L171.9 35.42a32 32 0 0 0-44.86 5.83c-6.84 9-9.06 19.95-6 30.07L72.86 110l-9.7-7.55a16 16 0 0 0-22.49 22.49l25.91 33.26L20 224a8 8 0 0 0 11.31 11.31l64.83-46.59L129.4 215a16 16 0 0 0 22.49-22.49l-7.55-9.7 38.69-48.18c10.11 3.04 21 .82 30.06-6a30.07 30.07 0 0 0 12.21-23.79Z',
+const COMPONENT: Record<IconName, typeof PhPlus> = {
+  plus: PhPlus,
+  x: PhX,
+  gear: PhGear,
+  trash: PhTrash,
+  'dots-three': PhDotsThree,
+  pencil: PhPencil,
+  'caret-left': PhCaretLeft,
+  'caret-right': PhCaretRight,
+  pin: PhPushPin,
+  'pin-fill': PhPushPinFill,
 };
 
 interface Props {
@@ -52,18 +54,6 @@ interface Props {
 }
 
 export function Icon({ name, size = 14, class: className, title }: Props) {
-  return (
-    <svg
-      viewBox="0 0 256 256"
-      fill="currentColor"
-      width={size}
-      height={size}
-      class={className}
-      aria-label={title}
-      role={title ? 'img' : undefined}
-      aria-hidden={title ? undefined : true}
-    >
-      <path d={PATHS[name]} />
-    </svg>
-  );
+  const C = COMPONENT[name];
+  return <C width={size} height={size} class={className} aria-label={title} aria-hidden={title ? undefined : true} />;
 }

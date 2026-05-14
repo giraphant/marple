@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import preact from '@preact/preset-vite';
+import Icons from 'unplugin-icons/vite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -10,7 +11,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // In dev, we proxy /vault/* and /reader/data/* through to serve.mjs so the SPA
 // can keep using absolute paths in production too.
 export default defineConfig({
-  plugins: [preact()],
+  plugins: [
+    preact(),
+    // ~icons/<set>/<name> imports — compiles each SVG into a Preact component
+    // at build time, so only icons actually imported make it into the bundle.
+    // We only need Phosphor; add @iconify-json/<other> deps to enable more sets.
+    Icons({ compiler: 'jsx', jsx: 'preact' }),
+  ],
   root: __dirname,
   base: '/reader/',
   build: {

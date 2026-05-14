@@ -16,7 +16,7 @@
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
     "verbatimModuleSyntax": false,
-    "types": ["node"]
+    "types": ["node", "unplugin-icons/types/preact"]
   },
   "include": ["src", "vite.config.ts", "scripts/**/*"]
 }
