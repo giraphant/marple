@@ -1,31 +1,15 @@
-# qua reader (v0.5)
+# qua reader
 
-Card-style reader over the qua vault with a Markdown editor for personal
-notes and annotations. Vite + TypeScript + Preact + CodeMirror 6; backend
-is a tiny Node static server that handles `GET / PUT / POST / DELETE`
-on `vault/`.
+Card-style typed-object browser + Markdown editor over the qua vault.
+Browses 12k+ vault entries (papers / books / chapters / authors / topics /
+notes), edits frontmatter and note bodies, manages annotations and trash.
 
-## Layout
+Stack: **Vite + TypeScript + Preact + CodeMirror 6 + unplugin-icons (Phosphor)**.
+Backend: **a single ~200-line Node static server** (`serve.mjs`) that also
+handles `PUT / POST / DELETE` write-back to `vault/` and a `/api/trash`
+endpoint. Total runtime bundle ~240 KB gzip.
 
-```
-reader/
-  index.html                # Vite entry (loads src/main.tsx)
-  src/
-    main.tsx                # render <App/>
-    app.tsx                 # top-level container
-    types.ts                # Entry shape + canonical type registry
-    api.ts                  # GET/PUT helpers, patchFrontmatter
-    frontmatter.ts          # yaml-based parse / serialize
-    wiki.ts                 # [[wikilink]] index + resolver
-    styles.css              # Tailwind + custom prose classes
-    components/             # Card, MiniRow, Dashboard, Reader, PropertyPanel
-  scripts/
-    build-index.mjs         # scans ../vault/, writes data/index.json
-  serve.mjs                 # static server + PUT /vault/**/*.md endpoint
-  vite.config.ts            # /vault and /reader/data proxied to serve.mjs
-  data/
-    index.json              # generated
-```
+For internals / architecture / how to extend, see [`context.md`](./context.md).
 
 ## Run
 
@@ -34,84 +18,135 @@ First time:
 ```sh
 cd reader
 npm install
-npm run build:index   # one-time index build
 ```
 
-Day-to-day dev (vite + serve.mjs concurrently):
+Day-to-day (`vite` + `serve.mjs` concurrently):
 
 ```sh
 npm run dev
 ```
 
-`vite` serves the SPA on `http://localhost:5173/reader/`, and proxies
-`/vault/*` and `/reader/data/*` through to the Node `serve.mjs` on 5174
-(which also handles the PUT writes).
+- SPA: `http://localhost:5173/reader/`
+- Backend: `http://localhost:5174` (vite proxies `/vault/*`,
+  `/reader/data/*`, `/api/*`, `/sources/*` through to it)
 
 Production build:
 
 ```sh
-npm run build           # emits dist/
-npm run serve           # serve dist + handle vault PUTs in one process
+npm run build           # rebuilds index, emits dist/
+npm run serve           # serve dist + handle vault writes in one process
 ```
 
-## What's in v0.5
+Useful one-offs:
 
-- **CodeMirror 6 Markdown editor** with Ulysses-style highlight: markers
-  (`#`, `**`, `>`, `-`) stay visible but muted; wrapped content stands out.
-  Serif font, generous line-height, no toolbar, no preview pane.
-- **Auto-save** debounced 1.5s. Header shows `未保存… → 保存中… → 已保存`.
-  Cmd+S flushes immediately. Switching entries or closing the drawer
-  flushes pending writes.
-- **Settings panel** (⚙ in top bar) — toggle "允许编辑 LLM 生成的正文".
-  Default off: only notes are editable, LLM analyses stay rendered.
-  When on: every entry opens in the editor.
-- **Soft delete**: `⋯` menu on notes → 移到回收站。 Files go to
-  `vault/notes/.trash/<base>.<ISO ts>.md` (timestamped to avoid name
-  collisions). `build-index` ignores `.trash/`.
+```sh
+npm run build:index     # rebuild data/index.json after vault changes
+npm run typecheck       # tsc --noEmit
+```
 
-## What's in v0.4
+## What it does
 
-- `note` as a 6th type. Personal notes live in `vault/notes/*.md`,
-  cleanly separated from LLM-generated analyses.
-- Annotations via frontmatter `annotates: <path>` — a note with that
-  field shows up in the target's right-panel under "我的批注 (N)"; without
-  it, the note is a stand-alone idea.
-- "+ 新建批注" button in the property panel of any non-note entry —
-  generates the slug, pre-fills frontmatter, POSTs to
-  `vault/notes/<slug>-note-<rand>.md`, opens the new note in the reader.
-- Note's own drawer shows "批注于 …" chip pointing back to the target.
+**Browsing**
 
-## What's in v0.3
+- 6 typed object lists: 论文 / 书 / 章节 / 作者 / 主题 / 笔记
+  (Capacities-style colored TypeIcon chips)
+- "横切视图 / 主题"：tag index sorted by frequency, click a chip to
+  filter that theme across types
+- Free-text search across title / author / themes / preview / source
+- Rating filter (≥ 0..4 stars)
+- 4-column card grid, lazy-paginated past 300 entries
 
-- Editable `PropertyPanel`: click any property row to edit
-  - Rating (1–5★ picker)
-  - Year / author / source / topic / DOI (inline text input)
-  - Themes (chip add / remove, comma-separated multi-add)
-- All edits round-trip through `PUT /vault/<path>.md`; the in-memory
-  entry list updates optimistically so backlinks/siblings/similar reflect
-  changes immediately
-- Diff-friendly YAML writeback: inline `themes: [a, b, c]` stays inline,
-  empty values stay bare, `flowCollectionPadding: false`
+**Reading**
 
-## What carried over from v0.2
+- Click a card → opens in the current tab as a `DocView` (chapters rail
+  for books / 3-pane layout / markdown rendered with `[[wikilink]]`
+  resolution / property panel on the right)
+- Wikilinks navigate within the current tab (history pushed)
+- "回到本书" jump on chapter pages
 
-- 5 tabs by `type`: paper / book / chapter / author / topic
-- Per-type dashboard (count, avg rating, top themes, top-rated)
-- Side-drawer reader with rendered markdown, Esc to close
-- `[[wiki-link]]` resolution → navigable; unresolved links struck through
-- Derived backlinks (author works, same-author, same-theme)
-- Theme-click filter
-- Rating filter, free-text search, lazy pagination
+**Editing**
 
-## Roadmap (not built yet)
+- Frontmatter is always editable in `PropertyPanel`: rating ★ picker,
+  year, author, source, DOI, topic, themes chips (add / remove)
+- Note bodies edit through a **CodeMirror 6 Markdown editor** with a
+  Ulysses-style theme: monoline serif/sans-serif, muted markup, no
+  preview pane, no toolbar
+- **LLM-generated body** (paper/book/author/topic/chapter) is read-only
+  by default. Toggle "允许编辑 LLM 生成的正文" in ⚙ Settings to make all
+  entries editable through the same editor surface
+- Auto-save debounced 1.5 s; `Cmd+S` flushes immediately; switching tabs
+  or closing flushes; `beforeunload` guards unsaved changes
 
-- `[[` autocomplete in the editor (framework is in place, source not
-  wired)
-- Focus mode + typewriter scrolling toggles (compartment hooks ready)
-- Trash recovery UI (currently file-system only)
-- Lazy-load the editor module to shrink initial bundle (~200KB)
-- File watcher to rebuild index on vault changes
+**Notes**
+
+- Personal notes live in `vault/notes/*.md`, the only directory in vault
+  whose contents are human-written (vs LLM-generated analyses)
+- Two modes via one mechanism — frontmatter `annotates: <vault path>`
+  field. With it, the note is an **annotation** on that target and shows
+  up in the target's "我的批注 (N)" list. Without it, the note is a free
+  **idea note**. Same file shape, same UI; promotion is just adding the
+  field
+- "+ 新建批注" button on any non-note entry → POSTs a pre-filled draft to
+  `vault/notes/<slug>-note-<rand>.md`, opens it in a new tab
+- Sidebar "+ 新建 note" → POSTs a standalone idea note
+- `⋯` menu in a note's header → 移到回收站, soft-delete to
+  `vault/notes/.trash/<base>.<ISO ts>.md` (timestamped to never collide).
+  Visit "回收站" in sidebar to restore or purge
+
+**Tabs**
+
+- Top tab bar holds a heterogeneous list of tabs. Each tab has its own
+  back/forward history (Cmd+[, Cmd+])
+- Tabs come in 4 kinds: `list` (a type), `doc` (an entry),
+  `themes` (the index), `trash`
+- Click a card or sidebar item → navigates in the current tab.
+  Cmd / Ctrl + click → opens in a new tab
+- Pin: 📌 toggle on active tab. Pinned tabs sort left, hide × button.
+  Drag tabs to reorder (pinned and unpinned cannot swap regions)
+- Middle-click or × to close; last tab is unclosable
+
+**Settings (⚙ in sidebar)**
+
+- Editor font: 苹方 / 宋体 / 等宽 (live preview)
+- Editor font size 14 / 15 / 16 / 17 / 18 px
+- Line height 1.60 / 1.78 / 1.90
+- Allow editing LLM-generated body
+- All settings hot-swap into CodeMirror via `Compartment.reconfigure`
+  (caret / history / selection preserved)
+
+**Paper / book actions**
+
+- "复制引用" → markdown-style citation to clipboard:
+  `Author (year). *Title*. Source. https://doi.org/DOI`
+- "打开 PDF" → `window.open('/sources/<pdf_slug>.pdf')`. Button only
+  appears when build-index found a matching PDF
+  (currently 514 / 12539 entries)
+
+## Where files live
+
+| Path | What |
+|---|---|
+| `src/main.tsx` + `src/app.tsx` | Top-level wiring (tab state, indexes) |
+| `src/components/` | All UI components (one per file, see context.md) |
+| `src/icons/` | (empty by design — icons come from `~icons/ph/*` virtual modules) |
+| `src/types.ts` | `Entry`, `EntryType`, `Tab`, `TabContent` shapes |
+| `src/api.ts` | All fetch helpers (GET/PUT/POST/DELETE + trash) |
+| `src/frontmatter.ts` | yaml-based parse / serialize |
+| `src/wiki.ts` | `[[wikilink]]` resolver |
+| `src/settings.ts` | Settings type + persistence |
+| `scripts/build-index.mjs` | Walks `vault/`, emits `data/index.json` |
+| `serve.mjs` | Static server + write-back endpoints |
+| `data/index.json` | Generated; loaded once on app boot |
+
+## Roadmap (not built)
+
+- Cmd+K global search palette
+- Daily Notes (date-named auto-created notes)
+- `[[` autocomplete in the editor
+- Focus mode / typewriter scrolling toggles
+- Theme as first-class object (`vault/themes/<slug>.md` with description page)
+- Auto-rebuild `data/index.json` on vault changes (file watcher)
 - Real list virtualization for 12k+ cards
-- "Create new free-standing idea note" button (separate from annotation)
-- Author → works back-reference in card view
-- Tauri shell for native window + filesystem watcher
+- Bibtex / CSL citation export formats
+- MCP server exposing vault to AI tools
+- Tauri shell for native window
