@@ -1,19 +1,23 @@
 import type { Entry, EntryType, TypeMeta } from '../types';
 import { TYPES } from '../types';
 import { TypeIcon } from './TypeIcon';
+import { Icon } from './Icon';
 
 interface Props {
   entries: Entry[];
   counts: Record<string, number>;
   /** Currently highlighted type — only set when the active tab is a ListTab. */
   activeType: EntryType | null;
+  /** True when the active tab is the trash view. */
+  trashActive: boolean;
   onSelectType: (id: EntryType) => void;
+  onOpenTrash: () => void;
   onOpenSettings: () => void;
   onNewIdeaNote: () => void;
 }
 
 export function Sidebar({
-  counts, activeType, onSelectType, onOpenSettings, onNewIdeaNote,
+  counts, activeType, trashActive, onSelectType, onOpenTrash, onOpenSettings, onNewIdeaNote,
 }: Props) {
   return (
     <aside class="w-60 shrink-0 bg-stone-50 border-r border-stone-200 flex flex-col text-stone-800">
@@ -25,10 +29,10 @@ export function Sidebar({
       <div class="px-2 py-2 border-b border-stone-200 space-y-0.5">
         <button
           onClick={onNewIdeaNote}
-          class="w-full text-left px-2 py-1.5 rounded text-[12px] hover:bg-stone-200/60 flex items-center gap-2"
+          class="w-full text-left px-2 py-1.5 rounded text-[12px] hover:bg-stone-200/60 flex items-center gap-2 text-stone-700"
           title="新建独立 idea note"
         >
-          <span class="text-stone-500 text-[13px] leading-none">＋</span>
+          <Icon name="plus" size={13} class="text-stone-500" />
           <span>新建 note</span>
         </button>
       </div>
@@ -58,18 +62,22 @@ export function Sidebar({
 
       <div class="border-t border-stone-200 p-2 space-y-0.5">
         <button
-          disabled
-          title="回收站浏览（下一轮）"
-          class="w-full text-left px-2 py-1.5 rounded text-[12px] flex items-center gap-2 text-stone-400 cursor-not-allowed"
+          onClick={onOpenTrash}
+          title="回收站"
+          class={`w-full text-left px-2 py-1.5 rounded text-[12px] flex items-center gap-2 transition ${
+            trashActive
+              ? 'bg-stone-900 text-white'
+              : 'text-stone-700 hover:bg-stone-200/60'
+          }`}
         >
-          <span class="text-[13px] leading-none w-4 text-center">🗑</span>
+          <Icon name="trash" size={13} class={trashActive ? 'text-white/80' : 'text-stone-500'} />
           <span class="flex-1">回收站</span>
         </button>
         <button
           onClick={onOpenSettings}
           class="w-full text-left px-2 py-1.5 rounded text-[12px] flex items-center gap-2 text-stone-700 hover:bg-stone-200/60"
         >
-          <span class="text-[13px] leading-none w-4 text-center">⚙</span>
+          <Icon name="gear" size={13} class="text-stone-500" />
           <span class="flex-1">设置</span>
         </button>
       </div>

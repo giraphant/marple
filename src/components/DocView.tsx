@@ -7,6 +7,7 @@ import { resolveWikilinks, bookSlugOf } from '../wiki';
 import { fetchEntryText, putEntryText, replaceBody } from '../api';
 import { PropertyPanel } from './PropertyPanel';
 import { NoteEditor, type EditorThemeConfig } from './NoteEditor';
+import { Icon } from './Icon';
 
 interface Props {
   entry: Entry;
@@ -195,9 +196,9 @@ export function DocView({
           <div class="relative">
             <button
               onClick={() => setMenuOpen(v => !v)}
-              class="text-stone-500 hover:text-stone-900 px-2 text-base leading-none"
+              class="text-stone-500 hover:text-stone-900 p-1 inline-flex items-center"
               title="更多"
-            >⋯</button>
+            ><Icon name="dots-three" size={16} /></button>
             {menuOpen && (
               <div class="absolute right-0 top-full mt-1 bg-white border border-stone-200 rounded shadow-lg py-1 min-w-[160px] z-10">
                 <button

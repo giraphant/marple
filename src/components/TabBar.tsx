@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import type { Entry, EntryType, Tab } from '../types';
 import { TYPE_BY_ID, activeContent } from '../types';
 import { TypeIcon } from './TypeIcon';
+import { Icon } from './Icon';
 import type { JSX } from 'preact';
 
 interface Props {
@@ -19,19 +20,6 @@ interface Props {
   canForward?: boolean;
 }
 
-function PinIcon({ filled }: { filled: boolean }) {
-  // Phosphor "Push Pin" outline vs fill.
-  return (
-    <svg viewBox="0 0 256 256" fill="currentColor" width="11" height="11" aria-hidden="true">
-      {filled ? (
-        <path d="M236 100c0-9.41-4.46-18.21-12.24-24.16L171.9 35.42a32 32 0 0 0-44.86 5.83c-6.84 9-9.06 19.95-6 30.07L72.86 110l-9.7-7.55a16 16 0 0 0-22.49 22.49l25.91 33.26L20 224a8 8 0 0 0 11.31 11.31l64.83-46.59L129.4 215a16 16 0 0 0 22.49-22.49l-7.55-9.7 38.69-48.18c10.11 3.04 21 .82 30.06-6a30.07 30.07 0 0 0 12.21-23.79z" />
-      ) : (
-        <path d="M235.5 81.45 174.55 20.5a17.85 17.85 0 0 0-25.27 0L122.07 47.7a31.85 31.85 0 0 0-8.41 30.43L82.27 109.5l-12.61-8.82a17.85 17.85 0 0 0-22.66 2.13l-3.78 3.78a17.85 17.85 0 0 0 0 25.27l34 34L34 244.34a8 8 0 0 0 11.31 11.31l45.27-45.27 34 34a17.85 17.85 0 0 0 25.27 0l3.78-3.78a17.85 17.85 0 0 0 2.13-22.66l-8.82-12.61 31.37-31.39a31.85 31.85 0 0 0 30.43-8.41l27.2-27.2a17.85 17.85 0 0 0 0-25.28zm-87.34 78.62a8 8 0 0 0-1.39 9.55l11.92 17a1.85 1.85 0 0 1-.22 2.35l-3.78 3.78a1.85 1.85 0 0 1-2.61 0L65.66 117a1.85 1.85 0 0 1 0-2.61l3.78-3.78a1.85 1.85 0 0 1 2.35-.22l17 11.92a8 8 0 0 0 9.55-1.39l37.13-37.13a8 8 0 0 0 2-7.82A15.86 15.86 0 0 1 141 60.74l30.69-30.69 54.27 54.27-30.69 30.69a15.86 15.86 0 0 1-15.23 4.15 8 8 0 0 0-7.82 2.06z" />
-      )}
-    </svg>
-  );
-}
-
 function tabDisplay(tab: Tab, entryByPath: Map<string, Entry>): {
   icon: JSX.Element;
   title: string;
@@ -44,6 +32,20 @@ function tabDisplay(tab: Tab, entryByPath: Map<string, Entry>): {
       icon: <TypeIcon type={content.type} scale={1.2} />,
       title: meta?.label ?? content.type,
       type: content.type,
+    };
+  }
+  if (content.kind === 'trash') {
+    return {
+      icon: (
+        <span
+          class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-stone-200 text-stone-600"
+          style={{ minWidth: '1.2em', minHeight: '1.2em', height: '1.2em', width: '1.2em' }}
+        >
+          <Icon name="trash" size={10} />
+        </span>
+      ),
+      title: '回收站',
+      type: null,
     };
   }
   const entry = entryByPath.get(content.path);
@@ -75,22 +77,18 @@ export function TabBar({
       <button
         onClick={onBack}
         disabled={!canBack}
-        title="后退"
+        title="后退 (Cmd+[)"
         class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded text-stone-500 hover:bg-stone-200/60 hover:text-stone-900 disabled:opacity-30 disabled:hover:bg-transparent"
       >
-        <svg viewBox="0 0 256 256" fill="currentColor" width="14" height="14" aria-hidden="true">
-          <path d="M165.66 202.34a8 8 0 0 1-11.32 11.32l-80-80a8 8 0 0 1 0-11.32l80-80a8 8 0 0 1 11.32 11.32L91.31 128Z" />
-        </svg>
+        <Icon name="caret-left" />
       </button>
       <button
         onClick={onForward}
         disabled={!canForward}
-        title="前进"
+        title="前进 (Cmd+])"
         class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded text-stone-500 hover:bg-stone-200/60 hover:text-stone-900 disabled:opacity-30 disabled:hover:bg-transparent"
       >
-        <svg viewBox="0 0 256 256" fill="currentColor" width="14" height="14" aria-hidden="true">
-          <path d="M181.66 133.66l-80 80a8 8 0 0 1-11.32-11.32L164.69 128 90.34 53.66a8 8 0 0 1 11.32-11.32l80 80a8 8 0 0 1 0 11.32Z" />
-        </svg>
+        <Icon name="caret-right" />
       </button>
 
       <div class="flex items-center gap-1 min-w-0">
@@ -104,7 +102,10 @@ export function TabBar({
           const showLeftIndicator = dropSlot === i && dragFrom !== null && dragFrom !== i && dragFrom !== i - 1;
           const showRightIndicator = dropSlot === i + 1 && i === tabs.length - 1 && dragFrom !== null && dragFrom !== i;
           const cur = activeContent(tab);
-          const tabK = cur.kind === 'list' ? `list:${cur.type}:${i}` : `doc:${cur.path}:${i}`;
+          const tabK =
+            cur.kind === 'list'  ? `list:${cur.type}:${i}` :
+            cur.kind === 'doc'   ? `doc:${cur.path}:${i}`  :
+                                   `trash:${i}`;
           return (
             <div
               key={tabK}
@@ -170,22 +171,22 @@ export function TabBar({
               {active && (
                 <button
                   onClick={(ev) => { ev.stopPropagation(); onTogglePin(i); }}
-                  class={`px-0.5 leading-none text-[12px] transition ${
+                  class={`px-0.5 inline-flex items-center transition ${
                     pinned
                       ? 'text-amber-600 hover:text-amber-800'
                       : 'text-stone-400 hover:text-stone-700 opacity-0 group-hover:opacity-100'
                   }`}
                   title={pinned ? '取消固定' : '固定 tab'}
                 >
-                  <PinIcon filled={pinned} />
+                  <Icon name={pinned ? 'pin-fill' : 'pin'} size={11} />
                 </button>
               )}
               {active && !pinned && !onlyOne && (
                 <button
                   onClick={(ev) => { ev.stopPropagation(); onClose(i); }}
-                  class="text-stone-400 hover:text-stone-900 px-0.5 leading-none text-[14px]"
+                  class="text-stone-400 hover:text-stone-900 px-0.5 inline-flex items-center"
                   title="关闭 tab"
-                >×</button>
+                ><Icon name="x" size={12} /></button>
               )}
             </div>
           );
@@ -195,8 +196,8 @@ export function TabBar({
       <button
         onClick={onNewTab}
         title="新建 tab"
-        class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded text-stone-500 hover:bg-stone-200/60 hover:text-stone-900 text-[16px] leading-none"
-      >+</button>
+        class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded text-stone-500 hover:bg-stone-200/60 hover:text-stone-900"
+      ><Icon name="plus" /></button>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { activeContent } from './types';
 import { buildWikiIndex, splitAuthors } from './wiki';
 import { ListView } from './components/ListView';
 import { DocView } from './components/DocView';
+import { TrashView } from './components/TrashView';
 import { SettingsPanel } from './components/SettingsPanel';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
@@ -37,7 +38,8 @@ function loadTabs(): Tab[] {
         if (!c || typeof c !== 'object') return false;
         const cc = c as Record<string, unknown>;
         return (cc.kind === 'list' && typeof cc.type === 'string')
-            || (cc.kind === 'doc' && typeof cc.path === 'string');
+            || (cc.kind === 'doc' && typeof cc.path === 'string')
+            || (cc.kind === 'trash');
       });
     });
     return clean.length > 0 ? clean : [defaultTab()];
@@ -146,6 +148,7 @@ export function App() {
     activeTabContent && activeTabContent.kind === 'list' ? activeTabContent.type : null;
   const activeDocEntry: Entry | null =
     activeTabContent && activeTabContent.kind === 'doc' ? entryByPath.get(activeTabContent.path) ?? null : null;
+  const trashActive = activeTabContent?.kind === 'trash';
 
   useEffect(() => { setLimit(300); setThemeFilter(null); }, [activeListType]);
 
@@ -307,6 +310,20 @@ export function App() {
     setQuery('');
   }, [navigateInActiveTab]);
 
+  const openTrash = useCallback(() => {
+    navigateInActiveTab({ kind: 'trash' });
+  }, [navigateInActiveTab]);
+
+  // After a successful trash restore, the restored file is back under
+  // vault/notes/. We don't have it in our in-memory entries until the index
+  // rebuilds; show a hint that the page can be reloaded to see it.
+  const onTrashRestored = useCallback((_restoredPath: string) => {
+    void _restoredPath;
+    // Best-effort: nudge the user; full integration would re-fetch index.json.
+    // For now do nothing — the file is on disk and will appear after next
+    // `npm run build:index` + reload.
+  }, []);
+
   // Card click: navigate in current tab. Cmd/Ctrl+click opens a new tab.
   // Matches Obsidian / browser muscle memory; consistent with how sidebar
   // type clicks and in-doc links behave.
@@ -398,7 +415,9 @@ export function App() {
         entries={entries}
         counts={counts}
         activeType={activeListType}
+        trashActive={trashActive}
         onSelectType={openListType}
+        onOpenTrash={openTrash}
         onOpenSettings={() => setSettingsOpen(true)}
         onNewIdeaNote={onNewIdeaNote}
       />
@@ -457,6 +476,10 @@ export function App() {
               />
             )
             : <StaleTab path={activeTabContent.path} onClose={() => closeTab(activeIndex)} />
+        )}
+
+        {activeTabContent?.kind === 'trash' && (
+          <TrashView onRestored={onTrashRestored} />
         )}
       </div>
 

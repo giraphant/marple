@@ -1,6 +1,7 @@
 import type { JSX } from 'preact';
 import type { Settings, FontFamily } from '../settings';
 import { FONT_SIZE_OPTIONS, LINE_HEIGHT_OPTIONS, fontStack } from '../settings';
+import { Icon } from './Icon';
 
 interface Props {
   settings: Settings;
@@ -26,7 +27,9 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
       >
         <div class="flex items-center justify-between px-5 py-3 border-b border-stone-200 sticky top-0 bg-white/95 backdrop-blur">
           <div class="text-[13px] font-semibold text-stone-900">设置</div>
-          <button onClick={onClose} class="text-stone-400 hover:text-stone-700 text-base leading-none px-1">✕</button>
+          <button onClick={onClose} class="text-stone-400 hover:text-stone-700 p-1 inline-flex items-center" title="关闭">
+            <Icon name="x" size={13} />
+          </button>
         </div>
 
         <Section title="外观">

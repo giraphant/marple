@@ -5,6 +5,7 @@ import { splitAuthors } from '../wiki';
 import { patchFrontmatter, applyFmToEntry } from '../api';
 import { ratingToStars } from '../frontmatter';
 import { MiniRow } from './MiniRow';
+import { Icon } from './Icon';
 
 interface Props {
   entry: Entry;
@@ -269,7 +270,7 @@ function TextRow({
           onClick={() => { setDraft(value == null ? '' : String(value)); setEditing(true); }}
         >
           {empty ? <span class="text-stone-400">—</span> : String(value)}
-          <span class="edit-hint text-[10px] text-stone-400 ml-1">✎</span>
+          <span class="edit-hint inline-flex items-center text-stone-400 ml-1"><Icon name="pencil" size={10} /></span>
         </button>
       </Row>
     );
@@ -328,7 +329,7 @@ function AuthorRow({
         ) : (
           <span class="flex-1 min-w-0 truncate">{entry.author}</span>
         )}
-        <button onClick={() => setEditing(true)} class="text-[10px] text-stone-400 hover:text-stone-700 px-1" title="编辑">✎</button>
+        <button onClick={() => setEditing(true)} class="text-stone-400 hover:text-stone-700 px-1 inline-flex items-center" title="编辑"><Icon name="pencil" size={11} /></button>
       </div>
     </Row>
   );
@@ -349,12 +350,12 @@ function DoiRow({ value, save }: { value: string | null; save: SaveFn }) {
               <a href={`https://doi.org/${value}`} target="_blank" rel="noopener" class="text-sky-700 hover:underline font-mono text-[11px] break-all flex-1 min-w-0">
                 {value}
               </a>
-              <button onClick={() => { setDraft(value); setEditing(true); }} class="text-[10px] text-stone-400 hover:text-stone-700 px-1">✎</button>
+              <button onClick={() => { setDraft(value); setEditing(true); }} class="text-stone-400 hover:text-stone-700 px-1 inline-flex items-center" title="编辑"><Icon name="pencil" size={11} /></button>
             </div>
           )
           : (
             <button class="text-left w-full hover:bg-stone-100 px-1 -mx-1 rounded text-stone-400" onClick={() => { setDraft(''); setEditing(true); }}>
-              — <span class="edit-hint text-[10px] text-stone-400 ml-1">✎</span>
+              — <span class="edit-hint inline-flex items-center text-stone-400 ml-1"><Icon name="pencil" size={10} /></span>
             </button>
           )
         }
@@ -427,7 +428,7 @@ function ThemesEditor({
         {themes.map(th => (
           <span key={th} class="text-[11px] inline-flex items-center gap-0.5 rounded border border-stone-200 bg-stone-50 hover:bg-amber-50 hover:border-amber-300 transition">
             <button onClick={() => onThemeClick(th)} class="px-1.5 py-0.5 hover:text-amber-800">{th}</button>
-            <button onClick={() => remove(th)} title="移除" class="px-1 text-stone-400 hover:text-red-600 border-l border-stone-200">×</button>
+            <button onClick={() => remove(th)} title="移除" class="px-1 text-stone-400 hover:text-red-600 border-l border-stone-200 inline-flex items-center"><Icon name="x" size={10} /></button>
           </span>
         ))}
         {themes.length === 0 && !adding && (

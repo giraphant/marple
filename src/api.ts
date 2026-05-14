@@ -3,6 +3,49 @@ import { parseFile, serializeFile } from './frontmatter';
 
 const NOTES_DIR = 'vault/notes/';
 
+// ---- Trash API client ----------------------------------------------------
+
+export interface TrashItem {
+  name: string;            // <base>.<iso-ts>.md  (filename in .trash/)
+  originalBase: string | null;
+  ts: string | null;       // ISO ts with `:` and `.` replaced by `-`
+  mtime: number;
+  size: number;
+}
+
+export async function listTrash(): Promise<TrashItem[]> {
+  const r = await fetch('/api/trash');
+  if (!r.ok) throw new Error(`list trash failed: ${r.status}`);
+  const json = await r.json() as { items: TrashItem[] };
+  return json.items ?? [];
+}
+
+export async function restoreTrash(name: string): Promise<string> {
+  const r = await fetch(`/api/trash/${encodeURIComponent(name)}/restore`, { method: 'POST' });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`restore failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { restored?: string }));
+  return json.restored ?? '';
+}
+
+export async function purgeTrash(name: string): Promise<void> {
+  const r = await fetch(`/api/trash/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`purge failed: ${r.status} ${msg}`);
+  }
+}
+
+/** Reverse the trash filename to its (likely) vault path on successful restore. */
+export function trashRestoredPath(name: string): string {
+  // Trash format: <base>.<isoTs>.md
+  const m = name.match(/\.(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)\.md$/);
+  if (!m) return `vault/notes/${name}`;
+  return `vault/notes/${name.slice(0, m.index)}.md`;
+}
+
 /** Fetch a vault md file as text. */
 export async function fetchEntryText(path: string): Promise<string> {
   const r = await fetch('/' + path);
