@@ -1,11 +1,23 @@
 import { useMemo, useState, useRef, useEffect } from 'preact/hooks';
 import type { JSX, ComponentChildren } from 'preact';
-import type { Entry } from '../types';
+import type { Entry, EntryType } from '../types';
 import { splitAuthors } from '../wiki';
 import { patchFrontmatter, applyFmToEntry } from '../api';
 import { ratingToStars } from '../frontmatter';
 import { MiniRow } from './MiniRow';
 import { Icon } from './Icon';
+
+/** Which property rows apply to each entry type. Driven by the underlying
+ * file shape (an author profile has no year / DOI; a note has no rating).
+ * Themes + annotations + works render via separate sections, not here. */
+const FIELDS_BY_TYPE: Record<EntryType, ReadonlySet<string>> = {
+  'paper-analysis':  new Set(['rating', 'year', 'author', 'source', 'doi', 'topic']),
+  'book-overview':   new Set(['rating', 'year', 'author', 'source', 'topic', 'chapters_analyzed']),
+  'chapter-summary': new Set(['rating', 'year', 'author', 'source', 'topic']),
+  'author-profile':  new Set(['rating']),
+  'topic-synthesis': new Set(['rating', 'topic']),
+  'note':            new Set([]),
+};
 
 interface Props {
   entry: Entry;
@@ -113,20 +125,26 @@ export function PropertyPanel({
       {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
         <ActionsRow entry={entry} />
       )}
-      <dl class={`space-y-2 ${saving ? 'opacity-60 pointer-events-none' : ''}`}>
-        <RatingRow value={entry.rating_score} save={save} />
-        <TextRow label="年份" value={entry.year} field="year" parse={parseYear} save={save} />
-        <AuthorRow entry={entry} backlinks={backlinks} onOpen={onOpen} save={save} />
-        <TextRow label="来源" value={entry.source} field="source" save={save} />
-        <DoiRow value={entry.doi} save={save} />
-        <TextRow label="Topic" value={entry.topic} field="topic" save={save} />
-        {entry.chapters_analyzed != null && (
-          <div class="grid grid-cols-[60px_1fr] gap-2">
-            <dt class="text-muted text-[11px] pt-0.5">章节数</dt>
-            <dd class="min-w-0 tabular-nums">{entry.chapters_analyzed}</dd>
-          </div>
-        )}
-      </dl>
+      {(() => {
+        const fields = FIELDS_BY_TYPE[entry.type];
+        if (fields.size === 0) return null;
+        return (
+          <dl class={`space-y-2 ${saving ? 'opacity-60 pointer-events-none' : ''}`}>
+            {fields.has('rating') && <RatingRow value={entry.rating_score} save={save} />}
+            {fields.has('year') && <TextRow label="年份" value={entry.year} field="year" parse={parseYear} save={save} />}
+            {fields.has('author') && <AuthorRow entry={entry} backlinks={backlinks} onOpen={onOpen} save={save} />}
+            {fields.has('source') && <TextRow label="来源" value={entry.source} field="source" save={save} />}
+            {fields.has('doi') && <DoiRow value={entry.doi} save={save} />}
+            {fields.has('topic') && <TextRow label="Topic" value={entry.topic} field="topic" save={save} />}
+            {fields.has('chapters_analyzed') && entry.chapters_analyzed != null && (
+              <div class="grid grid-cols-[60px_1fr] gap-2">
+                <dt class="text-muted text-[11px] pt-0.5">章节数</dt>
+                <dd class="min-w-0 tabular-nums">{entry.chapters_analyzed}</dd>
+              </div>
+            )}
+          </dl>
+        );
+      })()}
 
       <ThemesEditor themes={themes} onThemeClick={onThemeClick} save={save} disabled={saving} />
 

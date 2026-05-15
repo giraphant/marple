@@ -306,6 +306,18 @@ is importable immediately. No vite config change needed.
 
 ## Recent Changes
 
+- 2026-05-15: v0.8.7 — per-type property panel field visibility.
+  - `PropertyPanel` used to render the full row set
+    (rating/year/author/source/DOI/topic/chapters_analyzed) for every
+    entry type. Author profiles, notes, and topic syntheses were
+    showing 5+ irrelevant "—" rows since those fields don't exist in
+    their underlying schemas.
+  - Added `FIELDS_BY_TYPE` map at the top of `PropertyPanel.tsx`,
+    keyed by `EntryType`, listing the property rows that apply per
+    type. Source of truth — edit this when adding a new field or
+    type. Notes show no metadata rows at all (the `annotates` chip
+    surfaces separately above).
+
 - 2026-05-15: v0.8.6 — heading scale fix after typography unification.
   - The article body baseline went from a hard-coded 14 px to the
     settings-driven 16 px (default) in v0.8.5. The old heading scale
