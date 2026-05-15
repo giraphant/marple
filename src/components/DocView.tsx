@@ -106,7 +106,7 @@ export function DocView({
           }
         }
       } catch {
-        if (!cancelled) setRendered('<p class="text-red-600">加载失败</p>');
+        if (!cancelled) setRendered('<p class="text-red-600 dark:text-red-400">加载失败</p>');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -169,14 +169,14 @@ export function DocView({
     }
   }, [entry, onDelete]);
 
-  const tMeta = TYPE_BY_ID[entry.type] ?? { label: entry.type, accent: 'bg-stone-100 text-stone-700' };
+  const tMeta = TYPE_BY_ID[entry.type] ?? { label: entry.type, accent: 'bg-surface-2 text-secondary' };
   const canDelete = entry.type === 'note';
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
-      <div class="bg-white/95 backdrop-blur border-b border-stone-200 px-6 py-3 flex items-center gap-3 relative shrink-0">
+      <div class="bg-surface/95 backdrop-blur border-b border-base px-6 py-3 flex items-center gap-3 relative shrink-0">
         <span class={`text-[11px] px-1.5 py-0.5 rounded border ${tMeta.accent}`}>{tMeta.label}</span>
-        <div class="text-[14px] font-medium text-stone-900 flex-1 truncate">
+        <div class="text-[14px] font-medium text-primary flex-1 truncate">
           {entry.title || entry.path.split('/').pop()!.replace(/\.md$/, '')}
         </div>
 
@@ -188,7 +188,7 @@ export function DocView({
               const book = entries.find(e => e.type === 'book-overview' && bookSlugOf(e) === entry.book);
               if (book) onNavigate(book, { meta: ev.metaKey || ev.ctrlKey });
             }}
-            class="text-[11px] text-stone-600 hover:text-stone-900 underline whitespace-nowrap"
+            class="text-[11px] text-secondary hover:text-primary underline whitespace-nowrap"
           >↑ 回到本书</button>
         )}
 
@@ -196,14 +196,14 @@ export function DocView({
           <div class="relative">
             <button
               onClick={() => setMenuOpen(v => !v)}
-              class="text-stone-500 hover:text-stone-900 p-1 inline-flex items-center"
+              class="text-muted hover:text-primary p-1 inline-flex items-center"
               title="更多"
             ><Icon name="dots-three" size={16} /></button>
             {menuOpen && (
-              <div class="absolute right-0 top-full mt-1 bg-white border border-stone-200 rounded shadow-lg py-1 min-w-[160px] z-10">
+              <div class="absolute right-0 top-full mt-1 bg-surface border border-base rounded shadow-lg py-1 min-w-[160px] z-10">
                 <button
                   onClick={handleDelete}
-                  class="w-full text-left px-3 py-1.5 text-[12px] text-red-600 hover:bg-red-50"
+                  class="w-full text-left px-3 py-1.5 text-[12px] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30"
                 >移到回收站…</button>
               </div>
             )}
@@ -213,8 +213,8 @@ export function DocView({
 
       <div class="flex-1 overflow-hidden flex min-h-0">
         {chapters && chapters.length > 0 && (
-          <aside class="w-56 shrink-0 border-r border-stone-200 bg-stone-50 overflow-auto scrollbar-thin">
-            <div class="px-4 py-3 text-[11px] uppercase tracking-wider text-stone-500 font-semibold">
+          <aside class="w-56 shrink-0 border-r border-base bg-page overflow-auto scrollbar-thin">
+            <div class="px-4 py-3 text-[11px] uppercase tracking-wider text-muted font-semibold">
               章节 ({chapters.length})
             </div>
             <ul class="pb-4">
@@ -222,7 +222,7 @@ export function DocView({
                 <li key={c.path}>
                   <button
                     onClick={(ev) => onNavigate(c, { meta: ev.metaKey || ev.ctrlKey })}
-                    class="w-full text-left px-4 py-1.5 text-[12px] text-stone-700 hover:bg-stone-100 hover:text-stone-900 leading-snug line-clamp-2"
+                    class="w-full text-left px-4 py-1.5 text-[12px] text-secondary hover:bg-surface-2 hover:text-primary leading-snug line-clamp-2"
                   >
                     {c.title || c.path.split('/').pop()!.replace(/\.md$/, '')}
                   </button>
@@ -233,7 +233,7 @@ export function DocView({
         )}
         <div class="flex-1 min-w-0 flex flex-col">
           {loading
-            ? <div class="px-8 py-10 text-sm text-stone-500">加载中…</div>
+            ? <div class="px-8 py-10 text-sm text-muted">加载中…</div>
             : editable
               ? <NoteEditor
                   docId={entry.path}
@@ -245,13 +245,13 @@ export function DocView({
               : <div class="flex-1 overflow-auto scrollbar-thin">
                   <article
                     onClick={onArticleClick as unknown as JSX.MouseEventHandler<HTMLElement>}
-                    class="prose-body text-[14px] text-stone-800 px-8 py-6 max-w-3xl"
+                    class="prose-body text-[14px] text-primary px-8 py-6 max-w-3xl"
                     dangerouslySetInnerHTML={{ __html: rendered }}
                   />
                 </div>
           }
         </div>
-        <aside class="w-80 shrink-0 border-l border-stone-200 bg-stone-50/60 overflow-auto scrollbar-thin">
+        <aside class="w-80 shrink-0 border-l border-base bg-page/60 overflow-auto scrollbar-thin">
           <PropertyPanel
             entry={entry}
             entries={entries}
@@ -271,9 +271,9 @@ export function DocView({
 function SaveIndicator({ status, errMsg }: { status: SaveStatus; errMsg: string | null }) {
   switch (status) {
     case 'idle':   return null;
-    case 'dirty':  return <span class="text-[11px] text-stone-400">未保存…</span>;
-    case 'saving': return <span class="text-[11px] text-stone-500">保存中…</span>;
-    case 'saved':  return <span class="text-[11px] text-emerald-600">已保存</span>;
-    case 'error':  return <span class="text-[11px] text-red-600" title={errMsg ?? ''}>保存失败</span>;
+    case 'dirty':  return <span class="text-[11px] text-muted">未保存…</span>;
+    case 'saving': return <span class="text-[11px] text-muted">保存中…</span>;
+    case 'saved':  return <span class="text-[11px] text-emerald-600 dark:text-emerald-400">已保存</span>;
+    case 'error':  return <span class="text-[11px] text-red-600 dark:text-red-400" title={errMsg ?? ''}>保存失败</span>;
   }
 }

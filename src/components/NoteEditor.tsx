@@ -12,7 +12,38 @@ export interface EditorThemeConfig {
   fontFamily: FontFamily;
   fontSize: number;
   lineHeight: number;
+  /** Resolved 'light' | 'dark' (not 'system'). Drives editor color scheme. */
+  dark: boolean;
 }
+
+// Editor color palettes. Light is unchanged from the original Ulysses-flavored
+// theme; dark mirrors the same warmth on a near-black canvas.
+const PALETTE = {
+  light: {
+    bg:       '#fafaf9',
+    fg:       '#1c1917',
+    fgHi:     '#0c0a09',
+    fgMed:    '#57534e',
+    caret:    '#78716c',
+    selection:'#fef3c7',
+    markup:   '#d6d3d1',
+    hr:       '#e7e5e4',
+    codeBg:   '#f4f4f3',
+    link:     '#0369a1',
+  },
+  dark: {
+    bg:       '#1c1915',  /* matches --bg-page in styles.css */
+    fg:       '#ebe2d5',  /* matches --text-primary */
+    fgHi:     '#f5ede0',
+    fgMed:    '#b4a796',
+    caret:    '#b4a796',
+    selection:'#7c3a08',  /* deep warm amber for selection */
+    markup:   '#82736b',  /* close to --text-faint, muted markers */
+    hr:       '#4e453b',  /* matches --border-strong */
+    codeBg:   '#363128',
+    link:     '#7dd3fc',
+  },
+} as const;
 
 interface Props {
   /** Stable identifier; reinit the editor when this changes (entry switch). */
@@ -49,12 +80,13 @@ const highlightStyle = HighlightStyle.define([
 // Build the editor theme from settings — caller-controlled font, size, leading;
 // rest of the visual language (off-white page, muted markers, warm caret) is
 // constant and matches Ulysses sensibility.
-function buildEditorTheme({ fontFamily, fontSize, lineHeight }: EditorThemeConfig): Extension {
+function buildEditorTheme({ fontFamily, fontSize, lineHeight, dark }: EditorThemeConfig): Extension {
+  const p = dark ? PALETTE.dark : PALETTE.light;
   return EditorView.theme({
     '&': {
       height: '100%',
-      backgroundColor: '#fafaf9',
-      color: '#1c1917',
+      backgroundColor: p.bg,
+      color: p.fg,
     },
     '&.cm-focused': { outline: 'none' },
     '.cm-scroller': {
@@ -67,37 +99,37 @@ function buildEditorTheme({ fontFamily, fontSize, lineHeight }: EditorThemeConfi
       maxWidth: '680px',
       margin: '0 auto',
       padding: '48px 8px 60vh 8px',
-      caretColor: '#78716c',
+      caretColor: p.caret,
     },
     '.cm-line': { padding: '0 16px' },
-    '.cm-cursor': { borderLeftWidth: '1px', borderLeftColor: '#78716c' },
-    '&.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: '#fef3c7 !important' },
+    '.cm-cursor': { borderLeftWidth: '1px', borderLeftColor: p.caret },
+    '&.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: `${p.selection} !important` },
 
-    '.cm-h1': { fontSize: '1.7em',  fontWeight: '700', color: '#0c0a09', lineHeight: '1.25', letterSpacing: '-0.01em' },
-    '.cm-h2': { fontSize: '1.4em',  fontWeight: '700', color: '#0c0a09', lineHeight: '1.3' },
-    '.cm-h3': { fontSize: '1.2em',  fontWeight: '600', color: '#1c1917' },
+    '.cm-h1': { fontSize: '1.7em',  fontWeight: '700', color: p.fgHi, lineHeight: '1.25', letterSpacing: '-0.01em' },
+    '.cm-h2': { fontSize: '1.4em',  fontWeight: '700', color: p.fgHi, lineHeight: '1.3' },
+    '.cm-h3': { fontSize: '1.2em',  fontWeight: '600', color: p.fg },
     '.cm-h4': { fontSize: '1.08em', fontWeight: '600' },
     '.cm-h5': { fontSize: '1em',    fontWeight: '600' },
     '.cm-h6': { fontSize: '1em',    fontWeight: '600' },
 
-    '.cm-strong': { fontWeight: '700', color: '#0c0a09' },
+    '.cm-strong': { fontWeight: '700', color: p.fgHi },
     '.cm-em': { fontStyle: 'italic' },
     '.cm-code': {
       fontFamily: 'ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", monospace',
-      backgroundColor: '#f4f4f3',
+      backgroundColor: p.codeBg,
       padding: '0 4px',
       borderRadius: '3px',
       fontSize: '0.9em',
     },
 
-    '.cm-markup': { color: '#d6d3d1' },
-    '.cm-list':   { color: '#d6d3d1' },
-    '.cm-hr':     { color: '#e7e5e4' },
+    '.cm-markup': { color: p.markup },
+    '.cm-list':   { color: p.markup },
+    '.cm-hr':     { color: p.hr },
 
-    '.cm-quote': { color: '#57534e', fontStyle: 'italic' },
+    '.cm-quote': { color: p.fgMed, fontStyle: 'italic' },
 
-    '.cm-link': { color: '#0369a1' },
-    '.cm-url': { color: '#0369a1', textDecoration: 'underline' },
+    '.cm-link': { color: p.link },
+    '.cm-url': { color: p.link, textDecoration: 'underline' },
   });
 }
 
@@ -161,7 +193,7 @@ export function NoteEditor({ docId, initial, theme, onChange, onSaveShortcut }: 
     view.dispatch({
       effects: themeCompartment.reconfigure(buildEditorTheme(theme)),
     });
-  }, [theme.fontFamily, theme.fontSize, theme.lineHeight]);
+  }, [theme.fontFamily, theme.fontSize, theme.lineHeight, theme.dark]);
 
   return <div ref={hostRef} class="h-full overflow-auto scrollbar-thin" />;
 }

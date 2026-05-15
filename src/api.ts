@@ -30,6 +30,19 @@ export async function restoreTrash(name: string): Promise<string> {
   return json.restored ?? '';
 }
 
+/** Trigger a full rebuild of data/index.json on the server. Resolves once
+ *  the new index file is written; caller should re-fetch /reader/data/index.json
+ *  afterwards. */
+export async function reindex(): Promise<{ tookMs: number }> {
+  const r = await fetch('/api/reindex', { method: 'POST' });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`reindex failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { tookMs?: number }));
+  return { tookMs: json.tookMs ?? 0 };
+}
+
 export async function purgeTrash(name: string): Promise<void> {
   const r = await fetch(`/api/trash/${encodeURIComponent(name)}`, { method: 'DELETE' });
   if (!r.ok) {

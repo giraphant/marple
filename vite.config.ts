@@ -28,8 +28,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/vault': 'http://localhost:5174',
+      '/vault':       'http://localhost:5174',
       '/reader/data': 'http://localhost:5174',
+      '/api':         'http://localhost:5174',
+      '/sources':     'http://localhost:5174',
     },
   },
 });

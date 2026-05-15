@@ -82,11 +82,11 @@ export function ThemesView({ entries, onThemeClick }: Props) {
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
-      <header class="bg-white/95 backdrop-blur border-b border-stone-200 sticky top-0 z-10">
+      <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
         <div class="px-6 py-3 flex items-center gap-4 flex-wrap">
           <div class="flex items-baseline gap-2 min-w-0">
-            <div class="text-[18px] font-semibold tracking-tight text-stone-900">主题</div>
-            <div class="text-[11px] text-stone-400 tabular-nums">
+            <div class="text-[18px] font-semibold tracking-tight text-primary">主题</div>
+            <div class="text-[11px] text-muted tabular-nums">
               {filtered.length}{filtered.length !== rows.length && <span> / {rows.length}</span>}
             </div>
           </div>
@@ -95,15 +95,15 @@ export function ThemesView({ entries, onThemeClick }: Props) {
             placeholder="过滤主题名…"
             value={rawQuery}
             onInput={e => setRawQuery((e.target as HTMLInputElement).value)}
-            class="flex-1 min-w-[200px] max-w-[420px] px-3 py-1.5 border border-stone-300 rounded text-[13px] focus:outline-none focus:border-stone-500 bg-white"
+            class="flex-1 min-w-[200px] max-w-[420px] px-3 py-1.5 border border-strong rounded text-[13px] focus:outline-none focus:border-strong bg-surface"
           />
-          <div class="flex items-center gap-1 text-[11px] text-stone-600">
+          <div class="flex items-center gap-1 text-[11px] text-secondary">
             <span>出现 ≥</span>
             {[1, 2, 3, 5, 10].map(n => (
               <button
                 key={n}
                 onClick={() => setMinCount(n)}
-                class={`px-1.5 py-0.5 rounded tabular-nums ${minCount === n ? 'bg-stone-900 text-white' : 'hover:bg-stone-100'}`}
+                class={`px-1.5 py-0.5 rounded tabular-nums ${minCount === n ? 'bg-inverse text-inverse-fg' : 'hover:bg-surface-2'}`}
               >{n}</button>
             ))}
           </div>
@@ -112,7 +112,7 @@ export function ThemesView({ entries, onThemeClick }: Props) {
 
       <main class="flex-1 overflow-auto scrollbar-thin px-6 py-4">
         {filtered.length === 0
-          ? <div class="text-sm text-stone-500 py-20 text-center">没有匹配的主题</div>
+          ? <div class="text-sm text-muted py-20 text-center">没有匹配的主题</div>
           : (
             <>
               <div class="flex flex-wrap gap-1.5">
@@ -125,18 +125,18 @@ export function ThemesView({ entries, onThemeClick }: Props) {
                     <button
                       key={r.theme}
                       onClick={() => onThemeClick(r.theme, topType)}
-                      class="group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-stone-200 bg-white hover:border-amber-300 hover:bg-amber-50 transition text-[12px]"
+                      class="group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-base bg-surface hover:border-amber-300 dark:hover:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition text-[12px]"
                       style={{ contentVisibility: 'auto', containIntrinsicSize: '28px 120px' }}
                       title={
                         `${r.theme} · 共 ${r.total} 条\n` +
                         sortedByType.map(([t, n]) => `  ${TYPE_LABEL[t] ?? t}: ${n}`).join('\n')
                       }
                     >
-                      <span class="text-stone-800 group-hover:text-amber-900">{r.theme}</span>
-                      <span class="text-stone-400 tabular-nums text-[11px]">{r.total}</span>
+                      <span class="text-primary group-hover:text-amber-900 dark:hover:text-amber-200">{r.theme}</span>
+                      <span class="text-muted tabular-nums text-[11px]">{r.total}</span>
                       <span class="inline-flex gap-0.5 ml-0.5">
                         {sortedByType.slice(0, 3).map(([t]) => (
-                          <span key={t} class={`w-1.5 h-1.5 rounded-full ${TYPE_DOT[t] ?? 'bg-stone-300'}`} />
+                          <span key={t} class={`w-1.5 h-1.5 rounded-full ${TYPE_DOT[t] ?? 'bg-faint'}`} />
                         ))}
                       </span>
                     </button>
@@ -147,7 +147,7 @@ export function ThemesView({ entries, onThemeClick }: Props) {
                 <div class="text-center mt-6">
                   <button
                     onClick={() => setLimit(l => l + LOAD_STEP)}
-                    class="px-4 py-2 bg-white border border-stone-300 rounded text-[13px] hover:bg-stone-50"
+                    class="px-4 py-2 bg-surface border border-strong rounded text-[13px] hover:bg-page"
                   >
                     再加载 {Math.min(LOAD_STEP, filtered.length - limit)} ( 已显示 {limit} / {filtered.length} )
                   </button>

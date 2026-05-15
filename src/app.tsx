@@ -13,7 +13,7 @@ import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import {
   postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
-  newIdeaDraft, ideaEntryFromDraft,
+  newIdeaDraft, ideaEntryFromDraft, reindex,
 } from './api';
 import { loadSettings, saveSettings, type Settings } from './settings';
 
@@ -89,6 +89,45 @@ export function App() {
   const [tabs, setTabs] = useState<Tab[]>(() => loadTabs());
   const [activeIndex, setActiveIndex] = useState<number>(() => loadActiveIndex());
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
+
+  const onReindex = useCallback(async () => {
+    if (reindexing) return;
+    setReindexing(true);
+    try {
+      await reindex();
+      // Cache-bust so we don't serve the pre-rebuild index.json.
+      const r = await fetch(`data/index.json?t=${Date.now()}`);
+      const next = await r.json();
+      setEntries(next);
+    } catch (e) {
+      window.alert('重建索引失败：' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setReindexing(false);
+    }
+  }, [reindexing]);
+
+  // Apply the theme by toggling `.dark` on <html>. For 'system', listen to
+  // the OS preference and switch live when it changes. `resolvedDark` is the
+  // current effective mode so the editor (CodeMirror) can pick up the same
+  // theme via props.
+  const [resolvedDark, setResolvedDark] = useState(false);
+  useEffect(() => {
+    const root = document.documentElement;
+    const apply = (resolved: 'light' | 'dark') => {
+      root.classList.toggle('dark', resolved === 'dark');
+      setResolvedDark(resolved === 'dark');
+    };
+    if (settings.theme === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      apply(mq.matches ? 'dark' : 'light');
+      const onChange = (e: MediaQueryListEvent) => apply(e.matches ? 'dark' : 'light');
+      mq.addEventListener('change', onChange);
+      return () => mq.removeEventListener('change', onChange);
+    } else {
+      apply(settings.theme);
+    }
+  }, [settings.theme]);
 
   // Cmd/Ctrl+K opens the global search palette.
   useEffect(() => {
@@ -436,14 +475,15 @@ export function App() {
       fontFamily: settings.fontFamily,
       fontSize: settings.fontSize,
       lineHeight: settings.lineHeight,
+      dark: resolvedDark,
     }),
-    [settings.fontFamily, settings.fontSize, settings.lineHeight],
+    [settings.fontFamily, settings.fontSize, settings.lineHeight, resolvedDark],
   );
 
-  if (!entries) return <div class="p-10 text-stone-500">加载索引中…</div>;
+  if (!entries) return <div class="p-10 text-muted">加载索引中…</div>;
 
   return (
-    <div class="h-screen flex bg-white">
+    <div class="h-screen flex bg-surface">
       <Sidebar
         entries={entries}
         counts={counts}
@@ -452,12 +492,14 @@ export function App() {
         themesActive={themesActive}
         themesCount={themesCount}
         activityActive={activityActive}
+        reindexing={reindexing}
         onSelectType={openListType}
         onOpenTrash={openTrash}
         onOpenThemes={openThemes}
         onOpenActivity={openActivity}
         onOpenSettings={() => setSettingsOpen(true)}
         onNewIdeaNote={onNewIdeaNote}
+        onReindex={onReindex}
       />
 
       <div class="flex-1 min-w-0 flex flex-col">
@@ -549,10 +591,10 @@ export function App() {
 
 function StaleTab({ path, onClose }: { path: string; onClose: () => void }) {
   return (
-    <div class="flex-1 flex items-center justify-center text-stone-500 text-sm">
+    <div class="flex-1 flex items-center justify-center text-muted text-sm">
       <div class="text-center">
         <div class="mb-2">{path} 已不在索引中</div>
-        <button onClick={onClose} class="text-stone-700 underline">关闭 tab</button>
+        <button onClick={onClose} class="text-secondary underline">关闭 tab</button>
       </div>
     </div>
   );

@@ -83,7 +83,7 @@ export function CommandPalette({ open, entries, onClose, onPick }: Props) {
   return (
     <div class="fixed inset-0 bg-black/30 z-50 flex items-start justify-center pt-[15vh] px-4" onClick={onClose}>
       <div
-        class="w-full max-w-[640px] bg-white border border-stone-200 rounded-lg shadow-2xl overflow-hidden"
+        class="w-full max-w-[640px] bg-surface border border-base rounded-lg shadow-2xl overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         <input
@@ -93,15 +93,15 @@ export function CommandPalette({ open, entries, onClose, onPick }: Props) {
           value={query}
           onInput={e => setQuery((e.target as HTMLInputElement).value)}
           onKeyDown={handleKey}
-          class="w-full px-4 py-3 text-[14px] focus:outline-none border-b border-stone-200"
+          class="w-full px-4 py-3 text-[14px] focus:outline-none border-b border-base"
         />
         <div class="max-h-[60vh] overflow-auto scrollbar-thin">
           {query.trim() === '' ? (
-            <div class="px-4 py-6 text-sm text-stone-400 text-center">
+            <div class="px-4 py-6 text-sm text-muted text-center">
               开始输入以搜索 vault 中 {entries.length} 个条目…
             </div>
           ) : results.length === 0 ? (
-            <div class="px-4 py-6 text-sm text-stone-400 text-center">
+            <div class="px-4 py-6 text-sm text-muted text-center">
               没有匹配的条目
             </div>
           ) : (
@@ -117,18 +117,18 @@ export function CommandPalette({ open, entries, onClose, onPick }: Props) {
                         onClose();
                       }}
                       onMouseEnter={() => setActive(i)}
-                      class={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] border-b border-stone-100 last:border-b-0 ${
-                        isActive ? 'bg-amber-50' : 'hover:bg-stone-50'
+                      class={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] border-b border-base last:border-b-0 ${
+                        isActive ? 'bg-amber-50' : 'hover:bg-page'
                       }`}
                     >
                       <TypeIcon type={e.type} scale={1.4} />
                       <div class="flex-1 min-w-0">
-                        <div class="truncate text-stone-900">{e.title || e.path.split('/').pop()!.replace(/\.md$/, '')}</div>
-                        <div class="truncate text-[11px] text-stone-500">
+                        <div class="truncate text-primary">{e.title || e.path.split('/').pop()!.replace(/\.md$/, '')}</div>
+                        <div class="truncate text-[11px] text-muted">
                           {meta?.label}
                           {e.author && <span> · {e.author}</span>}
                           {e.year && <span> · <span class="tabular-nums">{e.year}</span></span>}
-                          {e.rating && <span class="ml-1 text-amber-600">{e.rating}</span>}
+                          {e.rating && <span class="ml-1 text-amber-600 dark:text-amber-400">{e.rating}</span>}
                         </div>
                       </div>
                     </button>

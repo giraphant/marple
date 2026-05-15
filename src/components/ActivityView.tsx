@@ -11,7 +11,7 @@ const WEEKS = 53;  // columns shown
 const DAYS = 7;    // rows: Sun..Sat
 
 const INTENSITY_CLASS = [
-  'bg-stone-100 border border-stone-200',
+  'bg-surface-2 border border-base',
   'bg-amber-100',
   'bg-amber-300',
   'bg-amber-500',
@@ -88,14 +88,14 @@ export function ActivityView({ entries }: Props) {
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
-      <header class="bg-white/95 backdrop-blur border-b border-stone-200 sticky top-0 z-10">
+      <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
         <div class="px-6 py-3 flex items-baseline gap-4">
-          <div class="text-[18px] font-semibold tracking-tight text-stone-900">活动</div>
-          <div class="text-[11px] text-stone-500">
-            过去一年 vault 文件变动 · 共 <span class="text-stone-800 tabular-nums">{total}</span> 次
+          <div class="text-[18px] font-semibold tracking-tight text-primary">活动</div>
+          <div class="text-[11px] text-muted">
+            过去一年 vault 文件变动 · 共 <span class="text-primary tabular-nums">{total}</span> 次
           </div>
           {maxDay && (
-            <div class="text-[11px] text-stone-400 tabular-nums">
+            <div class="text-[11px] text-muted tabular-nums">
               最忙：{maxDay.day} · {maxDay.n}
             </div>
           )}
@@ -109,7 +109,7 @@ export function ActivityView({ entries }: Props) {
             {monthMarks.map(m => (
               <div
                 key={`${m.col}-${m.label}`}
-                class="absolute text-[10px] text-stone-500"
+                class="absolute text-[10px] text-muted"
                 style={{ left: m.col * (CELL + GAP) }}
               >{m.label}</div>
             ))}
@@ -121,7 +121,7 @@ export function ActivityView({ entries }: Props) {
               {DAY_LABELS.map((d, i) => (
                 <div
                   key={d}
-                  class="text-[10px] text-stone-400 leading-none flex items-center"
+                  class="text-[10px] text-muted leading-none flex items-center"
                   style={{
                     height: CELL,
                     visibility: i % 2 === 1 ? 'visible' : 'hidden',
@@ -156,7 +156,7 @@ export function ActivityView({ entries }: Props) {
           </div>
 
           {/* legend */}
-          <div class="flex items-center gap-1.5 mt-4 text-[10px] text-stone-500 ml-7">
+          <div class="flex items-center gap-1.5 mt-4 text-[10px] text-muted ml-7">
             <span>少</span>
             {INTENSITY_CLASS.map((cls, i) => (
               <span key={i} class={`${cls} rounded-[2px]`} style={{ width: CELL, height: CELL }} />

@@ -2,7 +2,77 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------
+ * Semantic color tokens.
+ *
+ * All chrome colors flow through these vars so theme switches happen by
+ * toggling `.dark` on <html>. Per-token semantics:
+ *   bg-page       — outermost background (the page behind cards / panels)
+ *   bg-surface    — cards, panels, popovers (one elevation above page)
+ *   bg-surface-2  — sticky headers / hover states on surfaces
+ *   bg-hover      — hover on surface-2 / list rows
+ *   text-primary  — body text, headings
+ *   text-secondary — captions, labels
+ *   text-muted    — placeholder, faint counts
+ *   text-faint    — dividers-as-text, em-dashes for empty fields
+ *   border-base   — default 1px divider
+ *   border-strong — slightly heavier divider, used in modals
+ *
+ * Tailwind registers these as colors named `page` / `surface` / `primary` etc.,
+ * see tailwind.config.js. Use them like `bg-surface text-primary border-base`.
+ * Accent colors (amber/rose/emerald/sky/violet/teal) keep Tailwind's palette;
+ * dark adjustments live as `dark:` modifiers where contrast needs help.
+ * --------------------------------------------------------------- */
+:root {
+  --bg-page:        250 250 249;  /* stone-50 */
+  --bg-surface:     255 255 255;  /* white */
+  --bg-surface-2:   245 245 244;  /* stone-100 */
+  --bg-hover:       231 229 228;  /* stone-200 */
+
+  --text-primary:    28  25  23;  /* stone-900 */
+  --text-secondary:  87  83  78;  /* stone-600 */
+  --text-muted:     168 162 158;  /* stone-400 */
+  --text-faint:     214 211 209;  /* stone-300 */
+
+  --border-base:    231 229 228;  /* stone-200 */
+  --border-strong:  214 211 209;  /* stone-300 */
+
+  --accent-link:      3 105 161;  /* sky-700 */
+  --accent-link-bg: 240 249 255;  /* sky-50 */
+
+  --bg-inverse:      28  25  23;  /* stone-900 — used for active pills */
+  --text-inverse:   255 255 255;
+}
+
+/* Warm "dimmed" dark mode — inspired by GitHub Dark Dimmed but tuned to the
+ * reader's amber/stone identity. Lifted off pure black so long-read sessions
+ * don't fatigue; surface layers are spaced by ~10 luminance steps for clear
+ * elevation cues; text/bg pairs target WCAG AA (4.5:1+) on body text.
+ */
+.dark {
+  --bg-page:         28  25  21;   /* page canvas — warm near-black */
+  --bg-surface:      41  37  32;   /* cards, panels (one step up) */
+  --bg-surface-2:    54  49  43;   /* sticky headers, hover-on-surface */
+  --bg-hover:        70  63  55;   /* list-row hover, surface-2 hover */
+
+  --text-primary:   235 226 213;   /* warm off-white, body text */
+  --text-secondary: 180 167 150;   /* labels, captions */
+  --text-muted:     132 121 108;   /* faint counts, placeholders */
+  --text-faint:      82  75  67;   /* dividers-as-text */
+
+  --border-base:     54  49  43;   /* default divider — equals surface-2 so
+                                       borders disappear inside surface-2  */
+  --border-strong:   82  75  67;   /* heavier divider for modals/inputs */
+
+  --accent-link:    125 211 252;   /* sky-300 */
+  --accent-link-bg:  17  29  42;   /* faint sky-950-ish wash */
+
+  --bg-inverse:     235 226 213;   /* warm cream — used for active pills */
+  --text-inverse:    28  25  21;
+}
+
 @layer base {
+  html, body { background-color: rgb(var(--bg-page)); color: rgb(var(--text-primary)); }
   body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; }
 }
 
@@ -10,15 +80,15 @@
   .card { content-visibility: auto; contain-intrinsic-size: 220px; }
 
   .prose-body h1 { font-size: 1.5rem; font-weight: 600; margin: 1.2em 0 0.6em; }
-  .prose-body h2 { font-size: 1.2rem; font-weight: 600; margin: 1.1em 0 0.5em; border-bottom: 1px solid #e7e5e4; padding-bottom: 0.2em; }
+  .prose-body h2 { font-size: 1.2rem; font-weight: 600; margin: 1.1em 0 0.5em; border-bottom: 1px solid rgb(var(--border-base)); padding-bottom: 0.2em; }
   .prose-body h3 { font-size: 1.05rem; font-weight: 600; margin: 1em 0 0.4em; }
   .prose-body p { margin: 0.6em 0; line-height: 1.75; }
   .prose-body ul, .prose-body ol { margin: 0.6em 0; padding-left: 1.5em; }
   .prose-body li { margin: 0.2em 0; line-height: 1.7; }
-  .prose-body blockquote { border-left: 3px solid #d6d3d1; padding-left: 1em; color: #57534e; margin: 0.8em 0; }
-  .prose-body code { background: #f5f5f4; padding: 0 0.3em; border-radius: 3px; font-size: 0.9em; }
-  .prose-body strong { font-weight: 600; color: #1c1917; }
-  .prose-body hr { border: none; border-top: 1px solid #e7e5e4; margin: 1.4em 0; }
+  .prose-body blockquote { border-left: 3px solid rgb(var(--border-strong)); padding-left: 1em; color: rgb(var(--text-secondary)); margin: 0.8em 0; }
+  .prose-body code { background: rgb(var(--bg-surface-2)); padding: 0 0.3em; border-radius: 3px; font-size: 0.9em; }
+  .prose-body strong { font-weight: 600; color: rgb(var(--text-primary)); }
+  .prose-body hr { border: none; border-top: 1px solid rgb(var(--border-base)); margin: 1.4em 0; }
 
   .line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
   .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -26,13 +96,12 @@
   .line-clamp-4 { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 
   .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
-  .scrollbar-thin::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 3px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: rgb(var(--text-faint)); border-radius: 3px; }
 
-  .wiki-link { color: #0369a1; cursor: pointer; border-bottom: 1px dotted #0369a1; }
-  .wiki-link:hover { background: #f0f9ff; }
-  .wiki-broken { color: #a8a29e; text-decoration: line-through; cursor: help; }
+  .wiki-link { color: rgb(var(--accent-link)); cursor: pointer; border-bottom: 1px dotted rgb(var(--accent-link)); }
+  .wiki-link:hover { background: rgb(var(--accent-link-bg)); }
+  .wiki-broken { color: rgb(var(--text-muted)); text-decoration: line-through; cursor: help; }
 
-  /* Editable field hover affordance in PropertyPanel. */
   .editable-row:hover .edit-hint { opacity: 1; }
   .edit-hint { opacity: 0; transition: opacity 120ms; }
 }

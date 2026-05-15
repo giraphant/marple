@@ -1,4 +1,5 @@
 export type FontFamily = 'sans' | 'serif' | 'mono';
+export type Theme = 'light' | 'dark' | 'system';
 
 export interface Settings {
   /** When true, all LLM-generated body content (paper/book/author/topic/chapter)
@@ -12,6 +13,9 @@ export interface Settings {
   fontSize: number;
   /** Editor line height (unitless). */
   lineHeight: number;
+
+  /** Color theme. 'system' follows prefers-color-scheme. */
+  theme: Theme;
 }
 
 const DEFAULTS: Settings = {
@@ -19,6 +23,7 @@ const DEFAULTS: Settings = {
   fontFamily: 'sans',
   fontSize: 16,
   lineHeight: 1.78,
+  theme: 'system',
 };
 
 const KEY = 'qua-reader-settings';

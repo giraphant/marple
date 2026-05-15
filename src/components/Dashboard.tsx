@@ -31,29 +31,29 @@ export function Dashboard({ type, typeEntries, onThemeClick, onOpen }: Props) {
   const typeMeta = TYPE_BY_ID[type] ?? { label: type, accent: '' };
 
   return (
-    <section class="mb-4 bg-white border border-stone-200 rounded-lg p-4 grid grid-cols-1 lg:grid-cols-[260px_1fr_320px] gap-5">
+    <section class="mb-4 bg-surface border border-base rounded-lg p-4 grid grid-cols-1 lg:grid-cols-[260px_1fr_320px] gap-5">
       <div class="space-y-1.5">
-        <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold">{typeMeta.label}</div>
+        <div class="text-[11px] uppercase tracking-wider text-muted font-semibold">{typeMeta.label}</div>
         <div class="text-2xl font-semibold tabular-nums">{stats.total}</div>
         {stats.avg > 0 && (
-          <div class="text-[12px] text-stone-600">
-            平均评分 <span class="text-amber-600">{'★'.repeat(Math.round(stats.avg))}</span>
-            <span class="text-stone-400 tabular-nums"> ({stats.avg.toFixed(2)})</span>
+          <div class="text-[12px] text-secondary">
+            平均评分 <span class="text-amber-600 dark:text-amber-400">{'★'.repeat(Math.round(stats.avg))}</span>
+            <span class="text-muted tabular-nums"> ({stats.avg.toFixed(2)})</span>
           </div>
         )}
-        <div class="text-[12px] text-stone-600">{stats.topThemes.length} 个 themes</div>
+        <div class="text-[12px] text-secondary">{stats.topThemes.length} 个 themes</div>
       </div>
 
       {stats.topThemes.length > 0 && (
         <div class="min-w-0">
-          <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold mb-2">高频主题</div>
+          <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">高频主题</div>
           <div class="flex flex-wrap gap-1.5">
             {stats.topThemes.map(([th, n]) => (
               <button
                 onClick={() => onThemeClick(th)}
-                class="text-[11px] px-2 py-0.5 rounded border border-stone-200 bg-stone-50 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-800 transition"
+                class="text-[11px] px-2 py-0.5 rounded border border-base bg-page text-primary hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:border-amber-300 dark:hover:border-amber-700 hover:text-amber-800 dark:hover:text-amber-200 transition"
               >
-                {th} <span class="text-stone-400 tabular-nums">{n}</span>
+                {th} <span class="text-muted tabular-nums">{n}</span>
               </button>
             ))}
           </div>
@@ -61,8 +61,8 @@ export function Dashboard({ type, typeEntries, onThemeClick, onOpen }: Props) {
       )}
 
       {stats.top.length > 0 && stats.top[0].rating_score > 0 && (
-        <div class="min-w-0 border-t lg:border-t-0 lg:border-l border-stone-200 lg:pl-5 pt-3 lg:pt-0">
-          <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold mb-2">高分推荐</div>
+        <div class="min-w-0 border-t lg:border-t-0 lg:border-l border-base lg:pl-5 pt-3 lg:pt-0">
+          <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">高分推荐</div>
           <div class="space-y-0.5">
             {stats.top.map(e => <MiniRow entry={e} onClick={onOpen} key={e.path} />)}
           </div>

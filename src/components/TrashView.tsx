@@ -51,17 +51,17 @@ export function TrashView({ onRestored }: Props) {
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
-      <header class="bg-white/95 backdrop-blur border-b border-stone-200 sticky top-0 z-10">
+      <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
         <div class="px-6 py-3 flex items-center gap-4">
           <div class="flex items-baseline gap-2 min-w-0">
-            <div class="text-[18px] font-semibold tracking-tight text-stone-900">回收站</div>
-            <div class="text-[11px] text-stone-400 tabular-nums">
+            <div class="text-[18px] font-semibold tracking-tight text-primary">回收站</div>
+            <div class="text-[11px] text-muted tabular-nums">
               {items ? items.length : '…'}
             </div>
           </div>
           <button
             onClick={refresh}
-            class="text-[11px] text-stone-500 hover:text-stone-900 px-2 py-0.5 rounded hover:bg-stone-100"
+            class="text-[11px] text-muted hover:text-primary px-2 py-0.5 rounded hover:bg-surface-2"
             title="刷新"
           >刷新</button>
         </div>
@@ -69,17 +69,17 @@ export function TrashView({ onRestored }: Props) {
 
       <main class="flex-1 overflow-auto scrollbar-thin px-6 py-4">
         {err && (
-          <div class="text-[12px] text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2 mb-4">
+          <div class="text-[12px] text-red-700 dark:text-red-300 bg-red-50 border border-red-200 dark:border-red-900 rounded px-3 py-2 mb-4">
             {err}
           </div>
         )}
 
         {!items && !err && (
-          <div class="text-sm text-stone-500 py-10 text-center">加载中…</div>
+          <div class="text-sm text-muted py-10 text-center">加载中…</div>
         )}
 
         {items && items.length === 0 && (
-          <div class="text-sm text-stone-500 py-10 text-center">回收站为空</div>
+          <div class="text-sm text-muted py-10 text-center">回收站为空</div>
         )}
 
         {items && items.length > 0 && (
@@ -87,27 +87,27 @@ export function TrashView({ onRestored }: Props) {
             {items.map(it => (
               <div
                 key={it.name}
-                class="flex items-center gap-3 px-3 py-2 rounded border border-stone-200 bg-white hover:border-stone-300"
+                class="flex items-center gap-3 px-3 py-2 rounded border border-base bg-surface hover:border-strong"
               >
                 <div class="flex-1 min-w-0">
-                  <div class="text-[13px] text-stone-900 truncate">
+                  <div class="text-[13px] text-primary truncate">
                     {it.originalBase ?? it.name}
                   </div>
-                  <div class="text-[11px] text-stone-500 mt-0.5">
+                  <div class="text-[11px] text-muted mt-0.5">
                     <span class="font-mono">{it.name}</span>
-                    {it.ts && <span class="ml-2 text-stone-400">删除于 {prettyTs(it.ts)}</span>}
-                    <span class="ml-2 text-stone-400 tabular-nums">{prettySize(it.size)}</span>
+                    {it.ts && <span class="ml-2 text-muted">删除于 {prettyTs(it.ts)}</span>}
+                    <span class="ml-2 text-muted tabular-nums">{prettySize(it.size)}</span>
                   </div>
                 </div>
                 <button
                   onClick={() => onRestore(it.name)}
                   disabled={busy === it.name}
-                  class="text-[12px] px-2.5 py-1 rounded bg-stone-900 text-white hover:bg-stone-700 disabled:opacity-50"
+                  class="text-[12px] px-2.5 py-1 rounded bg-inverse text-inverse-fg hover:bg-inverse/80 disabled:opacity-50"
                 >恢复</button>
                 <button
                   onClick={() => onPurge(it.name)}
                   disabled={busy === it.name}
-                  class="text-[12px] px-2.5 py-1 rounded border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                  class="text-[12px] px-2.5 py-1 rounded border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
                 >永久删除</button>
               </div>
             ))}

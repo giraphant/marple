@@ -9,6 +9,7 @@ import { readFile, stat, writeFile, rename, mkdir, readdir, unlink } from 'node:
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { spawn } from 'node:child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -267,6 +268,52 @@ async function handleDelete(req, res) {
   }), { 'Content-Type': 'application/json; charset=utf-8' });
 }
 
+// Reindex API: spawn build-index.mjs as a child process, wait for it to
+// finish, return stats. Single-flight so concurrent calls share the same run.
+let inflightReindex = null;
+
+async function handleReindex(_req, res) {
+  if (inflightReindex) {
+    // Coalesce: wait for the in-progress run instead of starting a duplicate.
+    try {
+      const r = await inflightReindex;
+      return send(res, 200, JSON.stringify({ ok: true, coalesced: true, ...r }), {
+        'Content-Type': 'application/json; charset=utf-8',
+      });
+    } catch (e) {
+      return send(res, 500, String(e));
+    }
+  }
+
+  const script = path.join(__dirname, 'scripts', 'build-index.mjs');
+  const t0 = Date.now();
+
+  inflightReindex = new Promise((resolve, reject) => {
+    const proc = spawn(process.execPath, [script], { cwd: path.dirname(script) });
+    let stderr = '';
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`build-index exited ${code}: ${stderr.slice(0, 500)}`));
+      } else {
+        resolve({ tookMs: Date.now() - t0 });
+      }
+    });
+  });
+
+  try {
+    const r = await inflightReindex;
+    send(res, 200, JSON.stringify({ ok: true, ...r }), {
+      'Content-Type': 'application/json; charset=utf-8',
+    });
+  } catch (e) {
+    send(res, 500, String(e));
+  } finally {
+    inflightReindex = null;
+  }
+}
+
 function matchTrashRoute(urlPath) {
   // Returns { kind: 'list' } | { kind: 'restore', name } | { kind: 'purge', name } | null
   const url = decodeURIComponent(urlPath.split('?')[0]);
@@ -281,6 +328,13 @@ function matchTrashRoute(urlPath) {
 const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'OPTIONS') return send(res, 204, '');
+
+    // Reindex endpoint (POST /api/reindex)
+    const url = decodeURIComponent(req.url.split('?')[0]);
+    if (url === '/api/reindex' || url === '/api/reindex/') {
+      if (req.method === 'POST') return handleReindex(req, res);
+      return send(res, 405, 'POST only');
+    }
 
     // Trash API takes precedence over the generic file router.
     const trash = matchTrashRoute(req.url);
@@ -316,4 +370,5 @@ server.listen(PORT, () => {
   console.log(`GET    /api/trash              → list trashed notes`);
   console.log(`POST   /api/trash/<name>/restore → restore by trash filename`);
   console.log(`DELETE /api/trash/<name>       → permanently delete`);
+  console.log(`POST   /api/reindex            → run build-index.mjs and refresh data/index.json`);
 });

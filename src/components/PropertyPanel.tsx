@@ -96,16 +96,16 @@ export function PropertyPanel({
   };
 
   return (
-    <div class="p-5 space-y-5 text-[12px] text-stone-700">
+    <div class="p-5 space-y-5 text-[12px] text-secondary">
       {err && (
-        <div class="text-[11px] px-2 py-1 rounded bg-red-50 text-red-700 border border-red-200">
+        <div class="text-[11px] px-2 py-1 rounded bg-red-50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-900 dark:bg-red-950/40">
           保存失败：{err}
         </div>
       )}
 
       {entry.type === 'note' && annotatesTarget && (
-        <div class="text-[11px] px-2 py-1.5 rounded bg-rose-50 text-rose-800 border border-rose-200">
-          批注于 <button onClick={() => onOpen(annotatesTarget)} class="font-medium underline hover:text-rose-900">
+        <div class="text-[11px] px-2 py-1.5 rounded bg-rose-50 text-rose-800 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900">
+          批注于 <button onClick={() => onOpen(annotatesTarget)} class="font-medium underline hover:text-rose-900 dark:hover:text-rose-200">
             {annotatesTarget.title || annotatesTarget.path.split('/').pop()}
           </button>
         </div>
@@ -123,7 +123,7 @@ export function PropertyPanel({
         <TextRow label="Topic" value={entry.topic} field="topic" save={save} />
         {entry.chapters_analyzed != null && (
           <div class="grid grid-cols-[60px_1fr] gap-2">
-            <dt class="text-stone-500 text-[11px] pt-0.5">章节数</dt>
+            <dt class="text-muted text-[11px] pt-0.5">章节数</dt>
             <dd class="min-w-0 tabular-nums">{entry.chapters_analyzed}</dd>
           </div>
         )}
@@ -134,13 +134,13 @@ export function PropertyPanel({
       {entry.type !== 'note' && (
         <div>
           <div class="flex items-center justify-between mb-1">
-            <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold">
+            <div class="text-[11px] uppercase tracking-wider text-muted font-semibold">
               我的批注{myAnnotations.length > 0 && ` (${myAnnotations.length})`}
             </div>
             <button
               onClick={handleCreate}
               disabled={creatingNote}
-              class="text-[10px] text-rose-700 hover:text-rose-900 px-1.5 py-0.5 rounded hover:bg-rose-50 border border-rose-200 disabled:opacity-50"
+              class="text-[10px] text-rose-700 hover:text-rose-900 dark:hover:text-rose-200 px-1.5 py-0.5 rounded hover:bg-rose-50 border border-rose-200 disabled:opacity-50"
             >
               {creatingNote ? '创建中…' : '+ 新建批注'}
             </button>
@@ -150,7 +150,7 @@ export function PropertyPanel({
               {myAnnotations.map(n => <MiniRow entry={n} onClick={onOpen} key={n.path} />)}
             </div>
           ) : (
-            <div class="text-[11px] text-stone-400 pl-2">—</div>
+            <div class="text-[11px] text-muted pl-2">—</div>
           )}
         </div>
       )}
@@ -159,7 +159,7 @@ export function PropertyPanel({
         <Section title={`作品 (${backlinks.works.length})`}>
           {backlinks.works.slice(0, 30).map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
           {backlinks.works.length > 30 && (
-            <div class="text-[10px] text-stone-400 pl-2">+{backlinks.works.length - 30} 条</div>
+            <div class="text-[10px] text-muted pl-2">+{backlinks.works.length - 30} 条</div>
           )}
         </Section>
       )}
@@ -227,7 +227,7 @@ function ActionsRow({ entry }: { entry: Entry }) {
     <div class="flex items-center gap-2 -mt-1 text-[11px] flex-wrap">
       <button
         onClick={copyCitation}
-        class="px-2 py-1 rounded border border-stone-200 bg-white hover:border-stone-400 text-stone-700 hover:text-stone-900 transition"
+        class="px-2 py-1 rounded border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
         title={`复制 markdown 引用\n\n预览：${buildCitation(entry).slice(0, 200)}`}
       >
         {copied ? '✓ 已复制' : '复制引用'}
@@ -235,11 +235,11 @@ function ActionsRow({ entry }: { entry: Entry }) {
       {entry.has_pdf && entry.pdf_slug && (
         <button
           onClick={openPdf}
-          class="px-2 py-1 rounded border border-stone-200 bg-white hover:border-stone-400 text-stone-700 hover:text-stone-900 transition"
+          class="px-2 py-1 rounded border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
           title={`打开 sources/${entry.pdf_slug}.pdf`}
         >打开 PDF</button>
       )}
-      {err && <span class="text-red-600 text-[10px]">{err}</span>}
+      {err && <span class="text-red-600 dark:text-red-400 text-[10px]">{err}</span>}
     </div>
   );
 }
@@ -247,7 +247,7 @@ function ActionsRow({ entry }: { entry: Entry }) {
 function Section({ title, children }: { title: string; children: ComponentChildren }) {
   return (
     <div>
-      <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold mb-1">{title}</div>
+      <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-1">{title}</div>
       <div class="space-y-0.5">{children}</div>
     </div>
   );
@@ -256,19 +256,19 @@ function Section({ title, children }: { title: string; children: ComponentChildr
 function Row({ label, children }: { label: string; children: ComponentChildren }) {
   return (
     <div class="editable-row grid grid-cols-[60px_1fr] gap-2 items-start">
-      <dt class="text-stone-500 text-[11px] pt-0.5">{label}</dt>
+      <dt class="text-muted text-[11px] pt-0.5">{label}</dt>
       <dd class="min-w-0">{children}</dd>
     </div>
   );
 }
 
 function RatingRow({ value, save }: { value: number; save: SaveFn }) {
-  const display = value > 0 ? '★'.repeat(value) : <span class="text-stone-400">—</span>;
+  const display = value > 0 ? '★'.repeat(value) : <span class="text-muted">—</span>;
   const [editing, setEditing] = useState(false);
   if (!editing) {
     return (
       <Row label="评分">
-        <button class="text-amber-600 text-left hover:bg-stone-100 px-1 -mx-1 rounded" onClick={() => setEditing(true)}>
+        <button class="text-amber-600 dark:text-amber-400 text-left hover:bg-surface-2 px-1 -mx-1 rounded" onClick={() => setEditing(true)}>
           {display}
         </button>
       </Row>
@@ -283,7 +283,7 @@ function RatingRow({ value, save }: { value: number; save: SaveFn }) {
               await save(fm => ({ ...fm, rating: ratingToStars(n) }));
               setEditing(false);
             }}
-            class="text-amber-600 hover:text-amber-800 px-0.5"
+            class="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 px-0.5"
             title={`${n} 星`}
           >
             {n <= value ? '★' : '☆'}
@@ -294,10 +294,10 @@ function RatingRow({ value, save }: { value: number; save: SaveFn }) {
             await save(fm => ({ ...fm, rating: null }));
             setEditing(false);
           }}
-          class="ml-2 text-[10px] text-stone-400 hover:text-red-600"
+          class="ml-2 text-[10px] text-muted hover:text-red-600 dark:hover:text-red-400 dark:text-red-400"
           title="清空"
         >清空</button>
-        <button onClick={() => setEditing(false)} class="ml-1 text-[10px] text-stone-400 hover:text-stone-700">取消</button>
+        <button onClick={() => setEditing(false)} class="ml-1 text-[10px] text-muted hover:text-secondary">取消</button>
       </div>
     </Row>
   );
@@ -335,11 +335,11 @@ function TextRow({
     return (
       <Row label={label}>
         <button
-          class="text-left w-full hover:bg-stone-100 px-1 -mx-1 rounded text-stone-700"
+          class="text-left w-full hover:bg-surface-2 px-1 -mx-1 rounded text-secondary"
           onClick={() => { setDraft(value == null ? '' : String(value)); setEditing(true); }}
         >
-          {empty ? <span class="text-stone-400">—</span> : String(value)}
-          <span class="edit-hint inline-flex items-center text-stone-400 ml-1"><Icon name="pencil" size={10} /></span>
+          {empty ? <span class="text-muted">—</span> : String(value)}
+          <span class="edit-hint inline-flex items-center text-muted ml-1"><Icon name="pencil" size={10} /></span>
         </button>
       </Row>
     );
@@ -363,7 +363,7 @@ function TextRow({
           if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
         }}
         onBlur={commit}
-        class="w-full px-1.5 py-0.5 border border-amber-300 rounded text-[12px] focus:outline-none focus:border-amber-500 bg-amber-50/30"
+        class="w-full px-1.5 py-0.5 border border-amber-300 dark:border-amber-700 rounded text-[12px] focus:outline-none focus:border-amber-500 dark:focus:border-amber-400 bg-amber-50/30 dark:bg-amber-950/30"
       />
     </Row>
   );
@@ -392,13 +392,13 @@ function AuthorRow({
     <Row label="作者">
       <div class="flex items-center gap-1">
         {backlinks.authorProfile ? (
-          <button onClick={() => onOpen(backlinks.authorProfile!)} class="text-sky-700 hover:underline text-left flex-1 min-w-0 truncate">
+          <button onClick={() => onOpen(backlinks.authorProfile!)} class="text-sky-700 dark:text-sky-300 hover:underline text-left flex-1 min-w-0 truncate">
             {entry.author}
           </button>
         ) : (
           <span class="flex-1 min-w-0 truncate">{entry.author}</span>
         )}
-        <button onClick={() => setEditing(true)} class="text-stone-400 hover:text-stone-700 px-1 inline-flex items-center" title="编辑"><Icon name="pencil" size={11} /></button>
+        <button onClick={() => setEditing(true)} class="text-muted hover:text-secondary px-1 inline-flex items-center" title="编辑"><Icon name="pencil" size={11} /></button>
       </div>
     </Row>
   );
@@ -416,15 +416,15 @@ function DoiRow({ value, save }: { value: string | null; save: SaveFn }) {
         {value
           ? (
             <div class="flex items-center gap-1">
-              <a href={`https://doi.org/${value}`} target="_blank" rel="noopener" class="text-sky-700 hover:underline font-mono text-[11px] break-all flex-1 min-w-0">
+              <a href={`https://doi.org/${value}`} target="_blank" rel="noopener" class="text-sky-700 dark:text-sky-300 hover:underline font-mono text-[11px] break-all flex-1 min-w-0">
                 {value}
               </a>
-              <button onClick={() => { setDraft(value); setEditing(true); }} class="text-stone-400 hover:text-stone-700 px-1 inline-flex items-center" title="编辑"><Icon name="pencil" size={11} /></button>
+              <button onClick={() => { setDraft(value); setEditing(true); }} class="text-muted hover:text-secondary px-1 inline-flex items-center" title="编辑"><Icon name="pencil" size={11} /></button>
             </div>
           )
           : (
-            <button class="text-left w-full hover:bg-stone-100 px-1 -mx-1 rounded text-stone-400" onClick={() => { setDraft(''); setEditing(true); }}>
-              — <span class="edit-hint inline-flex items-center text-stone-400 ml-1"><Icon name="pencil" size={10} /></span>
+            <button class="text-left w-full hover:bg-surface-2 px-1 -mx-1 rounded text-muted" onClick={() => { setDraft(''); setEditing(true); }}>
+              — <span class="edit-hint inline-flex items-center text-muted ml-1"><Icon name="pencil" size={10} /></span>
             </button>
           )
         }
@@ -448,7 +448,7 @@ function DoiRow({ value, save }: { value: string | null; save: SaveFn }) {
           if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
         }}
         onBlur={commit}
-        class="w-full px-1.5 py-0.5 border border-amber-300 rounded font-mono text-[11px] focus:outline-none focus:border-amber-500 bg-amber-50/30"
+        class="w-full px-1.5 py-0.5 border border-amber-300 dark:border-amber-700 rounded font-mono text-[11px] focus:outline-none focus:border-amber-500 dark:focus:border-amber-400 bg-amber-50/30 dark:bg-amber-950/30"
       />
     </Row>
   );
@@ -484,24 +484,24 @@ function ThemesEditor({
   return (
     <div>
       <div class="flex items-center justify-between mb-2">
-        <div class="text-[11px] uppercase tracking-wider text-stone-500 font-semibold">主题</div>
+        <div class="text-[11px] uppercase tracking-wider text-muted font-semibold">主题</div>
         <button
           onClick={() => setAdding(v => !v)}
           disabled={disabled}
-          class="text-[10px] text-stone-500 hover:text-stone-800 px-1.5 py-0.5 rounded hover:bg-stone-100"
+          class="text-[10px] text-muted hover:text-primary px-1.5 py-0.5 rounded hover:bg-surface-2"
         >
           {adding ? '取消' : '+ 添加'}
         </button>
       </div>
       <div class="flex flex-wrap gap-1">
         {themes.map(th => (
-          <span key={th} class="text-[11px] inline-flex items-center gap-0.5 rounded border border-stone-200 bg-stone-50 hover:bg-amber-50 hover:border-amber-300 transition">
-            <button onClick={() => onThemeClick(th)} class="px-1.5 py-0.5 hover:text-amber-800">{th}</button>
-            <button onClick={() => remove(th)} title="移除" class="px-1 text-stone-400 hover:text-red-600 border-l border-stone-200 inline-flex items-center"><Icon name="x" size={10} /></button>
+          <span key={th} class="text-[11px] inline-flex items-center gap-0.5 rounded border border-base bg-page hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:border-amber-300 dark:hover:border-amber-700 transition">
+            <button onClick={() => onThemeClick(th)} class="px-1.5 py-0.5 hover:text-amber-800 dark:hover:text-amber-200">{th}</button>
+            <button onClick={() => remove(th)} title="移除" class="px-1 text-muted hover:text-red-600 dark:hover:text-red-400 dark:text-red-400 border-l border-base inline-flex items-center"><Icon name="x" size={10} /></button>
           </span>
         ))}
         {themes.length === 0 && !adding && (
-          <span class="text-[11px] text-stone-400">—</span>
+          <span class="text-[11px] text-muted">—</span>
         )}
       </div>
       {adding && (
@@ -516,7 +516,7 @@ function ThemesEditor({
               if (e.key === 'Enter') { e.preventDefault(); addOne(draft).then(() => setAdding(false)); }
               if (e.key === 'Escape') { e.preventDefault(); setAdding(false); setDraft(''); }
             }}
-            class="w-full px-2 py-1 border border-amber-300 rounded text-[12px] focus:outline-none focus:border-amber-500 bg-amber-50/30"
+            class="w-full px-2 py-1 border border-amber-300 dark:border-amber-700 rounded text-[12px] focus:outline-none focus:border-amber-500 dark:focus:border-amber-400 bg-amber-50/30 dark:bg-amber-950/30"
           />
         </div>
       )}
