@@ -42,6 +42,31 @@
 
   --bg-inverse:      28  25  23;  /* stone-900 — used for active pills */
   --text-inverse:   255 255 255;
+
+  /* ------------------------------------------------------------- *
+   * Reading typography tokens.
+   *
+   * One unified scale shared by the rendered article (.prose-body)
+   * and the markdown editor (CodeMirror .cm-scroller). Driven at
+   * runtime by app.tsx writing these vars on <html> from settings.
+   *
+   * CONTRACT — when adding new components:
+   *   - "reading content" (rendered article, editor, anything that
+   *     surfaces vault prose) consumes var(--reader-font-*).
+   *     Headings/code/blockquote inside those containers MUST use
+   *     `em` (relative to the body), never `rem`/`px`, so the
+   *     whole subtree scales when the user moves the slider.
+   *   - "chrome" (sidebar, tab bar, property panel, cards, settings
+   *     panel) uses Tailwind utilities directly (text-[11px] etc.)
+   *     — it's intentionally fixed-size and does NOT track the
+   *     reader slider.
+   *
+   * This split mirrors Obsidian's `--font-text-*` vs `--font-ui-*`
+   * convention.
+   * ------------------------------------------------------------- */
+  --reader-font-family: "PingFang SC", "PingFang TC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", system-ui, sans-serif;
+  --reader-font-size: 16px;
+  --reader-line-height: 1.78;
 }
 
 /* Warm "dimmed" dark mode — inspired by GitHub Dark Dimmed but tuned to the
@@ -79,12 +104,25 @@
 @layer components {
   .card { content-visibility: auto; contain-intrinsic-size: 220px; }
 
-  .prose-body h1 { font-size: 1.5rem; font-weight: 600; margin: 1.2em 0 0.6em; }
-  .prose-body h2 { font-size: 1.2rem; font-weight: 600; margin: 1.1em 0 0.5em; border-bottom: 1px solid rgb(var(--border-base)); padding-bottom: 0.2em; }
-  .prose-body h3 { font-size: 1.05rem; font-weight: 600; margin: 1em 0 0.4em; }
-  .prose-body p { margin: 0.6em 0; line-height: 1.75; }
+  /* Reading article. font-size/family/line-height come from --reader-*
+   * tokens (see :root). All children sized in em so the entire
+   * subtree scales with the user's reader-font-size setting. */
+  .prose-body {
+    font-family: var(--reader-font-family);
+    font-size: var(--reader-font-size);
+    line-height: var(--reader-line-height);
+  }
+  /* Heading scale mirrors NoteEditor's .cm-h1/2/3/4 so read and edit
+   * modes share the exact visual hierarchy. Tweak both sides together. */
+  .prose-body h1 { font-size: 1.7em;  font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; margin: 1.2em 0 0.6em; }
+  .prose-body h2 { font-size: 1.4em;  font-weight: 700; line-height: 1.3;  margin: 1.1em 0 0.5em; border-bottom: 1px solid rgb(var(--border-base)); padding-bottom: 0.2em; }
+  .prose-body h3 { font-size: 1.2em;  font-weight: 600; margin: 1em 0 0.4em; }
+  .prose-body h4 { font-size: 1.08em; font-weight: 600; margin: 0.9em 0 0.3em; }
+  .prose-body h5,
+  .prose-body h6 { font-size: 1em;    font-weight: 600; margin: 0.8em 0 0.3em; }
+  .prose-body p { margin: 0.65em 0; }
   .prose-body ul, .prose-body ol { margin: 0.6em 0; padding-left: 1.5em; }
-  .prose-body li { margin: 0.2em 0; line-height: 1.7; }
+  .prose-body li { margin: 0.25em 0; }
   .prose-body blockquote { border-left: 3px solid rgb(var(--border-strong)); padding-left: 1em; color: rgb(var(--text-secondary)); margin: 0.8em 0; }
   .prose-body code { background: rgb(var(--bg-surface-2)); padding: 0 0.3em; border-radius: 3px; font-size: 0.9em; }
   .prose-body strong { font-weight: 600; color: rgb(var(--text-primary)); }

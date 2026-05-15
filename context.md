@@ -172,6 +172,54 @@ UI surface:
 - "+ 新建批注" button on non-notes / "+ 新建 note" in sidebar both call
   POST `/vault/notes/<slug>.md`
 
+### Reading typography
+
+One slider in Settings ("字号" + family + 行高) drives **both** the
+rendered article and the markdown editor. The mechanism is plain CSS
+variables — no React tree pass, no editor rebuild on font tweaks.
+
+**Flow**:
+
+```
+settings.{fontFamily,fontSize,lineHeight}
+        │
+        │  useEffect in app.tsx, writes vars on <html>
+        ▼
+  :root {
+    --reader-font-family: <stack>;
+    --reader-font-size:   16px;
+    --reader-line-height: 1.78;
+  }
+        │  inherited via CSS cascade
+        ├──▶ .prose-body          (rendered article, styles.css)
+        └──▶ .cm-scroller         (CodeMirror, NoteEditor.tsx theme)
+```
+
+**Convention** (mirrors Obsidian's `--font-text-*` vs `--font-ui-*`):
+
+| Surface | Sizes from | Rationale |
+|---|---|---|
+| Article + editor ("reading content") | `var(--reader-font-*)` | one knob, slider-driven, user-controlled |
+| Sidebar, TabBar, PropertyPanel, cards, SettingsPanel ("chrome") | Tailwind utilities (`text-[11px]`, `text-[12px]`, …) | fixed UI density, not affected by reader slider |
+
+**Scaling rule for reading content**: headings / code / blockquote
+inside `.prose-body` and `.cm-*` use **`em`** (relative to body),
+never `rem` or `px`. The Tailwind Typography plugin uses the same
+trick — rem on container, em on children — so the whole subtree
+scales as a unit when the slider moves. If you add a new element
+inside `.prose-body` or a new highlight class in the editor theme,
+follow this rule or scaling will silently break.
+
+**Pitfalls**:
+
+- A `font-size: 1.05rem` on a new prose element will look right at
+  the default 16 px and silently fail to scale.
+- A new chrome component that copies `.prose-body` styling will
+  inherit the reader slider — keep chrome on Tailwind utilities.
+- CSS vars are inherited from `<html>`, so anything portaled into
+  `document.body` (modals, popovers) also picks them up — that's
+  usually fine since they sit inside the reading flow.
+
 ### Trash
 
 `DELETE /vault/notes/<name>` moves the file to
@@ -257,6 +305,75 @@ No path-copying. unplugin-icons inlines the SVG at build time.
 is importable immediately. No vite config change needed.
 
 ## Recent Changes
+
+- 2026-05-15: v0.8.6 — heading scale fix after typography unification.
+  - The article body baseline went from a hard-coded 14 px to the
+    settings-driven 16 px (default) in v0.8.5. The old heading scale
+    (h1=1.5em, h2=1.2em, h3=1.05em) was calibrated against the 14 px
+    body — at 16 px body those ratios collapsed to near-flat (h3 was
+    only ~5 % larger than body and looked indistinguishable).
+  - New scale matches the editor's `.cm-h1/2/3/4` ratios exactly so
+    read and edit modes share the same visual hierarchy:
+    h1=1.7em / h2=1.4em / h3=1.2em / h4=1.08em / h5+h6=1em. Added h4–h6
+    explicitly (previously they inherited body styling).
+  - When tuning heading sizes in the future, change both
+    `.prose-body h*` in `styles.css` and `.cm-h*` in
+    `NoteEditor.tsx`'s `buildEditorTheme` together.
+
+- 2026-05-15: v0.8.5 — unified reading typography (Obsidian-style).
+  - The "字号 / 字体 / 行高" settings used to only style the CodeMirror
+    editor; the rendered article was hard-coded `text-[14px]` with
+    `rem`-sized headings (`DocView.tsx` + `styles.css`). Same content
+    looked different in edit vs read mode.
+  - Refactored to a single source of truth: three CSS variables
+    (`--reader-font-family / --reader-font-size / --reader-line-height`)
+    written to `<html>` by `app.tsx`. Both `.prose-body` (article) and
+    `.cm-scroller` (CodeMirror) read from them via plain CSS. Headings,
+    code, blockquote inside `.prose-body` switched from `rem` to `em` so
+    the whole subtree scales when the slider moves.
+  - `EditorThemeConfig` collapsed to just `{ dark: boolean }` — font
+    fields are no longer props, so font tweaks don't trigger
+    `themeCompartment.reconfigure` (caret / undo / scroll preserved).
+  - See "Reading typography" in Key concepts for the contract that
+    future components should follow.
+
+- 2026-05-15: v0.8.4 — persistent chapter rail on chapter pages.
+  - `DocView` previously rendered the left章节 rail only when
+    `entry.type === 'book-overview'`. Clicking into a chapter dropped the
+    rail, forcing the user back through the overview to reach a sibling
+    chapter. The rail now also renders for `chapter-summary` entries —
+    keyed on `entry.book` (chapters carry this in frontmatter; overviews
+    derive it from the directory slug via `bookSlugOf`).
+  - The rail now includes the book overview as a top "↑ 概览" item, and
+    highlights whichever entry is currently open (`bg-surface-2` +
+    left accent border). The existing "↑ 回到本书" header button is
+    redundant but kept for muscle memory.
+
+- 2026-05-15: v0.8.3 — align with quasi 0.15.x schema (plural `authors`).
+  - **build-index** now reads `fm.author ?? fm.authors` for the author
+    field. The quasi 0.15.x schema (`schemas/book.py`, `schemas/paper.py`)
+    canonicalizes the field to `authors: list[Name]` (plural array,
+    required, ≥1 element). Older book overviews still use `author:`
+    (singular string or wiki-link array); the fallback handles both.
+  - **Data status** (snapshot): of 910 book overviews, 516 have neither
+    `author` nor `authors` in frontmatter — they were generated by a
+    pre-0.15 quasi build that didn't emit author at all. Backfilling
+    happens out-of-band in a separate worktree; the reader needs no
+    further changes once those frontmatter writes land on main.
+
+- 2026-05-15: v0.8.2 — author-profile backlink fixes + grouped siblings.
+  - **build-index** now reads `fm.title || fm.name` for the entry title.
+    Earlier 16 author profiles in `vault/authors/` used `name:` instead of
+    `title:` and were silently un-indexed for the author→works lookup
+    (their `entry.title` was `null`, so PropertyPanel's
+    `(entry.title ?? '').toLowerCase().trim()` key never matched any
+    work's `author` field).
+  - **PropertyPanel** splits the author-profile "作品" section into two
+    groups, "书 (N)" and "论文 (N)", instead of one flat list.
+  - **PropertyPanel siblings** ("同作者其他", shown on paper/book pages)
+    also split by type — "同作者其他·书 (N)" + "同作者其他·论文 (N)".
+    Replaced the global top-8 cap with per-group top-8, so one type can't
+    crowd out the other when an author has many works in both.
 
 - 2026-05-14: v0.7.0 — themes index + citation + PDF.
   - **ThemesView**: cross-type tag index. Chip grid sorted by count;

@@ -1,6 +1,6 @@
 {
   "name": "qua-reader",
-  "version": "0.5.0",
+  "version": "0.8.6",
   "private": true,
   "type": "module",
   "description": "Card-style reader over the qua vault (book / paper / author / topic) with editable properties",

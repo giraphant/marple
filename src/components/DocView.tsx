@@ -147,13 +147,18 @@ export function DocView({
     return () => window.removeEventListener('beforeunload', onUnload);
   }, []);
 
-  const chapters = useMemo(() => {
-    if (entry.type !== 'book-overview') return null;
-    const slug = bookSlugOf(entry);
+  // Show a chapter rail for both the book overview and any of its chapters,
+  // so users can jump between siblings without bouncing through the overview.
+  const bookContext = useMemo(() => {
+    let slug: string | null = null;
+    if (entry.type === 'book-overview') slug = bookSlugOf(entry);
+    else if (entry.type === 'chapter-summary') slug = entry.book;
     if (!slug) return null;
-    return entries
+    const overview = entries.find(e => e.type === 'book-overview' && bookSlugOf(e) === slug) ?? null;
+    const chapters = entries
       .filter(e => e.type === 'chapter-summary' && e.book === slug)
       .sort((a, b) => a.path.localeCompare(b.path));
+    return { slug, overview, chapters };
   }, [entry, entries]);
 
   const handleDelete = useCallback(async () => {
@@ -212,17 +217,35 @@ export function DocView({
       </div>
 
       <div class="flex-1 overflow-hidden flex min-h-0">
-        {chapters && chapters.length > 0 && (
+        {bookContext && bookContext.chapters.length > 0 && (
           <aside class="w-56 shrink-0 border-r border-base bg-page overflow-auto scrollbar-thin">
             <div class="px-4 py-3 text-[11px] uppercase tracking-wider text-muted font-semibold">
-              章节 ({chapters.length})
+              章节 ({bookContext.chapters.length})
             </div>
             <ul class="pb-4">
-              {chapters.map(c => (
+              {bookContext.overview && (
+                <li key={bookContext.overview.path}>
+                  <button
+                    onClick={(ev) => onNavigate(bookContext.overview!, { meta: ev.metaKey || ev.ctrlKey })}
+                    class={`w-full text-left px-4 py-1.5 text-[12px] leading-snug line-clamp-2 border-l-2 ${
+                      entry.path === bookContext.overview.path
+                        ? 'bg-surface-2 text-primary border-primary font-medium'
+                        : 'text-secondary border-transparent hover:bg-surface-2 hover:text-primary'
+                    }`}
+                  >
+                    ↑ 概览
+                  </button>
+                </li>
+              )}
+              {bookContext.chapters.map(c => (
                 <li key={c.path}>
                   <button
                     onClick={(ev) => onNavigate(c, { meta: ev.metaKey || ev.ctrlKey })}
-                    class="w-full text-left px-4 py-1.5 text-[12px] text-secondary hover:bg-surface-2 hover:text-primary leading-snug line-clamp-2"
+                    class={`w-full text-left px-4 py-1.5 text-[12px] leading-snug line-clamp-2 border-l-2 ${
+                      entry.path === c.path
+                        ? 'bg-surface-2 text-primary border-primary font-medium'
+                        : 'text-secondary border-transparent hover:bg-surface-2 hover:text-primary'
+                    }`}
                   >
                     {c.title || c.path.split('/').pop()!.replace(/\.md$/, '')}
                   </button>
@@ -245,7 +268,7 @@ export function DocView({
               : <div class="flex-1 overflow-auto scrollbar-thin">
                   <article
                     onClick={onArticleClick as unknown as JSX.MouseEventHandler<HTMLElement>}
-                    class="prose-body text-[14px] text-primary px-8 py-6 max-w-3xl"
+                    class="prose-body text-primary px-8 py-6 max-w-3xl"
                     dangerouslySetInnerHTML={{ __html: rendered }}
                   />
                 </div>

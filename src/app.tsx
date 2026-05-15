@@ -15,7 +15,7 @@ import {
   postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
   newIdeaDraft, ideaEntryFromDraft, reindex,
 } from './api';
-import { loadSettings, saveSettings, type Settings } from './settings';
+import { loadSettings, saveSettings, fontStack, type Settings } from './settings';
 
 const TABS_KEY = 'qua-reader-tabs-v3';
 const ACTIVE_KEY = 'qua-reader-active-tab';
@@ -128,6 +128,17 @@ export function App() {
       apply(settings.theme);
     }
   }, [settings.theme]);
+
+  // Mirror the reading-typography settings into CSS variables on <html>.
+  // Both .prose-body (rendered article) and CodeMirror's editor read these
+  // through plain CSS — no React tree pass needed, no editor rebuild on
+  // font tweaks. See "Reading typography" in context.md for the contract.
+  useEffect(() => {
+    const s = document.documentElement.style;
+    s.setProperty('--reader-font-family', fontStack(settings.fontFamily));
+    s.setProperty('--reader-font-size', `${settings.fontSize}px`);
+    s.setProperty('--reader-line-height', String(settings.lineHeight));
+  }, [settings.fontFamily, settings.fontSize, settings.lineHeight]);
 
   // Cmd/Ctrl+K opens the global search palette.
   useEffect(() => {
@@ -470,15 +481,10 @@ export function App() {
   const editable = activeDocEntry
     ? (activeDocEntry.type === 'note' || settings.allowEditLLMBody)
     : false;
-  const editorTheme = useMemo(
-    () => ({
-      fontFamily: settings.fontFamily,
-      fontSize: settings.fontSize,
-      lineHeight: settings.lineHeight,
-      dark: resolvedDark,
-    }),
-    [settings.fontFamily, settings.fontSize, settings.lineHeight, resolvedDark],
-  );
+  // Editor's reactive surface is just dark/light — font face & size flow
+  // in through CSS vars on <html>, so changing them doesn't rebuild the
+  // editor (preserves caret / undo / scroll).
+  const editorTheme = useMemo(() => ({ dark: resolvedDark }), [resolvedDark]);
 
   if (!entries) return <div class="p-10 text-muted">加载索引中…</div>;
 

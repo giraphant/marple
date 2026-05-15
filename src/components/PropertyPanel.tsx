@@ -61,8 +61,7 @@ export function PropertyPanel({
       }
       out.authorProfile = profile;
       out.siblings = [...siblings]
-        .sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0))
-        .slice(0, 8);
+        .sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0));
 
       const own = new Set(entry.themes ?? []);
       if (own.size >= 2) {
@@ -155,20 +154,33 @@ export function PropertyPanel({
         </div>
       )}
 
-      {backlinks.works && backlinks.works.length > 0 && (
-        <Section title={`作品 (${backlinks.works.length})`}>
-          {backlinks.works.slice(0, 30).map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
-          {backlinks.works.length > 30 && (
-            <div class="text-[10px] text-muted pl-2">+{backlinks.works.length - 30} 条</div>
-          )}
-        </Section>
-      )}
+      {backlinks.works && backlinks.works.length > 0 && (() => {
+        const books = backlinks.works.filter(w => w.type === 'book-overview');
+        const papers = backlinks.works.filter(w => w.type === 'paper-analysis');
+        const renderGroup = (title: string, list: Entry[]) => list.length > 0 && (
+          <Section title={`${title} (${list.length})`}>
+            {list.slice(0, 30).map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
+            {list.length > 30 && (
+              <div class="text-[10px] text-muted pl-2">+{list.length - 30} 条</div>
+            )}
+          </Section>
+        );
+        return <>{renderGroup('书', books)}{renderGroup('论文', papers)}</>;
+      })()}
 
-      {backlinks.siblings && backlinks.siblings.length > 0 && (
-        <Section title="同作者其他">
-          {backlinks.siblings.map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
-        </Section>
-      )}
+      {backlinks.siblings && backlinks.siblings.length > 0 && (() => {
+        const books = backlinks.siblings.filter(w => w.type === 'book-overview');
+        const papers = backlinks.siblings.filter(w => w.type === 'paper-analysis');
+        const renderGroup = (label: string, list: Entry[]) => list.length > 0 && (
+          <Section title={`同作者其他·${label} (${list.length})`}>
+            {list.slice(0, 8).map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
+            {list.length > 8 && (
+              <div class="text-[10px] text-muted pl-2">+{list.length - 8} 条</div>
+            )}
+          </Section>
+        );
+        return <>{renderGroup('书', books)}{renderGroup('论文', papers)}</>;
+      })()}
 
       {backlinks.similar && backlinks.similar.length > 0 && (
         <Section title="同主题相似">
