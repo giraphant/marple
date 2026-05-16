@@ -113,13 +113,21 @@
     line-height: var(--reader-line-height);
   }
   /* Heading scale mirrors NoteEditor's .cm-h1/2/3/4 so read and edit
-   * modes share the exact visual hierarchy. Tweak both sides together. */
-  .prose-body h1 { font-size: 1.7em;  font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; margin: 1.2em 0 0.6em; }
-  .prose-body h2 { font-size: 1.4em;  font-weight: 700; line-height: 1.3;  margin: 1.1em 0 0.5em; border-bottom: 1px solid rgb(var(--border-base)); padding-bottom: 0.2em; }
-  .prose-body h3 { font-size: 1.2em;  font-weight: 600; margin: 1em 0 0.4em; }
-  .prose-body h4 { font-size: 1.08em; font-weight: 600; margin: 0.9em 0 0.3em; }
+   * modes share the exact visual hierarchy. Tweak both sides together.
+   *
+   * Style: modern documentation (Linear / Vercel / iA Writer-ish).
+   *  - No border-bottom on H2 — section breaks live in whitespace, not
+   *    in chrome. Generous top margin (2em) does the visual cutting.
+   *  - First H2 in an article gets a shorter top margin so we don't
+   *    open with a giant gap above "思想肖像" etc.
+   */
+  .prose-body h1 { font-size: 1.7em;  font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; margin: 0 0 0.6em; }
+  .prose-body h2 { font-size: 1.45em; font-weight: 700; line-height: 1.3;  margin: 2em 0 0.5em; }
+  .prose-body h2:first-child { margin-top: 0.4em; }
+  .prose-body h3 { font-size: 1.18em; font-weight: 600; margin: 1.4em 0 0.35em; }
+  .prose-body h4 { font-size: 1.05em; font-weight: 600; margin: 1.1em 0 0.3em; }
   .prose-body h5,
-  .prose-body h6 { font-size: 1em;    font-weight: 600; margin: 0.8em 0 0.3em; }
+  .prose-body h6 { font-size: 1em;    font-weight: 600; margin: 0.9em 0 0.3em; }
   .prose-body p { margin: 0.65em 0; }
   .prose-body ul, .prose-body ol { margin: 0.6em 0; padding-left: 1.5em; }
   .prose-body li { margin: 0.25em 0; }

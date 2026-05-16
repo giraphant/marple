@@ -7,6 +7,11 @@ import { splitSections, type Segment } from './sections';
 import { ConceptTable, isConceptH2 } from './ConceptTable';
 import { QuoteCards, isQuoteH2 } from './QuoteCards';
 import { ProjectTabs, isProjectTabsH2 } from './ProjectTabs';
+import { ChapterFlow, isChapterFlowH2 } from './ChapterFlow';
+import { ReadingList, isReadingListH2 } from './ReadingList';
+import { WorksList, isWorksH2 } from './WorksList';
+import { IntroLead, isIntroLeadH2 } from './IntroLead';
+import { TheoryNetwork, isTheoryNetworkH2 } from './TheoryNetwork';
 
 /**
  * Segment-aware body renderer for non-editable docs.
@@ -45,7 +50,7 @@ export function BodyView({ entry, body, wikiIndex, onWikiClick }: Props) {
 
   return (
     <article
-      class="prose-body text-[14px] text-primary px-8 py-6 max-w-3xl"
+      class="prose-body text-primary px-8 py-6 mx-auto max-w-5xl"
       onClick={onClickAnchor as unknown as JSX.MouseEventHandler<HTMLElement>}
     >
       {segments.map((seg, i) => (
@@ -96,6 +101,51 @@ function SegmentRender({ entry, segment, wikiIndex, onWikiClick }: {
       <section>
         <h2>{title}</h2>
         <ProjectTabs content={content} wikiIndex={wikiIndex} entryKey={entry.path} />
+      </section>
+    );
+  }
+
+  if (isChapterFlowH2(title)) {
+    return (
+      <section>
+        <h2>{title}</h2>
+        <ChapterFlow content={content} wikiIndex={wikiIndex} />
+      </section>
+    );
+  }
+
+  if (isReadingListH2(title)) {
+    return (
+      <section>
+        <h2>{title}</h2>
+        <ReadingList content={content} wikiIndex={wikiIndex} />
+      </section>
+    );
+  }
+
+  if (isWorksH2(title)) {
+    return (
+      <section>
+        <h2>{title}</h2>
+        <WorksList content={content} wikiIndex={wikiIndex} onWikiClick={onWikiClick} />
+      </section>
+    );
+  }
+
+  if (isIntroLeadH2(title)) {
+    return (
+      <section>
+        <h2>{title}</h2>
+        <IntroLead content={content} wikiIndex={wikiIndex} />
+      </section>
+    );
+  }
+
+  if (isTheoryNetworkH2(title)) {
+    return (
+      <section>
+        <h2>{title}</h2>
+        <TheoryNetwork content={content} wikiIndex={wikiIndex} onWikiClick={onWikiClick} />
       </section>
     );
   }

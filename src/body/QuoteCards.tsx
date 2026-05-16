@@ -119,9 +119,14 @@ function QuoteCard({ item, wikiIndex }: { item: QuoteItem; wikiIndex: Map<string
 
   return (
     <figure class="group relative rounded-md bg-rose-50/40 dark:bg-rose-950/20 border-l-4 border-rose-300 dark:border-rose-700 pl-4 pr-3 py-3">
+      {/* `!border-l-0 !pl-0 !my-0` strips .prose-body's default 3-px blockquote
+          frame so we don't get a double left bar inside the figure's pink
+          frame. font-family puts Georgia/Charter first so English uses a
+          proper English serif at full size; Songti picks up the CJK glyphs
+          via per-glyph fallback. */}
       <blockquote
-        class="text-[14.5px] leading-relaxed text-primary font-serif"
-        style={{ fontFamily: '"Songti SC", "STSong", Georgia, serif' }}
+        class="!border-l-0 !pl-0 !my-0 text-[15.5px] leading-relaxed text-primary"
+        style={{ fontFamily: 'Georgia, "Iowan Old Style", "Charter", "Songti SC", "STSong", serif' }}
         dangerouslySetInnerHTML={{ __html: quoteHtml }}
       />
       {(item.source || item.attribution) && (

@@ -13,9 +13,10 @@ import { resolveWikilinks } from '../wiki';
  *
  * Strategy:
  * - Split content on `### H3` boundaries.
- * - With ≥2 tabs: render as a tab bar + active tab body.
- * - With 0 or 1 tabs: just render the whole section through marked
- *   (no value in adding a single-tab strip).
+ * - With ≥1 tabs: always render tab bar + active tab body (uniform UI,
+ *   even with a single project the tab strip explicitly labels which
+ *   project this section is about).
+ * - With 0 tabs: fall through to plain marked.
  *
  * Active-tab state is component-local; switching entries unmounts the
  * component so each doc starts fresh on its first tab.
@@ -71,8 +72,8 @@ export function ProjectTabs({ content, wikiIndex, entryKey }: Props) {
   const [active, setActive] = useState(0);
   useEffect(() => { setActive(0); }, [entryKey]);
 
-  if (tabs.length < 2) {
-    // 0 or 1 project — fall through to plain marked render.
+  if (tabs.length === 0) {
+    // No H3s — section is a plain paragraph block, marked handles it.
     return <Plain content={content} wikiIndex={wikiIndex} />;
   }
 

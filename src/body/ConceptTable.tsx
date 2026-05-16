@@ -23,14 +23,14 @@ import { parseMarkdownTable } from './sections';
  */
 
 type ColumnRole =
-  | 'name'         // primary name (rendered bold, slightly larger)
-  | 'translation'  // English / 译名 (small italic muted)
-  | 'coiner'       // 提出者 / 来源 (chip)
-  | 'refs'         // 出现章节 / 关联章节 (split into chips)
-  | 'works'        // 来源作品 (italic, wikilinks preserved)
-  | 'evolution'    // 演化轨迹 (prose)
-  | 'status'       // 当前状态 (chip)
-  | 'definition'   // 定义 / 说明 (prose, widest column)
+  | 'name'         // 概念    — primary, bold
+  | 'translation'  // 英文    — italic muted small
+  | 'coiner'       // 提出者  — chip (wraps when long)
+  | 'refs'         // 出现章节 — split into chips
+  | 'definition'   // 定义    — prose, widest column
+  | 'works'        // 来源作品 — italic, wikilinks preserved
+  | 'evolution'    // 演化轨迹 — prose
+  | 'status'       // 当前状态 — chip
   | 'unknown';
 
 interface Props {
@@ -39,18 +39,20 @@ interface Props {
   onWikiClick: (path: string, modifiers: { meta: boolean }) => void;
 }
 
+/** Map a header cell to a role. Uses exact SPEC column names — the data
+ *  pipeline is canonicalising to these, so we don't need fuzzy aliases. */
 function classifyHeader(h: string): ColumnRole {
-  const k = h.toLowerCase().trim();
-  // Order matters: more specific keywords first.
-  if (/^(概念|术语|关键概念|名称|中文|concept|term)$/i.test(k)) return 'name';
-  if (/(英文|译名|english|en\.?)/i.test(k)) return 'translation';
-  if (/(提出者|来源|出处|作者|coiner|origin)/i.test(k) && !/作品/.test(k)) return 'coiner';
-  if (/(出现章节|关联章节|涉及章节|^章节$|chapters?)/i.test(k)) return 'refs';
-  if (/(来源作品|代表作品|works?|主要作品)/i.test(k)) return 'works';
-  if (/(演化|演变|轨迹|发展|evolution)/i.test(k)) return 'evolution';
-  if (/(当前状态|状态|status)/i.test(k)) return 'status';
-  if (/(定义|说明|含义|description|阐释)/i.test(k)) return 'definition';
-  return 'unknown';
+  switch (h.trim()) {
+    case '概念':     return 'name';
+    case '英文':     return 'translation';
+    case '提出者':   return 'coiner';
+    case '出现章节': return 'refs';
+    case '定义':     return 'definition';
+    case '来源作品': return 'works';
+    case '演化轨迹': return 'evolution';
+    case '当前状态': return 'status';
+    default:         return 'unknown';
+  }
 }
 
 /** Render inline markdown (italic, wikilinks already resolved to HTML) for a
@@ -94,7 +96,7 @@ export function ConceptTable({ content, wikiIndex, onWikiClick }: Props) {
     // Section didn't parse as a table — fall back to letting marked render it.
     return (
       <div
-        class="prose-body text-[14px] text-primary"
+        class="prose-body text-primary"
         onClick={onClick as unknown as JSX.MouseEventHandler<HTMLDivElement>}
         dangerouslySetInnerHTML={{ __html: marked.parse(resolveWikilinks(content, wikiIndex)) as string }}
       />
@@ -143,15 +145,19 @@ export function ConceptTable({ content, wikiIndex, onWikiClick }: Props) {
 }
 
 function colHeadCls(role: ColumnRole): string {
+  // Min-widths force the table to overflow its container at narrow viewports,
+  // triggering horizontal scroll instead of compressing prose columns to a
+  // 1-char-per-line "vertical Chinese" disaster. No `whitespace-nowrap` —
+  // chips wrap, names wrap, only the prose columns get generous min-widths.
   switch (role) {
-    case 'name':        return 'min-w-[7em]';
+    case 'name':        return 'min-w-[6em]';
     case 'translation': return 'min-w-[8em]';
-    case 'coiner':      return 'min-w-[5em] whitespace-nowrap';
+    case 'coiner':      return 'min-w-[6em]';
     case 'refs':        return 'min-w-[6em]';
-    case 'works':       return 'min-w-[10em]';
-    case 'evolution':   return '';
-    case 'status':      return 'min-w-[6em] whitespace-nowrap';
-    case 'definition':  return '';
+    case 'works':       return 'min-w-[12em]';
+    case 'evolution':   return 'min-w-[18em]';
+    case 'status':      return 'min-w-[6em]';
+    case 'definition':  return 'min-w-[20em]';
     default:            return '';
   }
 }
@@ -159,11 +165,11 @@ function colBodyCls(role: ColumnRole): string {
   switch (role) {
     case 'name':        return 'font-semibold leading-snug';
     case 'translation': return 'italic text-secondary text-[12px] leading-snug';
-    case 'coiner':      return 'text-secondary text-[12px] whitespace-nowrap';
+    case 'coiner':      return 'text-secondary text-[12px] leading-snug';
     case 'refs':        return 'text-[12px]';
     case 'works':       return 'text-[12px] leading-snug';
     case 'evolution':   return 'text-secondary leading-relaxed';
-    case 'status':      return 'text-[12px] whitespace-nowrap';
+    case 'status':      return 'text-[12px] leading-snug';
     case 'definition':  return 'text-secondary leading-relaxed';
     default:            return 'text-secondary leading-relaxed';
   }

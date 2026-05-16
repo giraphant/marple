@@ -306,6 +306,61 @@ is importable immediately. No vite config change needed.
 
 ## Recent Changes
 
+- 2026-05-16: v0.9.0 — typed body renderers, sidebar collapse,
+  citation formats, EPUB-style book rail.
+  - New `src/body/` package. Splits the article body by `## H2` and
+    routes typed sections to specialised renderers; unknown sections
+    fall back to plain `marked`. Lives in `BodyView.tsx`.
+    - `ConceptTable` — `## 关键概念` / `## 核心概念谱系`. Header-driven
+      column roles (`概念 / 英文 / 提出者 / 出现章节 / 定义 / 来源作品 /
+      演化轨迹 / 当前状态`). Refs column splits on `,，、` into chips;
+      coiner/status render as chips; prose columns get min-widths so
+      the table overflows to horizontal scroll at narrow viewports
+      instead of compressing to vertical-Chinese single-char columns.
+    - `QuoteCards` — `## 可引用观点` / `## 金句要点` / `## 可引用段落`.
+      Pink-bordered cards, Georgia-first serif so English renders at
+      full proportions, copy-with-source button (clipboard).
+    - `ProjectTabs` — `## 项目关联` / `## 与项目主题的关联` / `##
+      相关引用文献`. Each `### H3` becomes a tab; renders even with
+      a single H3 (uniform UI, the tab strip labels the project).
+    - `ChapterFlow` — `## 章节(间)?逻辑` AND `## 学术轨迹` (same
+      `**bold prefix**` paragraph shape). Vertical timeline with dots
+      on the line (ring-page mask "cuts" the line through each dot).
+      Requires `!pl-0` to beat `.prose-body ol { padding-left: 1.5em }`'s
+      class+element specificity.
+    - `ReadingList` — `## 推荐精读章节`. Numbered cards with badge.
+    - `WorksList` — `## 代表著作`. Per-book cards parsed from
+      `[[wikilink|Title]]（year）描述`. Year chip + rating star if the
+      wiki target resolves to a vault entry. Clickable title navigates
+      via the SPA tab system.
+    - `IntroLead` — `## 思想肖像`. Lede-paragraph treatment (15px,
+      1.85 line-height, amber-300 left rule).
+    - `TheoryNetwork` — `## 理论网络`. Per-theorist card with bold
+      name + comma-split keyword chips + relationship prose.
+  - **Sidebar collapsible**: 240px → 56px icon-only via Cmd+B or
+    chevron in header. `settings.sidebarCollapsed` persisted.
+  - **Sidebar drag-reorder**: HTML5 drag on the 6 object-type rows;
+    order saved to `settings.typeOrder` and consumed by
+    `orderedTypes(settings)` in App.
+  - **DocView chapter rail** (EPUB-style): also shows on chapter pages
+    (not just on book-overview); rail header has a "概述" link back to
+    the book overview; current entry highlighted; chapter titles
+    single-line `truncate` with hover tooltip.
+  - **PropertyPanel works/siblings split by type**: "作品 (N)" /
+    "同作者 · ..." sections split into 图书 / 论文 sub-groups (render-
+    time filter on `backlinks.works` / `backlinks.siblings`).
+  - **Citation formats**: 4 presets (`inline-en` / `inline-zh` / `title`
+    / `markdown`) in `citation.ts`. Default chosen in Settings → 引用;
+    inline ▾ menu next to the 复制引用 button switches on the fly.
+  - **Type label**: 书 → 图书 so all 6 type labels are 2-char and align
+    in the sidebar.
+  - **Sidebar text labels**: `Object types` → `物件`, `横切视图` → `视图`.
+  - **H2 styling**: dropped the GitHub-readme `border-bottom` on h2;
+    rely on `margin-top: 2em` + weight for section breaks. First h2/h1
+    in an article gets a shrunk top margin so the doc doesn't open
+    with a giant gap.
+  - **PropertyPanel width**: 320px → 288px (`w-72`).
+
 - 2026-05-15: v0.8.7 — per-type property panel field visibility.
   - `PropertyPanel` used to render the full row set
     (rating/year/author/source/DOI/topic/chapters_analyzed) for every
