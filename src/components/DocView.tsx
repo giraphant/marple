@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'preact/hooks';
-import type { JSX } from 'preact';
-import { marked } from 'marked';
 import type { Entry } from '../types';
 import { TYPE_BY_ID } from '../types';
-import { resolveWikilinks, bookSlugOf } from '../wiki';
+import { bookSlugOf } from '../wiki';
 import { fetchEntryText, putEntryText, replaceBody } from '../api';
 import { PropertyPanel } from './PropertyPanel';
 import { NoteEditor, type EditorThemeConfig } from './NoteEditor';
 import { Icon } from './Icon';
+import { BodyView } from '../body/BodyView';
+import type { CitationFormat } from '../citation';
 
 interface Props {
   entry: Entry;
@@ -17,6 +17,7 @@ interface Props {
   wikiIndex: Map<string, Entry>;
   editable: boolean;
   editorTheme: EditorThemeConfig;
+  citationFormat: CitationFormat;
   onNavigate: (entry: Entry, modifiers: { meta: boolean }) => void;
   onThemeClick: (theme: string, fromType?: Entry['type']) => void;
   onUpdated: (updated: Entry) => void;
@@ -30,10 +31,11 @@ const SAVE_DEBOUNCE_MS = 1500;
 
 export function DocView({
   entry, entries, authorIndex, annotationIndex, wikiIndex, editable, editorTheme,
+  citationFormat,
   onNavigate, onThemeClick, onUpdated, onCreateAnnotation, onDelete,
 }: Props) {
   const [rawText, setRawText] = useState('');
-  const [rendered, setRendered] = useState('');
+  const [loadError, setLoadError] = useState(false);
   const [body, setBody] = useState('');
   const [loading, setLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -81,7 +83,7 @@ export function DocView({
     let cancelled = false;
     const path = entry.path;
     setLoading(true);
-    setRendered('');
+    setLoadError(false);
     setRawText('');
     setBody('');
     setSaveStatus('idle');
@@ -96,17 +98,8 @@ export function DocView({
         bodyRef.current = bodyOnly;
         setRawText(text);
         setBody(bodyOnly);
-        if (!editable) {
-          const resolved = resolveWikilinks(bodyOnly, wikiIndex);
-          const html = marked.parse(resolved);
-          if (typeof html === 'string') setRendered(html);
-          else {
-            const s = await Promise.resolve(html);
-            if (!cancelled) setRendered(s);
-          }
-        }
       } catch {
-        if (!cancelled) setRendered('<p class="text-red-600 dark:text-red-400">加载失败</p>');
+        if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -126,14 +119,9 @@ export function DocView({
     }, SAVE_DEBOUNCE_MS);
   }, [flushSave]);
 
-  const onArticleClick = useCallback((e: MouseEvent) => {
-    const target = e.target as HTMLElement | null;
-    const a = target?.closest?.('[data-wiki]') as HTMLElement | null;
-    if (!a) return;
-    e.preventDefault();
-    const path = a.dataset.wiki;
+  const onWikiClick = useCallback((path: string, modifiers: { meta: boolean }) => {
     const next = entries.find(x => x.path === path);
-    if (next) onNavigate(next, { meta: e.metaKey || e.ctrlKey });
+    if (next) onNavigate(next, modifiers);
   }, [entries, onNavigate]);
 
   useEffect(() => {
@@ -147,13 +135,21 @@ export function DocView({
     return () => window.removeEventListener('beforeunload', onUnload);
   }, []);
 
-  const chapters = useMemo(() => {
-    if (entry.type !== 'book-overview') return null;
-    const slug = bookSlugOf(entry);
+  // EPUB-style book context: when looking at a book-overview OR any of its
+  // chapters, we want the same left rail visible. `overview` is the book's
+  // top-level entry, `chapters` is the ordered chapter list. Returns null
+  // when the current entry isn't part of a book.
+  const bookContext = useMemo(() => {
+    let slug: string | null = null;
+    if (entry.type === 'book-overview') slug = bookSlugOf(entry);
+    else if (entry.type === 'chapter-summary') slug = entry.book;
     if (!slug) return null;
-    return entries
+    const overview = entries.find(e => e.type === 'book-overview' && bookSlugOf(e) === slug) ?? null;
+    const chapters = entries
       .filter(e => e.type === 'chapter-summary' && e.book === slug)
       .sort((a, b) => a.path.localeCompare(b.path));
+    if (!overview && chapters.length === 0) return null;
+    return { slug, overview, chapters };
   }, [entry, entries]);
 
   const handleDelete = useCallback(async () => {
@@ -182,16 +178,6 @@ export function DocView({
 
         {editable && <SaveIndicator status={saveStatus} errMsg={saveErr} />}
 
-        {entry.type === 'chapter-summary' && entry.book && (
-          <button
-            onClick={(ev) => {
-              const book = entries.find(e => e.type === 'book-overview' && bookSlugOf(e) === entry.book);
-              if (book) onNavigate(book, { meta: ev.metaKey || ev.ctrlKey });
-            }}
-            class="text-[11px] text-secondary hover:text-primary underline whitespace-nowrap"
-          >↑ 回到本书</button>
-        )}
-
         {canDelete && (
           <div class="relative">
             <button
@@ -212,23 +198,42 @@ export function DocView({
       </div>
 
       <div class="flex-1 overflow-hidden flex min-h-0">
-        {chapters && chapters.length > 0 && (
+        {bookContext && (
           <aside class="w-56 shrink-0 border-r border-base bg-page overflow-auto scrollbar-thin">
-            <div class="px-4 py-3 text-[11px] uppercase tracking-wider text-muted font-semibold">
-              章节 ({chapters.length})
-            </div>
-            <ul class="pb-4">
-              {chapters.map(c => (
-                <li key={c.path}>
-                  <button
-                    onClick={(ev) => onNavigate(c, { meta: ev.metaKey || ev.ctrlKey })}
-                    class="w-full text-left px-4 py-1.5 text-[12px] text-secondary hover:bg-surface-2 hover:text-primary leading-snug line-clamp-2"
-                  >
-                    {c.title || c.path.split('/').pop()!.replace(/\.md$/, '')}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {bookContext.overview && (
+              <div class="px-2 pt-3 pb-1">
+                <div class="text-[10px] uppercase tracking-wider text-muted font-semibold px-2 mb-1">本书</div>
+                <BookRailRow
+                  entry={bookContext.overview}
+                  label="概述"
+                  active={entry.path === bookContext.overview.path}
+                  onClick={(ev) => onNavigate(bookContext.overview!, { meta: ev.metaKey || ev.ctrlKey })}
+                />
+              </div>
+            )}
+            {bookContext.chapters.length > 0 && (
+              <>
+                <div class="px-4 pt-3 pb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
+                  章节 ({bookContext.chapters.length})
+                </div>
+                <ul class="pb-4 px-2">
+                  {bookContext.chapters.map(c => {
+                    const label = c.title || c.path.split('/').pop()!.replace(/\.md$/, '');
+                    const isActive = c.path === entry.path;
+                    return (
+                      <li key={c.path}>
+                        <BookRailRow
+                          entry={c}
+                          label={label}
+                          active={isActive}
+                          onClick={(ev) => onNavigate(c, { meta: ev.metaKey || ev.ctrlKey })}
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
           </aside>
         )}
         <div class="flex-1 min-w-0 flex flex-col">
@@ -243,20 +248,20 @@ export function DocView({
                   onSaveShortcut={() => flushSave()}
                 />
               : <div class="flex-1 overflow-auto scrollbar-thin">
-                  <article
-                    onClick={onArticleClick as unknown as JSX.MouseEventHandler<HTMLElement>}
-                    class="prose-body text-[14px] text-primary px-8 py-6 max-w-3xl"
-                    dangerouslySetInnerHTML={{ __html: rendered }}
-                  />
+                  {loadError
+                    ? <p class="px-8 py-6 text-red-600 dark:text-red-400">加载失败</p>
+                    : <BodyView entry={entry} body={body} wikiIndex={wikiIndex} onWikiClick={onWikiClick} />
+                  }
                 </div>
           }
         </div>
-        <aside class="w-80 shrink-0 border-l border-base bg-page/60 overflow-auto scrollbar-thin">
+        <aside class="w-72 shrink-0 border-l border-base bg-page/60 overflow-auto scrollbar-thin">
           <PropertyPanel
             entry={entry}
             entries={entries}
             authorIndex={authorIndex}
             annotationIndex={annotationIndex}
+            citationFormat={citationFormat}
             onOpen={(e) => onNavigate(e, { meta: false })}
             onThemeClick={(th) => onThemeClick(th, entry.type)}
             onUpdated={onUpdated}
@@ -276,4 +281,27 @@ function SaveIndicator({ status, errMsg }: { status: SaveStatus; errMsg: string 
     case 'saved':  return <span class="text-[11px] text-emerald-600 dark:text-emerald-400">已保存</span>;
     case 'error':  return <span class="text-[11px] text-red-600 dark:text-red-400" title={errMsg ?? ''}>保存失败</span>;
   }
+}
+
+/** One row in the EPUB-style book rail (concise + active highlight). */
+function BookRailRow({ entry, label, active, onClick }: {
+  entry: Entry;
+  label: string;
+  active: boolean;
+  onClick: (ev: MouseEvent) => void;
+}) {
+  void entry;
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      class={`w-full text-left px-2 py-1.5 rounded text-[12px] leading-snug truncate transition ${
+        active
+          ? 'bg-inverse text-inverse-fg font-medium'
+          : 'text-secondary hover:bg-surface-2 hover:text-primary'
+      }`}
+    >
+      {label}
+    </button>
+  );
 }

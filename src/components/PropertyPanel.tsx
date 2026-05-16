@@ -4,6 +4,7 @@ import type { Entry } from '../types';
 import { splitAuthors } from '../wiki';
 import { patchFrontmatter, applyFmToEntry } from '../api';
 import { ratingToStars } from '../frontmatter';
+import { buildCitation, CITATION_FORMATS, type CitationFormat } from '../citation';
 import { MiniRow } from './MiniRow';
 import { Icon } from './Icon';
 
@@ -12,6 +13,7 @@ interface Props {
   entries: Entry[];
   authorIndex: Map<string, Entry[]>;
   annotationIndex: Map<string, Entry[]>;
+  citationFormat: CitationFormat;
   onOpen: (entry: Entry) => void;
   onThemeClick: (theme: string) => void;
   onUpdated: (updated: Entry) => void;
@@ -21,7 +23,7 @@ interface Props {
 type SaveFn = (mutate: (fm: Record<string, unknown>) => Record<string, unknown>) => Promise<void>;
 
 export function PropertyPanel({
-  entry, entries, authorIndex, annotationIndex,
+  entry, entries, authorIndex, annotationIndex, citationFormat,
   onOpen, onThemeClick, onUpdated, onCreateAnnotation,
 }: Props) {
   // saving / err are panel-wide flags so we can disable rows during a write.
@@ -42,12 +44,26 @@ export function PropertyPanel({
   };
 
   const backlinks = useMemo(() => {
-    const out: { works?: Entry[]; siblings?: Entry[]; similar?: Entry[]; authorProfile?: Entry } = {};
+    const out: {
+      /** All works by this author (only on author-profile pages). Split by type. */
+      worksBooks?: Entry[];
+      worksPapers?: Entry[];
+      /** Other works by the SAME author (on paper / book pages). Split by type. */
+      siblingBooks?: Entry[];
+      siblingPapers?: Entry[];
+      /** Same-type entries that share ≥ 2 themes with this one. */
+      similar?: Entry[];
+      authorProfile?: Entry;
+    } = {};
+
     if (entry.type === 'author-profile') {
       const key = (entry.title ?? '').toLowerCase().trim();
       const works = key ? (authorIndex.get(key) ?? []) : [];
-      out.works = [...works].sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0));
+      const sorted = [...works].sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0));
+      out.worksBooks  = sorted.filter(w => w.type === 'book-overview');
+      out.worksPapers = sorted.filter(w => w.type === 'paper-analysis');
     }
+
     if (entry.type === 'paper-analysis' || entry.type === 'book-overview') {
       const names = splitAuthors(entry.author);
       const siblings = new Set<Entry>();
@@ -60,9 +76,11 @@ export function PropertyPanel({
         for (const w of (authorIndex.get(key) ?? [])) if (w.path !== entry.path) siblings.add(w);
       }
       out.authorProfile = profile;
-      out.siblings = [...siblings]
-        .sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0))
-        .slice(0, 8);
+      const sorted = [...siblings].sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0));
+      // Cap each group independently so books and papers each get a fair shot
+      // at being visible (vs. a mixed top-8 that could be all-papers).
+      out.siblingBooks  = sorted.filter(s => s.type === 'book-overview').slice(0, 8);
+      out.siblingPapers = sorted.filter(s => s.type === 'paper-analysis').slice(0, 8);
 
       const own = new Set(entry.themes ?? []);
       if (own.size >= 2) {
@@ -112,7 +130,7 @@ export function PropertyPanel({
       )}
 
       {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
-        <ActionsRow entry={entry} />
+        <ActionsRow entry={entry} defaultFormat={citationFormat} />
       )}
       <dl class={`space-y-2 ${saving ? 'opacity-60 pointer-events-none' : ''}`}>
         <RatingRow value={entry.rating_score} save={save} />
@@ -155,18 +173,31 @@ export function PropertyPanel({
         </div>
       )}
 
-      {backlinks.works && backlinks.works.length > 0 && (
-        <Section title={`作品 (${backlinks.works.length})`}>
-          {backlinks.works.slice(0, 30).map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
-          {backlinks.works.length > 30 && (
-            <div class="text-[10px] text-muted pl-2">+{backlinks.works.length - 30} 条</div>
+      {backlinks.worksBooks && backlinks.worksBooks.length > 0 && (
+        <Section title={`图书 (${backlinks.worksBooks.length})`}>
+          {backlinks.worksBooks.slice(0, 30).map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
+          {backlinks.worksBooks.length > 30 && (
+            <div class="text-[10px] text-muted pl-2">+{backlinks.worksBooks.length - 30} 条</div>
+          )}
+        </Section>
+      )}
+      {backlinks.worksPapers && backlinks.worksPapers.length > 0 && (
+        <Section title={`论文 (${backlinks.worksPapers.length})`}>
+          {backlinks.worksPapers.slice(0, 30).map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
+          {backlinks.worksPapers.length > 30 && (
+            <div class="text-[10px] text-muted pl-2">+{backlinks.worksPapers.length - 30} 条</div>
           )}
         </Section>
       )}
 
-      {backlinks.siblings && backlinks.siblings.length > 0 && (
-        <Section title="同作者其他">
-          {backlinks.siblings.map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
+      {backlinks.siblingBooks && backlinks.siblingBooks.length > 0 && (
+        <Section title="同作者 · 图书">
+          {backlinks.siblingBooks.map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
+        </Section>
+      )}
+      {backlinks.siblingPapers && backlinks.siblingPapers.length > 0 && (
+        <Section title="同作者 · 论文">
+          {backlinks.siblingPapers.map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
         </Section>
       )}
 
@@ -179,36 +210,31 @@ export function PropertyPanel({
   );
 }
 
-// Build a markdown-style citation string for paper / book entries.
-// Format: "Author (year). *Title*. Source. https://doi.org/DOI"
-// Missing fields are skipped gracefully.
-function buildCitation(entry: Entry): string {
-  const parts: string[] = [];
-  const author = entry.author?.trim();
-  const year = entry.year != null ? String(entry.year).trim() : '';
-  const title = entry.title?.trim();
-  const source = entry.source?.trim();
-  const doi = entry.doi?.trim();
-
-  if (author && year)      parts.push(`${author} (${year}).`);
-  else if (author)         parts.push(`${author}.`);
-  else if (year)           parts.push(`(${year}).`);
-
-  if (title)               parts.push(`*${title}*.`);
-  if (source)              parts.push(`${source}.`);
-  if (doi)                 parts.push(`https://doi.org/${doi}`);
-
-  return parts.join(' ').replace(/\s+/g, ' ').trim();
-}
-
-function ActionsRow({ entry }: { entry: Entry }) {
+function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultFormat: CitationFormat }) {
+  // Per-document override so the user can pick another format on the fly
+  // without going back to settings. Resets when entry changes.
+  const [format, setFormat] = useState<CitationFormat>(defaultFormat);
   const [copied, setCopied] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setFormat(defaultFormat); }, [defaultFormat, entry.path]);
+
+  // Click-outside to close the format menu.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [menuOpen]);
 
   const copyCitation = async () => {
     setErr(null);
-    const text = buildCitation(entry);
-    if (!text) { setErr('引用字段不全（缺 author/title/year/source/doi）'); return; }
+    const text = buildCitation(entry, format);
+    if (!text) { setErr('引用字段不全'); return; }
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -223,15 +249,52 @@ function ActionsRow({ entry }: { entry: Entry }) {
     window.open(`/sources/${entry.pdf_slug}.pdf`, '_blank', 'noopener');
   };
 
+  const activeMeta = CITATION_FORMATS.find(f => f.id === format);
+  const preview = buildCitation(entry, format);
+
   return (
     <div class="flex items-center gap-2 -mt-1 text-[11px] flex-wrap">
-      <button
-        onClick={copyCitation}
-        class="px-2 py-1 rounded border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
-        title={`复制 markdown 引用\n\n预览：${buildCitation(entry).slice(0, 200)}`}
-      >
-        {copied ? '✓ 已复制' : '复制引用'}
-      </button>
+      <div class="inline-flex rounded border border-base bg-surface overflow-hidden">
+        <button
+          onClick={copyCitation}
+          class="px-2 py-1 hover:bg-page text-secondary hover:text-primary transition"
+          title={`格式：${activeMeta?.label ?? format}\n\n预览：${preview.slice(0, 200) || '(字段不全)'}`}
+        >
+          {copied ? '✓ 已复制' : '复制引用'}
+        </button>
+        <div class="relative" ref={menuRef}>
+          <button
+            onClick={() => setMenuOpen(v => !v)}
+            class="px-1.5 py-1 border-l border-base hover:bg-page text-muted hover:text-primary transition"
+            title="切换引用格式"
+            aria-label="切换引用格式"
+          >▾</button>
+          {menuOpen && (
+            <div class="absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded shadow-lg py-1 w-[260px]">
+              {CITATION_FORMATS.map(f => {
+                const isActive = f.id === format;
+                const ex = buildCitation(entry, f.id);
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => { setFormat(f.id); setMenuOpen(false); }}
+                    class={`w-full text-left px-3 py-1.5 hover:bg-page ${isActive ? 'bg-page' : ''}`}
+                  >
+                    <div class="text-[12px] text-primary flex items-center gap-1.5">
+                      <span class={`inline-block w-1 h-1 rounded-full ${isActive ? 'bg-amber-500' : 'bg-transparent'}`} />
+                      {f.label}
+                      <span class="text-muted text-[10px] ml-1">{f.hint}</span>
+                    </div>
+                    <div class="text-[11px] text-muted mt-0.5 truncate">
+                      {ex || <span class="italic">字段不全</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
       {entry.has_pdf && entry.pdf_slug && (
         <button
           onClick={openPdf}

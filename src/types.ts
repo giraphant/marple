@@ -51,7 +51,7 @@ export interface TypeMeta {
 
 export const TYPES: TypeMeta[] = [
   { id: 'paper-analysis',  label: '论文', accent: 'bg-amber-100  text-amber-800  border-amber-200'  },
-  { id: 'book-overview',   label: '书',   accent: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  { id: 'book-overview',   label: '图书', accent: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   { id: 'author-profile',  label: '作者', accent: 'bg-sky-100    text-sky-800    border-sky-200'    },
   { id: 'topic-synthesis', label: '主题', accent: 'bg-violet-100 text-violet-800 border-violet-200' },
   { id: 'chapter-summary', label: '章节', accent: 'bg-teal-100   text-teal-800   border-teal-200'   },

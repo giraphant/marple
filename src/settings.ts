@@ -1,3 +1,7 @@
+import type { EntryType, TypeMeta } from './types';
+import { TYPES } from './types';
+import type { CitationFormat } from './citation';
+
 export type FontFamily = 'sans' | 'serif' | 'mono';
 export type Theme = 'light' | 'dark' | 'system';
 
@@ -16,6 +20,22 @@ export interface Settings {
 
   /** Color theme. 'system' follows prefers-color-scheme. */
   theme: Theme;
+
+  /** User-defined order of object-type rows in the sidebar. If absent or
+   * missing some types (e.g. a new type was added since this setting was
+   * saved), `orderedTypes()` falls back to TYPES order for the missing
+   * ones. */
+  typeOrder?: EntryType[];
+
+  /** Default format for the "复制引用" button. Inline forms (en/zh) cover
+   * the most common writing case; markdown is the verbose form; title is
+   * just the work's title. */
+  citationFormat: CitationFormat;
+
+  /** Collapse the leftmost main sidebar to icon-only (~56px). Section
+   * labels disappear; rows become square icon-buttons with hover tooltips.
+   * Toggled by Cmd+B or the chevron at the sidebar's top. */
+  sidebarCollapsed?: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -24,6 +44,7 @@ const DEFAULTS: Settings = {
   fontSize: 16,
   lineHeight: 1.78,
   theme: 'system',
+  citationFormat: 'inline-en',
 };
 
 const KEY = 'qua-reader-settings';
@@ -57,3 +78,20 @@ export function fontStack(family: FontFamily): string {
 
 export const FONT_SIZE_OPTIONS = [14, 15, 16, 17, 18] as const;
 export const LINE_HEIGHT_OPTIONS = [1.6, 1.78, 1.9] as const;
+
+/** Return TYPES in the user-saved order. Unknown ids in the saved order are
+ * skipped (e.g. removed types); new types not in the saved order are appended
+ * at the end so they remain discoverable. */
+export function orderedTypes(s: Settings): TypeMeta[] {
+  const saved = s.typeOrder;
+  if (!saved || !Array.isArray(saved) || saved.length === 0) return TYPES;
+  const byId = new Map(TYPES.map(t => [t.id, t] as const));
+  const out: TypeMeta[] = [];
+  const seen = new Set<EntryType>();
+  for (const id of saved) {
+    const t = byId.get(id);
+    if (t && !seen.has(id)) { out.push(t); seen.add(id); }
+  }
+  for (const t of TYPES) if (!seen.has(t.id)) out.push(t);
+  return out;
+}

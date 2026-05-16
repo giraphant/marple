@@ -1,6 +1,7 @@
 import type { JSX } from 'preact';
 import type { Settings, FontFamily, Theme } from '../settings';
 import { FONT_SIZE_OPTIONS, LINE_HEIGHT_OPTIONS, fontStack } from '../settings';
+import { CITATION_FORMATS } from '../citation';
 import { Icon } from './Icon';
 
 const THEME_OPTIONS: { id: Theme; label: string; hint: string }[] = [
@@ -122,6 +123,40 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
               </div>
             </div>
           </label>
+        </Section>
+
+        <Section title="引用">
+          <Field label="默认格式">
+            <div class="space-y-1">
+              {CITATION_FORMATS.map(f => {
+                const active = settings.citationFormat === f.id;
+                return (
+                  <label
+                    key={f.id}
+                    class={`flex items-start gap-2 cursor-pointer px-2 py-1.5 -mx-2 rounded ${active ? 'bg-page' : 'hover:bg-page'}`}
+                  >
+                    <input
+                      type="radio"
+                      name="citationFormat"
+                      checked={active}
+                      onChange={() => set('citationFormat', f.id)}
+                      class="mt-1"
+                    />
+                    <div class="flex-1 min-w-0">
+                      <div class="text-[12px] text-primary">
+                        {f.label}
+                        <span class="text-muted text-[11px] ml-1">{f.hint}</span>
+                      </div>
+                      <div class="text-[11px] text-muted mt-0.5 truncate">
+                        {f.example}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+              <div class="text-[11px] text-muted px-2 mt-1">在阅读时点按钮旁的 ▾ 可临时切换其他格式。</div>
+            </div>
+          </Field>
         </Section>
       </div>
     </div>

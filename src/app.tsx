@@ -15,7 +15,7 @@ import {
   postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
   newIdeaDraft, ideaEntryFromDraft, reindex,
 } from './api';
-import { loadSettings, saveSettings, type Settings } from './settings';
+import { loadSettings, saveSettings, orderedTypes, type Settings } from './settings';
 
 const TABS_KEY = 'qua-reader-tabs-v3';
 const ACTIVE_KEY = 'qua-reader-active-tab';
@@ -129,18 +129,6 @@ export function App() {
     }
   }, [settings.theme]);
 
-  // Cmd/Ctrl+K opens the global search palette.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault();
-        setPaletteOpen(true);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
   useEffect(() => {
     try { localStorage.setItem(TABS_KEY, JSON.stringify(tabs)); } catch {}
   }, [tabs]);
@@ -152,6 +140,40 @@ export function App() {
     setSettings(next);
     saveSettings(next);
   }, []);
+
+  const sidebarTypes = useMemo(() => orderedTypes(settings), [settings]);
+
+  const onReorderTypes = useCallback((next: EntryType[]) => {
+    setSettings(prev => {
+      const merged: Settings = { ...prev, typeOrder: next };
+      saveSettings(merged);
+      return merged;
+    });
+  }, []);
+
+  const onToggleSidebar = useCallback(() => {
+    setSettings(prev => {
+      const merged: Settings = { ...prev, sidebarCollapsed: !prev.sidebarCollapsed };
+      saveSettings(merged);
+      return merged;
+    });
+  }, []);
+
+  // Cmd/Ctrl+K opens the global search palette.
+  // Cmd/Ctrl+B toggles the leftmost main sidebar (VSCode-style).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setPaletteOpen(true);
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        onToggleSidebar();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onToggleSidebar]);
 
   useEffect(() => {
     fetch('data/index.json').then(r => r.json()).then(setEntries);
@@ -487,6 +509,8 @@ export function App() {
       <Sidebar
         entries={entries}
         counts={counts}
+        types={sidebarTypes}
+        collapsed={!!settings.sidebarCollapsed}
         activeType={activeListType}
         trashActive={trashActive}
         themesActive={themesActive}
@@ -494,6 +518,8 @@ export function App() {
         activityActive={activityActive}
         reindexing={reindexing}
         onSelectType={openListType}
+        onReorderTypes={onReorderTypes}
+        onToggleCollapse={onToggleSidebar}
         onOpenTrash={openTrash}
         onOpenThemes={openThemes}
         onOpenActivity={openActivity}
@@ -548,6 +574,7 @@ export function App() {
                 wikiIndex={wikiIndex}
                 editable={editable}
                 editorTheme={editorTheme}
+                citationFormat={settings.citationFormat}
                 onNavigate={navigateInTab}
                 onThemeClick={applyThemeFilter}
                 onUpdated={onUpdated}
