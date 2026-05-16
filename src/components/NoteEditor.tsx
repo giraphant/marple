@@ -6,13 +6,11 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { markdown } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
-import { fontStack, type FontFamily } from '../settings';
-
 export interface EditorThemeConfig {
-  fontFamily: FontFamily;
-  fontSize: number;
-  lineHeight: number;
-  /** Resolved 'light' | 'dark' (not 'system'). Drives editor color scheme. */
+  /** Resolved 'light' | 'dark' (not 'system'). Drives editor color scheme.
+   * Font family / size / line-height are NOT props — they flow in via the
+   * global --reader-font-* CSS vars set by app.tsx, so font tweaks don't
+   * rebuild the editor (caret / undo / scroll are preserved). */
   dark: boolean;
 }
 
@@ -80,7 +78,7 @@ const highlightStyle = HighlightStyle.define([
 // Build the editor theme from settings — caller-controlled font, size, leading;
 // rest of the visual language (off-white page, muted markers, warm caret) is
 // constant and matches Ulysses sensibility.
-function buildEditorTheme({ fontFamily, fontSize, lineHeight, dark }: EditorThemeConfig): Extension {
+function buildEditorTheme({ dark }: EditorThemeConfig): Extension {
   const p = dark ? PALETTE.dark : PALETTE.light;
   return EditorView.theme({
     '&': {
@@ -90,9 +88,9 @@ function buildEditorTheme({ fontFamily, fontSize, lineHeight, dark }: EditorThem
     },
     '&.cm-focused': { outline: 'none' },
     '.cm-scroller': {
-      fontFamily: fontStack(fontFamily),
-      fontSize: `${fontSize}px`,
-      lineHeight: String(lineHeight),
+      fontFamily: 'var(--reader-font-family)',
+      fontSize: 'var(--reader-font-size)',
+      lineHeight: 'var(--reader-line-height)',
       padding: '8px 0',
     },
     '.cm-content': {
@@ -186,14 +184,15 @@ export function NoteEditor({ docId, initial, theme, onChange, onSaveShortcut }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId]);
 
-  // Hot-swap the theme compartment when settings change.
+  // Hot-swap the theme compartment when dark mode flips. Font face / size /
+  // line-height live in CSS vars, so they update without a reconfigure.
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({
       effects: themeCompartment.reconfigure(buildEditorTheme(theme)),
     });
-  }, [theme.fontFamily, theme.fontSize, theme.lineHeight, theme.dark]);
+  }, [theme.dark]);
 
   return <div ref={hostRef} class="h-full overflow-auto scrollbar-thin" />;
 }

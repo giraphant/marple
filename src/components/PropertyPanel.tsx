@@ -1,12 +1,24 @@
 import { useMemo, useState, useRef, useEffect } from 'preact/hooks';
 import type { JSX, ComponentChildren } from 'preact';
-import type { Entry } from '../types';
+import type { Entry, EntryType } from '../types';
 import { splitAuthors } from '../wiki';
 import { patchFrontmatter, applyFmToEntry } from '../api';
 import { ratingToStars } from '../frontmatter';
 import { buildCitation, CITATION_FORMATS, type CitationFormat } from '../citation';
 import { MiniRow } from './MiniRow';
 import { Icon } from './Icon';
+
+/** Which property rows apply to each entry type. Driven by the underlying
+ * file shape (an author profile has no year / DOI; a note has no rating).
+ * Themes + annotations + works render via separate sections, not here. */
+const FIELDS_BY_TYPE: Record<EntryType, ReadonlySet<string>> = {
+  'paper-analysis':  new Set(['rating', 'year', 'author', 'source', 'doi', 'topic']),
+  'book-overview':   new Set(['rating', 'year', 'author', 'source', 'topic', 'chapters_analyzed']),
+  'chapter-summary': new Set(['rating', 'year', 'author', 'source', 'topic']),
+  'author-profile':  new Set(['rating']),
+  'topic-synthesis': new Set(['rating', 'topic']),
+  'note':            new Set([]),
+};
 
 interface Props {
   entry: Entry;
@@ -45,12 +57,10 @@ export function PropertyPanel({
 
   const backlinks = useMemo(() => {
     const out: {
-      /** All works by this author (only on author-profile pages). Split by type. */
-      worksBooks?: Entry[];
-      worksPapers?: Entry[];
-      /** Other works by the SAME author (on paper / book pages). Split by type. */
-      siblingBooks?: Entry[];
-      siblingPapers?: Entry[];
+      /** All works by this author (only on author-profile pages). Split by type at render time. */
+      works?: Entry[];
+      /** Other works by the SAME author (on paper / book pages). Split at render. */
+      siblings?: Entry[];
       /** Same-type entries that share ≥ 2 themes with this one. */
       similar?: Entry[];
       authorProfile?: Entry;
@@ -59,9 +69,7 @@ export function PropertyPanel({
     if (entry.type === 'author-profile') {
       const key = (entry.title ?? '').toLowerCase().trim();
       const works = key ? (authorIndex.get(key) ?? []) : [];
-      const sorted = [...works].sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0));
-      out.worksBooks  = sorted.filter(w => w.type === 'book-overview');
-      out.worksPapers = sorted.filter(w => w.type === 'paper-analysis');
+      out.works = [...works].sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0));
     }
 
     if (entry.type === 'paper-analysis' || entry.type === 'book-overview') {
@@ -76,11 +84,8 @@ export function PropertyPanel({
         for (const w of (authorIndex.get(key) ?? [])) if (w.path !== entry.path) siblings.add(w);
       }
       out.authorProfile = profile;
-      const sorted = [...siblings].sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0));
-      // Cap each group independently so books and papers each get a fair shot
-      // at being visible (vs. a mixed top-8 that could be all-papers).
-      out.siblingBooks  = sorted.filter(s => s.type === 'book-overview').slice(0, 8);
-      out.siblingPapers = sorted.filter(s => s.type === 'paper-analysis').slice(0, 8);
+      out.siblings = [...siblings]
+        .sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0));
 
       const own = new Set(entry.themes ?? []);
       if (own.size >= 2) {
@@ -132,20 +137,26 @@ export function PropertyPanel({
       {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
         <ActionsRow entry={entry} defaultFormat={citationFormat} />
       )}
-      <dl class={`space-y-2 ${saving ? 'opacity-60 pointer-events-none' : ''}`}>
-        <RatingRow value={entry.rating_score} save={save} />
-        <TextRow label="年份" value={entry.year} field="year" parse={parseYear} save={save} />
-        <AuthorRow entry={entry} backlinks={backlinks} onOpen={onOpen} save={save} />
-        <TextRow label="来源" value={entry.source} field="source" save={save} />
-        <DoiRow value={entry.doi} save={save} />
-        <TextRow label="Topic" value={entry.topic} field="topic" save={save} />
-        {entry.chapters_analyzed != null && (
-          <div class="grid grid-cols-[60px_1fr] gap-2">
-            <dt class="text-muted text-[11px] pt-0.5">章节数</dt>
-            <dd class="min-w-0 tabular-nums">{entry.chapters_analyzed}</dd>
-          </div>
-        )}
-      </dl>
+      {(() => {
+        const fields = FIELDS_BY_TYPE[entry.type];
+        if (fields.size === 0) return null;
+        return (
+          <dl class={`space-y-2 ${saving ? 'opacity-60 pointer-events-none' : ''}`}>
+            {fields.has('rating') && <RatingRow value={entry.rating_score} save={save} />}
+            {fields.has('year') && <TextRow label="年份" value={entry.year} field="year" parse={parseYear} save={save} />}
+            {fields.has('author') && <AuthorRow entry={entry} backlinks={backlinks} onOpen={onOpen} save={save} />}
+            {fields.has('source') && <TextRow label="来源" value={entry.source} field="source" save={save} />}
+            {fields.has('doi') && <DoiRow value={entry.doi} save={save} />}
+            {fields.has('topic') && <TextRow label="Topic" value={entry.topic} field="topic" save={save} />}
+            {fields.has('chapters_analyzed') && entry.chapters_analyzed != null && (
+              <div class="grid grid-cols-[60px_1fr] gap-2">
+                <dt class="text-muted text-[11px] pt-0.5">章节数</dt>
+                <dd class="min-w-0 tabular-nums">{entry.chapters_analyzed}</dd>
+              </div>
+            )}
+          </dl>
+        );
+      })()}
 
       <ThemesEditor themes={themes} onThemeClick={onThemeClick} save={save} disabled={saving} />
 
@@ -173,33 +184,33 @@ export function PropertyPanel({
         </div>
       )}
 
-      {backlinks.worksBooks && backlinks.worksBooks.length > 0 && (
-        <Section title={`图书 (${backlinks.worksBooks.length})`}>
-          {backlinks.worksBooks.slice(0, 30).map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
-          {backlinks.worksBooks.length > 30 && (
-            <div class="text-[10px] text-muted pl-2">+{backlinks.worksBooks.length - 30} 条</div>
-          )}
-        </Section>
-      )}
-      {backlinks.worksPapers && backlinks.worksPapers.length > 0 && (
-        <Section title={`论文 (${backlinks.worksPapers.length})`}>
-          {backlinks.worksPapers.slice(0, 30).map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
-          {backlinks.worksPapers.length > 30 && (
-            <div class="text-[10px] text-muted pl-2">+{backlinks.worksPapers.length - 30} 条</div>
-          )}
-        </Section>
-      )}
+      {backlinks.works && backlinks.works.length > 0 && (() => {
+        const books = backlinks.works.filter(w => w.type === 'book-overview');
+        const papers = backlinks.works.filter(w => w.type === 'paper-analysis');
+        const renderGroup = (title: string, list: Entry[]) => list.length > 0 && (
+          <Section title={`${title} (${list.length})`}>
+            {list.slice(0, 30).map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
+            {list.length > 30 && (
+              <div class="text-[10px] text-muted pl-2">+{list.length - 30} 条</div>
+            )}
+          </Section>
+        );
+        return <>{renderGroup('图书', books)}{renderGroup('论文', papers)}</>;
+      })()}
 
-      {backlinks.siblingBooks && backlinks.siblingBooks.length > 0 && (
-        <Section title="同作者 · 图书">
-          {backlinks.siblingBooks.map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
-        </Section>
-      )}
-      {backlinks.siblingPapers && backlinks.siblingPapers.length > 0 && (
-        <Section title="同作者 · 论文">
-          {backlinks.siblingPapers.map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
-        </Section>
-      )}
+      {backlinks.siblings && backlinks.siblings.length > 0 && (() => {
+        const books = backlinks.siblings.filter(w => w.type === 'book-overview');
+        const papers = backlinks.siblings.filter(w => w.type === 'paper-analysis');
+        const renderGroup = (label: string, list: Entry[]) => list.length > 0 && (
+          <Section title={`同作者 · ${label}`}>
+            {list.slice(0, 8).map(w => <MiniRow entry={w} onClick={onOpen} key={w.path} />)}
+            {list.length > 8 && (
+              <div class="text-[10px] text-muted pl-2">+{list.length - 8} 条</div>
+            )}
+          </Section>
+        );
+        return <>{renderGroup('图书', books)}{renderGroup('论文', papers)}</>;
+      })()}
 
       {backlinks.similar && backlinks.similar.length > 0 && (
         <Section title="同主题相似">
