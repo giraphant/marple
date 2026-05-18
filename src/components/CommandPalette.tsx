@@ -15,22 +15,26 @@ const MAX_RESULTS = 12;
 
 /**
  * Rank entries by how well they match the query. Bias matches:
- *  - title hit > author hit > themes hit > preview hit
+ *  - title hit > author hit > themes hit > topic hit > source hit > preview hit
  *  - earlier substring position = higher score
  *  - higher rating_score = tiebreaker boost
  */
 function score(entry: Entry, q: string): number {
-  const t = (entry.title ?? '').toLowerCase();
-  const a = (entry.author ?? '').toLowerCase();
+  const t  = (entry.title  ?? '').toLowerCase();
+  const a  = (entry.author ?? '').toLowerCase();
   const th = (entry.themes ?? []).join(' ').toLowerCase();
+  const tp = (entry.topic  ?? '').toLowerCase();
+  const sr = (entry.source ?? '').toLowerCase();
   const pv = (entry.preview ?? '').toLowerCase();
 
   let s = 0;
   let idx;
-  if ((idx = t.indexOf(q)) >= 0) s += 1000 - idx;
-  if ((idx = a.indexOf(q)) >= 0) s += 500  - idx;
-  if ((idx = th.indexOf(q)) >= 0) s += 300 - idx;
-  if ((idx = pv.indexOf(q)) >= 0) s += 100 - idx;
+  if ((idx = t.indexOf(q))  >= 0) s += 1000 - idx;
+  if ((idx = a.indexOf(q))  >= 0) s += 500  - idx;
+  if ((idx = th.indexOf(q)) >= 0) s += 300  - idx;
+  if ((idx = tp.indexOf(q)) >= 0) s += 250  - idx;
+  if ((idx = sr.indexOf(q)) >= 0) s += 200  - idx;
+  if ((idx = pv.indexOf(q)) >= 0) s += 100  - idx;
   if (s > 0) s += (entry.rating_score || 0) * 10;
   return s;
 }
