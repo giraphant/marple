@@ -21,6 +21,16 @@ interface Props {
 
 const PER_TYPE_LIMIT = 5;
 
+/** Coerce a frontmatter scalar that *might* be a string, an array of strings,
+ *  or null to a lowercased search-haystack string. The `Entry` types declare
+ *  topic/source as `string | null`, but real vault frontmatter has both
+ *  string and array forms (e.g. multi-source entries) so we tolerate both. */
+function fieldText(v: unknown): string {
+  if (typeof v === 'string') return v.toLowerCase();
+  if (Array.isArray(v)) return v.join(' ').toLowerCase();
+  return '';
+}
+
 /** Rank entries by how well they match the query. Bias matches:
  *  - title hit > author hit > themes hit > topic hit > source hit > preview hit
  *  - earlier substring position = higher score
@@ -29,8 +39,8 @@ function score(entry: Entry, q: string): number {
   const t  = (entry.title  ?? '').toLowerCase();
   const a  = (entry.author ?? '').toLowerCase();
   const th = (entry.themes ?? []).join(' ').toLowerCase();
-  const tp = (entry.topic  ?? '').toLowerCase();
-  const sr = (entry.source ?? '').toLowerCase();
+  const tp = fieldText(entry.topic);
+  const sr = fieldText(entry.source);
   const pv = (entry.preview ?? '').toLowerCase();
 
   let s = 0;
