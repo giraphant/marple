@@ -446,6 +446,16 @@ export function App() {
 
   // --- entry-level actions ---
 
+  const onViewAll = useCallback((type: EntryType, q: string) => {
+    setPaletteOpen(false);
+    setQuery(q);                                    // preserve current query
+    setLimit(300);                                  // reset pagination
+    setThemeFilter(null);                           // clear unrelated filter
+    navigateInActiveTab({ kind: 'list', type });
+    // Do NOT call openListType(): it clears the query, which is the opposite of
+    // what we want here.
+  }, [navigateInActiveTab]);
+
   const applyThemeFilter = useCallback((th: string, fromType?: EntryType) => {
     const targetType = fromType ?? activeListType;
     if (targetType) navigateInActiveTab({ kind: 'list', type: targetType });
@@ -615,8 +625,12 @@ export function App() {
       <CommandPalette
         open={paletteOpen}
         entries={entries}
+        typeOrder={sidebarTypes}
+        query={query}
+        onQueryChange={setQuery}
         onClose={() => setPaletteOpen(false)}
         onPick={openDoc}
+        onViewAll={onViewAll}
       />
     </div>
   );
