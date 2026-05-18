@@ -571,7 +571,8 @@ export function App() {
             minRating={minRating}
             themeFilter={themeFilter}
             limit={limit}
-            onQueryChange={setQuery}
+            onOpenSearch={() => setPaletteOpen(true)}
+            onClearQuery={() => setQuery('')}
             onMinRatingChange={setMinRating}
             onClearTheme={() => setThemeFilter(null)}
             onLoadMore={() => setLimit(limit + 500)}

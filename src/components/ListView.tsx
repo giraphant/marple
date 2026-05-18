@@ -2,6 +2,7 @@ import type { Entry, EntryType } from '../types';
 import { TYPE_BY_ID } from '../types';
 import { Card } from './Card';
 import { Dashboard } from './Dashboard';
+import { Icon } from './Icon';
 
 interface Props {
   entries: Entry[];
@@ -12,7 +13,8 @@ interface Props {
   minRating: number;
   themeFilter: string | null;
   limit: number;
-  onQueryChange: (q: string) => void;
+  onOpenSearch: () => void;
+  onClearQuery: () => void;
   onMinRatingChange: (n: number) => void;
   onClearTheme: () => void;
   onLoadMore: () => void;
@@ -22,7 +24,7 @@ interface Props {
 
 export function ListView({
   entries: _entries, type, typeEntries, filtered, query, minRating, themeFilter, limit,
-  onQueryChange, onMinRatingChange, onClearTheme, onLoadMore, onCardClick, onThemeClick,
+  onOpenSearch, onClearQuery, onMinRatingChange, onClearTheme, onLoadMore, onCardClick, onThemeClick,
 }: Props) {
   void _entries;
   const typeMeta = TYPE_BY_ID[type];
@@ -42,13 +44,34 @@ export function ListView({
             </div>
           </div>
 
-          <input
-            type="search"
-            placeholder="搜索 标题 / 作者 / 主题 / 正文摘要…"
-            value={query}
-            onInput={e => onQueryChange((e.target as HTMLInputElement).value)}
-            class="flex-1 min-w-[200px] max-w-[420px] px-3 py-1.5 border border-strong rounded text-[13px] focus:outline-none focus:border-strong bg-surface"
-          />
+          {query ? (
+            <div class="inline-flex items-center gap-1">
+              <button
+                onClick={onOpenSearch}
+                title="点击修改 (⌘K)"
+                class="inline-flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 hover:bg-amber-200 transition"
+              >
+                <Icon name="magnifying-glass" size={12} />
+                <span class="truncate max-w-[200px]">{query}</span>
+              </button>
+              <button
+                onClick={onClearQuery}
+                title="清空"
+                class="text-muted hover:text-primary p-1 rounded hover:bg-hover/60"
+              >
+                <Icon name="x" size={12} />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onOpenSearch}
+              title="搜索 (⌘K)"
+              aria-label="搜索"
+              class="text-muted hover:text-primary p-1.5 rounded hover:bg-hover/60"
+            >
+              <Icon name="magnifying-glass" size={16} />
+            </button>
+          )}
 
           <div class="flex items-center gap-1 text-[11px] text-secondary">
             <span>评分 ≥</span>
