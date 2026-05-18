@@ -34,13 +34,14 @@ interface Props {
   onOpenSettings: () => void;
   onNewIdeaNote: () => void;
   onReindex: () => void;
+  onOpenSearch: () => void;
 }
 
 export function Sidebar({
   counts, types, collapsed, activeType, trashActive, themesActive, themesCount, activityActive, reindexing,
   onSelectType, onReorderTypes, onToggleCollapse,
   onOpenTrash, onOpenThemes, onOpenActivity,
-  onOpenSettings, onNewIdeaNote, onReindex,
+  onOpenSettings, onNewIdeaNote, onReindex, onOpenSearch,
 }: Props) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -92,14 +93,24 @@ export function Sidebar({
             <div class="text-[10px] text-muted uppercase tracking-wider mt-0.5">reader</div>
           </div>
         )}
-        <button
-          onClick={onToggleCollapse}
-          title={collapsed ? '展开侧栏 (Cmd+B)' : '折叠侧栏 (Cmd+B)'}
-          aria-label={collapsed ? '展开侧栏' : '折叠侧栏'}
-          class="text-muted hover:text-primary p-1 inline-flex items-center rounded hover:bg-hover/60"
-        >
-          <Icon name={collapsed ? 'caret-right' : 'caret-left'} size={14} />
-        </button>
+        <div class="flex items-center gap-1">
+          <button
+            onClick={onOpenSearch}
+            title="超级检索 (⌘K)"
+            aria-label="超级检索"
+            class="text-muted hover:text-primary p-1 inline-flex items-center rounded hover:bg-hover/60"
+          >
+            <Icon name="magnifying-glass" size={14} />
+          </button>
+          <button
+            onClick={onToggleCollapse}
+            title={collapsed ? '展开侧栏 (Cmd+B)' : '折叠侧栏 (Cmd+B)'}
+            aria-label={collapsed ? '展开侧栏' : '折叠侧栏'}
+            class="text-muted hover:text-primary p-1 inline-flex items-center rounded hover:bg-hover/60"
+          >
+            <Icon name={collapsed ? 'caret-right' : 'caret-left'} size={14} />
+          </button>
+        </div>
       </div>
 
       {/* New idea note. */}

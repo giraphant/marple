@@ -542,6 +542,7 @@ export function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onNewIdeaNote={onNewIdeaNote}
         onReindex={onReindex}
+        onOpenSearch={() => setPaletteOpen(true)}
       />
 
       <div class="flex-1 min-w-0 flex flex-col">
