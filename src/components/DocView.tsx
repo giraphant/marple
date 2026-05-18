@@ -168,12 +168,23 @@ export function DocView({
   const tMeta = TYPE_BY_ID[entry.type] ?? { label: entry.type, accent: 'bg-surface-2 text-secondary' };
   const canDelete = entry.type === 'note';
 
+  // Notes 的 frontmatter `title:` 在 build-index 后不会再随用户编辑更新；
+  // 头部用 body 第一行 H 标题派生，编辑器输入会触发 setBody 进而重算，
+  // 实现 live 跟随。tab 名 / 卡片 / sidebar 仍走 entry.title（下次 reindex 时正确）。
+  const displayTitle = useMemo(() => {
+    if (entry.type === 'note') {
+      const m = body.match(/^#+\s+(.+?)\s*$/m);
+      if (m) return m[1].trim();
+    }
+    return entry.title || entry.path.split('/').pop()!.replace(/\.md$/, '');
+  }, [entry, body]);
+
   return (
     <div class="flex-1 flex flex-col min-h-0">
       <div class="bg-surface/95 backdrop-blur border-b border-base px-6 py-3 flex items-center gap-3 relative shrink-0">
         <span class={`text-[11px] px-1.5 py-0.5 rounded border ${tMeta.accent}`}>{tMeta.label}</span>
         <div class="text-[14px] font-medium text-primary flex-1 truncate">
-          {entry.title || entry.path.split('/').pop()!.replace(/\.md$/, '')}
+          {displayTitle}
         </div>
 
         {editable && <SaveIndicator status={saveStatus} errMsg={saveErr} />}

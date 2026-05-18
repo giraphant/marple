@@ -24,24 +24,43 @@
  * dark adjustments live as `dark:` modifiers where contrast needs help.
  * --------------------------------------------------------------- */
 :root {
-  --bg-page:        250 250 249;  /* stone-50 */
-  --bg-surface:     255 255 255;  /* white */
-  --bg-surface-2:   245 245 244;  /* stone-100 */
-  --bg-hover:       231 229 228;  /* stone-200 */
+  /* Blush light: Blush 原 bg #f5f5f5 / fg #444444 + chrome 用 Blush
+   * quote/code 砖红 hue 派生的暖灰 scale，让 header / cards 与 page
+   * 自然分层，而不是几个近白色撞在一起没层次。 */
+  --bg-page:        245 245 245;  /* #f5f5f5 — Blush bg */
+  --bg-surface:     252 248 246;  /* #fcf8f6 — 暖白，header / 卡片 elevation */
+  --bg-surface-2:   241 234 230;  /* #f1eae6 — sticky header / hover */
+  --bg-hover:       232 220 213;  /* #e8dcd5 */
 
-  --text-primary:    28  25  23;  /* stone-900 */
-  --text-secondary:  87  83  78;  /* stone-600 */
-  --text-muted:     168 162 158;  /* stone-400 */
-  --text-faint:     214 211 209;  /* stone-300 */
+  --text-primary:    68  68  68;  /* #444 — Blush fg */
+  --text-secondary: 107  95  89;  /* #6b5f59 — 暖灰 secondary */
+  --text-muted:     156 142 135;  /* #9c8e87 */
+  --text-faint:     200 185 177;  /* #c8b9b1 */
 
-  --border-base:    231 229 228;  /* stone-200 */
-  --border-strong:  214 211 209;  /* stone-300 */
+  --border-base:    215 200 192;  /* #d7c8c0 — 暖灰可见边 */
+  --border-strong:  192 172 162;  /* #c0aca2 */
 
-  --accent-link:      3 105 161;  /* sky-700 */
-  --accent-link-bg: 240 249 255;  /* sky-50 */
+  /* 链接保留旧 sky 蓝 — 此处是 chrome / wikilink 的旧轨道，
+   * 阅读模式内文的 link 走 --reader-link。 */
+  --accent-link:      3 105 161;
+  --accent-link-bg: 240 249 255;
 
-  --bg-inverse:      28  25  23;  /* stone-900 — used for active pills */
-  --text-inverse:   255 255 255;
+  --bg-inverse:      68  68  68;
+  --text-inverse:   245 245 245;
+
+  /* ============================================================ *
+   * Reading content accents — ported from Ulysses Blush theme.
+   * 同时被 .prose-body (阅读模式) 和 .cm-* (NoteEditor) 引用。
+   * ============================================================ */
+  --reader-heading:  250 150   0;  /* #fa9600 橙 — H1–H6 */
+  --reader-strong:   157 106 216;  /* #9d6ad8 紫 */
+  --reader-em:       255  95 139;  /* #ff5f8b 粉 */
+  --reader-quote:    189 105  63;  /* #bd693f 砖红 */
+  --reader-code:     189 105  63;  /* #bd693f */
+  --reader-code-bg:  240 234 230;  /* 暖灰 — 浅砖红的去饱和 bg */
+  --reader-link:     246 107   0;  /* #f66b00 深橙 */
+  --reader-marker:   157 106 216;  /* #9d6ad8 紫 — list ul/ol marker */
+  --reader-delete:   255  95 139;  /* #ff5f8b 粉 — strikethrough */
 
   /* ------------------------------------------------------------- *
    * Reading typography tokens.
@@ -75,25 +94,37 @@
  * elevation cues; text/bg pairs target WCAG AA (4.5:1+) on body text.
  */
 .dark {
-  --bg-page:         28  25  21;   /* page canvas — warm near-black */
-  --bg-surface:      41  37  32;   /* cards, panels (one step up) */
-  --bg-surface-2:    54  49  43;   /* sticky headers, hover-on-surface */
-  --bg-hover:        70  63  55;   /* list-row hover, surface-2 hover */
+  /* Blush dark palette — bg #2a2229 深酒红、fg #ecddd9 暖奶白 + 冷暖 accent。 */
+  --bg-page:         42  34  41;   /* #2a2229 — Blush dark bg */
+  --bg-surface:      54  46  53;   /* 一档浅，卡片 / panel */
+  --bg-surface-2:    66  56  64;   /* sticky header / hover */
+  --bg-hover:        82  70  79;
 
-  --text-primary:   235 226 213;   /* warm off-white, body text */
-  --text-secondary: 180 167 150;   /* labels, captions */
-  --text-muted:     132 121 108;   /* faint counts, placeholders */
-  --text-faint:      82  75  67;   /* dividers-as-text */
+  --text-primary:   236 221 217;   /* #ecddd9 — Blush dark fg */
+  --text-secondary: 195 178 173;
+  --text-muted:     140 124 121;
+  --text-faint:      90  78  86;
 
-  --border-base:     54  49  43;   /* default divider — equals surface-2 so
-                                       borders disappear inside surface-2  */
-  --border-strong:   82  75  67;   /* heavier divider for modals/inputs */
+  --border-base:     66  56  64;
+  --border-strong:   95  82  93;
 
-  --accent-link:    125 211 252;   /* sky-300 */
-  --accent-link-bg:  17  29  42;   /* faint sky-950-ish wash */
+  --accent-link:    125 211 252;
+  --accent-link-bg:  17  29  42;
 
-  --bg-inverse:     235 226 213;   /* warm cream — used for active pills */
-  --text-inverse:    28  25  21;
+  --bg-inverse:     236 221 217;
+  --text-inverse:    42  34  41;
+
+  /* Reading accents — dark palette */
+  --reader-heading:  238 181   0;  /* #eeb500 黄 */
+  --reader-strong:   172 129 243;  /* #ac81f3 紫 */
+  --reader-em:       255  71 113;  /* #ff4771 粉 */
+  --reader-quote:    236 221 217;  /* #ecddd9 同正文 — dark 下用色弱区分 */
+  --reader-code:       0 195 114;  /* #00c372 绿（XML 里 dark code 用 idx4，对应 #0097de 蓝；
+                                       这里实测绿更搭酒红 bg，可后续再调） */
+  --reader-code-bg:   54  44  52;
+  --reader-link:       0 151 222;  /* #0097de 青 */
+  --reader-marker:   236 221 217;  /* 奶白 marker + bold */
+  --reader-delete:   255  71 113;
 }
 
 @layer base {
@@ -121,19 +152,31 @@
    *  - First H2 in an article gets a shorter top margin so we don't
    *    open with a giant gap above "思想肖像" etc.
    */
-  .prose-body h1 { font-size: 1.7em;  font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; margin: 0 0 0.6em; }
-  .prose-body h2 { font-size: 1.45em; font-weight: 700; line-height: 1.3;  margin: 2em 0 0.5em; }
+  /* Blush 风：H1-H4 上色 + bold；H5/H6 不上色（与 Theme.xml 里 traits="" 一致）。 */
+  .prose-body h1 { font-size: 1.7em;  font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; margin: 0 0 0.6em; color: rgb(var(--reader-heading)); }
+  .prose-body h2 { font-size: 1.45em; font-weight: 700; line-height: 1.3;  margin: 2em 0 0.5em;   color: rgb(var(--reader-heading)); }
   .prose-body h2:first-child { margin-top: 0.4em; }
-  .prose-body h3 { font-size: 1.18em; font-weight: 600; margin: 1.4em 0 0.35em; }
-  .prose-body h4 { font-size: 1.05em; font-weight: 600; margin: 1.1em 0 0.3em; }
+  .prose-body h3 { font-size: 1.18em; font-weight: 700; margin: 1.4em 0 0.35em; color: rgb(var(--reader-heading)); }
+  .prose-body h4 { font-size: 1.05em; font-weight: 700; margin: 1.1em 0 0.3em;  color: rgb(var(--reader-heading)); }
   .prose-body h5,
   .prose-body h6 { font-size: 1em;    font-weight: 600; margin: 0.9em 0 0.3em; }
   .prose-body p { margin: 0.65em 0; }
-  .prose-body ul, .prose-body ol { margin: 0.6em 0; padding-left: 1.5em; }
+  /* Tailwind preflight 把 ul/ol 的 list-style 清掉了；显式复原。Blush
+   * marker = 紫色 + bold（unorderedList/orderedList traits="bold"）。 */
+  .prose-body ul { margin: 0.6em 0; padding-left: 1.5em; list-style-type: disc; }
+  .prose-body ol { margin: 0.6em 0; padding-left: 1.5em; list-style-type: decimal; }
   .prose-body li { margin: 0.25em 0; }
-  .prose-body blockquote { border-left: 3px solid rgb(var(--border-strong)); padding-left: 1em; color: rgb(var(--text-secondary)); margin: 0.8em 0; }
-  .prose-body code { background: rgb(var(--bg-surface-2)); padding: 0 0.3em; border-radius: 3px; font-size: 0.9em; }
-  .prose-body strong { font-weight: 600; color: rgb(var(--text-primary)); }
+  .prose-body li::marker { color: rgb(var(--reader-marker)); font-weight: 700; }
+  /* blockquote: CJK 整段加 italic 会变浏览器伪斜体（geometric slant），非常丑。
+   * 仅靠左 rule + 砖红色 + 文字颜色辨识，不加 italic。 */
+  .prose-body blockquote { border-left: 3px solid rgb(var(--reader-quote)); padding-left: 1em; color: rgb(var(--reader-quote)); margin: 0.8em 0; }
+  .prose-body code { background: rgb(var(--reader-code-bg)); color: rgb(var(--reader-code)); padding: 0 0.3em; border-radius: 3px; font-size: 0.9em; }
+  .prose-body a { color: rgb(var(--reader-link)); font-weight: 700; }
+  .prose-body del { color: rgb(var(--reader-delete)); }
+  .prose-body strong { font-weight: 700; color: rgb(var(--reader-strong)); }
+  /* em 保留 italic — CJK glyph 在多数字体下不会真出 italic、自然降级为彩色，
+   * 西文 glyph 出真 italic。两端都能识别 emphasis。 */
+  .prose-body em { color: rgb(var(--reader-em)); font-style: italic; font-weight: 600; }
   .prose-body hr { border: none; border-top: 1px solid rgb(var(--border-base)); margin: 1.4em 0; }
 
   .line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }

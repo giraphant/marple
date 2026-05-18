@@ -147,7 +147,7 @@ export function PropertyPanel({
             {fields.has('author') && <AuthorRow entry={entry} backlinks={backlinks} onOpen={onOpen} save={save} />}
             {fields.has('source') && <TextRow label="来源" value={entry.source} field="source" save={save} />}
             {fields.has('doi') && <DoiRow value={entry.doi} save={save} />}
-            {fields.has('topic') && <TextRow label="Topic" value={entry.topic} field="topic" save={save} />}
+            {fields.has('topic') && <TextRow label="专题" value={entry.topic} field="topic" save={save} />}
             {fields.has('chapters_analyzed') && entry.chapters_analyzed != null && (
               <div class="grid grid-cols-[60px_1fr] gap-2">
                 <dt class="text-muted text-[11px] pt-0.5">章节数</dt>
