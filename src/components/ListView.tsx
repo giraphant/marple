@@ -49,7 +49,7 @@ export function ListView({
               <button
                 onClick={onOpenSearch}
                 title="点击修改 (⌘K)"
-                class="inline-flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 hover:bg-amber-200 transition"
+                class="inline-flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-200 dark:hover:bg-amber-900/40 transition"
               >
                 <Icon name="magnifying-glass" size={12} />
                 <span class="truncate max-w-[200px]">{query}</span>

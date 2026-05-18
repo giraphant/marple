@@ -204,7 +204,7 @@ export function CommandPalette({
                     </ul>
                     {sec.total > sec.top.length && (
                       <button
-                        onClick={() => { onViewAll(sec.meta.id, query); onClose(); }}
+                        onClick={() => onViewAll(sec.meta.id, query)}
                         class="w-full text-left px-3 py-1.5 text-[12px] text-muted hover:text-primary hover:bg-page"
                       >
                         在「{sec.meta.label}」中查看全部 {sec.total} 条 →
