@@ -65,6 +65,13 @@ function firstParagraph(body) {
   return '';
 }
 
+// 抽 body 第一行 `#+ heading`。笔记标题用它替代 frontmatter title，
+// 这样用户在编辑器改 H1 后，下次 reindex / build 卡片列表自动跟上。
+function firstHeading(body) {
+  const m = body.match(/^\s*#+\s+(.+?)\s*$/m);
+  return m ? m[1].trim() : null;
+}
+
 // Star-rating → numeric score. Supports `★★★`, `★★★★ (4)`, plain `3`.
 function ratingScore(r) {
   if (typeof r === 'number') return r;
@@ -154,7 +161,9 @@ function canonicalType(t) {
       path: rel,
       type,
       book: bookMatch ? bookMatch[1] : null,
-      title: stripWiki(fm.title || fm.name) || null,
+      title: type === 'note'
+        ? (firstHeading(body) || stripWiki(fm.title || fm.name) || null)
+        : (stripWiki(fm.title || fm.name) || null),
       author: flattenAuthor(fm.author ?? fm.authors),
       year: fm.year ?? null,
       rating: fm.rating || null,
