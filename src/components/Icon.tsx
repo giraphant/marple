@@ -18,6 +18,7 @@ import PhCaretLeft from '~icons/ph/caret-left';
 import PhCaretRight from '~icons/ph/caret-right';
 import PhPushPin from '~icons/ph/push-pin';
 import PhPushPinFill from '~icons/ph/push-pin-fill';
+import PhMagnifyingGlass from '~icons/ph/magnifying-glass';
 
 export type IconName =
   | 'plus'
@@ -29,7 +30,8 @@ export type IconName =
   | 'caret-left'
   | 'caret-right'
   | 'pin'
-  | 'pin-fill';
+  | 'pin-fill'
+  | 'magnifying-glass';
 
 const COMPONENT: Record<IconName, typeof PhPlus> = {
   plus: PhPlus,
@@ -42,6 +44,7 @@ const COMPONENT: Record<IconName, typeof PhPlus> = {
   'caret-right': PhCaretRight,
   pin: PhPushPin,
   'pin-fill': PhPushPinFill,
+  'magnifying-glass': PhMagnifyingGlass,
 };
 
 interface Props {
