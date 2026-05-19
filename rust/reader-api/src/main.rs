@@ -99,10 +99,14 @@ async fn api_search(
         min_rating: params.min_rating,
         theme: params.theme,
         limit: params.limit.unwrap_or(80),
+        mode: reader_core::SearchMode::Lex,
     };
-    let hits = tokio::task::spawn_blocking(move || reader_core::search_entries(&paths, options))
-        .await
-        .map_err(|err| AppError(ReaderError::Other(err.into())))??;
+    let rt = tokio::runtime::Handle::current();
+    let hits = tokio::task::spawn_blocking(move || {
+        reader_core::search_entries(&paths, options, None, &rt)
+    })
+    .await
+    .map_err(|err| AppError(ReaderError::Other(err.into())))??;
     Ok(Json(json!({ "items": hits })))
 }
 

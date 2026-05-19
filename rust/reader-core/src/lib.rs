@@ -128,6 +128,13 @@ pub struct TrashItem {
     pub size: u64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SearchMode {
+    #[default]
+    Lex,
+    Hybrid,
+}
+
 #[derive(Debug, Clone)]
 pub struct SearchOptions {
     pub query: String,
@@ -135,6 +142,7 @@ pub struct SearchOptions {
     pub min_rating: Option<f64>,
     pub theme: Option<String>,
     pub limit: usize,
+    pub mode: SearchMode,
 }
 
 #[derive(Debug, Serialize)]
@@ -175,7 +183,31 @@ pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
     Ok(entries)
 }
 
-pub fn search_entries(paths: &ReaderPaths, options: SearchOptions) -> ReaderResult<Vec<SearchHit>> {
+pub fn search_entries(
+    paths: &ReaderPaths,
+    options: SearchOptions,
+    model: Option<&crate::vector::ModelHandle>,
+    runtime: &tokio::runtime::Handle,
+) -> ReaderResult<Vec<SearchHit>> {
+    match options.mode {
+        SearchMode::Lex => search_entries_lex(paths, &options),
+        SearchMode::Hybrid => match model {
+            Some(model) => search_entries_hybrid(paths, &options, model, runtime),
+            None => {
+                // Hybrid requested but no model available → fall back to lex
+                // with a marker on each hit so the API can surface the
+                // X-Search-Fallback header.
+                let mut hits = search_entries_lex(paths, &options)?;
+                for h in &mut hits {
+                    h.source = format!("{} (lex-fallback)", h.source);
+                }
+                Ok(hits)
+            }
+        },
+    }
+}
+
+fn search_entries_lex(paths: &ReaderPaths, options: &SearchOptions) -> ReaderResult<Vec<SearchHit>> {
     if !paths.index_db.is_file() {
         return Err(ReaderError::NotFound(
             "index database missing; run npm run build:index in reader/".to_string(),
@@ -300,6 +332,102 @@ pub fn search_entries(paths: &ReaderPaths, options: SearchOptions) -> ReaderResu
     });
     hits.truncate(limit);
     Ok(hits)
+}
+
+fn search_entries_hybrid(
+    paths: &ReaderPaths,
+    options: &SearchOptions,
+    model: &crate::vector::ModelHandle,
+    runtime: &tokio::runtime::Handle,
+) -> ReaderResult<Vec<SearchHit>> {
+    use crate::fuse::{reciprocal_rank_fusion, RankedItem};
+
+    let lex_hits = search_entries_lex(paths, options)?;
+
+    // Embed the query. The model is shared across requests, but only one
+    // embed call runs at a time (model has an internal Mutex).
+    let qvec = runtime
+        .block_on(model.embed_query(&options.query))
+        .map_err(ReaderError::Other)?;
+
+    crate::init_sqlite_vec();
+    let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    let vec_hits = crate::vector::vec_search(
+        &conn,
+        &qvec,
+        30,
+        options.entry_type.as_deref(),
+        options.min_rating,
+    )
+    .map_err(ReaderError::Other)?;
+
+    let lex_ranked: Vec<RankedItem> = lex_hits
+        .iter()
+        .map(|h| RankedItem {
+            path: h.entry.path.clone(),
+            score: h.score,
+        })
+        .collect();
+    let vec_ranked: Vec<RankedItem> = vec_hits
+        .iter()
+        .map(|h| RankedItem {
+            path: h.path.clone(),
+            score: h.cosine,
+        })
+        .collect();
+    let lex_paths: std::collections::HashSet<_> =
+        lex_ranked.iter().map(|r| r.path.clone()).collect();
+    let vec_paths: std::collections::HashSet<_> =
+        vec_ranked.iter().map(|r| r.path.clone()).collect();
+    let fused = reciprocal_rank_fusion(vec![lex_ranked, vec_ranked], &[1.0, 1.0], 60);
+
+    let mut by_path: HashMap<String, SearchHit> = lex_hits
+        .into_iter()
+        .map(|h| (h.entry.path.clone(), h))
+        .collect();
+    let entries = load_entries(paths)?;
+    let entries_by_path: HashMap<String, Entry> =
+        entries.into_iter().map(|e| (e.path.clone(), e)).collect();
+
+    let mut out = Vec::with_capacity(fused.len());
+    for f in fused.into_iter() {
+        if out.len() >= options.limit {
+            break;
+        }
+        let in_lex = lex_paths.contains(&f.path);
+        let in_vec = vec_paths.contains(&f.path);
+        // theme filter is multi-value; vec_search doesn't push it down, so we
+        // re-check it here for any vec-only candidates.
+        if let Some(theme) = options.theme.as_deref() {
+            if let Some(entry) = entries_by_path.get(&f.path) {
+                let has_theme = entry
+                    .themes
+                    .as_ref()
+                    .map(|themes| themes.iter().any(|t| t == theme))
+                    .unwrap_or(false);
+                if !has_theme {
+                    continue;
+                }
+            }
+        }
+        if let Some(mut hit) = by_path.remove(&f.path) {
+            hit.score = f.score;
+            if in_lex && in_vec {
+                hit.source = "hybrid".into();
+            }
+            out.push(hit);
+        } else if let Some(entry) = entries_by_path.get(&f.path) {
+            out.push(SearchHit {
+                entry: entry.clone(),
+                score: f.score,
+                snippet: None,
+                source: "vec".into(),
+            });
+            let _ = in_lex;
+        }
+    }
+    Ok(out)
 }
 
 #[derive(Debug)]
