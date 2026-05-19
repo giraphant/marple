@@ -12,6 +12,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 mod indexer;
+pub mod fuse;
 
 pub use indexer::{build_sqlite_index, IndexStats};
 
