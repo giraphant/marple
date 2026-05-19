@@ -735,11 +735,107 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
                 entry.search_text,
             ])?;
         }
+
+        // Embed entries via BGE-M3 into entry_vectors_staging.
+        embed_entries_into_staging(&tx, paths, entries)?;
+        write_meta_keys(&tx)?;
     }
     tx.commit()?;
     drop(conn);
     fs::rename(&tmp, &paths.index_db)?;
     Ok(())
+}
+
+const EMBED_INPUT_CHAR_CAP: usize = 8192 * 4; // ~8192 tokens, char proxy
+const EMBED_BATCH: usize = 8;
+const EMBED_MODEL_ID: &str = "BAAI/bge-m3";
+const EMBED_DIM: usize = 1024;
+
+fn embed_entries_into_staging(
+    tx: &rusqlite::Transaction<'_>,
+    paths: &ReaderPaths,
+    entries: &[IndexedEntry],
+) -> ReaderResult<()> {
+    use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+
+    let model_cache = paths.reader_root.join("data").join("models");
+    fs::create_dir_all(&model_cache)?;
+    let mut model = TextEmbedding::try_new(
+        InitOptions::new(EmbeddingModel::BGEM3)
+            .with_show_download_progress(true)
+            .with_cache_dir(model_cache),
+    )
+    .map_err(|e| ReaderError::Other(anyhow::anyhow!("init BGE-M3: {e}")))?;
+
+    let mut insert_vec = tx.prepare(
+        "INSERT INTO entry_vectors_staging(path, embedding) VALUES (?, ?)",
+    )?;
+
+    let total = entries.len();
+    for (batch_idx, chunk) in entries.chunks(EMBED_BATCH).enumerate() {
+        let texts: Vec<String> = chunk
+            .iter()
+            .map(|e| {
+                build_embed_input(
+                    e.title.as_deref(),
+                    e.author.as_deref(),
+                    &e.preview,
+                    &e.body_text,
+                )
+            })
+            .collect();
+        let vecs = model
+            .embed(texts, None)
+            .map_err(|e| ReaderError::Other(anyhow::anyhow!("embed batch: {e}")))?;
+        for (entry, v) in chunk.iter().zip(vecs.into_iter()) {
+            // BGE-M3 already L2-normalizes its output; no extra renorm needed.
+            let bytes: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
+            insert_vec.execute(params![entry.path, bytes])?;
+        }
+        let done = (batch_idx + 1) * EMBED_BATCH;
+        if done.is_multiple_of(80) || done >= total {
+            eprintln!("  embedded {}/{}", done.min(total), total);
+        }
+    }
+    Ok(())
+}
+
+fn write_meta_keys(tx: &rusqlite::Transaction<'_>) -> ReaderResult<()> {
+    tx.execute(
+        "INSERT INTO meta(key, value) VALUES ('embed_model', ?)",
+        params![EMBED_MODEL_ID],
+    )?;
+    tx.execute(
+        "INSERT INTO meta(key, value) VALUES ('embed_dim', ?)",
+        params![EMBED_DIM as i64],
+    )?;
+    tx.execute(
+        "INSERT INTO meta(key, value) VALUES ('embed_completed_at', ?)",
+        params![chrono::Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+fn build_embed_input(
+    title: Option<&str>,
+    author: Option<&str>,
+    preview: &str,
+    body: &str,
+) -> String {
+    let mut buf = String::from("passage: ");
+    if let Some(t) = title {
+        buf.push_str(t);
+        buf.push('\n');
+    }
+    if let Some(a) = author {
+        buf.push_str(a);
+        buf.push('\n');
+    }
+    buf.push_str(preview);
+    buf.push('\n');
+    let body_truncated = body.chars().take(EMBED_INPUT_CHAR_CAP).collect::<String>();
+    buf.push_str(&body_truncated);
+    buf
 }
 
 fn normalize_body_for_search(body: &str) -> String {
