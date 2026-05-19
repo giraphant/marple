@@ -48,18 +48,21 @@ export interface SearchHit {
   source: string;
 }
 
+export type SearchMode = 'lex' | 'hybrid';
+
 export interface SearchParams {
   q: string;
   type?: Entry['type'];
   minRating?: number;
   theme?: string | null;
   limit?: number;
+  mode?: SearchMode;
   signal?: AbortSignal;
 }
 
 /** Server-side full-text search backed by SQLite FTS/trigram indexes. */
 export async function searchIndex({
-  q, type, minRating, theme, limit, signal,
+  q, type, minRating, theme, limit, mode, signal,
 }: SearchParams): Promise<SearchHit[]> {
   const params = new URLSearchParams();
   params.set('q', q);
@@ -67,6 +70,7 @@ export async function searchIndex({
   if (minRating) params.set('minRating', String(minRating));
   if (theme) params.set('theme', theme);
   if (limit) params.set('limit', String(limit));
+  if (mode) params.set('mode', mode);
   const r = await fetch(`/api/search?${params.toString()}`, { signal });
   if (!r.ok) {
     const msg = await r.text().catch(() => '');
