@@ -70,15 +70,25 @@ python3 -m venv .venv
 
 如果决定集成到 reader-api：
 
-1. **存储**：`vectors.npz` 改为 `index.sqlite` 里的 `entry_vectors` 表（sqlite-vec
-   扩展的 vec0 虚拟表），跟主 index 同库。
+1. **存储**：`vectors.npz` 改为 `index.sqlite` 里的 `entry_vectors` 表，用
+   `sqlite-vec` crate (`cargo add sqlite-vec`) 加载 loadable extension，建
+   `CREATE VIRTUAL TABLE entry_vectors USING vec0(path TEXT PRIMARY KEY,
+   embedding float[384] distance_metric=cosine)`。`rusqlite` 在 Linux/macOS
+   下用 `LoadExtension` API 加载（Apple 系统 Python 的限制不适用 Rust）。
 2. **Query embedding**：Rust 端用 [`fastembed-rs`](https://github.com/Anush008/fastembed-rs)
-   跑同一模型，避免 Python sidecar 部署。
-3. **Chunking**：当前只 embed `title + author + themes + preview`，要继续提升精
-   度可以切 body 成 ~512 token chunk 各自 embed，每 entry 多向量、查询时
-   max-pool。
-4. **Hybrid 端**：`search_entries` 加一路 vec 召回，和现有 BM25/trigram
-   候选用 RRF 合并而不是当前的线性加权。
+   (`cargo add fastembed`)。**注意**：fastembed-rs 不带
+   `paraphrase-multilingual-MiniLM-L12-v2`，但带 `multilingual-e5-small`
+   （同样 384 维，且 e5 通常质量略好）—— 换模型 + 重新 embed 一次即可。
+   E5 需要在 query 前加 `"query: "`、doc 前加 `"passage: "` 前缀。
+3. **Chunking**：当前只 embed `title + author + themes + preview`（每 entry
+   一向量）。下个里程碑切 body 成 ~512 token chunk 各自 embed，每 entry
+   多向量、查询时 max-pool — 对长章节召回精度提升显著。
+4. **Hybrid 端**：`search_entries` 加一路 vec 召回（top 30-50 candidates），
+   和现有 BM25 / trigram / substring 候选用 RRF (k=60) 合并，替代当前的线
+   性加权融合。
+5. **拼写纠正层**：vec 救不了 `fucault` → `foucault`，需独立的字典纠错前
+   置（候选：[`symspell`](https://crates.io/crates/symspell)，或简单的
+   Levenshtein distance over 已知词典）。
 
 ## 已知短板
 
