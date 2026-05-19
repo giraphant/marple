@@ -1,0 +1,3 @@
+.venv/
+vectors.npz
+__pycache__/
