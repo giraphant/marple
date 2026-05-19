@@ -334,6 +334,18 @@ fn search_entries_lex(paths: &ReaderPaths, options: &SearchOptions) -> ReaderRes
     Ok(hits)
 }
 
+/// True if the index DB has an `entry_vectors` table (built by a
+/// vector-aware reader-index). Returns false for old indexes or any
+/// scenario where the vec0 table is missing or unreadable.
+fn vector_table_present(conn: &Connection) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE name = 'entry_vectors' LIMIT 1",
+        [],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
 fn search_entries_hybrid(
     paths: &ReaderPaths,
     options: &SearchOptions,
@@ -344,15 +356,27 @@ fn search_entries_hybrid(
 
     let lex_hits = search_entries_lex(paths, options)?;
 
+    // Compatibility check: a DB built with an older reader-index (or any
+    // index that hasn't run the vector pass yet) won't have entry_vectors.
+    // Probe early — before paying the cost of model load + query embed —
+    // and degrade to a lex-only result with a fallback marker.
+    crate::init_sqlite_vec();
+    let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    if !vector_table_present(&conn) {
+        let mut hits = lex_hits;
+        for h in &mut hits {
+            h.source = format!("{} (lex-fallback:no-vectors)", h.source);
+        }
+        return Ok(hits);
+    }
+
     // Embed the query. The model is shared across requests, but only one
     // embed call runs at a time (model has an internal Mutex).
     let qvec = runtime
         .block_on(model.embed_query(&options.query))
         .map_err(ReaderError::Other)?;
 
-    crate::init_sqlite_vec();
-    let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
     let vec_hits = crate::vector::vec_search(
         &conn,
         &qvec,

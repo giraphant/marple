@@ -149,6 +149,13 @@ impl ModelHandle {
 
     async fn ensure_loaded(&self) -> Result<()> {
         loop {
+            // Register interest in any upcoming notify BEFORE reading state.
+            // If the loader transitions Loading → Ready/Failed between when
+            // we observe Loading and when we await, this future will already
+            // hold a permit and resolve immediately rather than hanging.
+            let notified = self.inner.notify.notified();
+            tokio::pin!(notified);
+
             {
                 let s = self.inner.state.read().await;
                 match &*s {
@@ -165,7 +172,7 @@ impl ModelHandle {
                     }
                     RawState::Loading => {
                         drop(s);
-                        self.inner.notify.notified().await;
+                        notified.as_mut().await;
                         continue;
                     }
                     RawState::Uninitialized => {}

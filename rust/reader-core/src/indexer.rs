@@ -757,6 +757,14 @@ fn embed_entries_into_staging(
     paths: &ReaderPaths,
     entries: &[IndexedEntry],
 ) -> ReaderResult<()> {
+    if entries.is_empty() {
+        // No entries → nothing to embed; skip the 2.3 GB model init entirely.
+        // A reindex of an empty/filtered vault should still produce a valid
+        // (but empty) entry_vectors table after the swap step.
+        let _ = tx;
+        return Ok(());
+    }
+
     use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
     let model_cache = paths.reader_root.join("data").join("models");
