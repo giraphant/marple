@@ -2157,19 +2157,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reader-spike"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "fastembed",
- "rusqlite",
- "serde",
- "serde_json",
- "sqlite-vec",
-]
-
-[[package]]
 name = "redox_users"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
