@@ -34,13 +34,14 @@ interface Props {
   onOpenSettings: () => void;
   onNewIdeaNote: () => void;
   onReindex: () => void;
+  onOpenSearch: () => void;
 }
 
 export function Sidebar({
   counts, types, collapsed, activeType, trashActive, themesActive, themesCount, activityActive, reindexing,
   onSelectType, onReorderTypes, onToggleCollapse,
   onOpenTrash, onOpenThemes, onOpenActivity,
-  onOpenSettings, onNewIdeaNote, onReindex,
+  onOpenSettings, onNewIdeaNote, onReindex, onOpenSearch,
 }: Props) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -102,7 +103,7 @@ export function Sidebar({
         </button>
       </div>
 
-      {/* New idea note. */}
+      {/* Quick actions: new note + super-search. Both share the same row style. */}
       <div class={`border-b border-base ${collapsed ? 'px-1 py-2' : 'px-2 py-2'} space-y-0.5`}>
         <button
           onClick={onNewIdeaNote}
@@ -113,7 +114,18 @@ export function Sidebar({
           }
         >
           <Icon name="plus" size={collapsed ? 16 : 13} class="text-muted" />
-          {!collapsed && <span>新建 note</span>}
+          {!collapsed && <span>新建笔记</span>}
+        </button>
+        <button
+          onClick={onOpenSearch}
+          title="超级检索 (⌘K)"
+          class={collapsed
+            ? 'mx-auto flex items-center justify-center w-9 h-9 rounded text-secondary hover:bg-hover/60'
+            : 'w-full text-left px-2 py-1.5 rounded text-[12px] hover:bg-hover/60 flex items-center gap-2 text-secondary'
+          }
+        >
+          <Icon name="magnifying-glass" size={collapsed ? 16 : 13} class="text-muted" />
+          {!collapsed && <span>超级检索</span>}
         </button>
       </div>
 

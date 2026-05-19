@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'preact/hooks';
 import type { Entry, EntryType, Tab, TabContent } from './types';
 import { activeContent } from './types';
 import { buildWikiIndex, splitAuthors } from './wiki';
+import { buildSearchIndex, searchDocuments } from './search';
 import { ListView } from './components/ListView';
 import { DocView } from './components/DocView';
 import { TrashView } from './components/TrashView';
@@ -89,6 +90,11 @@ export function App() {
   const [tabs, setTabs] = useState<Tab[]>(() => loadTabs());
   const [activeIndex, setActiveIndex] = useState<number>(() => loadActiveIndex());
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // When the palette is triggered from a specific type's ListView (the
+  // ListView header 🔍 button), that type's section gets promoted to the top
+  // of the palette so the user sees "where they came from" first. Cmd+K /
+  // Sidebar 🔍 leave this null → strict sidebar order.
+  const [paletteSourceType, setPaletteSourceType] = useState<EntryType | null>(null);
   const [reindexing, setReindexing] = useState(false);
 
   const onReindex = useCallback(async () => {
@@ -176,6 +182,7 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
+        setPaletteSourceType(null);
         setPaletteOpen(true);
       } else if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
@@ -197,6 +204,7 @@ export function App() {
   }, [entries]);
 
   const wikiIndex = useMemo(() => buildWikiIndex(entries ?? []), [entries]);
+  const searchIndex = useMemo(() => buildSearchIndex(entries ?? []), [entries]);
 
   const annotationIndex = useMemo(() => {
     const m = new Map<string, Entry[]>();
@@ -254,20 +262,23 @@ export function App() {
     [entries, activeListType]
   );
 
+  const typeSearchIndex = useMemo(
+    () => activeListType ? searchIndex.filter(doc => doc.entry.type === activeListType) : [],
+    [searchIndex, activeListType]
+  );
+
   const filtered = useMemo(() => {
     if (!activeListType) return [];
     const q = query.trim().toLowerCase();
-    return typeEntries.filter(e => {
+    const base = typeSearchIndex.filter(doc => {
+      const e = doc.entry;
       if (minRating && (e.rating_score || 0) < minRating) return false;
       if (themeFilter && !(e.themes ?? []).some(t => t === themeFilter)) return false;
-      if (!q) return true;
-      const hay = [
-        e.title, e.author, e.preview, e.source, e.topic,
-        ...(e.themes ?? []),
-      ].filter(Boolean).join(' ').toLowerCase();
-      return hay.includes(q);
+      return true;
     });
-  }, [typeEntries, query, minRating, themeFilter, activeListType]);
+    if (!q) return base.map(doc => doc.entry);
+    return searchDocuments(base, q).map(result => result.entry);
+  }, [typeSearchIndex, query, minRating, themeFilter, activeListType]);
 
   // --- tab navigation: per-tab back/forward via history cursor ---
 
@@ -446,6 +457,16 @@ export function App() {
 
   // --- entry-level actions ---
 
+  const onViewAll = useCallback((type: EntryType, q: string) => {
+    setPaletteOpen(false);
+    setQuery(q);                                    // preserve current query
+    setLimit(300);                                  // reset pagination
+    setThemeFilter(null);                           // clear unrelated filter
+    navigateInActiveTab({ kind: 'list', type });
+    // Do NOT call openListType(): it clears the query, which is the opposite of
+    // what we want here.
+  }, [navigateInActiveTab]);
+
   const applyThemeFilter = useCallback((th: string, fromType?: EntryType) => {
     const targetType = fromType ?? activeListType;
     if (targetType) navigateInActiveTab({ kind: 'list', type: targetType });
@@ -532,6 +553,7 @@ export function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onNewIdeaNote={onNewIdeaNote}
         onReindex={onReindex}
+        onOpenSearch={() => { setPaletteSourceType(null); setPaletteOpen(true); }}
       />
 
       <div class="flex-1 min-w-0 flex flex-col">
@@ -560,7 +582,8 @@ export function App() {
             minRating={minRating}
             themeFilter={themeFilter}
             limit={limit}
-            onQueryChange={setQuery}
+            onOpenSearch={() => { setPaletteSourceType(activeTabContent.type); setPaletteOpen(true); }}
+            onClearQuery={() => setQuery('')}
             onMinRatingChange={setMinRating}
             onClearTheme={() => setThemeFilter(null)}
             onLoadMore={() => setLimit(limit + 500)}
@@ -614,9 +637,13 @@ export function App() {
 
       <CommandPalette
         open={paletteOpen}
-        entries={entries}
+        documents={searchIndex}
+        typeOrder={sidebarTypes}
+        sourceType={paletteSourceType}
+        query={query}
         onClose={() => setPaletteOpen(false)}
         onPick={openDoc}
+        onViewAll={onViewAll}
       />
     </div>
   );
