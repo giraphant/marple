@@ -4,10 +4,10 @@ Card-style typed-object browser + Markdown editor over the qua vault.
 Browses 12k+ vault entries (papers / books / chapters / authors / topics /
 notes), edits frontmatter and note bodies, manages annotations and trash.
 
-Stack: **Vite + TypeScript + Preact + CodeMirror 6 + unplugin-icons (Phosphor)**.
-Backend: **a single ~200-line Node static server** (`serve.mjs`) that also
-handles `PUT / POST / DELETE` write-back to `vault/` and a `/api/trash`
-endpoint. Total runtime bundle ~240 KB gzip.
+Stack: **Vite 8 + TypeScript + Preact + CodeMirror 6 + unplugin-icons (Phosphor)**.
+Backend: **Rust (`reader-index` / `reader-api`) + SQLite**. Vite serves
+the SPA in dev; Rust builds the SQLite index, handles `/api/*`, vault
+write-back, sources/PDF reads, trash, and production `dist/` serving.
 
 For internals / architecture / how to extend, see [`context.md`](./context.md).
 
@@ -18,9 +18,10 @@ First time:
 ```sh
 cd reader
 npm install
+cargo fetch --manifest-path rust/Cargo.toml
 ```
 
-Day-to-day (`vite` + `serve.mjs` concurrently):
+Day-to-day (`vite` + Rust `reader-api` concurrently):
 
 ```sh
 npm run dev
@@ -34,13 +35,15 @@ Production build:
 
 ```sh
 npm run build           # rebuilds index, emits dist/
-npm run serve           # serve dist + handle vault writes in one process
+npm run serve           # Rust API serves dist + vault writes in one process
 ```
 
 Useful one-offs:
 
 ```sh
-npm run build:index     # rebuild data/index.json after vault changes
+npm run build:index     # rebuild data/index.sqlite after vault changes
+npm run api             # run only the Rust reader-api backend
+npm run test:sql-index  # validate SQLite schema, themes mirror, and FTS
 npm run typecheck       # tsc --noEmit
 ```
 
@@ -134,9 +137,11 @@ npm run typecheck       # tsc --noEmit
 | `src/frontmatter.ts` | yaml-based parse / serialize |
 | `src/wiki.ts` | `[[wikilink]]` resolver |
 | `src/settings.ts` | Settings type + persistence |
-| `scripts/build-index.mjs` | Walks `vault/`, emits `data/index.json` |
-| `serve.mjs` | Static server + write-back endpoints |
-| `data/index.json` | Generated; loaded once on app boot |
+| `scripts/test-sql-index.mjs` | Validates SQLite schema, theme rows, and FTS smoke search |
+| `rust/reader-index` | CLI that walks `vault/` and emits `data/index.sqlite` |
+| `rust/reader-core` | Reusable Rust core: SQLite index build/read, path safety, vault/trash operations |
+| `rust/reader-api` | Axum HTTP adapter around `reader-core`; future Tauri commands can reuse core |
+| `data/index.sqlite` | Generated; read by `/api/index` on app boot |
 
 ## Roadmap (not built)
 
@@ -145,7 +150,7 @@ npm run typecheck       # tsc --noEmit
 - `[[` autocomplete in the editor
 - Focus mode / typewriter scrolling toggles
 - Theme as first-class object (`vault/themes/<slug>.md` with description page)
-- Auto-rebuild `data/index.json` on vault changes (file watcher)
+- Auto-rebuild `data/index.sqlite` on vault changes (file watcher)
 - Real list virtualization for 12k+ cards
 - Bibtex / CSL citation export formats
 - MCP server exposing vault to AI tools

@@ -5,11 +5,15 @@
   "type": "module",
   "description": "Card-style reader over the qua vault (book / paper / author / topic) with editable properties",
   "scripts": {
-    "build:index": "node scripts/build-index.mjs",
+    "build:index": "cargo run --release --manifest-path rust/Cargo.toml -p reader-index",
+    "build:index:dev": "cargo run --manifest-path rust/Cargo.toml -p reader-index",
+    "api": "cargo run --release --manifest-path rust/Cargo.toml -p reader-api",
+    "api:dev": "cargo run --manifest-path rust/Cargo.toml -p reader-api",
     "dev:vite": "vite",
-    "dev": "node scripts/build-index.mjs && concurrently -k -n vite,serve -c cyan,magenta \"vite\" \"node serve.mjs\"",
-    "build": "node scripts/build-index.mjs && vite build",
-    "serve": "node serve.mjs",
+    "dev": "cargo run --release --manifest-path rust/Cargo.toml -p reader-index && concurrently -k -n vite,api -c cyan,magenta \"vite\" \"cargo run --release --manifest-path rust/Cargo.toml -p reader-api\"",
+    "build": "cargo run --release --manifest-path rust/Cargo.toml -p reader-index && vite build",
+    "serve": "cargo run --release --manifest-path rust/Cargo.toml -p reader-api",
+    "test:sql-index": "node scripts/test-sql-index.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -27,7 +31,7 @@
   },
   "devDependencies": {
     "@iconify-json/ph": "^1.2.2",
-    "@preact/preset-vite": "^2.8.2",
+    "@preact/preset-vite": "^2.10.5",
     "@svgr/core": "^8.1.0",
     "@svgr/plugin-jsx": "^8.1.0",
     "@types/node": "^20.12.7",
@@ -37,6 +41,6 @@
     "tailwindcss": "^3.4.4",
     "typescript": "^5.4.5",
     "unplugin-icons": "^23.0.1",
-    "vite": "^5.2.11"
+    "vite": "^8.0.13"
   }
 }

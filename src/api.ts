@@ -30,8 +30,19 @@ export async function restoreTrash(name: string): Promise<string> {
   return json.restored ?? '';
 }
 
-/** Trigger a full rebuild of data/index.json on the server. Resolves once
- *  the new index file is written; caller should re-fetch /reader/data/index.json
+/** Fetch the reader index from the SQLite-backed API. */
+export async function fetchIndex(): Promise<Entry[]> {
+  const r = await fetch('/api/index');
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`fetch index failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { items?: Entry[] }));
+  return json.items ?? [];
+}
+
+/** Trigger a full rebuild of data/index.sqlite on the server. Resolves once
+ *  the new index database is written; caller should re-fetch /api/index
  *  afterwards. */
 export async function reindex(): Promise<{ tookMs: number }> {
   const r = await fetch('/api/reindex', { method: 'POST' });

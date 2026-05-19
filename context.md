@@ -27,11 +27,11 @@ Hard guarantees the design rests on:
 
 ```
 [ vault/**/*.md (12 k files) ] ──┐
-                                 │  build-index.mjs (one-shot)
+                                 │  reader-index / reader-core (one-shot)
                                  ▼
-                  data/index.json (~5 MB, one row per md)
+                  data/index.sqlite (entries + themes + FTS)
                                  │
-                                 │ fetched once on app boot
+                                 │ /api/index fetched once on app boot
                                  ▼
         ┌──────────── App.tsx (state hub) ────────────┐
         │  entries[]  tabs[]  settings   indexes      │
@@ -43,7 +43,7 @@ Hard guarantees the design rests on:
                                             │ on edit / create / delete
                                             ▼
                        PUT POST DELETE /vault/**/*.md
-                            (serve.mjs, ~250 lines)
+                            (Rust reader-api / reader-core)
                                             │
                                             ▼
                                   Filesystem ⇄ git
@@ -52,21 +52,22 @@ Hard guarantees the design rests on:
 Two long-running processes when developing:
 
 - **vite** on `:5173` — serves the SPA, HMR
-- **serve.mjs** on `:5174` — Node static server + write-back; vite proxies
+- **reader-api** on `:5174` — Rust SQLite + write-back API; vite proxies
   `/vault/*`, `/api/*`, `/sources/*`, `/reader/data/*` to it
 
-Production: `npm run build` writes `dist/`; `serve.mjs` serves the same
+Production: `npm run build` writes `dist/`; `reader-api` serves the same
 `dist/` and handles writes in one process.
 
 ## Key concepts
 
 ### Entry & EntryType
 
-A frontmatter-parsed row from `data/index.json`. Defined in `types.ts`.
+A frontmatter-parsed row from the SQLite-backed `/api/index` response.
+Defined in `types.ts`.
 6 canonical types: `paper-analysis / book-overview / chapter-summary /
-author-profile / topic-synthesis / note`. Build-index applies a `TYPE_ALIAS`
-map to collapse legacy aliases (`paper`, `monograph`, `journal-article`,
-…) to the canonical form.
+author-profile / topic-synthesis / note`. The Rust indexer applies a
+`TYPE_ALIAS` map to collapse legacy aliases (`paper`, `monograph`,
+`journal-article`, …) to the canonical form.
 
 Each `Entry` carries: `path`, `type`, `title`, `author`, `year`, `rating`
 + `rating_score` (computed from `★★★` → 3), `themes[]`, `topic`, `source`,
@@ -256,8 +257,10 @@ permanent recovery layer.
 | `src/frontmatter.ts` | YAML parse / serialize tuned for diff-clean writes |
 | `src/wiki.ts` | `[[wikilink]]` index + author splitter |
 | `src/settings.ts` | Settings type + `loadSettings` / `saveSettings` (localStorage) |
-| `scripts/build-index.mjs` | Walks `vault/`, scans `sources/` for PDFs, emits `data/index.json` |
-| `serve.mjs` | Static server + write-back endpoints |
+| `scripts/test-sql-index.mjs` | Validates SQLite schema, expanded themes, and FTS smoke search |
+| `rust/reader-index` | CLI that walks `vault/`, scans `sources/` for PDFs, emits `data/index.sqlite` |
+| `rust/reader-core` | Reusable Rust core for SQLite index build/read, path safety, vault writes, trash |
+| `rust/reader-api` | Axum HTTP adapter around `reader-core`; migration path to Tauri commands |
 | `vite.config.ts` | Vite + preact preset + unplugin-icons + dev proxy |
 
 ## How to extend
@@ -285,18 +288,18 @@ No path-copying. unplugin-icons inlines the SVG at build time.
 ### Add a new editable frontmatter field
 
 1. Extend `Entry` in `types.ts`.
-2. In `build-index.mjs`: read it from `fm.<field>` and push into entry.
+2. In `rust/reader-core/src/indexer.rs`: read it from frontmatter and push into `IndexedEntry`.
 3. In `api.ts → applyFmToEntry`: merge the field on optimistic update.
 4. In `PropertyPanel.tsx`: add a `<TextRow label="…" field="…" save={save} />`
    row (or write a custom row for special editors like rating / themes).
 
 ### Add a new HTTP endpoint
 
-1. Add a handler in `serve.mjs`. Mirror the existing security pattern:
-   `resolveSafe` → path constraint (e.g. must be under `vault/notes/`) →
-   extension check → existence check → atomic write.
-2. Route it in the request switch (or extend `matchTrashRoute` for `/api/*`
-   shapes).
+1. Put reusable query or file-system logic in `rust/reader-core` when it
+   should survive a future Tauri migration.
+2. Add HTTP routing in `rust/reader-api`. Mirror the existing security
+   pattern: resolve under repo root, constrain writes to the narrowest
+   directory, check extensions/existence, and use atomic writes.
 3. Add a client helper in `api.ts`.
 
 ### Add a new icon set
@@ -305,6 +308,19 @@ No path-copying. unplugin-icons inlines the SVG at build time.
 is importable immediately. No vite config change needed.
 
 ## Recent Changes
+
+- 2026-05-19: v0.10.0 — SQLite index + Rust backend migration + Vite 8.
+  - `data/index.json` replaced by generated `data/index.sqlite`
+    (`entries`, `entry_themes`, `entry_search` FTS5). The SPA fetches
+    `/api/index` instead of importing a large JSON blob.
+  - Node `serve.mjs` and `scripts/build-index.mjs` removed. `reader-core`
+    owns SQLite index build/read, vault path safety, trash, and write-back;
+    `reader-api` is the Axum HTTP adapter; `reader-index` is the release
+    CLI used by `npm run build:index`.
+  - `/api/reindex` rebuilds SQLite in-process through Rust instead of
+    spawning Node.
+  - Vite upgraded from 5 to 8. Production build uses Rolldown via Vite 8;
+    chunk warnings now reference `build.rolldownOptions`.
 
 - 2026-05-16: v0.9.0 — typed body renderers, sidebar collapse,
   citation formats, EPUB-style book rail.
@@ -455,7 +471,7 @@ is importable immediately. No vite config change needed.
     `pdf_slug` (paper basename / book directory slug) and `has_pdf` for
     each entry. Current vault: 569 PDFs match 514 entries (436 books +
     78 papers).
-  - **serve.mjs MIME** adds `.pdf → application/pdf`.
+  - Backend MIME map adds `.pdf → application/pdf`.
 
 - 2026-05-14: v0.6.0 — Capacities-inspired layout + real tab system +
   unplugin-icons.
@@ -494,7 +510,7 @@ is importable immediately. No vite config change needed.
 
 ## Dependencies
 
-Runtime: Node ≥ 18.
+Runtime: Node ≥ 20.19 (Vite 8) and a Rust toolchain.
 
 Production (`dependencies`):
 
@@ -502,12 +518,11 @@ Production (`dependencies`):
 - `marked` — markdown → HTML (read mode)
 - `yaml` — frontmatter parse / serialize
 - `codemirror` + `@codemirror/{state,view,commands,language,lang-markdown}` + `@lezer/highlight` — editor
-- `motion` (vestigial; unused after revert)
 - `htm` (vestigial; unused)
 
 Dev (`devDependencies`):
 
-- `vite` + `@preact/preset-vite` — build / dev server
+- `vite@8` + `@preact/preset-vite` — build / dev server
 - `unplugin-icons` + `@iconify-json/ph` + `@svgr/{core,plugin-jsx}` — icons
 - `typescript` + `@types/node`
 - `tailwindcss` + `postcss` + `autoprefixer` — styling
@@ -532,7 +547,7 @@ Dev (`devDependencies`):
   but cosmetic diff. Fixable by parsing through `yaml.Document` AST
   preserving per-node style.
 - **No file watcher.** Run `npm run build:index` after vault changes
-  to refresh `data/index.json`.
+  to refresh `data/index.sqlite`.
 - **All 12 k+ cards render at once** in ListView — fine due to
   `content-visibility: auto`, but real virtualization (e.g. `@tanstack/virtual`)
   would scale better as the vault grows past 20 k.
@@ -551,18 +566,22 @@ Dev (`devDependencies`):
 
 Frontend npm scripts:
 
-- `npm run dev` → vite + serve.mjs concurrently
-- `npm run dev:vite` → vite only (if serve.mjs already running)
-- `npm run build` → `build:index` then production bundle to `dist/`
-- `npm run build:index` → regenerate `data/index.json`
-- `npm run serve` → start static + write-back server on `PORT` (default 5174)
+- `npm run dev` → Rust `reader-index`, then vite + Rust reader-api concurrently
+- `npm run dev:vite` → vite only (if reader-api already running)
+- `npm run build` → Rust `reader-index` then production bundle to `dist/`
+- `npm run build:index` → regenerate `data/index.sqlite` with Rust release CLI
+- `npm run api` → run only the Rust reader-api backend
+- `npm run test:sql-index` → validate the generated SQLite index
+- `npm run serve` → start Rust static + write-back server on `PORT` (default 5174)
 - `npm run typecheck` → `tsc --noEmit`
 
-Backend HTTP endpoints (`serve.mjs`):
+Backend HTTP endpoints (`rust/reader-api`):
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/reader/*`, `/vault/*.md`, `/sources/*.pdf`, `/reader/data/*` | static files |
+| GET | `/api/index` | read entries from `data/index.sqlite` |
+| POST | `/api/reindex` | rebuild SQLite in-process through Rust |
 | PUT | `/vault/**/*.md` | update existing md (frontmatter or body) |
 | POST | `/vault/notes/**/*.md` | create new note (409 if exists) |
 | DELETE | `/vault/notes/**/*.md` | soft-delete (move to `.trash/`) |

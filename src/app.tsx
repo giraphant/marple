@@ -14,7 +14,7 @@ import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import {
   postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
-  newIdeaDraft, ideaEntryFromDraft, reindex,
+  newIdeaDraft, ideaEntryFromDraft, reindex, fetchIndex,
 } from './api';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
 
@@ -102,10 +102,7 @@ export function App() {
     setReindexing(true);
     try {
       await reindex();
-      // Cache-bust so we don't serve the pre-rebuild index.json.
-      const r = await fetch(`data/index.json?t=${Date.now()}`);
-      const next = await r.json();
-      setEntries(next);
+      setEntries(await fetchIndex());
     } catch (e) {
       window.alert('重建索引失败：' + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -194,7 +191,10 @@ export function App() {
   }, [onToggleSidebar]);
 
   useEffect(() => {
-    fetch('data/index.json').then(r => r.json()).then(setEntries);
+    fetchIndex().then(setEntries).catch(e => {
+      window.alert('加载索引失败：' + (e instanceof Error ? e.message : String(e)));
+      setEntries([]);
+    });
   }, []);
 
   const counts = useMemo(() => {
@@ -435,7 +435,7 @@ export function App() {
   // rebuilds; show a hint that the page can be reloaded to see it.
   const onTrashRestored = useCallback((_restoredPath: string) => {
     void _restoredPath;
-    // Best-effort: nudge the user; full integration would re-fetch index.json.
+    // Best-effort: nudge the user; full integration would re-fetch /api/index.
     // For now do nothing — the file is on disk and will appear after next
     // `npm run build:index` + reload.
   }, []);

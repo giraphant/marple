@@ -1,0 +1,257 @@
+use std::{env, fs, net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
+
+use axum::{
+    body::{Body, Bytes},
+    extract::{Path, State},
+    http::{header, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
+    routing::{delete, get, post},
+    Json, Router,
+};
+use reader_core::{ReaderError, ReaderPaths};
+use serde_json::json;
+use tower_http::cors::{Any, CorsLayer};
+
+#[derive(Clone)]
+struct AppState {
+    paths: Arc<ReaderPaths>,
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let reader_root = env::var("READER_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or(env::current_dir()?);
+    let paths = Arc::new(ReaderPaths::from_reader_root(reader_root)?);
+    let port = env::var("PORT")
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(5174);
+    let state = AppState { paths };
+
+    let app = Router::new()
+        .route("/api/index", get(api_index))
+        .route("/api/reindex", post(api_reindex))
+        .route("/api/trash", get(api_trash_list))
+        .route("/api/trash/:name/restore", post(api_trash_restore))
+        .route("/api/trash/:name", delete(api_trash_purge))
+        .route(
+            "/vault/*path",
+            get(get_vault_file)
+                .put(put_vault_file)
+                .post(post_vault_note)
+                .delete(delete_vault_note),
+        )
+        .route("/sources/*path", get(get_source_file))
+        .route("/reader/data/*path", get(get_reader_data_file))
+        .route("/reader", get(get_reader_dist_root))
+        .route("/reader/", get(get_reader_dist_root))
+        .route("/reader/*path", get(get_reader_dist_file))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
+        .with_state(state);
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    println!("reader api at http://localhost:{port}");
+    println!("GET    /api/index              -> read entries from data/index.sqlite");
+    println!("POST   /api/reindex            -> rebuild data/index.sqlite with Rust");
+    println!("GET    /vault/**/*.md          -> read vault markdown");
+    println!("PUT    /vault/**/*.md          -> update existing vault markdown");
+    println!("POST   /vault/notes/**/*.md    -> create notes");
+    println!("DELETE /vault/notes/**/*.md    -> soft-delete notes");
+    axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
+    Ok(())
+}
+
+async fn api_index(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    let items = reader_core::load_entries(&state.paths)?;
+    Ok(Json(
+        json!({ "items": items, "generatedFrom": "rust-sqlite" }),
+    ))
+}
+
+async fn api_reindex(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    let t0 = Instant::now();
+    let paths = state.paths.clone();
+    let stats = tokio::task::spawn_blocking(move || reader_core::build_sqlite_index(&paths))
+        .await
+        .map_err(|err| AppError(ReaderError::Other(err.into())))??;
+    Ok(Json(json!({
+        "ok": true,
+        "tookMs": t0.elapsed().as_millis(),
+        "entries": stats.entries,
+        "byType": stats.by_type,
+        "sourcePdfs": stats.source_pdfs,
+        "skippedFrontmatterWithoutType": stats.skipped_frontmatter_without_type
+    })))
+}
+
+async fn api_trash_list(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let items = reader_core::list_trash(&state.paths)?;
+    Ok(Json(json!({ "items": items })))
+}
+
+async fn api_trash_restore(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let restored = reader_core::restore_trash(&state.paths, &name)?;
+    Ok(Json(json!({ "ok": true, "restored": restored })))
+}
+
+async fn api_trash_purge(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    reader_core::purge_trash(&state.paths, &name)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn get_vault_file(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+) -> Result<Response, AppError> {
+    serve_workspace_file(&state.paths, &format!("vault/{path}")).await
+}
+
+async fn get_source_file(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+) -> Result<Response, AppError> {
+    serve_workspace_file(&state.paths, &format!("sources/{path}")).await
+}
+
+async fn get_reader_data_file(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+) -> Result<Response, AppError> {
+    serve_workspace_file(&state.paths, &format!("reader/data/{path}")).await
+}
+
+async fn put_vault_file(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+    body: Bytes,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mtime = reader_core::put_markdown(&state.paths, &format!("vault/{path}"), &body)?;
+    Ok(Json(json!({
+        "ok": true,
+        "bytes": body.len(),
+        "mtime": mtime
+    })))
+}
+
+async fn post_vault_note(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
+    let (created_path, mtime) =
+        reader_core::post_note(&state.paths, &format!("vault/{path}"), &body)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "ok": true,
+            "bytes": body.len(),
+            "mtime": mtime,
+            "path": created_path
+        })),
+    ))
+}
+
+async fn delete_vault_note(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let trash = reader_core::delete_note(&state.paths, &format!("vault/{path}"))?;
+    Ok(Json(json!({ "ok": true, "trash": trash })))
+}
+
+async fn get_reader_dist_root(State(state): State<AppState>) -> Result<Response, AppError> {
+    let file = reader_core::reader_dist_file(&state.paths, "/reader/")?;
+    serve_file(file).await
+}
+
+async fn get_reader_dist_file(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+) -> Result<Response, AppError> {
+    let file = reader_core::reader_dist_file(&state.paths, &format!("/reader/{path}"))?;
+    serve_file(file).await
+}
+
+async fn serve_workspace_file(paths: &ReaderPaths, path: &str) -> Result<Response, AppError> {
+    let file = reader_core::resolve_get_path(paths, path)?;
+    serve_file(file).await
+}
+
+async fn serve_file(path: PathBuf) -> Result<Response, AppError> {
+    let bytes = fs::read(&path)?;
+    let mut response = Response::new(Body::from(bytes));
+    let mime = mime_guess::from_path(&path).first_or_octet_stream();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(mime.as_ref())
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    Ok(response)
+}
+
+struct AppError(ReaderError);
+
+impl From<ReaderError> for AppError {
+    fn from(value: ReaderError) -> Self {
+        Self(value)
+    }
+}
+
+impl From<anyhow::Error> for AppError {
+    fn from(value: anyhow::Error) -> Self {
+        Self(ReaderError::Other(value))
+    }
+}
+
+impl From<std::io::Error> for AppError {
+    fn from(value: std::io::Error) -> Self {
+        Self(ReaderError::Other(value.into()))
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, message) = match self.0 {
+            ReaderError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
+            ReaderError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
+            ReaderError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
+            ReaderError::Conflict(msg) => (StatusCode::CONFLICT, msg),
+            ReaderError::Unsupported(msg) => (StatusCode::UNSUPPORTED_MEDIA_TYPE, msg),
+            ReaderError::Io(err) => {
+                eprintln!("[reader-api] {err:?}");
+                (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+            }
+            ReaderError::Sql(err) => {
+                eprintln!("[reader-api] {err:?}");
+                (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+            }
+            ReaderError::Other(err) => {
+                eprintln!("[reader-api] {err:?}");
+                (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+            }
+        };
+        let mut response = (status, message).into_response();
+        response.headers_mut().insert(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("*"),
+        );
+        response
+    }
+}

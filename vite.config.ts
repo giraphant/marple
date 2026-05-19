@@ -6,13 +6,13 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Vite dev runs on 5173 by default; the Node serve.mjs runs on 5174 and is the
-// source of truth for both reader/data/index.json and vault/**/*.md fetches.
-// In dev, we proxy /vault/* and /reader/data/* through to serve.mjs so the SPA
+// Vite dev runs on 5173 by default; the Rust reader-api runs on 5174 and is the
+// source of truth for /api/*, /vault/* and /sources/* fetches.
+// In dev, we proxy those paths through to reader-api so the SPA
 // can keep using absolute paths in production too.
 //
 // Both ports are overridable via env vars (e.g. when 5173/5174 collide with
-// another dev session). PORT here is the same one serve.mjs reads, so a single
+// another dev session). PORT here is the same one reader-api reads, so a single
 // var controls both the backend's listen address AND the proxy target:
 //   VITE_PORT=6173 PORT=6174 npm run dev
 const FRONTEND_PORT = Number(process.env.VITE_PORT || 5173);
