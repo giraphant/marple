@@ -53,13 +53,23 @@
    * 同时被 .prose-body (阅读模式) 和 .cm-* (NoteEditor) 引用。
    * ============================================================ */
   --reader-heading:  250 150   0;  /* #fa9600 橙 — H1–H6 */
+  --reader-fg:        68  68  68;  /* #444444 — Blush body fg */
   --reader-strong:   157 106 216;  /* #9d6ad8 紫 */
   --reader-em:       255  95 139;  /* #ff5f8b 粉 */
   --reader-quote:    189 105  63;  /* #bd693f 砖红 */
-  --reader-code:     189 105  63;  /* #bd693f */
-  --reader-code-bg:  240 234 230;  /* 暖灰 — 浅砖红的去饱和 bg */
+  --reader-quote-marker: 223 198 183;
+  --reader-quote-bg: 245 235 226;
+  --reader-code:      61 147 234;  /* #3d93ea — Blush palette idx 8 */
+  --reader-code-bg:  232 238 245;  /* #e8eef5 — light blue code wash */
   --reader-link:     246 107   0;  /* #f66b00 深橙 */
+  --reader-link-token-fg:     229 115  44;  /* sampled Ulysses capsule text */
+  --reader-link-token-border: 233 160 100;  /* sampled Ulysses capsule border */
+  --reader-link-token-bg:     242 227 213;  /* sampled Ulysses capsule fill */
   --reader-marker:   157 106 216;  /* #9d6ad8 紫 — list ul/ol marker */
+  --reader-mark-fg:   117  88 153;
+  --reader-mark-bg:   203 178 237;
+  --reader-comment-fg: 141 202 102;
+  --reader-comment-bg: 232 241 227;
   --reader-delete:   255  95 139;  /* #ff5f8b 粉 — strikethrough */
 
   /* ------------------------------------------------------------- *
@@ -116,14 +126,23 @@
 
   /* Reading accents — dark palette */
   --reader-heading:  238 181   0;  /* #eeb500 黄 */
+  --reader-fg:       236 221 217;  /* #ecddd9 — Blush dark fg */
   --reader-strong:   172 129 243;  /* #ac81f3 紫 */
   --reader-em:       255  71 113;  /* #ff4771 粉 */
   --reader-quote:    236 221 217;  /* #ecddd9 同正文 — dark 下用色弱区分 */
-  --reader-code:       0 195 114;  /* #00c372 绿（XML 里 dark code 用 idx4，对应 #0097de 蓝；
-                                       这里实测绿更搭酒红 bg，可后续再调） */
-  --reader-code-bg:   54  44  52;
+  --reader-quote-marker: 139 122 132;
+  --reader-quote-bg: 60 48 55;
+  --reader-code:       0 151 222;  /* #0097de — dark inline code */
+  --reader-code-bg:   38  53  69;
   --reader-link:       0 151 222;  /* #0097de 青 */
+  --reader-link-token-fg:       0 151 222;
+  --reader-link-token-border:  73 129 163;
+  --reader-link-token-bg:      38  53  69;
   --reader-marker:   236 221 217;  /* 奶白 marker + bold */
+  --reader-mark-fg:   203 178 237;
+  --reader-mark-bg:    77  58 102;
+  --reader-comment-fg: 123 195  68;
+  --reader-comment-bg:  42  58  43;
   --reader-delete:   255  71 113;
 }
 
@@ -178,6 +197,212 @@
    * 西文 glyph 出真 italic。两端都能识别 emphasis。 */
   .prose-body em { color: rgb(var(--reader-em)); font-style: italic; font-weight: 600; }
   .prose-body hr { border: none; border-top: 1px solid rgb(var(--border-base)); margin: 1.4em 0; }
+
+  .cm-list-rendered-marker {
+    display: inline-flex;
+    justify-content: flex-end;
+    width: 1.25em;
+    margin-right: 0;
+    color: rgb(var(--reader-marker));
+    font-weight: 900;
+    transform: scaleX(1.18);
+    transform-origin: right center;
+    text-shadow: 0.045em 0 0 currentColor, -0.02em 0 0 currentColor;
+    text-indent: 0;
+    user-select: none;
+  }
+
+  .cm-ulysses-mark {
+    color: rgb(var(--reader-mark-fg)) !important;
+    background: rgb(var(--reader-mark-bg)) !important;
+    font-weight: 400;
+    padding: 0 0.02em;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+  .cm-ulysses-mark * {
+    color: rgb(var(--reader-mark-fg)) !important;
+    font-weight: 400 !important;
+  }
+  .cm-blockquote-line {
+    background: rgb(var(--reader-quote-bg)) !important;
+    box-shadow: -100vw 0 0 rgb(var(--reader-quote-bg)), 100vw 0 0 rgb(var(--reader-quote-bg)) !important;
+  }
+  .cm-blockquote-marker,
+  .cm-blockquote-marker * {
+    color: rgb(var(--reader-quote-marker)) !important;
+    font-weight: 400 !important;
+  }
+  .cm-blockquote-text,
+  .cm-blockquote-text * {
+    color: rgb(var(--reader-quote)) !important;
+    font-weight: 400 !important;
+  }
+  .cm-comment-line {
+    background: rgb(var(--reader-comment-bg)) !important;
+    box-shadow: -100vw 0 0 rgb(var(--reader-comment-bg)), 100vw 0 0 rgb(var(--reader-comment-bg)) !important;
+  }
+  .cm-comment,
+  .cm-comment * {
+    color: rgb(var(--reader-comment-fg)) !important;
+    font-weight: 400 !important;
+    font-style: normal;
+  }
+  .cm-hr-line {
+    background: transparent !important;
+  }
+  .cm-hr {
+    color: rgb(var(--reader-em)) !important;
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+  .cm-hr-rendered {
+    display: inline-block;
+    color: rgb(var(--reader-em));
+    font-weight: 400;
+    letter-spacing: 0;
+    text-indent: 0;
+    transform: scaleX(0.72);
+    transform-origin: left center;
+    user-select: none;
+  }
+  .cm-before-hr-text,
+  .cm-before-hr-text * {
+    color: rgb(var(--reader-fg)) !important;
+    font-weight: 400 !important;
+  }
+  .cm-footnote-definition-line {
+    display: none;
+  }
+
+  .cm-semantic-token {
+    display: inline-flex;
+    align-items: center;
+    max-width: min(34em, 100%);
+    vertical-align: -0.08em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-indent: 0;
+    cursor: pointer;
+    user-select: none;
+  }
+  .cm-semantic-wiki,
+  .cm-semantic-link {
+    color: rgb(var(--reader-link-token-fg));
+    border: 2px solid rgb(var(--reader-link-token-border));
+    border-radius: 3px;
+    padding: 0 0.18em;
+    font-weight: 800;
+    line-height: 1.14;
+    background: rgb(var(--reader-link-token-bg));
+  }
+  .cm-semantic-image {
+    color: rgb(var(--reader-quote));
+    background: rgb(var(--reader-code-bg));
+    border: 1px solid rgb(var(--border-base));
+    border-radius: 4px;
+    padding: 0.02em 0.35em;
+    font-size: 0.92em;
+    font-weight: 700;
+  }
+  .cm-semantic-footnote {
+    justify-content: center;
+    width: 1.55em;
+    height: 1.55em;
+    margin-left: 0.18em;
+    margin-right: 0.08em;
+    border: 2px solid #d5d5d5;
+    border-radius: 4px;
+    color: #afafaf;
+    background: #ebebeb;
+    font-size: 0.95em;
+    font-weight: 600;
+    line-height: 1;
+  }
+  .cm-semantic-footnote-star {
+    display: block;
+    line-height: 1;
+    transform: translateY(0.1em);
+  }
+
+  .semantic-token-popover {
+    position: fixed;
+    z-index: 60;
+    width: min(360px, calc(100vw - 24px));
+    padding: 10px;
+    border: 1px solid rgb(var(--border-base));
+    border-radius: 8px;
+    background: rgb(var(--bg-surface));
+    color: rgb(var(--text-primary));
+    box-shadow: 0 8px 20px rgb(0 0 0 / 0.14);
+  }
+  .semantic-token-popover-footnote {
+    width: min(360px, calc(100vw - 24px));
+    padding: 8px;
+  }
+  .semantic-token-field {
+    position: relative;
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    align-items: start;
+    gap: 8px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: rgb(var(--text-secondary));
+  }
+  .semantic-token-field input,
+  .semantic-token-field textarea {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    border-radius: 6px;
+    background: rgb(var(--bg-page));
+    color: rgb(var(--text-primary));
+    padding: 7px 9px;
+    font-size: 13px;
+    line-height: 1.45;
+    outline: 1px solid transparent;
+  }
+  .semantic-token-field input:focus,
+  .semantic-token-field textarea:focus {
+    outline-color: #3d93ea;
+  }
+  .semantic-footnote-editor-wrap {
+    display: block;
+  }
+  .semantic-footnote-editor {
+    width: 100%;
+    min-height: 76px;
+    max-height: 220px;
+    resize: vertical;
+    border: 0;
+    border-radius: 6px;
+    background: rgb(var(--bg-page));
+    color: rgb(var(--text-primary));
+    padding: 8px 9px;
+    font-family: var(--reader-font-family);
+    font-size: 13px;
+    line-height: 1.5;
+    outline: 1px solid transparent;
+  }
+  .semantic-footnote-editor:focus {
+    outline-color: #3d93ea;
+  }
+  .semantic-token-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgb(var(--border-base));
+  }
+  .semantic-token-actions button {
+    color: rgb(var(--text-secondary));
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .semantic-token-actions button:hover { color: rgb(var(--text-primary)); }
 
   .line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
   .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
