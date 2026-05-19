@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -74,7 +75,7 @@ pub enum ReaderError {
 
 pub type ReaderResult<T> = std::result::Result<T, ReaderError>;
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Entry {
     pub path: String,
     #[serde(rename = "type")]
@@ -108,6 +109,23 @@ pub struct TrashItem {
     pub size: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct SearchOptions {
+    pub query: String,
+    pub entry_type: Option<String>,
+    pub min_rating: Option<f64>,
+    pub theme: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SearchHit {
+    pub entry: Entry,
+    pub score: f64,
+    pub snippet: Option<String>,
+    pub source: String,
+}
+
 pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
     if !paths.index_db.is_file() {
         return Err(ReaderError::NotFound(
@@ -136,6 +154,340 @@ pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
         .query_map([], row_to_entry)?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(entries)
+}
+
+pub fn search_entries(paths: &ReaderPaths, options: SearchOptions) -> ReaderResult<Vec<SearchHit>> {
+    if !paths.index_db.is_file() {
+        return Err(ReaderError::NotFound(
+            "index database missing; run npm run build:index in reader/".to_string(),
+        ));
+    }
+
+    let query = options.query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let limit = options.limit.clamp(1, 500);
+    let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    let mut candidates: HashMap<String, SearchCandidate> = HashMap::new();
+    let tokens = query_terms(query);
+
+    if query.chars().filter(|c| !c.is_whitespace()).count() >= 2 {
+        let phrase = quote_fts(query);
+        collect_fts_candidates(&conn, &phrase, limit * 4, 4.0, "phrase", &mut candidates)?;
+    }
+
+    if !tokens.is_empty() {
+        let all_terms = tokens
+            .iter()
+            .map(|token| quote_fts(token))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        collect_fts_candidates(&conn, &all_terms, limit * 5, 2.5, "fulltext", &mut candidates)?;
+
+        if tokens.len() > 1 {
+            let any_terms = tokens
+                .iter()
+                .map(|token| quote_fts(token))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            collect_fts_candidates(&conn, &any_terms, limit * 6, 1.2, "expanded", &mut candidates)?;
+        }
+    }
+
+    let trigram_query = tokens
+        .iter()
+        .filter(|token| token.chars().count() >= 3)
+        .map(|token| quote_fts(token))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    if !trigram_query.is_empty() {
+        collect_trigram_candidates(
+            &conn,
+            &trigram_query,
+            limit * 4,
+            0.9,
+            "fuzzy",
+            &mut candidates,
+        )?;
+    }
+
+    if candidates.len() < limit
+        && should_run_substring_fallback(query, &tokens, candidates.is_empty())
+    {
+        collect_substring_candidates(&conn, query, limit * 2, 0.45, &mut candidates)?;
+    }
+
+    let entries = load_entries(paths)?;
+    let entries_by_path = entries
+        .into_iter()
+        .map(|entry| (entry.path.clone(), entry))
+        .collect::<HashMap<_, _>>();
+
+    let mut hits = candidates
+        .into_values()
+        .filter_map(|candidate| {
+            let entry = entries_by_path.get(&candidate.path)?;
+            if let Some(entry_type) = options.entry_type.as_deref() {
+                if entry.entry_type != entry_type {
+                    return None;
+                }
+            }
+            if let Some(min_rating) = options.min_rating {
+                if entry.rating_score < min_rating {
+                    return None;
+                }
+            }
+            if let Some(theme) = options.theme.as_deref() {
+                if !entry
+                    .themes
+                    .as_ref()
+                    .map(|themes| themes.iter().any(|item| item == theme))
+                    .unwrap_or(false)
+                {
+                    return None;
+                }
+            }
+
+            let mut entry = entry.clone();
+            if let Some(snippet) = candidate.snippet.as_deref().map(clean_snippet) {
+                if !snippet.is_empty() {
+                    entry.preview = snippet;
+                }
+            }
+
+            Some(SearchHit {
+                score: candidate.score + entry.rating_score * 0.03,
+                snippet: candidate.snippet,
+                source: candidate.source,
+                entry,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    hits.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| b.entry.rating_score.total_cmp(&a.entry.rating_score))
+            .then_with(|| {
+                a.entry
+                    .title
+                    .as_deref()
+                    .unwrap_or(&a.entry.path)
+                    .cmp(b.entry.title.as_deref().unwrap_or(&b.entry.path))
+            })
+    });
+    hits.truncate(limit);
+    Ok(hits)
+}
+
+#[derive(Debug)]
+struct SearchCandidate {
+    path: String,
+    score: f64,
+    snippet: Option<String>,
+    source: String,
+}
+
+fn merge_candidate(
+    candidates: &mut HashMap<String, SearchCandidate>,
+    path: String,
+    score: f64,
+    snippet: Option<String>,
+    source: &str,
+) {
+    match candidates.get_mut(&path) {
+        Some(existing) => {
+            let replaces_best = score > existing.score;
+            existing.score += score;
+            if snippet.as_deref().map(str::trim).is_some_and(|s| !s.is_empty())
+                && (existing.snippet.is_none() || replaces_best)
+            {
+                existing.snippet = snippet;
+            }
+            if replaces_best {
+                existing.source = source.to_string();
+            }
+        }
+        None => {
+            candidates.insert(
+                path.clone(),
+                SearchCandidate {
+                    path,
+                    score,
+                    snippet,
+                    source: source.to_string(),
+                },
+            );
+        }
+    }
+}
+
+fn collect_fts_candidates(
+    conn: &Connection,
+    fts_query: &str,
+    limit: usize,
+    multiplier: f64,
+    source: &str,
+    candidates: &mut HashMap<String, SearchCandidate>,
+) -> ReaderResult<()> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+          path,
+          bm25(entry_search, 0.0, 0.0, 8.0, 5.0, 4.0, 3.0, 3.0, 2.5, 1.0, 2.0, 2.0, 1.0) AS rank,
+          snippet(entry_search, -1, '', '', ' ... ', 28) AS snippet
+        FROM entry_search
+        WHERE entry_search MATCH ?
+        ORDER BY rank
+        LIMIT ?
+        "#,
+    )?;
+    let rows = stmt.query_map((fts_query, limit as i64), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, f64>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (path, rank, snippet) = row?;
+        merge_candidate(candidates, path, (0.0 - rank) * multiplier, snippet, source);
+    }
+    Ok(())
+}
+
+fn collect_trigram_candidates(
+    conn: &Connection,
+    fts_query: &str,
+    limit: usize,
+    multiplier: f64,
+    source: &str,
+    candidates: &mut HashMap<String, SearchCandidate>,
+) -> ReaderResult<()> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+          path,
+          bm25(entry_trigram) AS rank,
+          snippet(entry_trigram, 2, '', '', ' ... ', 28) AS snippet
+        FROM entry_trigram
+        WHERE entry_trigram MATCH ?
+        ORDER BY rank
+        LIMIT ?
+        "#,
+    )?;
+    let rows = stmt.query_map((fts_query, limit as i64), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, f64>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (path, rank, snippet) = row?;
+        merge_candidate(candidates, path, (0.0 - rank) * multiplier, snippet, source);
+    }
+    Ok(())
+}
+
+fn collect_substring_candidates(
+    conn: &Connection,
+    query: &str,
+    limit: usize,
+    multiplier: f64,
+    candidates: &mut HashMap<String, SearchCandidate>,
+) -> ReaderResult<()> {
+    let needle = query.trim().to_lowercase();
+    if needle.chars().filter(|c| !c.is_whitespace()).count() < 2 {
+        return Ok(());
+    }
+
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT path, search_text
+        FROM entry_text
+        WHERE instr(lower(search_text), ?) > 0
+        LIMIT ?
+        "#,
+    )?;
+    let rows = stmt.query_map((&needle, limit as i64), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    for row in rows {
+        let (path, text) = row?;
+        let snippet = substring_snippet(&text, &needle);
+        merge_candidate(candidates, path, multiplier, snippet, "substring");
+    }
+    Ok(())
+}
+
+fn query_terms(query: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut current = String::new();
+    for ch in query.chars() {
+        if ch.is_alphanumeric() {
+            current.extend(ch.to_lowercase());
+        } else if !current.is_empty() {
+            terms.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        terms.push(current);
+    }
+    terms.sort();
+    terms.dedup();
+    terms
+        .into_iter()
+        .filter(|term| term.chars().count() >= 2)
+        .take(12)
+        .collect()
+}
+
+fn should_run_substring_fallback(query: &str, tokens: &[String], no_fts_hits: bool) -> bool {
+    if query.chars().count() > 80 {
+        return false;
+    }
+    no_fts_hits || !query.is_ascii() || tokens.iter().any(|token| token.chars().count() < 3)
+}
+
+fn quote_fts(input: &str) -> String {
+    format!("\"{}\"", input.replace('"', "\"\""))
+}
+
+fn clean_snippet(input: &str) -> String {
+    input.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn substring_snippet(text: &str, needle: &str) -> Option<String> {
+    let pos = find_case_insensitive(text, needle)?;
+    let start = text[..pos]
+        .char_indices()
+        .rev()
+        .nth(80)
+        .map(|(idx, _)| idx)
+        .unwrap_or(0);
+    let end = text[pos..]
+        .char_indices()
+        .nth(160)
+        .map(|(idx, _)| pos + idx)
+        .unwrap_or(text.len());
+    Some(clean_snippet(&text[start..end]))
+}
+
+fn find_case_insensitive(text: &str, needle: &str) -> Option<usize> {
+    let needle = needle.to_lowercase();
+    for (idx, _) in text.char_indices() {
+        if text[idx..].to_lowercase().starts_with(&needle) {
+            return Some(idx);
+        }
+    }
+    None
 }
 
 pub fn list_trash(paths: &ReaderPaths) -> ReaderResult<Vec<TrashItem>> {

@@ -44,6 +44,8 @@ struct IndexedEntry {
     has_pdf: bool,
     mtime: Option<i64>,
     preview: String,
+    body_text: String,
+    search_text: String,
 }
 
 pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
@@ -101,15 +103,25 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
         let rating_source = field(&frontmatter, "rating");
         let rating = rating_source.and_then(truthy_json);
         let themes = field(&frontmatter, "themes").and_then(theme_array);
+        let author = field(&frontmatter, "author")
+            .or_else(|| field(&frontmatter, "authors"))
+            .and_then(flatten_author);
+
+        let body_text = normalize_body_for_search(body);
+        let preview = first_paragraph(body);
+        let search_text = search_text(&[
+            rel.as_str(),
+            title.as_deref().unwrap_or_default(),
+            author.as_deref().unwrap_or_default(),
+            body_text.as_str(),
+        ]);
 
         entries.push(IndexedEntry {
             path: rel,
             entry_type,
             book,
             title,
-            author: field(&frontmatter, "author")
-                .or_else(|| field(&frontmatter, "authors"))
-                .and_then(flatten_author),
+            author,
             year,
             rating,
             rating_score: rating_source.map(rating_score).unwrap_or_default(),
@@ -123,7 +135,9 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
             pdf_slug,
             has_pdf,
             mtime: meta.and_then(|m| mtime_ms(&m).ok()),
-            preview: first_paragraph(body),
+            preview,
+            body_text,
+            search_text,
         });
     }
 
@@ -547,6 +561,8 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
         DROP TABLE IF EXISTS entries;
         DROP TABLE IF EXISTS entry_themes;
         DROP TABLE IF EXISTS entry_search;
+        DROP TABLE IF EXISTS entry_text;
+        DROP TABLE IF EXISTS entry_trigram;
 
         CREATE TABLE entries (
           path TEXT PRIMARY KEY,
@@ -570,6 +586,12 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           preview TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE entry_text (
+          path TEXT PRIMARY KEY,
+          search_text TEXT NOT NULL,
+          FOREIGN KEY (path) REFERENCES entries(path) ON DELETE CASCADE
+        );
+
         CREATE TABLE entry_themes (
           path TEXT NOT NULL,
           theme TEXT NOT NULL,
@@ -589,7 +611,15 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           source,
           year,
           preview,
-          doi
+          doi,
+          body
+        );
+
+        CREATE VIRTUAL TABLE entry_trigram USING fts5(
+          path UNINDEXED,
+          type UNINDEXED,
+          text,
+          tokenize = 'trigram'
         );
 
         CREATE INDEX entries_type_rating_title_idx
@@ -615,11 +645,20 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
         )?;
         let mut insert_theme =
             tx.prepare("INSERT INTO entry_themes (path, theme, type) VALUES (?, ?, ?)")?;
+        let mut insert_text =
+            tx.prepare("INSERT INTO entry_text (path, search_text) VALUES (?, ?)")?;
         let mut insert_search = tx.prepare(
             r#"
             INSERT INTO entry_search (
-              path, type, title, author, book, themes, topic, source, year, preview, doi
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              path, type, title, author, book, themes, topic, source, year, preview, doi, body
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )?;
+        let mut insert_trigram = tx.prepare(
+            r#"
+            INSERT INTO entry_trigram (
+              path, type, text
+            ) VALUES (?, ?, ?)
             "#,
         )?;
 
@@ -658,6 +697,8 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
                 }
             }
 
+            insert_text.execute(params![entry.path, entry.search_text])?;
+
             insert_search.execute(params![
                 entry.path,
                 entry.entry_type,
@@ -670,6 +711,13 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
                 fts_json(&entry.year),
                 entry.preview,
                 entry.doi,
+                entry.body_text,
+            ])?;
+
+            insert_trigram.execute(params![
+                entry.path,
+                entry.entry_type,
+                entry.search_text,
             ])?;
         }
     }
@@ -677,6 +725,24 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
     drop(conn);
     fs::rename(&tmp, &paths.index_db)?;
     Ok(())
+}
+
+fn normalize_body_for_search(body: &str) -> String {
+    body.replace("\r\n", "\n")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn search_text(parts: &[&str]) -> String {
+    parts
+        .iter()
+        .map(|part| part.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]

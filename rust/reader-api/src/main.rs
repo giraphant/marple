@@ -2,13 +2,14 @@ use std::{env, fs, net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
 
 use axum::{
     body::{Body, Bytes},
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
 };
 use reader_core::{ReaderError, ReaderPaths};
+use serde::Deserialize;
 use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -31,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/api/index", get(api_index))
+        .route("/api/search", get(api_search))
         .route("/api/reindex", post(api_reindex))
         .route("/api/trash", get(api_trash_list))
         .route("/api/trash/:name/restore", post(api_trash_restore))
@@ -58,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     println!("reader api at http://localhost:{port}");
     println!("GET    /api/index              -> read entries from data/index.sqlite");
+    println!("GET    /api/search?q=...       -> search entries with SQLite FTS");
     println!("POST   /api/reindex            -> rebuild data/index.sqlite with Rust");
     println!("GET    /vault/**/*.md          -> read vault markdown");
     println!("PUT    /vault/**/*.md          -> update existing vault markdown");
@@ -72,6 +75,35 @@ async fn api_index(State(state): State<AppState>) -> Result<Json<serde_json::Val
     Ok(Json(
         json!({ "items": items, "generatedFrom": "rust-sqlite" }),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchParams {
+    q: String,
+    #[serde(rename = "type")]
+    entry_type: Option<String>,
+    min_rating: Option<f64>,
+    theme: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn api_search(
+    State(state): State<AppState>,
+    Query(params): Query<SearchParams>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let paths = state.paths.clone();
+    let options = reader_core::SearchOptions {
+        query: params.q,
+        entry_type: params.entry_type,
+        min_rating: params.min_rating,
+        theme: params.theme,
+        limit: params.limit.unwrap_or(80),
+    };
+    let hits = tokio::task::spawn_blocking(move || reader_core::search_entries(&paths, options))
+        .await
+        .map_err(|err| AppError(ReaderError::Other(err.into())))??;
+    Ok(Json(json!({ "items": hits })))
 }
 
 async fn api_reindex(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {

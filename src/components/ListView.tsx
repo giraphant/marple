@@ -13,6 +13,8 @@ interface Props {
   minRating: number;
   themeFilter: string | null;
   limit: number;
+  searchLoading: boolean;
+  searchError: string | null;
   onOpenSearch: () => void;
   onClearQuery: () => void;
   onMinRatingChange: (n: number) => void;
@@ -24,6 +26,7 @@ interface Props {
 
 export function ListView({
   entries: _entries, type, typeEntries, filtered, query, minRating, themeFilter, limit,
+  searchLoading, searchError,
   onOpenSearch, onClearQuery, onMinRatingChange, onClearTheme, onLoadMore, onCardClick, onThemeClick,
 }: Props) {
   void _entries;
@@ -83,6 +86,15 @@ export function ListView({
               >{n || '·'}</button>
             ))}
           </div>
+
+          {searchLoading && (
+            <div class="text-[11px] text-muted">全文搜索中…</div>
+          )}
+          {searchError && (
+            <div class="text-[11px] text-red-600 dark:text-red-400" title={searchError}>
+              全文搜索失败，已使用本地匹配
+            </div>
+          )}
         </div>
         {themeFilter && (
           <div class="px-6 pb-2 flex items-center gap-2">
@@ -136,4 +148,3 @@ export function ListView({
     </div>
   );
 }
-

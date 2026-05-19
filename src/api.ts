@@ -41,6 +41,41 @@ export async function fetchIndex(): Promise<Entry[]> {
   return json.items ?? [];
 }
 
+export interface SearchHit {
+  entry: Entry;
+  score: number;
+  snippet?: string | null;
+  source: string;
+}
+
+export interface SearchParams {
+  q: string;
+  type?: Entry['type'];
+  minRating?: number;
+  theme?: string | null;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+/** Server-side full-text search backed by SQLite FTS/trigram indexes. */
+export async function searchIndex({
+  q, type, minRating, theme, limit, signal,
+}: SearchParams): Promise<SearchHit[]> {
+  const params = new URLSearchParams();
+  params.set('q', q);
+  if (type) params.set('type', type);
+  if (minRating) params.set('minRating', String(minRating));
+  if (theme) params.set('theme', theme);
+  if (limit) params.set('limit', String(limit));
+  const r = await fetch(`/api/search?${params.toString()}`, { signal });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`search failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { items?: SearchHit[] }));
+  return json.items ?? [];
+}
+
 /** Trigger a full rebuild of data/index.sqlite on the server. Resolves once
  *  the new index database is written; caller should re-fetch /api/index
  *  afterwards. */

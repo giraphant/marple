@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Entry, EntryType, TypeMeta } from '../types';
 import type { SearchDocument } from '../search';
 import { searchDocuments } from '../search';
+import { searchIndex } from '../api';
 import { TypeIcon } from './TypeIcon';
 import { Icon } from './Icon';
 
@@ -37,6 +38,12 @@ export function CommandPalette({
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [draftQuery, setDraftQuery] = useState(query);
+  const [serverSearch, setServerSearch] = useState<{
+    query: string;
+    entries: Entry[];
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
 
   // Focus + select-all on open so the user can either keep typing into the
   // existing query or start fresh by typing over it.
@@ -47,6 +54,47 @@ export function CommandPalette({
       inputRef.current?.select();
     }
   }, [open, query]);
+
+  useEffect(() => {
+    const q = draftQuery.trim();
+    if (!open || !q) {
+      setServerSearch(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setServerSearch(prev => (
+      prev?.query === q
+        ? { ...prev, loading: true, error: null }
+        : { query: q, entries: [], loading: true, error: null }
+    ));
+
+    const timer = window.setTimeout(() => {
+      searchIndex({ q, limit: 300, signal: controller.signal })
+        .then(items => {
+          setServerSearch({
+            query: q,
+            entries: items.map(item => item.entry),
+            loading: false,
+            error: null,
+          });
+        })
+        .catch(err => {
+          if (controller.signal.aborted) return;
+          setServerSearch({
+            query: q,
+            entries: [],
+            loading: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+    }, 160);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [open, draftQuery]);
 
   // Effective section order: sourceType (if any) first, then the rest of
   // typeOrder. When the palette opens from Cmd+K or Sidebar 🔍, sourceType
@@ -65,10 +113,22 @@ export function CommandPalette({
   const sections = useMemo<Section[]>(() => {
     if (!draftQuery.trim()) return [];
     const buckets = new Map<EntryType, { e: Entry; s: number }[]>();
-    for (const result of searchDocuments(documents, draftQuery)) {
-      let bucket = buckets.get(result.entry.type);
-      if (!bucket) { bucket = []; buckets.set(result.entry.type, bucket); }
-      bucket.push({ e: result.entry, s: result.score });
+    const readyServerEntries =
+      serverSearch?.query === draftQuery.trim() && !serverSearch.loading && !serverSearch.error
+        ? serverSearch.entries
+        : null;
+    if (readyServerEntries) {
+      readyServerEntries.forEach((entry, index) => {
+        let bucket = buckets.get(entry.type);
+        if (!bucket) { bucket = []; buckets.set(entry.type, bucket); }
+        bucket.push({ e: entry, s: readyServerEntries.length - index });
+      });
+    } else {
+      for (const result of searchDocuments(documents, draftQuery)) {
+        let bucket = buckets.get(result.entry.type);
+        if (!bucket) { bucket = []; buckets.set(result.entry.type, bucket); }
+        bucket.push({ e: result.entry, s: result.score });
+      }
     }
     const out: Section[] = [];
     for (const meta of effectiveOrder) {
@@ -82,7 +142,7 @@ export function CommandPalette({
       });
     }
     return out;
-  }, [documents, draftQuery, effectiveOrder]);
+  }, [documents, draftQuery, effectiveOrder, serverSearch]);
 
   // Flat ordered list of all visible result rows, used for ↑/↓ navigation
   // across section boundaries. Section headers and "view all" links are
@@ -145,6 +205,14 @@ export function CommandPalette({
             >
               <Icon name="x" size={14} />
             </button>
+          )}
+          {serverSearch?.query === draftQuery.trim() && serverSearch.loading && (
+            <span class="text-[11px] text-muted shrink-0">全文…</span>
+          )}
+          {serverSearch?.query === draftQuery.trim() && serverSearch.error && (
+            <span class="text-[11px] text-red-600 dark:text-red-400 shrink-0" title={serverSearch.error}>
+              本地
+            </span>
           )}
         </div>
         <div class="max-h-[80vh] overflow-auto scrollbar-thin">
