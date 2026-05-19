@@ -2138,11 +2138,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "fastembed",
  "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sqlite-vec",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
