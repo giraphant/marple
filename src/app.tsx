@@ -96,6 +96,10 @@ export function App() {
   // Sidebar 🔍 leave this null → strict sidebar order.
   const [paletteSourceType, setPaletteSourceType] = useState<EntryType | null>(null);
   const [reindexing, setReindexing] = useState(false);
+  const [searchMode, setSearchMode] = useState<'lex' | 'hybrid'>('lex');
+  const toggleSearchMode = useCallback(() => {
+    setSearchMode(prev => (prev === 'lex' ? 'hybrid' : 'lex'));
+  }, []);
   const [listSearch, setListSearch] = useState<{
     key: string;
     entries: Entry[];
@@ -291,7 +295,8 @@ export function App() {
     type: activeListType,
     minRating,
     themeFilter,
-  }), [query, activeListType, minRating, themeFilter]);
+    mode: searchMode,
+  }), [query, activeListType, minRating, themeFilter, searchMode]);
 
   useEffect(() => {
     const q = query.trim();
@@ -314,6 +319,7 @@ export function App() {
         minRating,
         theme: themeFilter,
         limit: 500,
+        mode: searchMode,
         signal: controller.signal,
       })
         .then(items => {
@@ -339,7 +345,7 @@ export function App() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [activeListType, query, minRating, themeFilter, listSearchKey, localFiltered]);
+  }, [activeListType, query, minRating, themeFilter, searchMode, listSearchKey, localFiltered]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return localFiltered;
@@ -651,6 +657,8 @@ export function App() {
             limit={limit}
             searchLoading={!!query.trim() && !!listSearch && listSearch.key === listSearchKey && listSearch.loading}
             searchError={listSearch && listSearch.key === listSearchKey ? listSearch.error : null}
+            searchMode={searchMode}
+            onToggleSearchMode={toggleSearchMode}
             onOpenSearch={() => { setPaletteSourceType(activeTabContent.type); setPaletteOpen(true); }}
             onClearQuery={() => setQuery('')}
             onMinRatingChange={setMinRating}
@@ -710,6 +718,8 @@ export function App() {
         typeOrder={sidebarTypes}
         sourceType={paletteSourceType}
         query={query}
+        searchMode={searchMode}
+        onToggleSearchMode={toggleSearchMode}
         onClose={() => setPaletteOpen(false)}
         onPick={openDoc}
         onViewAll={onViewAll}
