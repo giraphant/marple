@@ -18,6 +18,9 @@ interface Props {
   /** Initial query. The palette keeps keystrokes local and only commits
    *  through `onViewAll`, avoiding background ListView recomputation. */
   query: string;
+  /** "lex" (快速) or "hybrid" (深度). Tab toggles in-palette. */
+  searchMode: 'lex' | 'hybrid';
+  onToggleSearchMode: () => void;
   onClose: () => void;
   /** Pick a single result. modifiers.meta → open in a new tab. */
   onPick: (entry: Entry, modifiers: { meta: boolean }) => void;
@@ -34,7 +37,8 @@ interface Section {
 }
 
 export function CommandPalette({
-  open, documents, typeOrder, sourceType, query, onClose, onPick, onViewAll,
+  open, documents, typeOrder, sourceType, query, searchMode, onToggleSearchMode,
+  onClose, onPick, onViewAll,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [draftQuery, setDraftQuery] = useState(query);
@@ -70,7 +74,7 @@ export function CommandPalette({
     ));
 
     const timer = window.setTimeout(() => {
-      searchIndex({ q, limit: 300, signal: controller.signal })
+      searchIndex({ q, limit: 300, mode: searchMode, signal: controller.signal })
         .then(items => {
           setServerSearch({
             query: q,
@@ -94,7 +98,7 @@ export function CommandPalette({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [open, draftQuery]);
+  }, [open, draftQuery, searchMode]);
 
   // Effective section order: sourceType (if any) first, then the rest of
   // typeOrder. When the palette opens from Cmd+K or Sidebar 🔍, sourceType
@@ -158,6 +162,11 @@ export function CommandPalette({
 
   const handleKey = (ev: KeyboardEvent) => {
     if (ev.key === 'Escape') { ev.preventDefault(); onClose(); return; }
+    if (ev.key === 'Tab') {
+      ev.preventDefault();
+      onToggleSearchMode();
+      return;
+    }
     if (flatResults.length === 0) return;
     const target = ev.target as HTMLElement | null;
     // Find currently focused row index (by data-row-index attr on result buttons).
@@ -189,10 +198,23 @@ export function CommandPalette({
       >
         <div class="flex items-center gap-2 px-3 border-b border-base">
           <Icon name="magnifying-glass" size={16} class="text-muted shrink-0" />
+          <span
+            class={`text-[11px] px-1.5 py-0.5 rounded shrink-0 cursor-pointer select-none ${
+              searchMode === 'hybrid'
+                ? 'bg-purple-200 dark:bg-purple-800 text-purple-900 dark:text-purple-100'
+                : 'bg-zinc-200 dark:bg-zinc-700 text-secondary'
+            }`}
+            title="Tab 切换模式"
+            onClick={onToggleSearchMode}
+          >
+            {searchMode === 'hybrid' ? '深度' : '快速'}
+          </span>
           <input
             ref={inputRef}
             type="search"
-            placeholder="搜索 标题 / 作者 / 主题 / 正文…  ⏎ 打开 · ⌘⏎ 新 tab · Esc 关闭"
+            placeholder={searchMode === 'lex'
+              ? '快速检索 标题/作者/主题/正文…  Tab 切深度 · ⏎ 打开 · Esc 关闭'
+              : '深度检索 跨语言 / 概念 / 自然语言…  Tab 切回快速 · ⏎ 打开 · Esc 关闭'}
             value={draftQuery}
             onInput={e => setDraftQuery((e.target as HTMLInputElement).value)}
             class="flex-1 py-3 bg-transparent text-[14px] focus:outline-none"
@@ -207,7 +229,9 @@ export function CommandPalette({
             </button>
           )}
           {serverSearch?.query === draftQuery.trim() && serverSearch.loading && (
-            <span class="text-[11px] text-muted shrink-0">全文…</span>
+            <span class="text-[11px] text-muted shrink-0">
+              {searchMode === 'hybrid' ? '深度…（首次加载语义模型 ~2s）' : '全文…'}
+            </span>
           )}
           {serverSearch?.query === draftQuery.trim() && serverSearch.error && (
             <span class="text-[11px] text-red-600 dark:text-red-400 shrink-0" title={serverSearch.error}>
