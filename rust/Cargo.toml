@@ -1,5 +1,5 @@
 [workspace]
-members = ["reader-core", "reader-api", "reader-index"]
+members = ["reader-core", "reader-api", "reader-index", "reader-spike"]
 resolver = "2"
 
 [workspace.package]

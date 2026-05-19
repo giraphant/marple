@@ -1,3 +1,4 @@
 .venv/
 vectors.npz
 __pycache__/
+reader/vector-proto/spike-vectors.sqlite
