@@ -13,6 +13,7 @@ use thiserror::Error;
 
 mod indexer;
 pub mod fuse;
+pub mod vector;
 
 pub use indexer::{build_sqlite_index, IndexStats};
 
