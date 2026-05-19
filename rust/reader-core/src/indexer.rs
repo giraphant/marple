@@ -739,6 +739,7 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
         // Embed entries via BGE-M3 into entry_vectors_staging.
         embed_entries_into_staging(&tx, paths, entries)?;
         write_meta_keys(&tx)?;
+        swap_staging_into_live(&tx)?;
     }
     tx.commit()?;
     drop(conn);
@@ -797,6 +798,25 @@ fn embed_entries_into_staging(
             eprintln!("  embedded {}/{}", done.min(total), total);
         }
     }
+    Ok(())
+}
+
+/// Move the freshly-populated `entry_vectors_staging` virtual table into the
+/// canonical `entry_vectors` slot. sqlite-vec's vec0 virtual table does not
+/// support `ALTER TABLE … RENAME TO`, so we explicitly recreate `entry_vectors`
+/// and copy rows. The whole thing runs inside the outer transaction, so the
+/// swap is atomic.
+fn swap_staging_into_live(tx: &rusqlite::Transaction<'_>) -> ReaderResult<()> {
+    tx.execute("DROP TABLE IF EXISTS entry_vectors", [])?;
+    tx.execute(
+        "CREATE VIRTUAL TABLE entry_vectors USING vec0(path TEXT PRIMARY KEY, embedding float[1024] distance_metric=cosine)",
+        [],
+    )?;
+    tx.execute(
+        "INSERT INTO entry_vectors(path, embedding) SELECT path, embedding FROM entry_vectors_staging",
+        [],
+    )?;
+    tx.execute("DROP TABLE entry_vectors_staging", [])?;
     Ok(())
 }
 
