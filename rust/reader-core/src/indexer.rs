@@ -49,6 +49,8 @@ struct IndexedEntry {
 }
 
 pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
+    crate::init_sqlite_vec();
+
     let mut files = Vec::new();
     walk_markdown(&paths.vault, &mut files)?;
     files.sort();

@@ -16,6 +16,23 @@ pub mod fuse;
 
 pub use indexer::{build_sqlite_index, IndexStats};
 
+use std::sync::Once;
+static SQLITE_VEC_INIT: Once = Once::new();
+
+/// Register the sqlite-vec extension with SQLite once per process.
+///
+/// `sqlite3_auto_extension` is global; every Connection opened after this
+/// call automatically has the vec0 virtual-table module and vec_*() SQL
+/// functions available. Safe to call from multiple call sites; only the
+/// first call has effect.
+pub fn init_sqlite_vec() {
+    SQLITE_VEC_INIT.call_once(|| unsafe {
+        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+            sqlite_vec::sqlite3_vec_init as *const (),
+        )));
+    });
+}
+
 const TRASH_TS_SUFFIX_LEN: usize = ".0000-00-00T00-00-00-000Z.md".len();
 
 #[derive(Clone, Debug)]
