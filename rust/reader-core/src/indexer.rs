@@ -44,9 +44,13 @@ struct IndexedEntry {
     has_pdf: bool,
     mtime: Option<i64>,
     preview: String,
+    body_text: String,
+    search_text: String,
 }
 
 pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
+    crate::init_sqlite_vec();
+
     let mut files = Vec::new();
     walk_markdown(&paths.vault, &mut files)?;
     files.sort();
@@ -101,15 +105,25 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
         let rating_source = field(&frontmatter, "rating");
         let rating = rating_source.and_then(truthy_json);
         let themes = field(&frontmatter, "themes").and_then(theme_array);
+        let author = field(&frontmatter, "author")
+            .or_else(|| field(&frontmatter, "authors"))
+            .and_then(flatten_author);
+
+        let body_text = normalize_body_for_search(body);
+        let preview = first_paragraph(body);
+        let search_text = search_text(&[
+            rel.as_str(),
+            title.as_deref().unwrap_or_default(),
+            author.as_deref().unwrap_or_default(),
+            body_text.as_str(),
+        ]);
 
         entries.push(IndexedEntry {
             path: rel,
             entry_type,
             book,
             title,
-            author: field(&frontmatter, "author")
-                .or_else(|| field(&frontmatter, "authors"))
-                .and_then(flatten_author),
+            author,
             year,
             rating,
             rating_score: rating_source.map(rating_score).unwrap_or_default(),
@@ -123,7 +137,9 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
             pdf_slug,
             has_pdf,
             mtime: meta.and_then(|m| mtime_ms(&m).ok()),
-            preview: first_paragraph(body),
+            preview,
+            body_text,
+            search_text,
         });
     }
 
@@ -547,6 +563,11 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
         DROP TABLE IF EXISTS entries;
         DROP TABLE IF EXISTS entry_themes;
         DROP TABLE IF EXISTS entry_search;
+        DROP TABLE IF EXISTS entry_text;
+        DROP TABLE IF EXISTS entry_trigram;
+        DROP TABLE IF EXISTS meta;
+        DROP TABLE IF EXISTS entry_vectors;
+        DROP TABLE IF EXISTS entry_vectors_staging;
 
         CREATE TABLE entries (
           path TEXT PRIMARY KEY,
@@ -570,6 +591,12 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           preview TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE entry_text (
+          path TEXT PRIMARY KEY,
+          search_text TEXT NOT NULL,
+          FOREIGN KEY (path) REFERENCES entries(path) ON DELETE CASCADE
+        );
+
         CREATE TABLE entry_themes (
           path TEXT NOT NULL,
           theme TEXT NOT NULL,
@@ -589,7 +616,25 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           source,
           year,
           preview,
-          doi
+          doi,
+          body
+        );
+
+        CREATE VIRTUAL TABLE entry_trigram USING fts5(
+          path UNINDEXED,
+          type UNINDEXED,
+          text,
+          tokenize = 'trigram'
+        );
+
+        CREATE TABLE meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        CREATE VIRTUAL TABLE entry_vectors_staging USING vec0(
+          path TEXT PRIMARY KEY,
+          embedding float[1024] distance_metric=cosine
         );
 
         CREATE INDEX entries_type_rating_title_idx
@@ -615,11 +660,20 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
         )?;
         let mut insert_theme =
             tx.prepare("INSERT INTO entry_themes (path, theme, type) VALUES (?, ?, ?)")?;
+        let mut insert_text =
+            tx.prepare("INSERT INTO entry_text (path, search_text) VALUES (?, ?)")?;
         let mut insert_search = tx.prepare(
             r#"
             INSERT INTO entry_search (
-              path, type, title, author, book, themes, topic, source, year, preview, doi
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              path, type, title, author, book, themes, topic, source, year, preview, doi, body
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )?;
+        let mut insert_trigram = tx.prepare(
+            r#"
+            INSERT INTO entry_trigram (
+              path, type, text
+            ) VALUES (?, ?, ?)
             "#,
         )?;
 
@@ -658,6 +712,8 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
                 }
             }
 
+            insert_text.execute(params![entry.path, entry.search_text])?;
+
             insert_search.execute(params![
                 entry.path,
                 entry.entry_type,
@@ -670,13 +726,162 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
                 fts_json(&entry.year),
                 entry.preview,
                 entry.doi,
+                entry.body_text,
+            ])?;
+
+            insert_trigram.execute(params![
+                entry.path,
+                entry.entry_type,
+                entry.search_text,
             ])?;
         }
+
+        // Embed entries via BGE-M3 into entry_vectors_staging.
+        embed_entries_into_staging(&tx, paths, entries)?;
+        write_meta_keys(&tx)?;
+        swap_staging_into_live(&tx)?;
     }
     tx.commit()?;
     drop(conn);
     fs::rename(&tmp, &paths.index_db)?;
     Ok(())
+}
+
+const EMBED_INPUT_CHAR_CAP: usize = 8192 * 4; // ~8192 tokens, char proxy
+const EMBED_BATCH: usize = 8;
+const EMBED_MODEL_ID: &str = "BAAI/bge-m3";
+const EMBED_DIM: usize = 1024;
+
+fn embed_entries_into_staging(
+    tx: &rusqlite::Transaction<'_>,
+    paths: &ReaderPaths,
+    entries: &[IndexedEntry],
+) -> ReaderResult<()> {
+    if entries.is_empty() {
+        // No entries → nothing to embed; skip the 2.3 GB model init entirely.
+        // A reindex of an empty/filtered vault should still produce a valid
+        // (but empty) entry_vectors table after the swap step.
+        let _ = tx;
+        return Ok(());
+    }
+
+    use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+
+    let model_cache = paths.reader_root.join("data").join("models");
+    fs::create_dir_all(&model_cache)?;
+    let mut model = TextEmbedding::try_new(
+        InitOptions::new(EmbeddingModel::BGEM3)
+            .with_show_download_progress(true)
+            .with_cache_dir(model_cache),
+    )
+    .map_err(|e| ReaderError::Other(anyhow::anyhow!("init BGE-M3: {e}")))?;
+
+    let mut insert_vec = tx.prepare(
+        "INSERT INTO entry_vectors_staging(path, embedding) VALUES (?, ?)",
+    )?;
+
+    let total = entries.len();
+    for (batch_idx, chunk) in entries.chunks(EMBED_BATCH).enumerate() {
+        let texts: Vec<String> = chunk
+            .iter()
+            .map(|e| {
+                build_embed_input(
+                    e.title.as_deref(),
+                    e.author.as_deref(),
+                    &e.preview,
+                    &e.body_text,
+                )
+            })
+            .collect();
+        let vecs = model
+            .embed(texts, None)
+            .map_err(|e| ReaderError::Other(anyhow::anyhow!("embed batch: {e}")))?;
+        for (entry, v) in chunk.iter().zip(vecs.into_iter()) {
+            // BGE-M3 already L2-normalizes its output; no extra renorm needed.
+            let bytes: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
+            insert_vec.execute(params![entry.path, bytes])?;
+        }
+        let done = (batch_idx + 1) * EMBED_BATCH;
+        if done.is_multiple_of(80) || done >= total {
+            eprintln!("  embedded {}/{}", done.min(total), total);
+        }
+    }
+    Ok(())
+}
+
+/// Move the freshly-populated `entry_vectors_staging` virtual table into the
+/// canonical `entry_vectors` slot. sqlite-vec's vec0 virtual table does not
+/// support `ALTER TABLE … RENAME TO`, so we explicitly recreate `entry_vectors`
+/// and copy rows. The whole thing runs inside the outer transaction, so the
+/// swap is atomic.
+fn swap_staging_into_live(tx: &rusqlite::Transaction<'_>) -> ReaderResult<()> {
+    tx.execute("DROP TABLE IF EXISTS entry_vectors", [])?;
+    tx.execute(
+        "CREATE VIRTUAL TABLE entry_vectors USING vec0(path TEXT PRIMARY KEY, embedding float[1024] distance_metric=cosine)",
+        [],
+    )?;
+    tx.execute(
+        "INSERT INTO entry_vectors(path, embedding) SELECT path, embedding FROM entry_vectors_staging",
+        [],
+    )?;
+    tx.execute("DROP TABLE entry_vectors_staging", [])?;
+    Ok(())
+}
+
+fn write_meta_keys(tx: &rusqlite::Transaction<'_>) -> ReaderResult<()> {
+    tx.execute(
+        "INSERT INTO meta(key, value) VALUES ('embed_model', ?)",
+        params![EMBED_MODEL_ID],
+    )?;
+    tx.execute(
+        "INSERT INTO meta(key, value) VALUES ('embed_dim', ?)",
+        params![EMBED_DIM as i64],
+    )?;
+    tx.execute(
+        "INSERT INTO meta(key, value) VALUES ('embed_completed_at', ?)",
+        params![chrono::Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+fn build_embed_input(
+    title: Option<&str>,
+    author: Option<&str>,
+    preview: &str,
+    body: &str,
+) -> String {
+    let mut buf = String::from("passage: ");
+    if let Some(t) = title {
+        buf.push_str(t);
+        buf.push('\n');
+    }
+    if let Some(a) = author {
+        buf.push_str(a);
+        buf.push('\n');
+    }
+    buf.push_str(preview);
+    buf.push('\n');
+    let body_truncated = body.chars().take(EMBED_INPUT_CHAR_CAP).collect::<String>();
+    buf.push_str(&body_truncated);
+    buf
+}
+
+fn normalize_body_for_search(body: &str) -> String {
+    body.replace("\r\n", "\n")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn search_text(parts: &[&str]) -> String {
+    parts
+        .iter()
+        .map(|part| part.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]

@@ -2,23 +2,28 @@ use std::{env, fs, net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
 
 use axum::{
     body::{Body, Bytes},
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
 };
 use reader_core::{ReaderError, ReaderPaths};
+use serde::Deserialize;
 use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Clone)]
 struct AppState {
     paths: Arc<ReaderPaths>,
+    model: reader_core::vector::ModelHandle,
+    reindex_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    reader_core::init_sqlite_vec();
+
     let reader_root = env::var("READER_ROOT")
         .map(PathBuf::from)
         .unwrap_or(env::current_dir()?);
@@ -27,10 +32,19 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(5174);
-    let state = AppState { paths };
+
+    let model = reader_core::vector::ModelHandle::with_cache_dir(
+        paths.reader_root.join("data").join("models"),
+    );
+    let state = AppState {
+        paths,
+        model,
+        reindex_lock: Arc::new(tokio::sync::Mutex::new(())),
+    };
 
     let app = Router::new()
         .route("/api/index", get(api_index))
+        .route("/api/search", get(api_search))
         .route("/api/reindex", post(api_reindex))
         .route("/api/trash", get(api_trash_list))
         .route("/api/trash/:name/restore", post(api_trash_restore))
@@ -58,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     println!("reader api at http://localhost:{port}");
     println!("GET    /api/index              -> read entries from data/index.sqlite");
+    println!("GET    /api/search?q=...       -> search entries with SQLite FTS");
     println!("POST   /api/reindex            -> rebuild data/index.sqlite with Rust");
     println!("GET    /vault/**/*.md          -> read vault markdown");
     println!("PUT    /vault/**/*.md          -> update existing vault markdown");
@@ -74,7 +89,56 @@ async fn api_index(State(state): State<AppState>) -> Result<Json<serde_json::Val
     ))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchParams {
+    q: String,
+    #[serde(rename = "type")]
+    entry_type: Option<String>,
+    min_rating: Option<f64>,
+    theme: Option<String>,
+    limit: Option<usize>,
+    /// "lex" (default) or "hybrid".
+    #[serde(default)]
+    mode: Option<String>,
+}
+
+async fn api_search(
+    State(state): State<AppState>,
+    Query(params): Query<SearchParams>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let paths = state.paths.clone();
+    let model = state.model.clone();
+    let mode = match params.mode.as_deref() {
+        Some("hybrid") => reader_core::SearchMode::Hybrid,
+        _ => reader_core::SearchMode::Lex,
+    };
+    let options = reader_core::SearchOptions {
+        query: params.q,
+        entry_type: params.entry_type,
+        min_rating: params.min_rating,
+        theme: params.theme,
+        limit: params.limit.unwrap_or(80),
+        mode,
+    };
+    let rt = tokio::runtime::Handle::current();
+    let hits = tokio::task::spawn_blocking(move || {
+        reader_core::search_entries(&paths, options, Some(&model), &rt)
+    })
+    .await
+    .map_err(|err| AppError(ReaderError::Other(err.into())))??;
+    Ok(Json(json!({ "items": hits })))
+}
+
 async fn api_reindex(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    let _guard = match state.reindex_lock.try_lock() {
+        Ok(g) => g,
+        Err(_) => {
+            return Err(AppError(ReaderError::Conflict(
+                "reindex already in progress".to_string(),
+            )))
+        }
+    };
     let t0 = Instant::now();
     let paths = state.paths.clone();
     let stats = tokio::task::spawn_blocking(move || reader_core::build_sqlite_index(&paths))

@@ -14,7 +14,7 @@ import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import {
   postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
-  newIdeaDraft, ideaEntryFromDraft, reindex, fetchIndex,
+  newIdeaDraft, ideaEntryFromDraft, reindex, fetchIndex, searchIndex as searchServerIndex,
 } from './api';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
 
@@ -96,6 +96,16 @@ export function App() {
   // Sidebar 🔍 leave this null → strict sidebar order.
   const [paletteSourceType, setPaletteSourceType] = useState<EntryType | null>(null);
   const [reindexing, setReindexing] = useState(false);
+  const [searchMode, setSearchMode] = useState<'lex' | 'hybrid'>('lex');
+  const toggleSearchMode = useCallback(() => {
+    setSearchMode(prev => (prev === 'lex' ? 'hybrid' : 'lex'));
+  }, []);
+  const [listSearch, setListSearch] = useState<{
+    key: string;
+    entries: Entry[];
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
 
   const onReindex = useCallback(async () => {
     if (reindexing) return;
@@ -267,7 +277,7 @@ export function App() {
     [searchIndex, activeListType]
   );
 
-  const filtered = useMemo(() => {
+  const localFiltered = useMemo(() => {
     if (!activeListType) return [];
     const q = query.trim().toLowerCase();
     const base = typeSearchIndex.filter(doc => {
@@ -279,6 +289,69 @@ export function App() {
     if (!q) return base.map(doc => doc.entry);
     return searchDocuments(base, q).map(result => result.entry);
   }, [typeSearchIndex, query, minRating, themeFilter, activeListType]);
+
+  const listSearchKey = useMemo(() => JSON.stringify({
+    q: query.trim(),
+    type: activeListType,
+    minRating,
+    themeFilter,
+    mode: searchMode,
+  }), [query, activeListType, minRating, themeFilter, searchMode]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!activeListType || !q) {
+      setListSearch(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setListSearch(prev => (
+      prev?.key === listSearchKey
+        ? { ...prev, loading: true, error: null }
+        : { key: listSearchKey, entries: [], loading: true, error: null }
+    ));
+
+    const timer = window.setTimeout(() => {
+      searchServerIndex({
+        q,
+        type: activeListType,
+        minRating,
+        theme: themeFilter,
+        limit: 500,
+        mode: searchMode,
+        signal: controller.signal,
+      })
+        .then(items => {
+          setListSearch({
+            key: listSearchKey,
+            entries: items.map(item => item.entry),
+            loading: false,
+            error: null,
+          });
+        })
+        .catch(err => {
+          if (controller.signal.aborted) return;
+          setListSearch({
+            key: listSearchKey,
+            entries: localFiltered,
+            loading: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+    }, 180);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [activeListType, query, minRating, themeFilter, searchMode, listSearchKey, localFiltered]);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return localFiltered;
+    if (listSearch && listSearch.key === listSearchKey && !listSearch.loading) return listSearch.entries;
+    return localFiltered;
+  }, [localFiltered, listSearch, listSearchKey, query]);
 
   // --- tab navigation: per-tab back/forward via history cursor ---
 
@@ -582,6 +655,10 @@ export function App() {
             minRating={minRating}
             themeFilter={themeFilter}
             limit={limit}
+            searchLoading={!!query.trim() && !!listSearch && listSearch.key === listSearchKey && listSearch.loading}
+            searchError={listSearch && listSearch.key === listSearchKey ? listSearch.error : null}
+            searchMode={searchMode}
+            onToggleSearchMode={toggleSearchMode}
             onOpenSearch={() => { setPaletteSourceType(activeTabContent.type); setPaletteOpen(true); }}
             onClearQuery={() => setQuery('')}
             onMinRatingChange={setMinRating}
@@ -641,6 +718,8 @@ export function App() {
         typeOrder={sidebarTypes}
         sourceType={paletteSourceType}
         query={query}
+        searchMode={searchMode}
+        onToggleSearchMode={toggleSearchMode}
         onClose={() => setPaletteOpen(false)}
         onPick={openDoc}
         onViewAll={onViewAll}

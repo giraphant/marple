@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -11,8 +12,27 @@ use serde_json::Value;
 use thiserror::Error;
 
 mod indexer;
+pub mod fuse;
+pub mod vector;
 
 pub use indexer::{build_sqlite_index, IndexStats};
+
+use std::sync::Once;
+static SQLITE_VEC_INIT: Once = Once::new();
+
+/// Register the sqlite-vec extension with SQLite once per process.
+///
+/// `sqlite3_auto_extension` is global; every Connection opened after this
+/// call automatically has the vec0 virtual-table module and vec_*() SQL
+/// functions available. Safe to call from multiple call sites; only the
+/// first call has effect.
+pub fn init_sqlite_vec() {
+    SQLITE_VEC_INIT.call_once(|| unsafe {
+        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+            sqlite_vec::sqlite3_vec_init as *const (),
+        )));
+    });
+}
 
 const TRASH_TS_SUFFIX_LEN: usize = ".0000-00-00T00-00-00-000Z.md".len();
 
@@ -74,7 +94,7 @@ pub enum ReaderError {
 
 pub type ReaderResult<T> = std::result::Result<T, ReaderError>;
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Entry {
     pub path: String,
     #[serde(rename = "type")]
@@ -108,6 +128,31 @@ pub struct TrashItem {
     pub size: u64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SearchMode {
+    #[default]
+    Lex,
+    Hybrid,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchOptions {
+    pub query: String,
+    pub entry_type: Option<String>,
+    pub min_rating: Option<f64>,
+    pub theme: Option<String>,
+    pub limit: usize,
+    pub mode: SearchMode,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SearchHit {
+    pub entry: Entry,
+    pub score: f64,
+    pub snippet: Option<String>,
+    pub source: String,
+}
+
 pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
     if !paths.index_db.is_file() {
         return Err(ReaderError::NotFound(
@@ -136,6 +181,484 @@ pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
         .query_map([], row_to_entry)?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(entries)
+}
+
+pub fn search_entries(
+    paths: &ReaderPaths,
+    options: SearchOptions,
+    model: Option<&crate::vector::ModelHandle>,
+    runtime: &tokio::runtime::Handle,
+) -> ReaderResult<Vec<SearchHit>> {
+    match options.mode {
+        SearchMode::Lex => search_entries_lex(paths, &options),
+        SearchMode::Hybrid => match model {
+            Some(model) => search_entries_hybrid(paths, &options, model, runtime),
+            None => {
+                // Hybrid requested but no model available → fall back to lex
+                // with a marker on each hit so the API can surface the
+                // X-Search-Fallback header.
+                let mut hits = search_entries_lex(paths, &options)?;
+                for h in &mut hits {
+                    h.source = format!("{} (lex-fallback)", h.source);
+                }
+                Ok(hits)
+            }
+        },
+    }
+}
+
+fn search_entries_lex(paths: &ReaderPaths, options: &SearchOptions) -> ReaderResult<Vec<SearchHit>> {
+    if !paths.index_db.is_file() {
+        return Err(ReaderError::NotFound(
+            "index database missing; run npm run build:index in reader/".to_string(),
+        ));
+    }
+
+    let query = options.query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let limit = options.limit.clamp(1, 500);
+    let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    let mut candidates: HashMap<String, SearchCandidate> = HashMap::new();
+    let tokens = query_terms(query);
+
+    if query.chars().filter(|c| !c.is_whitespace()).count() >= 2 {
+        let phrase = quote_fts(query);
+        collect_fts_candidates(&conn, &phrase, limit * 4, 4.0, "phrase", &mut candidates)?;
+    }
+
+    if !tokens.is_empty() {
+        let all_terms = tokens
+            .iter()
+            .map(|token| quote_fts(token))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        collect_fts_candidates(&conn, &all_terms, limit * 5, 2.5, "fulltext", &mut candidates)?;
+
+        if tokens.len() > 1 {
+            let any_terms = tokens
+                .iter()
+                .map(|token| quote_fts(token))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            collect_fts_candidates(&conn, &any_terms, limit * 6, 1.2, "expanded", &mut candidates)?;
+        }
+    }
+
+    let trigram_query = tokens
+        .iter()
+        .filter(|token| token.chars().count() >= 3)
+        .map(|token| quote_fts(token))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    if !trigram_query.is_empty() {
+        collect_trigram_candidates(
+            &conn,
+            &trigram_query,
+            limit * 4,
+            0.9,
+            "fuzzy",
+            &mut candidates,
+        )?;
+    }
+
+    if candidates.len() < limit
+        && should_run_substring_fallback(query, &tokens, candidates.is_empty())
+    {
+        collect_substring_candidates(&conn, query, limit * 2, 0.45, &mut candidates)?;
+    }
+
+    let entries = load_entries(paths)?;
+    let entries_by_path = entries
+        .into_iter()
+        .map(|entry| (entry.path.clone(), entry))
+        .collect::<HashMap<_, _>>();
+
+    let mut hits = candidates
+        .into_values()
+        .filter_map(|candidate| {
+            let entry = entries_by_path.get(&candidate.path)?;
+            if let Some(entry_type) = options.entry_type.as_deref() {
+                if entry.entry_type != entry_type {
+                    return None;
+                }
+            }
+            if let Some(min_rating) = options.min_rating {
+                if entry.rating_score < min_rating {
+                    return None;
+                }
+            }
+            if let Some(theme) = options.theme.as_deref() {
+                if !entry
+                    .themes
+                    .as_ref()
+                    .map(|themes| themes.iter().any(|item| item == theme))
+                    .unwrap_or(false)
+                {
+                    return None;
+                }
+            }
+
+            let mut entry = entry.clone();
+            if let Some(snippet) = candidate.snippet.as_deref().map(clean_snippet) {
+                if !snippet.is_empty() {
+                    entry.preview = snippet;
+                }
+            }
+
+            Some(SearchHit {
+                score: candidate.score + entry.rating_score * 0.03,
+                snippet: candidate.snippet,
+                source: candidate.source,
+                entry,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    hits.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| b.entry.rating_score.total_cmp(&a.entry.rating_score))
+            .then_with(|| {
+                a.entry
+                    .title
+                    .as_deref()
+                    .unwrap_or(&a.entry.path)
+                    .cmp(b.entry.title.as_deref().unwrap_or(&b.entry.path))
+            })
+    });
+    hits.truncate(limit);
+    Ok(hits)
+}
+
+/// True if the index DB has an `entry_vectors` table (built by a
+/// vector-aware reader-index). Returns false for old indexes or any
+/// scenario where the vec0 table is missing or unreadable.
+fn vector_table_present(conn: &Connection) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE name = 'entry_vectors' LIMIT 1",
+        [],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+fn search_entries_hybrid(
+    paths: &ReaderPaths,
+    options: &SearchOptions,
+    model: &crate::vector::ModelHandle,
+    runtime: &tokio::runtime::Handle,
+) -> ReaderResult<Vec<SearchHit>> {
+    use crate::fuse::{reciprocal_rank_fusion, RankedItem};
+
+    let lex_hits = search_entries_lex(paths, options)?;
+
+    // Compatibility check: a DB built with an older reader-index (or any
+    // index that hasn't run the vector pass yet) won't have entry_vectors.
+    // Probe early — before paying the cost of model load + query embed —
+    // and degrade to a lex-only result with a fallback marker.
+    crate::init_sqlite_vec();
+    let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    if !vector_table_present(&conn) {
+        let mut hits = lex_hits;
+        for h in &mut hits {
+            h.source = format!("{} (lex-fallback:no-vectors)", h.source);
+        }
+        return Ok(hits);
+    }
+
+    // Embed the query. The model is shared across requests, but only one
+    // embed call runs at a time (model has an internal Mutex).
+    let qvec = runtime
+        .block_on(model.embed_query(&options.query))
+        .map_err(ReaderError::Other)?;
+
+    let vec_hits = crate::vector::vec_search(
+        &conn,
+        &qvec,
+        30,
+        options.entry_type.as_deref(),
+        options.min_rating,
+    )
+    .map_err(ReaderError::Other)?;
+
+    let lex_ranked: Vec<RankedItem> = lex_hits
+        .iter()
+        .map(|h| RankedItem {
+            path: h.entry.path.clone(),
+            score: h.score,
+        })
+        .collect();
+    let vec_ranked: Vec<RankedItem> = vec_hits
+        .iter()
+        .map(|h| RankedItem {
+            path: h.path.clone(),
+            score: h.cosine,
+        })
+        .collect();
+    let lex_paths: std::collections::HashSet<_> =
+        lex_ranked.iter().map(|r| r.path.clone()).collect();
+    let vec_paths: std::collections::HashSet<_> =
+        vec_ranked.iter().map(|r| r.path.clone()).collect();
+    let fused = reciprocal_rank_fusion(vec![lex_ranked, vec_ranked], &[1.0, 1.0], 60);
+
+    let mut by_path: HashMap<String, SearchHit> = lex_hits
+        .into_iter()
+        .map(|h| (h.entry.path.clone(), h))
+        .collect();
+    let entries = load_entries(paths)?;
+    let entries_by_path: HashMap<String, Entry> =
+        entries.into_iter().map(|e| (e.path.clone(), e)).collect();
+
+    let mut out = Vec::with_capacity(fused.len());
+    for f in fused.into_iter() {
+        if out.len() >= options.limit {
+            break;
+        }
+        let in_lex = lex_paths.contains(&f.path);
+        let in_vec = vec_paths.contains(&f.path);
+        // theme filter is multi-value; vec_search doesn't push it down, so we
+        // re-check it here for any vec-only candidates.
+        if let Some(theme) = options.theme.as_deref() {
+            if let Some(entry) = entries_by_path.get(&f.path) {
+                let has_theme = entry
+                    .themes
+                    .as_ref()
+                    .map(|themes| themes.iter().any(|t| t == theme))
+                    .unwrap_or(false);
+                if !has_theme {
+                    continue;
+                }
+            }
+        }
+        if let Some(mut hit) = by_path.remove(&f.path) {
+            hit.score = f.score;
+            if in_lex && in_vec {
+                hit.source = "hybrid".into();
+            }
+            out.push(hit);
+        } else if let Some(entry) = entries_by_path.get(&f.path) {
+            out.push(SearchHit {
+                entry: entry.clone(),
+                score: f.score,
+                snippet: None,
+                source: "vec".into(),
+            });
+            let _ = in_lex;
+        }
+    }
+    Ok(out)
+}
+
+#[derive(Debug)]
+struct SearchCandidate {
+    path: String,
+    score: f64,
+    snippet: Option<String>,
+    source: String,
+}
+
+fn merge_candidate(
+    candidates: &mut HashMap<String, SearchCandidate>,
+    path: String,
+    score: f64,
+    snippet: Option<String>,
+    source: &str,
+) {
+    match candidates.get_mut(&path) {
+        Some(existing) => {
+            let replaces_best = score > existing.score;
+            existing.score += score;
+            if snippet.as_deref().map(str::trim).is_some_and(|s| !s.is_empty())
+                && (existing.snippet.is_none() || replaces_best)
+            {
+                existing.snippet = snippet;
+            }
+            if replaces_best {
+                existing.source = source.to_string();
+            }
+        }
+        None => {
+            candidates.insert(
+                path.clone(),
+                SearchCandidate {
+                    path,
+                    score,
+                    snippet,
+                    source: source.to_string(),
+                },
+            );
+        }
+    }
+}
+
+fn collect_fts_candidates(
+    conn: &Connection,
+    fts_query: &str,
+    limit: usize,
+    multiplier: f64,
+    source: &str,
+    candidates: &mut HashMap<String, SearchCandidate>,
+) -> ReaderResult<()> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+          path,
+          bm25(entry_search, 0.0, 0.0, 8.0, 5.0, 4.0, 3.0, 3.0, 2.5, 1.0, 2.0, 2.0, 1.0) AS rank,
+          snippet(entry_search, -1, '', '', ' ... ', 28) AS snippet
+        FROM entry_search
+        WHERE entry_search MATCH ?
+        ORDER BY rank
+        LIMIT ?
+        "#,
+    )?;
+    let rows = stmt.query_map((fts_query, limit as i64), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, f64>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (path, rank, snippet) = row?;
+        merge_candidate(candidates, path, (0.0 - rank) * multiplier, snippet, source);
+    }
+    Ok(())
+}
+
+fn collect_trigram_candidates(
+    conn: &Connection,
+    fts_query: &str,
+    limit: usize,
+    multiplier: f64,
+    source: &str,
+    candidates: &mut HashMap<String, SearchCandidate>,
+) -> ReaderResult<()> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+          path,
+          bm25(entry_trigram) AS rank,
+          snippet(entry_trigram, 2, '', '', ' ... ', 28) AS snippet
+        FROM entry_trigram
+        WHERE entry_trigram MATCH ?
+        ORDER BY rank
+        LIMIT ?
+        "#,
+    )?;
+    let rows = stmt.query_map((fts_query, limit as i64), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, f64>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (path, rank, snippet) = row?;
+        merge_candidate(candidates, path, (0.0 - rank) * multiplier, snippet, source);
+    }
+    Ok(())
+}
+
+fn collect_substring_candidates(
+    conn: &Connection,
+    query: &str,
+    limit: usize,
+    multiplier: f64,
+    candidates: &mut HashMap<String, SearchCandidate>,
+) -> ReaderResult<()> {
+    let needle = query.trim().to_lowercase();
+    if needle.chars().filter(|c| !c.is_whitespace()).count() < 2 {
+        return Ok(());
+    }
+
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT path, search_text
+        FROM entry_text
+        WHERE instr(lower(search_text), ?) > 0
+        LIMIT ?
+        "#,
+    )?;
+    let rows = stmt.query_map((&needle, limit as i64), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    for row in rows {
+        let (path, text) = row?;
+        let snippet = substring_snippet(&text, &needle);
+        merge_candidate(candidates, path, multiplier, snippet, "substring");
+    }
+    Ok(())
+}
+
+fn query_terms(query: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut current = String::new();
+    for ch in query.chars() {
+        if ch.is_alphanumeric() {
+            current.extend(ch.to_lowercase());
+        } else if !current.is_empty() {
+            terms.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        terms.push(current);
+    }
+    terms.sort();
+    terms.dedup();
+    terms
+        .into_iter()
+        .filter(|term| term.chars().count() >= 2)
+        .take(12)
+        .collect()
+}
+
+fn should_run_substring_fallback(query: &str, tokens: &[String], no_fts_hits: bool) -> bool {
+    if query.chars().count() > 80 {
+        return false;
+    }
+    no_fts_hits || !query.is_ascii() || tokens.iter().any(|token| token.chars().count() < 3)
+}
+
+fn quote_fts(input: &str) -> String {
+    format!("\"{}\"", input.replace('"', "\"\""))
+}
+
+fn clean_snippet(input: &str) -> String {
+    input.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn substring_snippet(text: &str, needle: &str) -> Option<String> {
+    let pos = find_case_insensitive(text, needle)?;
+    let start = text[..pos]
+        .char_indices()
+        .rev()
+        .nth(80)
+        .map(|(idx, _)| idx)
+        .unwrap_or(0);
+    let end = text[pos..]
+        .char_indices()
+        .nth(160)
+        .map(|(idx, _)| pos + idx)
+        .unwrap_or(text.len());
+    Some(clean_snippet(&text[start..end]))
+}
+
+fn find_case_insensitive(text: &str, needle: &str) -> Option<usize> {
+    let needle = needle.to_lowercase();
+    for (idx, _) in text.char_indices() {
+        if text[idx..].to_lowercase().starts_with(&needle) {
+            return Some(idx);
+        }
+    }
+    None
 }
 
 pub fn list_trash(paths: &ReaderPaths) -> ReaderResult<Vec<TrashItem>> {

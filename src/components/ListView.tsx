@@ -13,6 +13,10 @@ interface Props {
   minRating: number;
   themeFilter: string | null;
   limit: number;
+  searchLoading: boolean;
+  searchError: string | null;
+  searchMode: 'lex' | 'hybrid';
+  onToggleSearchMode: () => void;
   onOpenSearch: () => void;
   onClearQuery: () => void;
   onMinRatingChange: (n: number) => void;
@@ -24,6 +28,7 @@ interface Props {
 
 export function ListView({
   entries: _entries, type, typeEntries, filtered, query, minRating, themeFilter, limit,
+  searchLoading, searchError, searchMode, onToggleSearchMode,
   onOpenSearch, onClearQuery, onMinRatingChange, onClearTheme, onLoadMore, onCardClick, onThemeClick,
 }: Props) {
   void _entries;
@@ -83,6 +88,28 @@ export function ListView({
               >{n || '·'}</button>
             ))}
           </div>
+
+          <button
+            type="button"
+            class={`text-[11px] px-1.5 py-0.5 rounded ${
+              searchMode === 'hybrid'
+                ? 'bg-purple-200 dark:bg-purple-800 text-purple-900 dark:text-purple-100'
+                : 'bg-zinc-200 dark:bg-zinc-700 text-secondary'
+            }`}
+            title="切换搜索模式（Cmd+K 后 Tab）"
+            onClick={onToggleSearchMode}
+          >
+            {searchMode === 'hybrid' ? '深度' : '快速'}
+          </button>
+
+          {searchLoading && (
+            <div class="text-[11px] text-muted">全文搜索中…</div>
+          )}
+          {searchError && (
+            <div class="text-[11px] text-red-600 dark:text-red-400" title={searchError}>
+              全文搜索失败，已使用本地匹配
+            </div>
+          )}
         </div>
         {themeFilter && (
           <div class="px-6 pb-2 flex items-center gap-2">
@@ -136,4 +163,3 @@ export function ListView({
     </div>
   );
 }
-
