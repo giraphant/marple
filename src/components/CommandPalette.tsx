@@ -1,17 +1,22 @@
-import { useEffect, useMemo, useRef } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Entry, EntryType, TypeMeta } from '../types';
+import type { SearchDocument } from '../search';
+import { searchDocuments } from '../search';
 import { TypeIcon } from './TypeIcon';
 import { Icon } from './Icon';
 
 interface Props {
   open: boolean;
-  entries: Entry[];
+  documents: SearchDocument<Entry>[];
   /** Type sections render in this order. Pass `orderedTypes(settings)`. */
   typeOrder: TypeMeta[];
-  /** Controlled. Same string the ListView uses, so closing the palette
-   *  leaves a pre-filtered list behind (intentional — see design doc). */
+  /** If set, that type's section is promoted to the top of the palette,
+   *  with remaining sections still in `typeOrder`. App passes the active
+   *  ListView's type when the palette is opened from a list's 🔍 button. */
+  sourceType: EntryType | null;
+  /** Initial query. The palette keeps keystrokes local and only commits
+   *  through `onViewAll`, avoiding background ListView recomputation. */
   query: string;
-  onQueryChange: (q: string) => void;
   onClose: () => void;
   /** Pick a single result. modifiers.meta → open in a new tab. */
   onPick: (entry: Entry, modifiers: { meta: boolean }) => void;
@@ -21,40 +26,6 @@ interface Props {
 
 const PER_TYPE_LIMIT = 5;
 
-/** Coerce a frontmatter scalar that *might* be a string, an array of strings,
- *  or null to a lowercased search-haystack string. The `Entry` types declare
- *  topic/source as `string | null`, but real vault frontmatter has both
- *  string and array forms (e.g. multi-source entries) so we tolerate both. */
-function fieldText(v: unknown): string {
-  if (typeof v === 'string') return v.toLowerCase();
-  if (Array.isArray(v)) return v.join(' ').toLowerCase();
-  return '';
-}
-
-/** Rank entries by how well they match the query. Bias matches:
- *  - title hit > author hit > themes hit > topic hit > source hit > preview hit
- *  - earlier substring position = higher score
- *  - higher rating_score = tiebreaker boost */
-function score(entry: Entry, q: string): number {
-  const t  = (entry.title  ?? '').toLowerCase();
-  const a  = (entry.author ?? '').toLowerCase();
-  const th = (entry.themes ?? []).join(' ').toLowerCase();
-  const tp = fieldText(entry.topic);
-  const sr = fieldText(entry.source);
-  const pv = (entry.preview ?? '').toLowerCase();
-
-  let s = 0;
-  let idx;
-  if ((idx = t.indexOf(q))  >= 0) s += 1000 - idx;
-  if ((idx = a.indexOf(q))  >= 0) s += 500  - idx;
-  if ((idx = th.indexOf(q)) >= 0) s += 300  - idx;
-  if ((idx = tp.indexOf(q)) >= 0) s += 250  - idx;
-  if ((idx = sr.indexOf(q)) >= 0) s += 200  - idx;
-  if ((idx = pv.indexOf(q)) >= 0) s += 100  - idx;
-  if (s > 0) s += (entry.rating_score || 0) * 10;
-  return s;
-}
-
 interface Section {
   meta: TypeMeta;
   total: number;
@@ -62,34 +33,45 @@ interface Section {
 }
 
 export function CommandPalette({
-  open, entries, typeOrder, query, onQueryChange, onClose, onPick, onViewAll,
+  open, documents, typeOrder, sourceType, query, onClose, onPick, onViewAll,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [draftQuery, setDraftQuery] = useState(query);
 
   // Focus + select-all on open so the user can either keep typing into the
   // existing query or start fresh by typing over it.
   useEffect(() => {
     if (open) {
+      setDraftQuery(query);
       inputRef.current?.focus();
       inputRef.current?.select();
     }
-  }, [open]);
+  }, [open, query]);
+
+  // Effective section order: sourceType (if any) first, then the rest of
+  // typeOrder. When the palette opens from Cmd+K or Sidebar 🔍, sourceType
+  // is null and we get strict sidebar order. When opened from a ListView's
+  // 🔍, the user's current type is promoted to the top so "where they came
+  // from" is the section they see first.
+  const effectiveOrder = useMemo<TypeMeta[]>(() => {
+    if (!sourceType) return typeOrder;
+    const source = typeOrder.find(t => t.id === sourceType);
+    if (!source) return typeOrder;
+    return [source, ...typeOrder.filter(t => t.id !== sourceType)];
+  }, [typeOrder, sourceType]);
 
   // Score → bucket by type → sort within bucket → top-N. Sections render
-  // in `typeOrder` (sidebar order); empty sections are dropped.
+  // in `effectiveOrder`; empty sections are dropped.
   const sections = useMemo<Section[]>(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
+    if (!draftQuery.trim()) return [];
     const buckets = new Map<EntryType, { e: Entry; s: number }[]>();
-    for (const e of entries) {
-      const s = score(e, q);
-      if (s <= 0) continue;
-      let bucket = buckets.get(e.type);
-      if (!bucket) { bucket = []; buckets.set(e.type, bucket); }
-      bucket.push({ e, s });
+    for (const result of searchDocuments(documents, draftQuery)) {
+      let bucket = buckets.get(result.entry.type);
+      if (!bucket) { bucket = []; buckets.set(result.entry.type, bucket); }
+      bucket.push({ e: result.entry, s: result.score });
     }
     const out: Section[] = [];
-    for (const meta of typeOrder) {
+    for (const meta of effectiveOrder) {
       const bucket = buckets.get(meta.id);
       if (!bucket || bucket.length === 0) continue;
       bucket.sort((a, b) => b.s - a.s);
@@ -100,7 +82,7 @@ export function CommandPalette({
       });
     }
     return out;
-  }, [entries, query, typeOrder]);
+  }, [documents, draftQuery, effectiveOrder]);
 
   // Flat ordered list of all visible result rows, used for ↑/↓ navigation
   // across section boundaries. Section headers and "view all" links are
@@ -151,13 +133,13 @@ export function CommandPalette({
             ref={inputRef}
             type="search"
             placeholder="搜索 标题 / 作者 / 主题 / 正文…  ⏎ 打开 · ⌘⏎ 新 tab · Esc 关闭"
-            value={query}
-            onInput={e => onQueryChange((e.target as HTMLInputElement).value)}
+            value={draftQuery}
+            onInput={e => setDraftQuery((e.target as HTMLInputElement).value)}
             class="flex-1 py-3 bg-transparent text-[14px] focus:outline-none"
           />
-          {query && (
+          {draftQuery && (
             <button
-              onClick={() => { onQueryChange(''); inputRef.current?.focus(); }}
+              onClick={() => { setDraftQuery(''); inputRef.current?.focus(); }}
               title="清空"
               class="text-muted hover:text-primary p-1 rounded hover:bg-hover/60"
             >
@@ -166,9 +148,9 @@ export function CommandPalette({
           )}
         </div>
         <div class="max-h-[80vh] overflow-auto scrollbar-thin">
-          {query.trim() === '' ? (
+          {draftQuery.trim() === '' ? (
             <div class="px-4 py-6 text-sm text-muted text-center">
-              开始输入以搜索 vault 中 {entries.length} 个条目…
+              开始输入以搜索 vault 中 {documents.length} 个条目…
             </div>
           ) : sections.length === 0 ? (
             <div class="px-4 py-6 text-sm text-muted text-center">
@@ -214,7 +196,7 @@ export function CommandPalette({
                     </ul>
                     {sec.total > sec.top.length && (
                       <button
-                        onClick={() => onViewAll(sec.meta.id, query)}
+                        onClick={() => onViewAll(sec.meta.id, draftQuery)}
                         class="w-full text-left px-3 py-1.5 text-[12px] text-muted hover:text-primary hover:bg-page"
                       >
                         在「{sec.meta.label}」中查看全部 {sec.total} 条 →
