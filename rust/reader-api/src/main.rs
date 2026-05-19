@@ -16,10 +16,14 @@ use tower_http::cors::{Any, CorsLayer};
 #[derive(Clone)]
 struct AppState {
     paths: Arc<ReaderPaths>,
+    model: reader_core::vector::ModelHandle,
+    reindex_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    reader_core::init_sqlite_vec();
+
     let reader_root = env::var("READER_ROOT")
         .map(PathBuf::from)
         .unwrap_or(env::current_dir()?);
@@ -28,7 +32,15 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(5174);
-    let state = AppState { paths };
+
+    let model = reader_core::vector::ModelHandle::with_cache_dir(
+        paths.reader_root.join("data").join("models"),
+    );
+    let state = AppState {
+        paths,
+        model,
+        reindex_lock: Arc::new(tokio::sync::Mutex::new(())),
+    };
 
     let app = Router::new()
         .route("/api/index", get(api_index))
@@ -86,6 +98,9 @@ struct SearchParams {
     min_rating: Option<f64>,
     theme: Option<String>,
     limit: Option<usize>,
+    /// "lex" (default) or "hybrid".
+    #[serde(default)]
+    mode: Option<String>,
 }
 
 async fn api_search(
@@ -93,17 +108,22 @@ async fn api_search(
     Query(params): Query<SearchParams>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let paths = state.paths.clone();
+    let model = state.model.clone();
+    let mode = match params.mode.as_deref() {
+        Some("hybrid") => reader_core::SearchMode::Hybrid,
+        _ => reader_core::SearchMode::Lex,
+    };
     let options = reader_core::SearchOptions {
         query: params.q,
         entry_type: params.entry_type,
         min_rating: params.min_rating,
         theme: params.theme,
         limit: params.limit.unwrap_or(80),
-        mode: reader_core::SearchMode::Lex,
+        mode,
     };
     let rt = tokio::runtime::Handle::current();
     let hits = tokio::task::spawn_blocking(move || {
-        reader_core::search_entries(&paths, options, None, &rt)
+        reader_core::search_entries(&paths, options, Some(&model), &rt)
     })
     .await
     .map_err(|err| AppError(ReaderError::Other(err.into())))??;
@@ -111,6 +131,14 @@ async fn api_search(
 }
 
 async fn api_reindex(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    let _guard = match state.reindex_lock.try_lock() {
+        Ok(g) => g,
+        Err(_) => {
+            return Err(AppError(ReaderError::Conflict(
+                "reindex already in progress".to_string(),
+            )))
+        }
+    };
     let t0 = Instant::now();
     let paths = state.paths.clone();
     let stats = tokio::task::spawn_blocking(move || reader_core::build_sqlite_index(&paths))
