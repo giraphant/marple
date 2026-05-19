@@ -563,6 +563,9 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
         DROP TABLE IF EXISTS entry_search;
         DROP TABLE IF EXISTS entry_text;
         DROP TABLE IF EXISTS entry_trigram;
+        DROP TABLE IF EXISTS meta;
+        DROP TABLE IF EXISTS entry_vectors;
+        DROP TABLE IF EXISTS entry_vectors_staging;
 
         CREATE TABLE entries (
           path TEXT PRIMARY KEY,
@@ -620,6 +623,16 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           type UNINDEXED,
           text,
           tokenize = 'trigram'
+        );
+
+        CREATE TABLE meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        CREATE VIRTUAL TABLE entry_vectors_staging USING vec0(
+          path TEXT PRIMARY KEY,
+          embedding float[1024] distance_metric=cosine
         );
 
         CREATE INDEX entries_type_rating_title_idx
