@@ -227,3 +227,93 @@ impl Default for ModelHandle {
         Self::new()
     }
 }
+
+// ---------------------------------------------------------------------------
+// vec_search: KNN over entry_vectors with filters pushed into the SQL.
+
+use rusqlite::Connection;
+
+const COSINE_FLOOR: f64 = 0.45;
+const VEC_OVERFETCH_STAGES: &[usize] = &[30, 60, 120, 240];
+
+#[derive(Debug, Clone)]
+pub struct VecHit {
+    pub path: String,
+    pub cosine: f64,
+}
+
+/// Run a vec0 KNN search joined against the entries table so that type and
+/// rating filters are pushed into the candidate query rather than applied
+/// post-hoc. Returns up to `limit` hits with `cosine >= COSINE_FLOOR`, using
+/// adaptive over-fetch when filters strip the initial top-k too aggressively.
+pub fn vec_search(
+    conn: &Connection,
+    qvec: &[f32],
+    limit: usize,
+    entry_type: Option<&str>,
+    min_rating: Option<f64>,
+) -> Result<Vec<VecHit>> {
+    let qbytes: Vec<u8> = qvec.iter().flat_map(|f| f.to_le_bytes()).collect();
+    let mut accumulated: Vec<VecHit> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for &k in VEC_OVERFETCH_STAGES {
+        if accumulated.len() >= limit {
+            break;
+        }
+
+        let mut where_parts = vec![
+            "v.embedding MATCH ?".to_string(),
+            "v.k = ?".to_string(),
+        ];
+        if entry_type.is_some() {
+            where_parts.push("e.type = ?".to_string());
+        }
+        if min_rating.is_some() {
+            where_parts.push("e.rating_score >= ?".to_string());
+        }
+        let sql = format!(
+            "SELECT v.path, v.distance FROM entry_vectors v
+             JOIN entries e ON e.path = v.path
+             WHERE {}
+             ORDER BY v.distance
+             LIMIT ?",
+            where_parts.join(" AND ")
+        );
+
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![
+            Box::new(qbytes.clone()),
+            Box::new(k as i64),
+        ];
+        if let Some(t) = entry_type {
+            params.push(Box::new(t.to_string()));
+        }
+        if let Some(r) = min_rating {
+            params.push(Box::new(r));
+        }
+        params.push(Box::new(limit as i64));
+
+        let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| &**p).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(refs.as_slice(), |row| {
+            let path: String = row.get(0)?;
+            let distance: f64 = row.get(1)?;
+            Ok((path, 1.0 - distance))
+        })?;
+
+        for r in rows {
+            let (path, cosine) = r?;
+            if cosine < COSINE_FLOOR {
+                continue;
+            }
+            if seen.insert(path.clone()) {
+                accumulated.push(VecHit { path, cosine });
+                if accumulated.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(accumulated)
+}
