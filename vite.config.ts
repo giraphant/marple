@@ -6,10 +6,19 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Vite dev runs on 5173 (default). The Node serve.mjs runs on 5174 and is the
+// Vite dev runs on 5173 by default; the Node serve.mjs runs on 5174 and is the
 // source of truth for both reader/data/index.json and vault/**/*.md fetches.
 // In dev, we proxy /vault/* and /reader/data/* through to serve.mjs so the SPA
 // can keep using absolute paths in production too.
+//
+// Both ports are overridable via env vars (e.g. when 5173/5174 collide with
+// another dev session). PORT here is the same one serve.mjs reads, so a single
+// var controls both the backend's listen address AND the proxy target:
+//   VITE_PORT=6173 PORT=6174 npm run dev
+const FRONTEND_PORT = Number(process.env.VITE_PORT || 5173);
+const BACKEND_PORT = Number(process.env.PORT || 5174);
+const BACKEND = `http://localhost:${BACKEND_PORT}`;
+
 export default defineConfig({
   plugins: [
     preact(),
@@ -26,12 +35,12 @@ export default defineConfig({
     sourcemap: true,
   },
   server: {
-    port: 5173,
+    port: FRONTEND_PORT,
     proxy: {
-      '/vault':       'http://localhost:5174',
-      '/reader/data': 'http://localhost:5174',
-      '/api':         'http://localhost:5174',
-      '/sources':     'http://localhost:5174',
+      '/vault':       BACKEND,
+      '/reader/data': BACKEND,
+      '/api':         BACKEND,
+      '/sources':     BACKEND,
     },
   },
 });
