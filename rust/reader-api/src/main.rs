@@ -211,7 +211,8 @@ async fn api_reindex(State(state): State<AppState>) -> Result<Json<serde_json::V
         "entries": stats.entries,
         "byType": stats.by_type,
         "sourcePdfs": stats.source_pdfs,
-        "skippedFrontmatterWithoutType": stats.skipped_frontmatter_without_type
+        "skippedFrontmatterWithoutType": stats.skipped_frontmatter_without_type,
+        "skipped": serde_json::to_value(&stats.skipped).unwrap_or_default()
     })))
 }
 

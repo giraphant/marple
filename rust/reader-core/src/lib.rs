@@ -18,7 +18,8 @@ pub mod vector;
 
 pub use indexer::{
     build_embeddings, build_embeddings_with_progress, build_sqlite_index, list_vault_files,
-    model_cache_ready, model_ready_marker, parse_entry, IndexStats,
+    model_cache_ready, model_ready_marker, parse_entry, reconcile_index, remove_entry,
+    upsert_entry, IndexStats, ReconcileStats,
 };
 
 use std::sync::Once;

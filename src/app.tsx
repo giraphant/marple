@@ -79,9 +79,14 @@ export function App() {
     if (reindexing) return;
     setReindexing(true);
     try {
-      await reindex();
+      const { skipped } = await reindex();
       setEntries(await fetchIndex());
       bumpVaultVersion();
+      if (skipped.length > 0) {
+        const lines = skipped.slice(0, 20).map(s => `· [${s.reason}] ${s.path}`).join('\n');
+        const more = skipped.length > 20 ? `\n…还有 ${skipped.length - 20} 个` : '';
+        window.alert(`重建完成，但有 ${skipped.length} 个文件 frontmatter 无法识别，未进入搜索索引：\n${lines}${more}`);
+      }
     } catch (e) {
       window.alert('重建索引失败：' + (e instanceof Error ? e.message : String(e)));
     } finally {

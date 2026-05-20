@@ -118,17 +118,25 @@ export async function searchIndex({
   return json.items ?? [];
 }
 
+/** A vault file the indexer left out, with why (no `type` field, or a `type`
+ *  value that maps to no known entry kind). Surfaced after a reindex so a
+ *  dropped entry is never silent. */
+export interface SkippedFile {
+  path: string;
+  reason: string;
+}
+
 /** Trigger a full rebuild of data/index.sqlite on the server. Resolves once
  *  the new index database is written; caller should re-fetch /api/index
- *  afterwards. */
-export async function reindex(): Promise<{ tookMs: number }> {
+ *  afterwards. `skipped` lists files that had frontmatter but were left out. */
+export async function reindex(): Promise<{ tookMs: number; skipped: SkippedFile[] }> {
   const r = await fetch('/api/reindex', { method: 'POST' });
   if (!r.ok) {
     const msg = await r.text().catch(() => '');
     throw new Error(`reindex failed: ${r.status} ${msg}`);
   }
-  const json = await r.json().catch(() => ({} as { tookMs?: number }));
-  return { tookMs: json.tookMs ?? 0 };
+  const json = await r.json().catch(() => ({} as { tookMs?: number; skipped?: SkippedFile[] }));
+  return { tookMs: json.tookMs ?? 0, skipped: json.skipped ?? [] };
 }
 
 /** Advanced/opt-in: start a background semantic-vector build. Returns
