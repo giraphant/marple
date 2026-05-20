@@ -359,6 +359,52 @@ fn vectors_available(paths: &ReaderPaths) -> bool {
     paths.vectors_db.is_file()
 }
 
+/// What the built `vectors.sqlite` actually contains — the truthful, on-disk
+/// view used by the embedding-status endpoint (survives restarts, unlike the
+/// in-memory job state). `None` when no vectors DB has been built yet.
+#[derive(Debug, Clone, Serialize)]
+pub struct VectorsSummary {
+    pub count: usize,
+    pub model: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+/// Read the on-disk vectors summary, or `None` if `vectors.sqlite` is absent.
+/// Best-effort: a present-but-unreadable DB yields `count = 0` with empty meta
+/// rather than an error, so the status endpoint never fails because of it.
+pub fn vectors_summary(paths: &ReaderPaths) -> Option<VectorsSummary> {
+    if !paths.vectors_db.is_file() {
+        return None;
+    }
+    init_sqlite_vec();
+    let conn = match Connection::open_with_flags(
+        &paths.vectors_db,
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) {
+        Ok(conn) => conn,
+        Err(_) => return Some(VectorsSummary { count: 0, model: None, completed_at: None }),
+    };
+    let count: usize = conn
+        .query_row("SELECT count(*) FROM entry_vectors", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map(|n| n.max(0) as usize)
+        .unwrap_or(0);
+    let meta = |key: &str| -> Option<String> {
+        conn.query_row(
+            "SELECT value FROM meta WHERE key = ?",
+            [key],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+    };
+    Some(VectorsSummary {
+        count,
+        model: meta("embed_model"),
+        completed_at: meta("embed_completed_at"),
+    })
+}
+
 fn search_entries_hybrid(
     paths: &ReaderPaths,
     options: &SearchOptions,

@@ -98,8 +98,10 @@ impl EmbedJob {
         self.inner.total.store(n, Ordering::SeqCst);
     }
 
-    pub fn inc(&self, n: usize) {
-        self.inner.embedded.fetch_add(n, Ordering::SeqCst);
+    /// Set the absolute embedded count. The build callback reports cumulative
+    /// `(done, total)`, so an absolute setter matches it without delta math.
+    pub fn set_embedded(&self, n: usize) {
+        self.inner.embedded.store(n, Ordering::SeqCst);
     }
 
     pub fn finish_ok(&self) {

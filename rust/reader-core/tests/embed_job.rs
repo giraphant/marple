@@ -28,8 +28,8 @@ fn progress_is_reflected_in_snapshot() {
     let job = EmbedJob::new();
     job.try_begin();
     job.set_total(10);
-    job.inc(3);
-    job.inc(2);
+    job.set_embedded(3);
+    job.set_embedded(5);
     let s = job.snapshot();
     assert_eq!(s.total, 10);
     assert_eq!(s.embedded, 5);
