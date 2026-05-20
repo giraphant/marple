@@ -308,21 +308,27 @@ export function DocView({
         <div class="flex-1 min-w-0 flex flex-col">
           {loading
             ? <div class="px-8 py-10 text-sm text-muted">加载中…</div>
-            : editable
-              ? <NoteEditor
-                  key={`${entry.path}:${reloadNonce}`}
-                  docId={entry.path}
-                  initial={body}
-                  theme={editorTheme}
-                  onChange={handleEditorChange}
-                  onSaveShortcut={() => flushSave()}
-                />
-              : <div class="flex-1 overflow-auto scrollbar-thin">
-                  {loadError
-                    ? <p class="px-8 py-6 text-red-600 dark:text-red-400">加载失败</p>
-                    : <BodyView entry={entry} body={body} wikiIndex={wikiIndex} onWikiClick={onWikiClick} />
-                  }
+            : loadError
+              // Show the failure for editable docs too — never mount the editor
+              // on a failed load, or edits would be accepted but never saved.
+              ? <div class="flex-1 flex items-center justify-center text-sm">
+                  <div class="text-center">
+                    <div class="mb-2 text-red-600 dark:text-red-400">加载失败</div>
+                    <button onClick={reloadFromDisk} class="text-secondary underline">重试</button>
+                  </div>
                 </div>
+              : editable
+                ? <NoteEditor
+                    key={`${entry.path}:${reloadNonce}`}
+                    docId={entry.path}
+                    initial={body}
+                    theme={editorTheme}
+                    onChange={handleEditorChange}
+                    onSaveShortcut={() => flushSave()}
+                  />
+                : <div class="flex-1 overflow-auto scrollbar-thin">
+                    <BodyView entry={entry} body={body} wikiIndex={wikiIndex} onWikiClick={onWikiClick} />
+                  </div>
           }
         </div>
         <aside class="w-72 shrink-0 border-l border-base bg-page/60 overflow-auto scrollbar-thin">
