@@ -211,8 +211,11 @@ function computeMarkerDeco(view: EditorView): DecorationSet {
           // marker is right-aligned before the content column. text-indent pulls
           // the first line's marker back into the padding gutter so wrapped
           // continuation lines align with the body (hanging indent).
+          // Body column = 4.25em (normal 3em + 1.25em indent, same as blockquote)
+          // so the list is indented relative to normal paragraphs; deeper nesting
+          // adds 2em/level. The marker widget hangs in the gutter via -1.25em.
           const nestedLevel = Math.floor(leadingSpaces / 2);
-          const padEm = 3 + nestedLevel * 2;
+          const padEm = 4.25 + nestedLevel * 2;
           style = `padding-left: ${padEm}em; text-indent: -1.25em`;
         } else if (isQuote) {
           // Blockquote: body column = 4.25em (i.e. the normal 3em body column
