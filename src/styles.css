@@ -215,7 +215,12 @@
   .cm-list-rendered-marker {
     display: inline-flex;
     justify-content: flex-end;
+    box-sizing: border-box;
+    /* width matches the list line's `text-indent: -1.25em` so the body column
+     * (= padding-left) is exact; padding-right is the marker→body gap, kept
+     * inside the box (border-box) so the total width stays 1.25em. */
     width: 1.25em;
+    padding-right: 0.3em;
     margin-right: 0;
     color: rgb(var(--reader-marker));
     font-weight: 900;
@@ -249,6 +254,17 @@
   .cm-blockquote-marker * {
     color: rgb(var(--reader-quote-marker)) !important;
     font-weight: 400 !important;
+  }
+  /* Fixed-width hanging `>` slot: width matches the blockquote line's
+   * `text-indent: -1.25em`, so the body starts at an exact column and wrapped
+   * lines align with it. The `>` sits at the left of the slot (hanging), with
+   * the slot's right edge at the body column. */
+  .cm-blockquote-marker {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 1.25em;
+    overflow: hidden;
+    white-space: nowrap;
   }
   .cm-blockquote-text,
   .cm-blockquote-text * {

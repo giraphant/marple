@@ -199,19 +199,24 @@ function computeMarkerDeco(view: EditorView): DecorationSet {
         const isList = LIST_MARKER_RE.test(marker);
 
         let style: string | undefined;
-        if (isQuote) {
-          // Ulysses keeps `>` in the normal text column, then lets the body
-          // start after the literal marker + following ASCII space.
-          style = undefined;
-        } else if (isList) {
+        if (isList) {
           // List: line padding defines the marker slot origin; the source
           // marker+space is replaced by ListMarkerWidget, whose fixed-width
-          // marker is right-aligned before the content column.
+          // marker is right-aligned before the content column. text-indent pulls
+          // the first line's marker back into the padding gutter so wrapped
+          // continuation lines align with the body (hanging indent).
           const nestedLevel = Math.floor(leadingSpaces / 2);
           const padEm = 3 + nestedLevel * 2;
-          style = `padding-left: ${padEm}em`;
+          style = `padding-left: ${padEm}em; text-indent: -1.25em`;
+        } else if (isQuote) {
+          // Blockquote: the `> ` marker becomes a fixed-width inline-block (see
+          // .cm-blockquote-marker), so a -1.25em text-indent lands the body
+          // EXACTLY at the 3em column on the first line and on every wrapped
+          // line (a `ch`-based indent drifts because `>`+space ≠ 2ch in a
+          // proportional font). Ulysses-style hanging `>`.
+          style = `text-indent: -1.25em`;
         } else {
-          // heading / blockquote: marker 挂在 padding gutter 里，content 在 body column。
+          // heading: marker 挂在 padding gutter 里，content 在 body column。
           // hangLen = marker 字符数 + trailing space，用 ch 让对齐到 body 段落同列。
           style = `text-indent: -${hangLen}ch`;
         }
@@ -226,18 +231,24 @@ function computeMarkerDeco(view: EditorView): DecorationSet {
 
         if (isQuote) {
           const markerFrom = line.from + leadingSpaces;
-          const markerTo = markerFrom + marker.length;
-          const bodyFrom = markerTo + m[3].length;
-          builder.add(markerFrom, markerTo, Decoration.mark({ class: 'cm-blockquote-marker' }));
+          const bodyFrom = markerFrom + marker.length + m[3].length;
+          // Mark the whole `> ` (marker + trailing space) as one fixed-width
+          // inline-block so the body starts at an exact column (CSS handles the
+          // width / gap). Wrapped lines then align with it via the line's
+          // text-indent.
+          builder.add(markerFrom, bodyFrom, Decoration.mark({ class: 'cm-blockquote-marker' }));
           if (bodyFrom < line.to) {
             builder.add(bodyFrom, line.to, Decoration.mark({ class: 'cm-blockquote-text' }));
           }
         }
 
         if (isList) {
-          // Only replace the marker itself. The following ASCII space remains
-          // real markdown text, matching Ulysses' "marker + normal space" feel.
-          const markerTo = line.from + leadingSpaces + marker.length;
+          // Replace the marker AND its trailing space with the fixed-width
+          // widget, so the body starts exactly at the body column (padding-left)
+          // and the `text-indent: -1.25em` makes wrapped lines align under the
+          // first line's body (hanging indent). The widget's own right padding
+          // supplies the marker→body gap.
+          const markerTo = line.from + leadingSpaces + marker.length + m[3].length;
           if (!selectionTouchesToken(view, line.from, markerTo)) {
             builder.add(
               line.from,
