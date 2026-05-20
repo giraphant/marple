@@ -20,8 +20,10 @@
  *
  * Tailwind registers these as colors named `page` / `surface` / `primary` etc.,
  * see tailwind.config.js. Use them like `bg-surface text-primary border-base`.
- * Accent colors (amber/rose/emerald/sky/violet/teal) keep Tailwind's palette;
- * dark adjustments live as `dark:` modifiers where contrast needs help.
+ * Accent / state / type colors also flow through tokens (--accent, --accent-text,
+ * --accent-bg, --danger, --success, --star, --type-*-{fg,bg}), registered in
+ * tailwind.config.js. Components use `bg-accent` / `text-accent-text` /
+ * `bg-type-paper-bg` etc. — never raw palette literals.
  * --------------------------------------------------------------- */
 :root {
   /* Blush light: Blush 原 bg #f5f5f5 / fg #444444 + chrome 用 Blush
@@ -235,8 +237,7 @@
   .prose-body ol { margin: 0.6em 0; padding-left: 1.5em; list-style-type: decimal; }
   .prose-body li { margin: 0.25em 0; }
   .prose-body li::marker { color: rgb(var(--reader-marker)); font-weight: 700; }
-  /* blockquote: CJK 整段加 italic 会变浏览器伪斜体（geometric slant），非常丑。
-   * 仅靠左 rule + 砖红色 + 文字颜色辨识，不加 italic。 */
+  /* blockquote: 中性左 rule + 中性文字辨识，不加 italic（CJK 伪斜体很丑）。 */
   .prose-body blockquote { border-left: 3px solid rgb(var(--reader-quote-bar)); padding-left: 1em; color: rgb(var(--reader-quote)); margin: 0.8em 0; }
   .prose-body code { background: rgb(var(--reader-code-bg)); color: rgb(var(--reader-code)); padding: 0 0.3em; border-radius: 3px; font-size: 0.9em; }
   .prose-body a { color: rgb(var(--reader-link)); font-weight: 700; }

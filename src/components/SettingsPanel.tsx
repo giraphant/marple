@@ -53,7 +53,7 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
                     onClick={() => set('theme', t.id)}
                     class={`text-[12px] px-2.5 py-1 rounded border transition ${
                       active
-                        ? 'bg-inverse text-inverse-fg border-primary'
+                        ? 'bg-accent-bg text-accent-text border-accent'
                         : 'bg-surface text-secondary border-base hover:border-strong'
                     }`}
                     title={t.hint}
@@ -298,7 +298,7 @@ function Slider<T extends number>({
             onClick={() => onChange(opt)}
             class={`text-[12px] px-2.5 py-1 rounded border tabular-nums transition ${
               active
-                ? 'bg-inverse text-inverse-fg border-primary'
+                ? 'bg-accent-bg text-accent-text border-accent'
                 : 'bg-surface text-secondary border-base hover:border-strong'
             }`}
           >

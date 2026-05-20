@@ -103,7 +103,7 @@ export function ThemesView({ entries, onThemeClick }: Props) {
               <button
                 key={n}
                 onClick={() => setMinCount(n)}
-                class={`px-1.5 py-0.5 rounded tabular-nums ${minCount === n ? 'bg-inverse text-inverse-fg' : 'hover:bg-surface-2'}`}
+                class={`px-1.5 py-0.5 rounded tabular-nums ${minCount === n ? 'bg-accent-bg text-accent-text' : 'hover:bg-surface-2'}`}
               >{n}</button>
             ))}
           </div>

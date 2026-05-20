@@ -102,7 +102,7 @@ export function TrashView({ onRestored }: Props) {
                 <button
                   onClick={() => onRestore(it.name)}
                   disabled={busy === it.name}
-                  class="text-[12px] px-2.5 py-1 rounded bg-inverse text-inverse-fg hover:bg-inverse/80 disabled:opacity-50"
+                  class="text-[12px] px-2.5 py-1 rounded bg-accent-bg text-accent-text hover:bg-accent/20 disabled:opacity-50"
                 >恢复</button>
                 <button
                   onClick={() => onPurge(it.name)}
