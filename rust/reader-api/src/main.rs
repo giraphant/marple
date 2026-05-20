@@ -44,6 +44,8 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/api/index", get(api_index))
+        .route("/api/files", get(api_files))
+        .route("/api/entry", get(api_entry))
         .route("/api/search", get(api_search))
         .route("/api/reindex", post(api_reindex))
         .route("/api/trash", get(api_trash_list))
@@ -72,6 +74,8 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     println!("reader api at http://localhost:{port}");
     println!("GET    /api/index              -> read entries from data/index.sqlite");
+    println!("GET    /api/files              -> list vault files (path + mtime)");
+    println!("GET    /api/entry?path=...     -> live-parse one vault file's metadata");
     println!("GET    /api/search?q=...       -> search entries with SQLite FTS");
     println!("POST   /api/reindex            -> rebuild data/index.sqlite with Rust");
     println!("GET    /vault/**/*.md          -> read vault markdown");
@@ -87,6 +91,30 @@ async fn api_index(State(state): State<AppState>) -> Result<Json<serde_json::Val
     Ok(Json(
         json!({ "items": items, "generatedFrom": "rust-sqlite" }),
     ))
+}
+
+/// Cheap directory listing (path + mtime) — the file-browser's source of "what
+/// exists", independent of the metadata cache. Clients diff this to find files
+/// changed since the last index build.
+async fn api_files(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    let items = reader_core::list_vault_files(&state.paths)?;
+    Ok(Json(json!({ "items": items })))
+}
+
+#[derive(Debug, Deserialize)]
+struct EntryParams {
+    path: String,
+}
+
+/// Live-parse ONE vault file's metadata straight from disk (no DB). `entry` is
+/// null when the file is missing or has no usable type, so the client can skip
+/// non-entries without thrashing.
+async fn api_entry(
+    State(state): State<AppState>,
+    Query(params): Query<EntryParams>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let entry = reader_core::parse_entry(&state.paths, &params.path)?;
+    Ok(Json(json!({ "entry": entry })))
 }
 
 #[derive(Debug, Deserialize)]

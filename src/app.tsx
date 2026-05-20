@@ -15,6 +15,7 @@ import { TabBar } from './components/TabBar';
 import {
   postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
   newIdeaDraft, ideaEntryFromDraft, reindex, fetchIndex, searchIndex as searchServerIndex,
+  listFiles, fetchEntry,
 } from './api';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
 import { loadTabs, loadActiveIndex, saveTabs, saveActiveIndex, defaultTab } from './session';
@@ -161,34 +162,74 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [onToggleSidebar]);
 
+  // File-browser data layer: the DB snapshot (/api/index) is just a metadata
+  // cache loaded once on boot; the file system is the source of truth. We track
+  // the mtime we last processed per file so cross-window / refocus syncs only
+  // re-parse what actually changed.
+  const entriesRef = useRef<Entry[] | null>(entries);
+  entriesRef.current = entries;
+  const knownMtimesRef = useRef<Map<string, number | null>>(new Map());
+  const syncingRef = useRef(false);
+  const syncTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
-    fetchIndex().then(setEntries).catch(e => {
+    fetchIndex().then(es => {
+      setEntries(es);
+      for (const e of es) knownMtimesRef.current.set(e.path, e.mtime ?? null);
+    }).catch(e => {
       window.alert('加载索引失败：' + (e instanceof Error ? e.message : String(e)));
       setEntries([]);
     });
   }, []);
 
-  // Cross-window freshness. The server keeps the SQLite index current on every
-  // write, so a window just needs to RE-READ that authoritative snapshot when
-  // (a) another window signals a vault change via the storage event, or
-  // (b) this window regains focus. No entry payloads cross windows — each
-  // refetch is a full consistent snapshot, so there are no merge/order races.
-  const refetchTimer = useRef<number | null>(null);
-  const refetchIndex = useCallback(() => {
-    if (refetchTimer.current != null) clearTimeout(refetchTimer.current);
-    refetchTimer.current = window.setTimeout(() => {
-      refetchTimer.current = null;
-      // Keep current entries on a transient failure rather than blanking the UI.
-      fetchIndex().then(setEntries).catch(() => {});
+  // Cross-window / external freshness, the file-browser way: list the vault
+  // (cheap path+mtime), live-parse only files that are new or changed since we
+  // last saw them, and drop files that disappeared. No 12MB index refetch, no
+  // per-write DB work. A transient failure leaves the current list untouched.
+  const syncFromFiles = useCallback(() => {
+    if (syncTimerRef.current != null) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = window.setTimeout(async () => {
+      syncTimerRef.current = null;
+      if (syncingRef.current) return;
+      syncingRef.current = true;
+      try {
+        let files;
+        try { files = await listFiles(); } catch { return; }
+        const known = knownMtimesRef.current;
+        const fileSet = new Set(files.map(f => f.path));
+        const changed = files.filter(f => !known.has(f.path) || known.get(f.path) !== f.mtime);
+        const parsed = await Promise.all(changed.map(async f => {
+          try { return [f, await fetchEntry(f.path)] as const; }
+          catch { return [f, undefined] as const; } // fetch failed → leave as-is
+        }));
+        const cur = entriesRef.current ?? [];
+        const byPath = new Map(cur.map(e => [e.path, e]));
+        let mutated = false;
+        for (const [f, entry] of parsed) {
+          if (entry === undefined) continue;
+          known.set(f.path, f.mtime);          // processed at this mtime (entry or not)
+          if (entry === null) { if (byPath.delete(f.path)) mutated = true; }
+          else { byPath.set(f.path, entry); mutated = true; }
+        }
+        for (const p of Array.from(byPath.keys())) {
+          if (!fileSet.has(p)) { byPath.delete(p); mutated = true; }
+        }
+        for (const p of Array.from(known.keys())) {
+          if (!fileSet.has(p)) known.delete(p);
+        }
+        if (mutated) setEntries(Array.from(byPath.values()));
+      } finally {
+        syncingRef.current = false;
+      }
     }, 250);
   }, []);
 
   useEffect(() => {
     const unsubscribe = subscribeVaultChanges({
-      onVaultChanged: refetchIndex,
+      onVaultChanged: syncFromFiles,
       onSettingsChanged: () => setSettings(loadSettings()),
     });
-    const onVisible = () => { if (document.visibilityState === 'visible') refetchIndex(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') syncFromFiles(); };
     window.addEventListener('focus', onVisible);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -196,7 +237,7 @@ export function App() {
       window.removeEventListener('focus', onVisible);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [refetchIndex]);
+  }, [syncFromFiles]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -205,7 +246,14 @@ export function App() {
   }, [entries]);
 
   const wikiIndex = useMemo(() => buildWikiIndex(entries ?? []), [entries]);
-  const searchIndex = useMemo(() => buildSearchIndex(entries ?? []), [entries]);
+  // Built lazily — only while a search query is active. No-query list rendering
+  // and optimistic writes therefore never pay the ~14k-entry index rebuild
+  // (the NFKD-normalize-10-fields cost that made new-note feel slow).
+  const hasQuery = query.trim() !== '';
+  const searchIndex = useMemo(
+    () => (hasQuery ? buildSearchIndex(entries ?? []) : []),
+    [entries, hasQuery],
+  );
 
   const annotationIndex = useMemo(() => {
     const m = new Map<string, Entry[]>();
@@ -263,23 +311,23 @@ export function App() {
     [entries, activeListType]
   );
 
-  const typeSearchIndex = useMemo(
-    () => activeListType ? searchIndex.filter(doc => doc.entry.type === activeListType) : [],
-    [searchIndex, activeListType]
-  );
-
   const localFiltered = useMemo(() => {
     if (!activeListType) return [];
-    const q = query.trim().toLowerCase();
-    const base = typeSearchIndex.filter(doc => {
-      const e = doc.entry;
+    // Rating/theme filter on plain entries — no search index needed for the
+    // common no-query list path.
+    const base = typeEntries.filter(e => {
       if (minRating && (e.rating_score || 0) < minRating) return false;
       if (themeFilter && !(e.themes ?? []).some(t => t === themeFilter)) return false;
       return true;
     });
-    if (!q) return base.map(doc => doc.entry);
-    return searchDocuments(base, q).map(result => result.entry);
-  }, [typeSearchIndex, query, minRating, themeFilter, activeListType]);
+    const q = query.trim();
+    if (!q) return base;
+    // Query: rank via the (lazily-built) search index, restricted to this type
+    // + the active filters. Instant client fallback ahead of server FTS.
+    const allowed = new Set(base.map(e => e.path));
+    const docs = searchIndex.filter(doc => allowed.has(doc.entry.path));
+    return searchDocuments(docs, q).map(result => result.entry);
+  }, [typeEntries, searchIndex, query, minRating, themeFilter, activeListType]);
 
   const listSearchKey = useMemo(() => JSON.stringify({
     q: query.trim(),

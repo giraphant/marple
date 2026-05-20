@@ -30,7 +30,7 @@ export async function restoreTrash(name: string): Promise<string> {
   return json.restored ?? '';
 }
 
-/** Fetch the reader index from the SQLite-backed API. */
+/** Fetch the reader index (DB metadata cache snapshot) on boot. */
 export async function fetchIndex(): Promise<Entry[]> {
   const r = await fetch('/api/index');
   if (!r.ok) {
@@ -39,6 +39,35 @@ export async function fetchIndex(): Promise<Entry[]> {
   }
   const json = await r.json().catch(() => ({} as { items?: Entry[] }));
   return json.items ?? [];
+}
+
+export interface VaultFile {
+  path: string;
+  mtime: number | null;
+}
+
+/** Cheap directory listing (path + mtime) — the file-browser's "what exists".
+ *  Diffed against in-memory entries to find files changed since the DB build. */
+export async function listFiles(): Promise<VaultFile[]> {
+  const r = await fetch('/api/files');
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`list files failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { items?: VaultFile[] }));
+  return json.items ?? [];
+}
+
+/** Live-parse one vault file's metadata straight from disk (no DB). Returns
+ *  null when the file is missing or has no usable type (not a renderable entry). */
+export async function fetchEntry(path: string): Promise<Entry | null> {
+  const r = await fetch('/api/entry?path=' + encodeURIComponent(path));
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`fetch entry failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { entry?: Entry | null }));
+  return json.entry ?? null;
 }
 
 export interface SearchHit {

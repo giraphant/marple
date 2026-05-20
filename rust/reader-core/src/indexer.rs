@@ -821,60 +821,69 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
     Ok(())
 }
 
-/// Remove one path's rows from the metadata + FTS tables (not `entry_vectors`).
-fn delete_entry_rows(conn: &Connection, rel_path: &str) -> rusqlite::Result<()> {
-    conn.execute("DELETE FROM entries WHERE path = ?", params![rel_path])?;
-    conn.execute("DELETE FROM entry_text WHERE path = ?", params![rel_path])?;
-    conn.execute("DELETE FROM entry_themes WHERE path = ?", params![rel_path])?;
-    conn.execute("DELETE FROM entry_search WHERE path = ?", params![rel_path])?;
-    conn.execute("DELETE FROM entry_trigram WHERE path = ?", params![rel_path])?;
-    Ok(())
+impl IndexedEntry {
+    /// Project the internal index row onto the public `Entry` shape (drops the
+    /// search-only `body_text` / `search_text`).
+    fn into_public(self) -> crate::Entry {
+        crate::Entry {
+            path: self.path,
+            entry_type: self.entry_type,
+            book: self.book,
+            title: self.title,
+            author: self.author,
+            year: self.year,
+            rating: self.rating,
+            rating_score: self.rating_score,
+            themes: self.themes,
+            topic: self.topic,
+            source: self.source,
+            doi: self.doi,
+            chapters_analyzed: self.chapters_analyzed,
+            annotates: self.annotates,
+            created: self.created,
+            has_pdf: self.has_pdf,
+            pdf_slug: self.pdf_slug,
+            mtime: self.mtime,
+            preview: self.preview,
+        }
+    }
 }
 
-/// Re-derive a single file's row in the live index, in place. Called after a
-/// PUT/POST so `/api/index` reflects the edit immediately, without a full
-/// reindex (and without recomputing embeddings). No-op if no index exists yet.
-/// Best-effort by contract: callers must not fail the file write if this errors.
-pub fn index_upsert_file(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<()> {
-    if !paths.index_db.is_file() {
-        return Ok(());
+/// Cheap directory listing of the vault: path + mtime for every `.md` file, no
+/// frontmatter parsing. The file-browser view diffs this against its cached
+/// entries to find what changed since the last index build — files are the
+/// source of truth; the DB is only a metadata cache.
+pub fn list_vault_files(paths: &ReaderPaths) -> ReaderResult<Vec<crate::VaultFile>> {
+    let mut files = Vec::new();
+    walk_markdown(&paths.vault, &mut files)?;
+    files.sort();
+    let mut out = Vec::with_capacity(files.len());
+    for file in &files {
+        let mtime = fs::metadata(file).ok().and_then(|m| mtime_ms(&m).ok());
+        out.push(crate::VaultFile {
+            path: slash_relative(&paths.workspace_root, file),
+            mtime,
+        });
+    }
+    Ok(out)
+}
+
+/// Parse ONE vault file into a public `Entry` using the same frontmatter rules
+/// as the full index build (single source of truth) — no DB, no model. Returns
+/// `None` when the file is missing or has no usable `type`, so the file-browser
+/// can skip non-entries without thrashing. Path is validated under vault.
+pub fn parse_entry(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<Option<crate::Entry>> {
+    let target = crate::safe_join(&paths.workspace_root, rel_path.trim_start_matches('/'))?;
+    crate::ensure_markdown(&target)?;
+    crate::ensure_under(&target, &paths.vault, "only vault files can be parsed")?;
+    if !target.is_file() {
+        return Ok(None);
     }
     let source_slugs = load_source_slugs(&paths.sources)?;
-    let abs = paths.workspace_root.join(rel_path);
-
-    let _guard = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut conn = Connection::open(&paths.index_db)
-        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
-    conn.busy_timeout(INDEX_BUSY_TIMEOUT)?;
-    let tx = conn.transaction()?;
-    delete_entry_rows(&tx, rel_path)?;
-    if let BuildOutcome::Indexed(entry) = build_indexed_entry(paths, &abs, &source_slugs)? {
-        insert_indexed_entry(&tx, &entry)?;
+    match build_indexed_entry(paths, &target, &source_slugs)? {
+        BuildOutcome::Indexed(entry) => Ok(Some(entry.into_public())),
+        _ => Ok(None),
     }
-    tx.commit()?;
-    Ok(())
-}
-
-/// Remove a single file's row from the live index (after a DELETE/move-to-trash).
-/// No-op if no index exists yet. Best-effort by contract.
-pub fn index_remove_file(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<()> {
-    if !paths.index_db.is_file() {
-        return Ok(());
-    }
-    // Needed so the vec0 `entry_vectors` table can be opened for the delete on
-    // indexes that have it; cheap (registers the extension, not the model).
-    crate::init_sqlite_vec();
-
-    let _guard = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut conn = Connection::open(&paths.index_db)
-        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
-    conn.busy_timeout(INDEX_BUSY_TIMEOUT)?;
-    let tx = conn.transaction()?;
-    delete_entry_rows(&tx, rel_path)?;
-    // Tolerate older indexes without an entry_vectors table.
-    let _ = tx.execute("DELETE FROM entry_vectors WHERE path = ?", params![rel_path]);
-    tx.commit()?;
-    Ok(())
 }
 
 const EMBED_INPUT_CHAR_CAP: usize = 8192 * 4; // ~8192 tokens, char proxy
