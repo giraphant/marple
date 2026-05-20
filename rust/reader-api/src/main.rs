@@ -195,6 +195,18 @@ async fn get_reader_data_file(
     State(state): State<AppState>,
     Path(path): Path<String>,
 ) -> Result<Response, AppError> {
+    // Never serve the live SQLite index or its WAL/journal sidecars via raw
+    // fs::read — that races concurrent incremental writes and can read a torn
+    // file. Clients use /api/index, not the DB file.
+    if path
+        .rsplit('/')
+        .next()
+        .is_some_and(|name| name.starts_with("index.sqlite"))
+    {
+        return Err(AppError(ReaderError::Forbidden(
+            "index database is not served directly".to_string(),
+        )));
+    }
     serve_workspace_file(&state.paths, &format!("reader/data/{path}")).await
 }
 

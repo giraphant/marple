@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'preact/hooks';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'preact/hooks';
 import type { Entry, EntryType, Tab, TabContent } from './types';
 import { activeContent } from './types';
 import { buildWikiIndex, splitAuthors } from './wiki';
@@ -18,6 +18,7 @@ import {
 } from './api';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
 import { loadTabs, loadActiveIndex, saveTabs, saveActiveIndex, defaultTab } from './session';
+import { bumpVaultVersion, subscribeVaultChanges } from './sync';
 
 const MAX_TABS = 16;
 const MAX_HISTORY = 50;
@@ -76,6 +77,7 @@ export function App() {
     try {
       await reindex();
       setEntries(await fetchIndex());
+      bumpVaultVersion();
     } catch (e) {
       window.alert('重建索引失败：' + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -165,6 +167,36 @@ export function App() {
       setEntries([]);
     });
   }, []);
+
+  // Cross-window freshness. The server keeps the SQLite index current on every
+  // write, so a window just needs to RE-READ that authoritative snapshot when
+  // (a) another window signals a vault change via the storage event, or
+  // (b) this window regains focus. No entry payloads cross windows — each
+  // refetch is a full consistent snapshot, so there are no merge/order races.
+  const refetchTimer = useRef<number | null>(null);
+  const refetchIndex = useCallback(() => {
+    if (refetchTimer.current != null) clearTimeout(refetchTimer.current);
+    refetchTimer.current = window.setTimeout(() => {
+      refetchTimer.current = null;
+      // Keep current entries on a transient failure rather than blanking the UI.
+      fetchIndex().then(setEntries).catch(() => {});
+    }, 250);
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeVaultChanges({
+      onVaultChanged: refetchIndex,
+      onSettingsChanged: () => setSettings(loadSettings()),
+    });
+    const onVisible = () => { if (document.visibilityState === 'visible') refetchIndex(); };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refetchIndex]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -509,6 +541,7 @@ export function App() {
 
   const onUpdated = useCallback((updated: Entry) => {
     setEntries(prev => prev ? prev.map(e => e.path === updated.path ? updated : e) : prev);
+    bumpVaultVersion();
   }, []);
 
   const onCreateAnnotation = useCallback(async (target: Entry) => {
@@ -516,6 +549,7 @@ export function App() {
     await postEntryText(path, body);
     const draftEntry = entryFromDraft(path, target, title);
     setEntries(prev => prev ? [...prev, draftEntry] : prev);
+    bumpVaultVersion();
     openInNewTab({ kind: 'doc', path });
   }, [openInNewTab]);
 
@@ -525,6 +559,7 @@ export function App() {
       await postEntryText(path, body);
       const draft = ideaEntryFromDraft(path, title);
       setEntries(prev => prev ? [...prev, draft] : prev);
+      bumpVaultVersion();
       openInNewTab({ kind: 'doc', path });
     } catch (e) {
       window.alert('新建 note 失败：' + (e instanceof Error ? e.message : String(e)));
@@ -534,6 +569,7 @@ export function App() {
   const onDelete = useCallback(async (target: Entry) => {
     await deleteEntry(target.path);
     setEntries(prev => prev ? prev.filter(e => e.path !== target.path) : prev);
+    bumpVaultVersion();
     // Close any tab whose *current* content is the deleted entry. (We keep tabs
     // that merely reference it in history — back/forward will show StaleTab.)
     setTabs(prev => {

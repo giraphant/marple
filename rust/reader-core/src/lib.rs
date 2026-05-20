@@ -15,7 +15,7 @@ mod indexer;
 pub mod fuse;
 pub mod vector;
 
-pub use indexer::{build_sqlite_index, IndexStats};
+pub use indexer::{build_sqlite_index, index_remove_file, index_upsert_file, IndexStats};
 
 use std::sync::Once;
 static SQLITE_VEC_INIT: Once = Once::new();
@@ -162,6 +162,8 @@ pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
 
     let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    // Wait briefly rather than erroring if an incremental write holds the lock.
+    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
 
     let mut stmt = conn.prepare(
         r#"
@@ -732,6 +734,22 @@ pub fn resolve_get_path(paths: &ReaderPaths, url_path: &str) -> ReaderResult<Pat
     Ok(path)
 }
 
+/// Keep the live index current for one file after a write. Best-effort: a
+/// failure here must never fail the file write — the file is the source of
+/// truth, and a stale row self-heals on the next edit or full reindex.
+fn upsert_index_best_effort(paths: &ReaderPaths, target: &Path) {
+    let rel = relative_slash(&paths.workspace_root, target);
+    if let Err(e) = index_upsert_file(paths, &rel) {
+        eprintln!("[reader-core] index upsert failed for {rel}: {e:?}");
+    }
+}
+
+fn remove_index_best_effort(paths: &ReaderPaths, rel: &str) {
+    if let Err(e) = index_remove_file(paths, rel) {
+        eprintln!("[reader-core] index remove failed for {rel}: {e:?}");
+    }
+}
+
 pub fn put_markdown(paths: &ReaderPaths, url_path: &str, body: &[u8]) -> ReaderResult<f64> {
     if body.len() > 5 * 1024 * 1024 {
         return Err(ReaderError::BadRequest("payload too large".to_string()));
@@ -746,7 +764,9 @@ pub fn put_markdown(paths: &ReaderPaths, url_path: &str, body: &[u8]) -> ReaderR
     }
     ensure_frontmatter(body)?;
     atomic_write(&target, body)?;
-    Ok(mtime_ms(&target)?)
+    let mtime = mtime_ms(&target)?;
+    upsert_index_best_effort(paths, &target);
+    Ok(mtime)
 }
 
 pub fn post_note(paths: &ReaderPaths, url_path: &str, body: &[u8]) -> ReaderResult<(String, f64)> {
@@ -768,7 +788,9 @@ pub fn post_note(paths: &ReaderPaths, url_path: &str, body: &[u8]) -> ReaderResu
     ensure_frontmatter(body)?;
     atomic_write(&target, body)?;
     let rel = relative_slash(&paths.workspace_root, &target);
-    Ok((rel, mtime_ms(&target)?))
+    let mtime = mtime_ms(&target)?;
+    upsert_index_best_effort(paths, &target);
+    Ok((rel, mtime))
 }
 
 pub fn delete_note(paths: &ReaderPaths, url_path: &str) -> ReaderResult<String> {
@@ -791,7 +813,9 @@ pub fn delete_note(paths: &ReaderPaths, url_path: &str) -> ReaderResult<String> 
         .ok_or_else(|| ReaderError::BadRequest("invalid note filename".to_string()))?;
     let ts = Utc::now().format("%Y-%m-%dT%H-%M-%S-%3fZ").to_string();
     let trash_path = paths.trash_dir.join(format!("{base}.{ts}.md"));
+    let rel = relative_slash(&paths.workspace_root, &target);
     fs::rename(&target, &trash_path)?;
+    remove_index_best_effort(paths, &rel);
     Ok(relative_slash(&paths.workspace_root, &trash_path))
 }
 

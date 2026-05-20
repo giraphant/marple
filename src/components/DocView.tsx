@@ -4,6 +4,7 @@ import { TYPE_BY_ID } from '../types';
 import { bookSlugOf } from '../wiki';
 import { fetchEntryText, putEntryText, replaceBody } from '../api';
 import { saveDecision } from '../live';
+import { bumpVaultVersion } from '../sync';
 import { PropertyPanel } from './PropertyPanel';
 import { NoteEditor, type EditorThemeConfig } from './NoteEditor';
 import { Icon } from './Icon';
@@ -80,6 +81,7 @@ export function DocView({
       setRawText(out);
       setSaveStatus('saved');
       setSaveErr(null);
+      bumpVaultVersion();
     } catch (e) {
       setSaveStatus('error');
       setSaveErr(e instanceof Error ? e.message : String(e));
@@ -122,6 +124,23 @@ export function DocView({
 
     return () => { cancelled = true; };
   }, [entry.path, editable, wikiIndex, reloadNonce]);
+
+  // The refreshed index carries each file's mtime. If the *same* open doc's
+  // mtime advances (another window saved it / external edit), pull the new body
+  // — unless we have local unsaved edits, in which case the save-conflict guard
+  // handles it instead of clobbering.
+  const mtimeRef = useRef<{ path: string; mtime: number | null | undefined }>(
+    { path: entry.path, mtime: entry.mtime },
+  );
+  useEffect(() => {
+    const prev = mtimeRef.current;
+    mtimeRef.current = { path: entry.path, mtime: entry.mtime };
+    if (prev.path === entry.path && entry.mtime !== prev.mtime) {
+      if (statusRef.current === 'idle' || statusRef.current === 'saved') {
+        reloadFromDisk();
+      }
+    }
+  }, [entry.path, entry.mtime, reloadFromDisk]);
 
   const handleEditorChange = useCallback((newBody: string) => {
     bodyRef.current = newBody;

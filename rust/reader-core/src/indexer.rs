@@ -2,7 +2,8 @@ use std::{
     collections::{BTreeMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
+    sync::Mutex,
+    time::{Duration, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
@@ -12,6 +13,16 @@ use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
 
 use crate::{ReaderError, ReaderPaths, ReaderResult};
+
+// Serializes the moment the live index DB is mutated: every incremental
+// upsert/remove transaction AND the full-reindex tmp→live rename take this
+// lock, so no incremental writer is mid-transaction while the file is being
+// swapped (the SQLite-corruption footgun of renaming an open DB). Critical
+// sections are tiny — the slow embed phase of a reindex runs WITHOUT the lock,
+// so autosaves never block on a multi-minute reindex.
+static INDEX_WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+const INDEX_BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct IndexStats {
@@ -48,6 +59,104 @@ struct IndexedEntry {
     search_text: String,
 }
 
+/// Result of trying to turn one markdown file into an index row. Carries the
+/// skip reason so the full reindex keeps its `skipped_frontmatter_without_type`
+/// stat (the incremental path just ignores non-`Indexed` outcomes).
+enum BuildOutcome {
+    Indexed(Box<IndexedEntry>),
+    SkippedNoType,
+    Skipped,
+}
+
+/// Parse a single markdown file into an `IndexedEntry`. Shared by the full
+/// reindex loop and the incremental upsert so both derive identical rows.
+fn build_indexed_entry(
+    paths: &ReaderPaths,
+    file: &Path,
+    source_slugs: &HashSet<String>,
+) -> Result<BuildOutcome> {
+    let text = fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let meta = fs::metadata(file).ok();
+    let (frontmatter, body) = parse_file(&text);
+    let Some(frontmatter) = frontmatter else {
+        return Ok(BuildOutcome::Skipped);
+    };
+    let Some(raw_type) = field_text(&frontmatter, "type") else {
+        return Ok(BuildOutcome::SkippedNoType);
+    };
+    let Some(entry_type) = canonical_type(&raw_type) else {
+        return Ok(BuildOutcome::Skipped);
+    };
+
+    let rel = slash_relative(&paths.workspace_root, file);
+    let book = if entry_type == "chapter-summary" {
+        book_slug(&rel)
+    } else {
+        None
+    };
+    let pdf_slug = match entry_type.as_str() {
+        "paper-analysis" => file.file_stem().and_then(|s| s.to_str()).map(str::to_owned),
+        "book-overview" => book_slug(&rel),
+        _ => None,
+    };
+    let has_pdf = pdf_slug
+        .as_ref()
+        .map(|slug| source_slugs.contains(slug))
+        .unwrap_or(false);
+
+    let title = if entry_type == "note" {
+        first_heading(body)
+            .or_else(|| truthy_field_text(&frontmatter, "title").map(|s| strip_wiki(&s)))
+            .or_else(|| truthy_field_text(&frontmatter, "name").map(|s| strip_wiki(&s)))
+    } else {
+        truthy_field_text(&frontmatter, "title")
+            .or_else(|| truthy_field_text(&frontmatter, "name"))
+            .map(|s| strip_wiki(&s))
+    };
+
+    let year = field_json(&frontmatter, "year");
+    let rating_source = field(&frontmatter, "rating");
+    let rating = rating_source.and_then(truthy_json);
+    let themes = field(&frontmatter, "themes").and_then(theme_array);
+    let author = field(&frontmatter, "author")
+        .or_else(|| field(&frontmatter, "authors"))
+        .and_then(flatten_author);
+
+    let body_text = normalize_body_for_search(body);
+    let preview = first_paragraph(body);
+    let search_text = search_text(&[
+        rel.as_str(),
+        title.as_deref().unwrap_or_default(),
+        author.as_deref().unwrap_or_default(),
+        body_text.as_str(),
+    ]);
+
+    Ok(BuildOutcome::Indexed(Box::new(IndexedEntry {
+        path: rel,
+        entry_type,
+        book,
+        title,
+        author,
+        year,
+        rating,
+        rating_score: rating_source.map(rating_score).unwrap_or_default(),
+        themes,
+        topic: truthy_field_text(&frontmatter, "topic"),
+        source: truthy_field_text(&frontmatter, "source"),
+        doi: truthy_field_text(&frontmatter, "doi"),
+        chapters_analyzed: field(&frontmatter, "chapters_analyzed").and_then(int_value),
+        annotates: truthy_field_text(&frontmatter, "annotates"),
+        created: field(&frontmatter, "created").and_then(text_value),
+        pdf_slug,
+        has_pdf,
+        mtime: meta.and_then(|m| mtime_ms(&m).ok()),
+        preview,
+        body_text,
+        search_text,
+    })))
+}
+
 pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
     crate::init_sqlite_vec();
 
@@ -60,87 +169,11 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
     let mut skipped_frontmatter_without_type = 0usize;
 
     for file in &files {
-        let text = fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
-        let meta = fs::metadata(file).ok();
-        let (frontmatter, body) = parse_file(&text);
-        let Some(frontmatter) = frontmatter else {
-            continue;
-        };
-        let Some(raw_type) = field_text(&frontmatter, "type") else {
-            skipped_frontmatter_without_type += 1;
-            continue;
-        };
-        let Some(entry_type) = canonical_type(&raw_type) else {
-            continue;
-        };
-
-        let rel = slash_relative(&paths.workspace_root, file);
-        let book = if entry_type == "chapter-summary" {
-            book_slug(&rel)
-        } else {
-            None
-        };
-        let pdf_slug = match entry_type.as_str() {
-            "paper-analysis" => file.file_stem().and_then(|s| s.to_str()).map(str::to_owned),
-            "book-overview" => book_slug(&rel),
-            _ => None,
-        };
-        let has_pdf = pdf_slug
-            .as_ref()
-            .map(|slug| source_slugs.contains(slug))
-            .unwrap_or(false);
-
-        let title = if entry_type == "note" {
-            first_heading(body)
-                .or_else(|| truthy_field_text(&frontmatter, "title").map(|s| strip_wiki(&s)))
-                .or_else(|| truthy_field_text(&frontmatter, "name").map(|s| strip_wiki(&s)))
-        } else {
-            truthy_field_text(&frontmatter, "title")
-                .or_else(|| truthy_field_text(&frontmatter, "name"))
-                .map(|s| strip_wiki(&s))
-        };
-
-        let year = field_json(&frontmatter, "year");
-        let rating_source = field(&frontmatter, "rating");
-        let rating = rating_source.and_then(truthy_json);
-        let themes = field(&frontmatter, "themes").and_then(theme_array);
-        let author = field(&frontmatter, "author")
-            .or_else(|| field(&frontmatter, "authors"))
-            .and_then(flatten_author);
-
-        let body_text = normalize_body_for_search(body);
-        let preview = first_paragraph(body);
-        let search_text = search_text(&[
-            rel.as_str(),
-            title.as_deref().unwrap_or_default(),
-            author.as_deref().unwrap_or_default(),
-            body_text.as_str(),
-        ]);
-
-        entries.push(IndexedEntry {
-            path: rel,
-            entry_type,
-            book,
-            title,
-            author,
-            year,
-            rating,
-            rating_score: rating_source.map(rating_score).unwrap_or_default(),
-            themes,
-            topic: truthy_field_text(&frontmatter, "topic"),
-            source: truthy_field_text(&frontmatter, "source"),
-            doi: truthy_field_text(&frontmatter, "doi"),
-            chapters_analyzed: field(&frontmatter, "chapters_analyzed").and_then(int_value),
-            annotates: truthy_field_text(&frontmatter, "annotates"),
-            created: field(&frontmatter, "created").and_then(text_value),
-            pdf_slug,
-            has_pdf,
-            mtime: meta.and_then(|m| mtime_ms(&m).ok()),
-            preview,
-            body_text,
-            search_text,
-        });
+        match build_indexed_entry(paths, file, &source_slugs)? {
+            BuildOutcome::Indexed(entry) => entries.push(*entry),
+            BuildOutcome::SkippedNoType => skipped_frontmatter_without_type += 1,
+            BuildOutcome::Skipped => {}
+        }
     }
 
     entries.sort_by(|a, b| {
@@ -647,93 +680,8 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
 
     let tx = conn.transaction()?;
     {
-        let mut insert_entry = tx.prepare(
-            r#"
-            INSERT INTO entries (
-              path, type, book, title, author, year_json, rating_json, rating_score,
-              themes_json, topic, source, doi, chapters_analyzed, annotates, created,
-              pdf_slug, has_pdf, mtime, preview
-            ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            )
-            "#,
-        )?;
-        let mut insert_theme =
-            tx.prepare("INSERT INTO entry_themes (path, theme, type) VALUES (?, ?, ?)")?;
-        let mut insert_text =
-            tx.prepare("INSERT INTO entry_text (path, search_text) VALUES (?, ?)")?;
-        let mut insert_search = tx.prepare(
-            r#"
-            INSERT INTO entry_search (
-              path, type, title, author, book, themes, topic, source, year, preview, doi, body
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )?;
-        let mut insert_trigram = tx.prepare(
-            r#"
-            INSERT INTO entry_trigram (
-              path, type, text
-            ) VALUES (?, ?, ?)
-            "#,
-        )?;
-
         for entry in entries {
-            let themes_json = entry
-                .themes
-                .as_ref()
-                .and_then(|themes| serde_json::to_string(themes).ok());
-            insert_entry.execute(params![
-                entry.path,
-                entry.entry_type,
-                entry.book,
-                entry.title,
-                entry.author,
-                json_cell(&entry.year),
-                json_cell(&entry.rating),
-                entry.rating_score,
-                themes_json,
-                entry.topic,
-                entry.source,
-                entry.doi,
-                entry.chapters_analyzed,
-                entry.annotates,
-                entry.created,
-                entry.pdf_slug,
-                if entry.has_pdf { 1 } else { 0 },
-                entry.mtime,
-                entry.preview,
-            ])?;
-
-            if let Some(themes) = &entry.themes {
-                for theme in themes {
-                    if !theme.is_empty() {
-                        insert_theme.execute(params![entry.path, theme, entry.entry_type])?;
-                    }
-                }
-            }
-
-            insert_text.execute(params![entry.path, entry.search_text])?;
-
-            insert_search.execute(params![
-                entry.path,
-                entry.entry_type,
-                entry.title,
-                entry.author,
-                entry.book,
-                entry.themes.as_ref().map(|themes| themes.join(" ")),
-                entry.topic,
-                entry.source,
-                fts_json(&entry.year),
-                entry.preview,
-                entry.doi,
-                entry.body_text,
-            ])?;
-
-            insert_trigram.execute(params![
-                entry.path,
-                entry.entry_type,
-                entry.search_text,
-            ])?;
+            insert_indexed_entry(&tx, entry)?;
         }
 
         // Embed entries via BGE-M3 into entry_vectors_staging.
@@ -743,7 +691,153 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
     }
     tx.commit()?;
     drop(conn);
-    fs::rename(&tmp, &paths.index_db)?;
+    {
+        // Hold the write lock only for the swap so no incremental upsert is
+        // mid-transaction on the old DB file while it is replaced.
+        let _swap = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        fs::rename(&tmp, &paths.index_db)?;
+    }
+    Ok(())
+}
+
+/// Insert one entry's rows across the metadata + FTS tables. Shared by the full
+/// reindex and the incremental upsert so the column logic lives in one place.
+/// Does NOT touch `entry_vectors` — embeddings are produced only by full reindex.
+fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Result<()> {
+    let themes_json = entry
+        .themes
+        .as_ref()
+        .and_then(|themes| serde_json::to_string(themes).ok());
+    conn.execute(
+        r#"
+        INSERT INTO entries (
+          path, type, book, title, author, year_json, rating_json, rating_score,
+          themes_json, topic, source, doi, chapters_analyzed, annotates, created,
+          pdf_slug, has_pdf, mtime, preview
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+        params![
+            entry.path,
+            entry.entry_type,
+            entry.book,
+            entry.title,
+            entry.author,
+            json_cell(&entry.year),
+            json_cell(&entry.rating),
+            entry.rating_score,
+            themes_json,
+            entry.topic,
+            entry.source,
+            entry.doi,
+            entry.chapters_analyzed,
+            entry.annotates,
+            entry.created,
+            entry.pdf_slug,
+            if entry.has_pdf { 1 } else { 0 },
+            entry.mtime,
+            entry.preview,
+        ],
+    )?;
+
+    if let Some(themes) = &entry.themes {
+        for theme in themes {
+            if !theme.is_empty() {
+                conn.execute(
+                    "INSERT INTO entry_themes (path, theme, type) VALUES (?, ?, ?)",
+                    params![entry.path, theme, entry.entry_type],
+                )?;
+            }
+        }
+    }
+
+    conn.execute(
+        "INSERT INTO entry_text (path, search_text) VALUES (?, ?)",
+        params![entry.path, entry.search_text],
+    )?;
+
+    conn.execute(
+        r#"
+        INSERT INTO entry_search (
+          path, type, title, author, book, themes, topic, source, year, preview, doi, body
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+        params![
+            entry.path,
+            entry.entry_type,
+            entry.title,
+            entry.author,
+            entry.book,
+            entry.themes.as_ref().map(|themes| themes.join(" ")),
+            entry.topic,
+            entry.source,
+            fts_json(&entry.year),
+            entry.preview,
+            entry.doi,
+            entry.body_text,
+        ],
+    )?;
+
+    conn.execute(
+        "INSERT INTO entry_trigram (path, type, text) VALUES (?, ?, ?)",
+        params![entry.path, entry.entry_type, entry.search_text],
+    )?;
+
+    Ok(())
+}
+
+/// Remove one path's rows from the metadata + FTS tables (not `entry_vectors`).
+fn delete_entry_rows(conn: &Connection, rel_path: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM entries WHERE path = ?", params![rel_path])?;
+    conn.execute("DELETE FROM entry_text WHERE path = ?", params![rel_path])?;
+    conn.execute("DELETE FROM entry_themes WHERE path = ?", params![rel_path])?;
+    conn.execute("DELETE FROM entry_search WHERE path = ?", params![rel_path])?;
+    conn.execute("DELETE FROM entry_trigram WHERE path = ?", params![rel_path])?;
+    Ok(())
+}
+
+/// Re-derive a single file's row in the live index, in place. Called after a
+/// PUT/POST so `/api/index` reflects the edit immediately, without a full
+/// reindex (and without recomputing embeddings). No-op if no index exists yet.
+/// Best-effort by contract: callers must not fail the file write if this errors.
+pub fn index_upsert_file(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<()> {
+    if !paths.index_db.is_file() {
+        return Ok(());
+    }
+    let source_slugs = load_source_slugs(&paths.sources)?;
+    let abs = paths.workspace_root.join(rel_path);
+
+    let _guard = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut conn = Connection::open(&paths.index_db)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    conn.busy_timeout(INDEX_BUSY_TIMEOUT)?;
+    let tx = conn.transaction()?;
+    delete_entry_rows(&tx, rel_path)?;
+    if let BuildOutcome::Indexed(entry) = build_indexed_entry(paths, &abs, &source_slugs)? {
+        insert_indexed_entry(&tx, &entry)?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Remove a single file's row from the live index (after a DELETE/move-to-trash).
+/// No-op if no index exists yet. Best-effort by contract.
+pub fn index_remove_file(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<()> {
+    if !paths.index_db.is_file() {
+        return Ok(());
+    }
+    // Needed so the vec0 `entry_vectors` table can be opened for the delete on
+    // indexes that have it; cheap (registers the extension, not the model).
+    crate::init_sqlite_vec();
+
+    let _guard = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut conn = Connection::open(&paths.index_db)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    conn.busy_timeout(INDEX_BUSY_TIMEOUT)?;
+    let tx = conn.transaction()?;
+    delete_entry_rows(&tx, rel_path)?;
+    // Tolerate older indexes without an entry_vectors table.
+    let _ = tx.execute("DELETE FROM entry_vectors WHERE path = ?", params![rel_path]);
+    tx.commit()?;
     Ok(())
 }
 
