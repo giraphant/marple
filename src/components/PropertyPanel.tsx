@@ -2,7 +2,7 @@ import { useMemo, useState, useRef, useEffect } from 'preact/hooks';
 import type { JSX, ComponentChildren } from 'preact';
 import type { Entry, EntryType } from '../types';
 import { splitAuthors } from '../wiki';
-import { patchFrontmatter, applyFmToEntry } from '../api';
+import { patchFrontmatter, applyFmToEntry, openPdfExternal } from '../api';
 import { ratingToStars } from '../frontmatter';
 import { buildCitation, CITATION_FORMATS, type CitationFormat } from '../citation';
 import { MiniRow } from './MiniRow';
@@ -25,7 +25,6 @@ interface Props {
   entries: Entry[];
   authorIndex: Map<string, Entry[]>;
   annotationIndex: Map<string, Entry[]>;
-  citationFormat: CitationFormat;
   onOpen: (entry: Entry) => void;
   onThemeClick: (theme: string) => void;
   onUpdated: (updated: Entry) => void;
@@ -35,7 +34,7 @@ interface Props {
 type SaveFn = (mutate: (fm: Record<string, unknown>) => Record<string, unknown>) => Promise<void>;
 
 export function PropertyPanel({
-  entry, entries, authorIndex, annotationIndex, citationFormat,
+  entry, entries, authorIndex, annotationIndex,
   onOpen, onThemeClick, onUpdated, onCreateAnnotation,
 }: Props) {
   // saving / err are panel-wide flags so we can disable rows during a write.
@@ -134,9 +133,6 @@ export function PropertyPanel({
         </div>
       )}
 
-      {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
-        <ActionsRow entry={entry} defaultFormat={citationFormat} />
-      )}
       {(() => {
         const fields = FIELDS_BY_TYPE[entry.type];
         if (fields.size === 0) return null;
@@ -221,7 +217,7 @@ export function PropertyPanel({
   );
 }
 
-function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultFormat: CitationFormat }) {
+export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultFormat: CitationFormat }) {
   // Per-document override so the user can pick another format on the fly
   // without going back to settings. Resets when entry changes.
   const [format, setFormat] = useState<CitationFormat>(defaultFormat);
@@ -255,9 +251,14 @@ function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultFormat: Cit
     }
   };
 
-  const openPdf = () => {
+  const openPdf = async () => {
     if (!entry.pdf_slug) return;
-    window.open(`/sources/${entry.pdf_slug}.pdf`, '_blank', 'noopener');
+    setErr(null);
+    try {
+      await openPdfExternal(entry.pdf_slug);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '打开 PDF 失败');
+    }
   };
 
   const activeMeta = CITATION_FORMATS.find(f => f.id === format);
@@ -310,7 +311,7 @@ function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultFormat: Cit
         <button
           onClick={openPdf}
           class="px-2 py-1 rounded border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
-          title={`打开 sources/${entry.pdf_slug}.pdf`}
+          title={`用系统默认 PDF 阅读器打开 sources/${entry.pdf_slug}.pdf`}
         >打开 PDF</button>
       )}
       {err && <span class="text-red-600 dark:text-red-400 text-[10px]">{err}</span>}

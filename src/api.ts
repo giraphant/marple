@@ -155,6 +155,20 @@ export async function embeddingStatus(): Promise<EmbedStatus> {
   return await r.json() as EmbedStatus;
 }
 
+/** Ask the backend to open sources/<slug>.pdf in the host's default PDF app
+ *  (QUA-55). The browser can't launch native apps, so reader-api does it. */
+export async function openPdfExternal(slug: string): Promise<void> {
+  const r = await fetch('/api/open-pdf', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+  });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`open pdf failed: ${r.status} ${msg}`);
+  }
+}
+
 export async function purgeTrash(name: string): Promise<void> {
   const r = await fetch(`/api/trash/${encodeURIComponent(name)}`, { method: 'DELETE' });
   if (!r.ok) {

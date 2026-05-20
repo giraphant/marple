@@ -1,12 +1,16 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'preact/hooks';
+import { EditorView } from '@codemirror/view';
 import type { Entry } from '../types';
 import { TYPE_BY_ID } from '../types';
 import { bookSlugOf } from '../wiki';
 import { fetchEntryText, putEntryText, replaceBody } from '../api';
 import { createSaveQueue } from '../save-queue';
 import { bumpVaultVersion } from '../sync';
-import { PropertyPanel } from './PropertyPanel';
+import { PropertyPanel, ActionsRow } from './PropertyPanel';
 import { NoteEditor, type EditorThemeConfig } from './NoteEditor';
+import { RightPanel, type PanelHeading } from './RightPanel';
+import { extractHeadings } from '../doc-outline';
+import { computeDocStats } from '../doc-stats';
 import { Icon } from './Icon';
 import { BodyView } from '../body/BodyView';
 import type { CitationFormat } from '../citation';
@@ -230,6 +234,85 @@ export function DocView({
     return entry.title || entry.path.split('/').pop()!.replace(/\.md$/, '');
   }, [entry, body]);
 
+  // --- right panel (QUA-57): outline + stats ---
+  // The rendered article scroll container (read mode) and the live EditorView
+  // (edit mode) — so the 目录 tab can scroll to a heading in either mode.
+  const bodyScrollRef = useRef<HTMLDivElement>(null);
+  const editorViewRef = useRef<EditorView | null>(null);
+
+  const docStats = useMemo(() => computeDocStats(body), [body]);
+
+  // Edit mode: outline from markdown source (keys carry the source line).
+  const editHeadings = useMemo<PanelHeading[]>(
+    () => (editable
+      ? extractHeadings(body).map(h => ({ level: h.level, text: h.text, key: `L${h.line}` }))
+      : []),
+    [editable, body],
+  );
+
+  // Read mode: outline from the actually-rendered DOM (BodyView routes some
+  // sections through typed renderers, so the DOM is the source of truth). Assign
+  // ids to the heading elements so clicks can scroll to them.
+  const [domHeadings, setDomHeadings] = useState<PanelHeading[]>([]);
+  useEffect(() => {
+    if (editable || loading || loadError) { setDomHeadings([]); return; }
+    const raf = requestAnimationFrame(() => {
+      const root = bodyScrollRef.current;
+      if (!root) { setDomHeadings([]); return; }
+      const els = Array.from(
+        root.querySelectorAll('.prose-body h1, .prose-body h2, .prose-body h3, .prose-body h4'),
+      ) as HTMLElement[];
+      setDomHeadings(els.map((el, i) => {
+        const key = `toc-h-${i}`;
+        el.id = key;
+        el.style.scrollMarginTop = '12px';
+        return { level: Number(el.tagName[1]) || 1, text: (el.textContent || '').trim(), key };
+      }));
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [editable, body, entry.path, loading, loadError]);
+
+  const headings = editable ? editHeadings : domHeadings;
+
+  // Read-mode scroll-spy: highlight the topmost heading scrolled into view.
+  const [activeHeadingKey, setActiveHeadingKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (editable || domHeadings.length === 0) { setActiveHeadingKey(null); return; }
+    const root = bodyScrollRef.current;
+    if (!root) return;
+    const els = domHeadings
+      .map(h => root.querySelector('#' + CSS.escape(h.key)))
+      .filter(Boolean) as HTMLElement[];
+    if (els.length === 0) return;
+    const io = new IntersectionObserver((entries) => {
+      const visible = entries.filter(e => e.isIntersecting).map(e => e.target as HTMLElement);
+      if (visible.length === 0) return;
+      visible.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+      setActiveHeadingKey(visible[0].id);
+    }, { root, rootMargin: '0px 0px -70% 0px', threshold: 0 });
+    els.forEach(el => io.observe(el));
+    return () => io.disconnect();
+  }, [editable, domHeadings]);
+
+  const onHeadingClick = useCallback((key: string) => {
+    if (editable) {
+      const view = editorViewRef.current;
+      if (!view) return;
+      const lineNo = Number(key.slice(1)); // 'L<line>'
+      if (!Number.isFinite(lineNo) || lineNo < 1 || lineNo > view.state.doc.lines) return;
+      const line = view.state.doc.line(lineNo);
+      view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: 'start' }) });
+      view.focus();
+    } else {
+      const el = bodyScrollRef.current?.querySelector('#' + CSS.escape(key)) as HTMLElement | null;
+      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [editable]);
+
+  const panelBookContext = bookContext
+    ? { overview: bookContext.overview, chapters: bookContext.chapters }
+    : null;
+
   return (
     <div class="flex-1 flex flex-col min-h-0">
       <div class="bg-surface/95 backdrop-blur border-b border-base px-6 py-3 flex items-center gap-3 relative shrink-0">
@@ -237,6 +320,10 @@ export function DocView({
         <div class="text-[14px] font-medium text-primary flex-1 truncate">
           {displayTitle}
         </div>
+
+        {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
+          <ActionsRow entry={entry} defaultFormat={citationFormat} />
+        )}
 
         {editable && (saveStatus === 'conflict' ? (
           <span class="text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1.5" title="磁盘上的文件在你编辑期间被其他窗口或外部改动；为避免覆盖，自动保存已暂停">
@@ -267,44 +354,6 @@ export function DocView({
       </div>
 
       <div class="flex-1 overflow-hidden flex min-h-0">
-        {bookContext && (
-          <aside class="w-56 shrink-0 border-r border-base bg-page overflow-auto scrollbar-thin">
-            {bookContext.overview && (
-              <div class="px-2 pt-3 pb-1">
-                <div class="text-[10px] uppercase tracking-wider text-muted font-semibold px-2 mb-1">本书</div>
-                <BookRailRow
-                  entry={bookContext.overview}
-                  label="概述"
-                  active={entry.path === bookContext.overview.path}
-                  onClick={(ev) => onNavigate(bookContext.overview!, { meta: ev.metaKey || ev.ctrlKey })}
-                />
-              </div>
-            )}
-            {bookContext.chapters.length > 0 && (
-              <>
-                <div class="px-4 pt-3 pb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
-                  章节 ({bookContext.chapters.length})
-                </div>
-                <ul class="pb-4 px-2">
-                  {bookContext.chapters.map(c => {
-                    const label = c.title || c.path.split('/').pop()!.replace(/\.md$/, '');
-                    const isActive = c.path === entry.path;
-                    return (
-                      <li key={c.path}>
-                        <BookRailRow
-                          entry={c}
-                          label={label}
-                          active={isActive}
-                          onClick={(ev) => onNavigate(c, { meta: ev.metaKey || ev.ctrlKey })}
-                        />
-                      </li>
-                    );
-                  })}
-                </ul>
-              </>
-            )}
-          </aside>
-        )}
         <div class="flex-1 min-w-0 flex flex-col">
           {loading
             ? <div class="px-8 py-10 text-sm text-muted">加载中…</div>
@@ -325,25 +374,34 @@ export function DocView({
                     theme={editorTheme}
                     onChange={handleEditorChange}
                     onSaveShortcut={() => flushSave()}
+                    onViewReady={(v) => { editorViewRef.current = v; }}
                   />
-                : <div class="flex-1 overflow-auto scrollbar-thin">
+                : <div ref={bodyScrollRef} class="flex-1 overflow-auto scrollbar-thin">
                     <BodyView entry={entry} body={body} wikiIndex={wikiIndex} onWikiClick={onWikiClick} />
                   </div>
           }
         </div>
-        <aside class="w-72 shrink-0 border-l border-base bg-page/60 overflow-auto scrollbar-thin">
-          <PropertyPanel
-            entry={entry}
-            entries={entries}
-            authorIndex={authorIndex}
-            annotationIndex={annotationIndex}
-            citationFormat={citationFormat}
-            onOpen={(e) => onNavigate(e, { meta: false })}
-            onThemeClick={(th) => onThemeClick(th, entry.type)}
-            onUpdated={onUpdated}
-            onCreateAnnotation={onCreateAnnotation}
-          />
-        </aside>
+        <RightPanel
+          headings={headings}
+          activeHeadingKey={activeHeadingKey}
+          onHeadingClick={onHeadingClick}
+          bookContext={panelBookContext}
+          activeEntryPath={entry.path}
+          onNavigate={onNavigate}
+          stats={docStats}
+          info={
+            <PropertyPanel
+              entry={entry}
+              entries={entries}
+              authorIndex={authorIndex}
+              annotationIndex={annotationIndex}
+              onOpen={(e) => onNavigate(e, { meta: false })}
+              onThemeClick={(th) => onThemeClick(th, entry.type)}
+              onUpdated={onUpdated}
+              onCreateAnnotation={onCreateAnnotation}
+            />
+          }
+        />
       </div>
     </div>
   );
@@ -360,25 +418,3 @@ function SaveIndicator({ status, errMsg }: { status: SaveStatus; errMsg: string 
   }
 }
 
-/** One row in the EPUB-style book rail (concise + active highlight). */
-function BookRailRow({ entry, label, active, onClick }: {
-  entry: Entry;
-  label: string;
-  active: boolean;
-  onClick: (ev: MouseEvent) => void;
-}) {
-  void entry;
-  return (
-    <button
-      onClick={onClick}
-      title={label}
-      class={`w-full text-left px-2 py-1.5 rounded text-[12px] leading-snug truncate transition ${
-        active
-          ? 'bg-inverse text-inverse-fg font-medium'
-          : 'text-secondary hover:bg-surface-2 hover:text-primary'
-      }`}
-    >
-      {label}
-    </button>
-  );
-}

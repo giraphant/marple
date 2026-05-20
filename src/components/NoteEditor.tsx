@@ -71,6 +71,9 @@ interface Props {
   theme: EditorThemeConfig;
   onChange: (body: string) => void;
   onSaveShortcut?: () => void;
+  /** Exposes the live EditorView (or null on teardown) so the parent can drive
+   * imperative actions like scroll-to-line for the outline panel (QUA-57). */
+  onViewReady?: (view: EditorView | null) => void;
 }
 
 type SemanticTokenKind = 'wiki' | 'link' | 'image' | 'footnote';
@@ -138,7 +141,11 @@ const highlightStyle = HighlightStyle.define([
 // MARKER_RE 捕获：(leading-ws)(marker-chars)(trailing-ws)。
 // 计算 text-indent 时用 marker+trailing-ws 的字符数 —— 让 marker 后第一个
 // 实际正文字符落到非 marker 行同列。
-const MARKER_RE = /^(\s*)(#{1,6}|[-*+]|\d{1,3}[.)]|>)(\s+)/;
+// 标题 / 列表必须有 ≥1 个尾随空格才成立（CommonMark：`#foo`/`-foo` 不算）。
+const MARKER_RE = /^(\s*)(#{1,6}|[-*+]|\d{1,3}[.)])(\s+)/;
+// blockquote 单独处理：CommonMark 里 `>` 后的空格是可选的，`>foo` 同样是引用块。
+// 所以删掉 `> ` 的空格不应丢掉引用格式 —— 这里允许最多一个尾随空格。
+const QUOTE_RE = /^(\s*)(>)( ?)/;
 const LIST_MARKER_RE = /^[-*+]|^\d/;
 
 class ListMarkerWidget extends WidgetType {
@@ -187,28 +194,39 @@ function computeMarkerDeco(view: EditorView): DecorationSet {
     let pos = from;
     while (pos <= to) {
       const line = view.state.doc.lineAt(pos);
-      const m = line.text.match(MARKER_RE);
+      // Quote first (its trailing space is optional); then heading / list.
+      const m = line.text.match(QUOTE_RE) ?? line.text.match(MARKER_RE);
       if (m) {
         const leadingSpaces = m[1].length;
         const marker = m[2];
-        const hangLen = marker.length + m[3].length;
+        const trailing = m[3]; // quote: '' or ' ';  heading/list: the \s+
+        const hangLen = marker.length + trailing.length;
         const isQuote = marker === '>';
-        const isList = LIST_MARKER_RE.test(marker);
+        const isList = !isQuote && LIST_MARKER_RE.test(marker);
 
         let style: string | undefined;
-        if (isQuote) {
-          // Ulysses keeps `>` in the normal text column, then lets the body
-          // start after the literal marker + following ASCII space.
-          style = undefined;
-        } else if (isList) {
+        if (isList) {
           // List: line padding defines the marker slot origin; the source
           // marker+space is replaced by ListMarkerWidget, whose fixed-width
-          // marker is right-aligned before the content column.
+          // marker is right-aligned before the content column. text-indent pulls
+          // the first line's marker back into the padding gutter so wrapped
+          // continuation lines align with the body (hanging indent).
+          // List body indented 2 full-width chars (2em) past the normal 3em
+          // column → body at 5em; deeper nesting adds 2em/level. The marker
+          // widget occupies a 1em slot (text-indent -1em): marker sits at 4em
+          // with a ~half-width gap before the body at 5em.
           const nestedLevel = Math.floor(leadingSpaces / 2);
-          const padEm = 3 + nestedLevel * 2;
-          style = `padding-left: ${padEm}em`;
+          const padEm = 5 + nestedLevel * 2;
+          style = `padding-left: ${padEm}em; text-indent: -1em`;
+        } else if (isQuote) {
+          // Blockquote: body indented 1 full-width char (1em) past the normal
+          // 3em column → body at 4em. The fixed-width `>` marker
+          // (.cm-blockquote-marker, 1em slot) hangs via `text-indent: -1em`,
+          // landing `>` at the 3em column with a ~half-width gap before the body
+          // at 4em (first line and every wrapped line).
+          style = `padding-left: 4em; text-indent: -1em`;
         } else {
-          // heading / blockquote: marker 挂在 padding gutter 里，content 在 body column。
+          // heading: marker 挂在 padding gutter 里，content 在 body column。
           // hangLen = marker 字符数 + trailing space，用 ch 让对齐到 body 段落同列。
           style = `text-indent: -${hangLen}ch`;
         }
@@ -223,18 +241,24 @@ function computeMarkerDeco(view: EditorView): DecorationSet {
 
         if (isQuote) {
           const markerFrom = line.from + leadingSpaces;
-          const markerTo = markerFrom + marker.length;
-          const bodyFrom = markerTo + m[3].length;
-          builder.add(markerFrom, markerTo, Decoration.mark({ class: 'cm-blockquote-marker' }));
+          const bodyFrom = markerFrom + marker.length + trailing.length;
+          // Mark the whole `> ` (marker + trailing space) as one fixed-width
+          // inline-block so the body starts at an exact column (CSS handles the
+          // width / gap). Wrapped lines then align with it via the line's
+          // text-indent.
+          builder.add(markerFrom, bodyFrom, Decoration.mark({ class: 'cm-blockquote-marker' }));
           if (bodyFrom < line.to) {
             builder.add(bodyFrom, line.to, Decoration.mark({ class: 'cm-blockquote-text' }));
           }
         }
 
         if (isList) {
-          // Only replace the marker itself. The following ASCII space remains
-          // real markdown text, matching Ulysses' "marker + normal space" feel.
-          const markerTo = line.from + leadingSpaces + marker.length;
+          // Replace the marker AND its trailing space with the fixed-width
+          // widget, so the body starts exactly at the body column (padding-left)
+          // and the `text-indent: -1.25em` makes wrapped lines align under the
+          // first line's body (hanging indent). The widget's own right padding
+          // supplies the marker→body gap.
+          const markerTo = line.from + leadingSpaces + marker.length + trailing.length;
           if (!selectionTouchesToken(view, line.from, markerTo)) {
             builder.add(
               line.from,
@@ -799,15 +823,17 @@ function buildEditorTheme({ dark }: EditorThemeConfig): Extension {
 const editableCompartment = new Compartment();
 const themeCompartment = new Compartment();
 
-export function NoteEditor({ docId, initial, theme, onChange, onSaveShortcut }: Props) {
+export function NoteEditor({ docId, initial, theme, onChange, onSaveShortcut, onViewReady }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSaveShortcut);
+  const onViewReadyRef = useRef(onViewReady);
   const [popover, setPopover] = useState<SemanticPopover | null>(null);
   onChangeRef.current = onChange;
   onSaveRef.current = onSaveShortcut;
+  onViewReadyRef.current = onViewReady;
 
   const openSemanticPopover: OpenSemanticPopover = (view, token, rect) => {
     const width = token.kind === 'footnote' ? 360 : 360;
@@ -963,8 +989,9 @@ export function NoteEditor({ docId, initial, theme, onChange, onSaveShortcut }: 
 
     const view = new EditorView({ state, parent: hostRef.current });
     viewRef.current = view;
+    onViewReadyRef.current?.(view);
     requestAnimationFrame(() => normalizeLegacyFootnotePlaceholders(view));
-    return () => { view.destroy(); viewRef.current = null; };
+    return () => { onViewReadyRef.current?.(null); view.destroy(); viewRef.current = null; };
     // theme intentionally not in deps — handled by the hot-swap effect below
     // so we don't lose caret/selection/history when settings change.
     // initial intentionally not in deps — we don't reseed mid-edit.
