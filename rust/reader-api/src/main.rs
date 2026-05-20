@@ -8,6 +8,11 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
+use notify_debouncer_mini::{
+    new_debouncer,
+    notify::{RecommendedWatcher, RecursiveMode},
+    DebounceEventResult, Debouncer,
+};
 use reader_core::embed_job::{EmbedJob, EmbedOutcome};
 use reader_core::{ReaderError, ReaderPaths};
 use serde::Deserialize;
@@ -50,12 +55,17 @@ async fn main() -> anyhow::Result<()> {
 
     maybe_auto_embed(&state);
 
+    // Background index maintenance needs the paths after `state` is moved into
+    // the router.
+    let bg_paths = state.paths.clone();
+
     let app = Router::new()
         .route("/api/index", get(api_index))
         .route("/api/files", get(api_files))
         .route("/api/entry", get(api_entry))
         .route("/api/search", get(api_search))
         .route("/api/reindex", post(api_reindex))
+        .route("/api/reconcile", post(api_reconcile))
         .route("/api/open-pdf", post(api_open_pdf))
         .route("/api/embeddings", post(api_embeddings))
         .route("/api/embeddings/status", get(api_embeddings_status))
@@ -89,6 +99,7 @@ async fn main() -> anyhow::Result<()> {
     println!("GET    /api/entry?path=...     -> live-parse one vault file's metadata");
     println!("GET    /api/search?q=...       -> search entries with SQLite FTS");
     println!("POST   /api/reindex            -> rebuild data/index.sqlite with Rust");
+    println!("POST   /api/reconcile          -> delta-sync index to the vault (cheap)");
     println!("POST   /api/open-pdf           -> open sources/<slug>.pdf in the system PDF app");
     println!("POST   /api/embeddings         -> start background semantic-vector build (202)");
     println!("GET    /api/embeddings/status  -> poll embedding job + on-disk vectors summary");
@@ -96,8 +107,58 @@ async fn main() -> anyhow::Result<()> {
     println!("PUT    /vault/**/*.md          -> update existing vault markdown");
     println!("POST   /vault/notes/**/*.md    -> create notes");
     println!("DELETE /vault/notes/**/*.md    -> soft-delete notes");
+
+    // Catch edits made while the server was down, then live-watch for new ones.
+    spawn_boot_reconcile(bg_paths.clone());
+    let _watcher = match start_vault_watcher(bg_paths.clone()) {
+        Ok(watcher) => Some(watcher),
+        Err(err) => {
+            eprintln!("vault watcher disabled (search won't auto-refresh on external edits): {err}");
+            None
+        }
+    };
+
     axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
     Ok(())
+}
+
+/// Reconcile once at startup so changes made while the server was down (git
+/// pull, external edits) are reflected without a manual reindex. Fire-and-forget
+/// on a blocking thread; the delta is cheap when little changed.
+fn spawn_boot_reconcile(paths: Arc<ReaderPaths>) {
+    tokio::task::spawn_blocking(move || match reader_core::reconcile_index(&paths) {
+        Ok(s) => println!(
+            "boot reconcile: upserted {}, removed {}, unchanged {}",
+            s.upserted, s.removed, s.unchanged
+        ),
+        Err(e) => eprintln!("boot reconcile failed: {e}"),
+    });
+}
+
+/// Watch the vault and run a debounced delta reconcile on any change. The
+/// watcher only hints "something changed" — `reconcile_index` decides *what*
+/// via mtime diff — so a dropped/missed event is self-healed by the next event
+/// or the boot reconcile. Index writes land outside the vault dir, so this never
+/// feeds back on itself. The returned Debouncer must be kept alive to keep
+/// watching.
+fn start_vault_watcher(paths: Arc<ReaderPaths>) -> anyhow::Result<Debouncer<RecommendedWatcher>> {
+    let vault = paths.vault.clone();
+    let mut debouncer = new_debouncer(
+        std::time::Duration::from_millis(500),
+        move |res: DebounceEventResult| match res {
+            Ok(_events) => match reader_core::reconcile_index(&paths) {
+                Ok(s) if s.upserted + s.removed > 0 => println!(
+                    "watch reconcile: upserted {}, removed {}",
+                    s.upserted, s.removed
+                ),
+                Ok(_) => {}
+                Err(e) => eprintln!("watch reconcile failed: {e}"),
+            },
+            Err(e) => eprintln!("vault watch error: {e:?}"),
+        },
+    )?;
+    debouncer.watcher().watch(&vault, RecursiveMode::Recursive)?;
+    Ok(debouncer)
 }
 
 async fn api_index(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
@@ -213,6 +274,22 @@ async fn api_reindex(State(state): State<AppState>) -> Result<Json<serde_json::V
         "sourcePdfs": stats.source_pdfs,
         "skippedFrontmatterWithoutType": stats.skipped_frontmatter_without_type,
         "skipped": serde_json::to_value(&stats.skipped).unwrap_or_default()
+    })))
+}
+
+/// Cheap delta-sync: bring the index into agreement with the vault by diffing
+/// per-file mtimes (new/changed/deleted), instead of the full /api/reindex
+/// rebuild. Safe to call often.
+async fn api_reconcile(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    let paths = state.paths.clone();
+    let stats = tokio::task::spawn_blocking(move || reader_core::reconcile_index(&paths))
+        .await
+        .map_err(|err| AppError(ReaderError::Other(err.into())))??;
+    Ok(Json(json!({
+        "ok": true,
+        "upserted": stats.upserted,
+        "removed": stats.removed,
+        "unchanged": stats.unchanged,
     })))
 }
 
@@ -415,7 +492,14 @@ async fn put_vault_file(
     Path(path): Path<String>,
     body: Bytes,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mtime = reader_core::put_markdown(&state.paths, &format!("vault/{path}"), &body)?;
+    let rel = format!("vault/{path}");
+    let mtime = reader_core::put_markdown(&state.paths, &rel, &body)?;
+    // Update the index immediately for this one file (best-effort: the watcher /
+    // boot reconcile would catch it anyway, but this makes the edit searchable
+    // without the debounce wait).
+    if let Err(e) = reader_core::upsert_entry(&state.paths, &rel) {
+        eprintln!("index upsert failed for {rel}: {e}");
+    }
     Ok(Json(json!({
         "ok": true,
         "bytes": body.len(),
@@ -430,6 +514,9 @@ async fn post_vault_note(
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     let (created_path, mtime) =
         reader_core::post_note(&state.paths, &format!("vault/{path}"), &body)?;
+    if let Err(e) = reader_core::upsert_entry(&state.paths, &created_path) {
+        eprintln!("index upsert failed for {created_path}: {e}");
+    }
     Ok((
         StatusCode::CREATED,
         Json(json!({
@@ -445,7 +532,11 @@ async fn delete_vault_note(
     State(state): State<AppState>,
     Path(path): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let trash = reader_core::delete_note(&state.paths, &format!("vault/{path}"))?;
+    let rel = format!("vault/{path}");
+    let trash = reader_core::delete_note(&state.paths, &rel)?;
+    if let Err(e) = reader_core::remove_entry(&state.paths, &rel) {
+        eprintln!("index remove failed for {rel}: {e}");
+    }
     Ok(Json(json!({ "ok": true, "trash": trash })))
 }
 
