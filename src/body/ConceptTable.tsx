@@ -24,11 +24,11 @@ import { parseMarkdownTable } from './sections';
 
 type ColumnRole =
   | 'name'         // 概念    — primary, bold
-  | 'translation'  // 英文    — italic muted small
+  | 'translation'  // 英文    — muted small
   | 'coiner'       // 提出者  — chip (wraps when long)
   | 'refs'         // 出现章节 — split into chips
   | 'definition'   // 定义    — prose, widest column
-  | 'works'        // 来源作品 — italic, wikilinks preserved
+  | 'works'        // 来源作品 — wikilinks preserved
   | 'evolution'    // 演化轨迹 — prose
   | 'status'       // 当前状态 — chip
   | 'unknown';

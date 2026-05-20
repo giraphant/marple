@@ -12,7 +12,7 @@ import { resolveWikilinks } from '../wiki';
  *   - Antonio Gramsci（霸权理论、伦理国家）——Bennett 的系统批判对象…
  *
  * We render each entry as a compact card: bold name, comma-split keywords
- * as amber chips, then the relationship prose on the next line. Names
+ * as accent chips, then the relationship prose on the next line. Names
  * wrapped in `[[wikilink]]` become clickable if the linked entry exists.
  */
 

@@ -120,7 +120,7 @@ function QuoteCard({ item, wikiIndex }: { item: QuoteItem; wikiIndex: Map<string
   return (
     <figure class="group relative rounded-md bg-accent-bg/40 border-l-4 border-accent pl-4 pr-3 py-3">
       {/* `!border-l-0 !pl-0 !my-0` strips .prose-body's default 3-px blockquote
-          frame so we don't get a double left bar inside the figure's pink
+          frame so we don't get a double left bar inside the figure's accent
           frame. font-family puts Georgia/Charter first so English uses a
           proper English serif at full size; Songti picks up the CJK glyphs
           via per-glyph fallback. */}
