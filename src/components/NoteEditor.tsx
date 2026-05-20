@@ -141,7 +141,11 @@ const highlightStyle = HighlightStyle.define([
 // MARKER_RE 捕获：(leading-ws)(marker-chars)(trailing-ws)。
 // 计算 text-indent 时用 marker+trailing-ws 的字符数 —— 让 marker 后第一个
 // 实际正文字符落到非 marker 行同列。
-const MARKER_RE = /^(\s*)(#{1,6}|[-*+]|\d{1,3}[.)]|>)(\s+)/;
+// 标题 / 列表必须有 ≥1 个尾随空格才成立（CommonMark：`#foo`/`-foo` 不算）。
+const MARKER_RE = /^(\s*)(#{1,6}|[-*+]|\d{1,3}[.)])(\s+)/;
+// blockquote 单独处理：CommonMark 里 `>` 后的空格是可选的，`>foo` 同样是引用块。
+// 所以删掉 `> ` 的空格不应丢掉引用格式 —— 这里允许最多一个尾随空格。
+const QUOTE_RE = /^(\s*)(>)( ?)/;
 const LIST_MARKER_RE = /^[-*+]|^\d/;
 
 class ListMarkerWidget extends WidgetType {
@@ -190,13 +194,15 @@ function computeMarkerDeco(view: EditorView): DecorationSet {
     let pos = from;
     while (pos <= to) {
       const line = view.state.doc.lineAt(pos);
-      const m = line.text.match(MARKER_RE);
+      // Quote first (its trailing space is optional); then heading / list.
+      const m = line.text.match(QUOTE_RE) ?? line.text.match(MARKER_RE);
       if (m) {
         const leadingSpaces = m[1].length;
         const marker = m[2];
-        const hangLen = marker.length + m[3].length;
+        const trailing = m[3]; // quote: '' or ' ';  heading/list: the \s+
+        const hangLen = marker.length + trailing.length;
         const isQuote = marker === '>';
-        const isList = LIST_MARKER_RE.test(marker);
+        const isList = !isQuote && LIST_MARKER_RE.test(marker);
 
         let style: string | undefined;
         if (isList) {
@@ -231,7 +237,7 @@ function computeMarkerDeco(view: EditorView): DecorationSet {
 
         if (isQuote) {
           const markerFrom = line.from + leadingSpaces;
-          const bodyFrom = markerFrom + marker.length + m[3].length;
+          const bodyFrom = markerFrom + marker.length + trailing.length;
           // Mark the whole `> ` (marker + trailing space) as one fixed-width
           // inline-block so the body starts at an exact column (CSS handles the
           // width / gap). Wrapped lines then align with it via the line's
@@ -248,7 +254,7 @@ function computeMarkerDeco(view: EditorView): DecorationSet {
           // and the `text-indent: -1.25em` makes wrapped lines align under the
           // first line's body (hanging indent). The widget's own right padding
           // supplies the marker→body gap.
-          const markerTo = line.from + leadingSpaces + marker.length + m[3].length;
+          const markerTo = line.from + leadingSpaces + marker.length + trailing.length;
           if (!selectionTouchesToken(view, line.from, markerTo)) {
             builder.add(
               line.from,
