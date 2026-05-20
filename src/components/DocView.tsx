@@ -6,7 +6,7 @@ import { bookSlugOf } from '../wiki';
 import { fetchEntryText, putEntryText, replaceBody } from '../api';
 import { createSaveQueue } from '../save-queue';
 import { bumpVaultVersion } from '../sync';
-import { PropertyPanel } from './PropertyPanel';
+import { PropertyPanel, ActionsRow } from './PropertyPanel';
 import { NoteEditor, type EditorThemeConfig } from './NoteEditor';
 import { RightPanel, type PanelHeading } from './RightPanel';
 import { extractHeadings } from '../doc-outline';
@@ -321,6 +321,10 @@ export function DocView({
           {displayTitle}
         </div>
 
+        {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
+          <ActionsRow entry={entry} defaultFormat={citationFormat} />
+        )}
+
         {editable && (saveStatus === 'conflict' ? (
           <span class="text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1.5" title="磁盘上的文件在你编辑期间被其他窗口或外部改动；为避免覆盖，自动保存已暂停">
             文件已被其他窗口修改
@@ -391,7 +395,6 @@ export function DocView({
               entries={entries}
               authorIndex={authorIndex}
               annotationIndex={annotationIndex}
-              citationFormat={citationFormat}
               onOpen={(e) => onNavigate(e, { meta: false })}
               onThemeClick={(th) => onThemeClick(th, entry.type)}
               onUpdated={onUpdated}

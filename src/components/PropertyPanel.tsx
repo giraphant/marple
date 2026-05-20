@@ -25,7 +25,6 @@ interface Props {
   entries: Entry[];
   authorIndex: Map<string, Entry[]>;
   annotationIndex: Map<string, Entry[]>;
-  citationFormat: CitationFormat;
   onOpen: (entry: Entry) => void;
   onThemeClick: (theme: string) => void;
   onUpdated: (updated: Entry) => void;
@@ -35,7 +34,7 @@ interface Props {
 type SaveFn = (mutate: (fm: Record<string, unknown>) => Record<string, unknown>) => Promise<void>;
 
 export function PropertyPanel({
-  entry, entries, authorIndex, annotationIndex, citationFormat,
+  entry, entries, authorIndex, annotationIndex,
   onOpen, onThemeClick, onUpdated, onCreateAnnotation,
 }: Props) {
   // saving / err are panel-wide flags so we can disable rows during a write.
@@ -134,9 +133,6 @@ export function PropertyPanel({
         </div>
       )}
 
-      {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
-        <ActionsRow entry={entry} defaultFormat={citationFormat} />
-      )}
       {(() => {
         const fields = FIELDS_BY_TYPE[entry.type];
         if (fields.size === 0) return null;
@@ -221,7 +217,7 @@ export function PropertyPanel({
   );
 }
 
-function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultFormat: CitationFormat }) {
+export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultFormat: CitationFormat }) {
   // Per-document override so the user can pick another format on the fly
   // without going back to settings. Resets when entry changes.
   const [format, setFormat] = useState<CitationFormat>(defaultFormat);
