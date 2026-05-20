@@ -215,12 +215,13 @@ function computeMarkerDeco(view: EditorView): DecorationSet {
           const padEm = 3 + nestedLevel * 2;
           style = `padding-left: ${padEm}em; text-indent: -1.25em`;
         } else if (isQuote) {
-          // Blockquote: the `> ` marker becomes a fixed-width inline-block (see
-          // .cm-blockquote-marker), so a -1.25em text-indent lands the body
-          // EXACTLY at the 3em column on the first line and on every wrapped
-          // line (a `ch`-based indent drifts because `>`+space ≠ 2ch in a
-          // proportional font). Ulysses-style hanging `>`.
-          style = `text-indent: -1.25em`;
+          // Blockquote: body column = 4.25em (i.e. the normal 3em body column
+          // PLUS a 1.25em indent), so the quote is visibly indented relative to
+          // normal paragraphs. The fixed-width `>` marker (.cm-blockquote-marker,
+          // 1.25em) hangs in that indent gutter via `text-indent: -1.25em`,
+          // landing `>` at the 3em column and the body at 4.25em on the first
+          // line and on every wrapped line.
+          style = `padding-left: 4.25em; text-indent: -1.25em`;
         } else {
           // heading: marker 挂在 padding gutter 里，content 在 body column。
           // hangLen = marker 字符数 + trailing space，用 ch 让对齐到 body 段落同列。
