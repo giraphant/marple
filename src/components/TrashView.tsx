@@ -69,7 +69,7 @@ export function TrashView({ onRestored }: Props) {
 
       <main class="flex-1 overflow-auto scrollbar-thin px-6 py-4">
         {err && (
-          <div class="text-[12px] text-red-700 dark:text-red-300 bg-red-50 border border-red-200 dark:border-red-900 rounded px-3 py-2 mb-4">
+          <div class="text-[12px] text-danger bg-danger-bg border border-danger/30 rounded px-3 py-2 mb-4">
             {err}
           </div>
         )}
@@ -107,7 +107,7 @@ export function TrashView({ onRestored }: Props) {
                 <button
                   onClick={() => onPurge(it.name)}
                   disabled={busy === it.name}
-                  class="text-[12px] px-2.5 py-1 rounded border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
+                  class="text-[12px] px-2.5 py-1 rounded border border-danger/30 text-danger hover:bg-danger-bg disabled:opacity-50"
                 >永久删除</button>
               </div>
             ))}

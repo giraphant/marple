@@ -37,7 +37,7 @@ export function Dashboard({ type, typeEntries, onThemeClick, onOpen }: Props) {
         <div class="text-2xl font-semibold tabular-nums">{stats.total}</div>
         {stats.avg > 0 && (
           <div class="text-[12px] text-secondary">
-            平均评分 <span class="text-amber-600 dark:text-amber-400">{'★'.repeat(Math.round(stats.avg))}</span>
+            平均评分 <span class="text-star">{'★'.repeat(Math.round(stats.avg))}</span>
             <span class="text-muted tabular-nums"> ({stats.avg.toFixed(2)})</span>
           </div>
         )}
@@ -51,7 +51,7 @@ export function Dashboard({ type, typeEntries, onThemeClick, onOpen }: Props) {
             {stats.topThemes.map(([th, n]) => (
               <button
                 onClick={() => onThemeClick(th)}
-                class="text-[11px] px-2 py-0.5 rounded border border-base bg-page text-primary hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:border-amber-300 dark:hover:border-amber-700 hover:text-amber-800 dark:hover:text-amber-200 transition"
+                class="text-[11px] px-2 py-0.5 rounded border border-base bg-page text-primary hover:bg-accent-bg hover:border-accent hover:text-accent-text transition"
               >
                 {th} <span class="text-muted tabular-nums">{n}</span>
               </button>

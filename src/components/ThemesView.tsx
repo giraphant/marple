@@ -15,12 +15,12 @@ interface ThemeRow {
 }
 
 const TYPE_DOT: Record<EntryType, string> = {
-  'paper-analysis':  'bg-amber-400',
-  'book-overview':   'bg-emerald-400',
-  'chapter-summary': 'bg-teal-400',
-  'author-profile':  'bg-sky-400',
-  'topic-synthesis': 'bg-violet-400',
-  'note':            'bg-rose-400',
+  'paper-analysis':  'bg-type-paper-fg',
+  'book-overview':   'bg-type-book-fg',
+  'chapter-summary': 'bg-type-chapter-fg',
+  'author-profile':  'bg-type-author-fg',
+  'topic-synthesis': 'bg-type-topic-fg',
+  'note':            'bg-type-note-fg',
 };
 
 const TYPE_LABEL: Record<EntryType, string> = {
@@ -125,14 +125,14 @@ export function ThemesView({ entries, onThemeClick }: Props) {
                     <button
                       key={r.theme}
                       onClick={() => onThemeClick(r.theme, topType)}
-                      class="group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-base bg-surface hover:border-amber-300 dark:hover:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition text-[12px]"
+                      class="group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-base bg-surface hover:border-accent hover:bg-accent-bg transition text-[12px]"
                       style={{ contentVisibility: 'auto', containIntrinsicSize: '28px 120px' }}
                       title={
                         `${r.theme} · 共 ${r.total} 条\n` +
                         sortedByType.map(([t, n]) => `  ${TYPE_LABEL[t] ?? t}: ${n}`).join('\n')
                       }
                     >
-                      <span class="text-primary group-hover:text-amber-900 dark:hover:text-amber-200">{r.theme}</span>
+                      <span class="text-primary group-hover:text-accent-text">{r.theme}</span>
                       <span class="text-muted tabular-nums text-[11px]">{r.total}</span>
                       <span class="inline-flex gap-0.5 ml-0.5">
                         {sortedByType.slice(0, 3).map(([t]) => (

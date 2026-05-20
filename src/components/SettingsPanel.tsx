@@ -227,7 +227,7 @@ function EmbeddingsRebuild() {
   const display = status ? formatEmbedStatus(status) : null;
   const toneClass =
     display?.tone === 'error'
-      ? 'text-red-600 dark:text-red-400'
+      ? 'text-danger'
       : display?.tone === 'running'
         ? 'text-secondary'
         : 'text-muted';
@@ -254,7 +254,7 @@ function EmbeddingsRebuild() {
         <div class={`mt-2 text-[11px] ${toneClass}`}>{display.label}</div>
       )}
       {err && (
-        <div class="mt-1 text-[11px] text-red-600 dark:text-red-400">{err}</div>
+        <div class="mt-1 text-[11px] text-danger">{err}</div>
       )}
     </div>
   );

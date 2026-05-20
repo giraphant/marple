@@ -201,8 +201,8 @@ export function CommandPalette({
           <span
             class={`text-[11px] px-1.5 py-0.5 rounded shrink-0 cursor-pointer select-none ${
               searchMode === 'hybrid'
-                ? 'bg-purple-200 dark:bg-purple-800 text-purple-900 dark:text-purple-100'
-                : 'bg-zinc-200 dark:bg-zinc-700 text-secondary'
+                ? 'bg-accent-bg text-accent-text'
+                : 'bg-surface-2 text-secondary'
             }`}
             title="Tab 切换模式"
             onClick={onToggleSearchMode}
@@ -234,7 +234,7 @@ export function CommandPalette({
             </span>
           )}
           {serverSearch?.query === draftQuery.trim() && serverSearch.error && (
-            <span class="text-[11px] text-red-600 dark:text-red-400 shrink-0" title={serverSearch.error}>
+            <span class="text-[11px] text-danger shrink-0" title={serverSearch.error}>
               本地
             </span>
           )}
@@ -268,7 +268,7 @@ export function CommandPalette({
                             data-row-index={baseIdx + i}
                             onClick={ev => onPickRow(e, ev)}
                             onMouseEnter={ev => (ev.currentTarget as HTMLElement).focus()}
-                            class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] hover:bg-page focus:bg-amber-50 dark:focus:bg-amber-950/30 focus:outline-none"
+                            class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] hover:bg-page focus:bg-accent-bg focus:outline-none"
                           >
                             <TypeIcon type={e.type} scale={1.2} />
                             <div class="flex-1 min-w-0">
@@ -279,7 +279,7 @@ export function CommandPalette({
                                 {sec.meta.label}
                                 {e.author && <span> · {e.author}</span>}
                                 {e.year && <span> · <span class="tabular-nums">{e.year}</span></span>}
-                                {e.rating && <span class="ml-1 text-amber-600 dark:text-amber-400">{e.rating}</span>}
+                                {e.rating && <span class="ml-1 text-star">{e.rating}</span>}
                               </div>
                             </div>
                           </button>
