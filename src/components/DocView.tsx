@@ -64,6 +64,11 @@ export function DocView({
     }
     if (!editablePath) return;
     if (statusRef.current !== 'dirty') return;
+    // Snapshot editor state BEFORE any await. On a switch-away flush the shared
+    // refs are reset to the next doc as it loads, so reading them post-await
+    // could write the wrong (or empty) content back into THIS file.
+    const baseRaw = rawRef.current;
+    const nextBody = bodyRef.current;
     setSaveStatus('saving');
     try {
       // Optimistic-concurrency guard: re-read disk and bail if the file changed
@@ -71,11 +76,11 @@ export function DocView({
       let disk: string | null;
       try { disk = await fetchEntryText(editablePath); }
       catch { disk = null; }
-      if (saveDecision(rawRef.current, disk) === 'conflict') {
+      if (saveDecision(baseRaw, disk) === 'conflict') {
         setSaveStatus('conflict');
         return;
       }
-      const out = replaceBody(rawRef.current, bodyRef.current);
+      const out = replaceBody(baseRaw, nextBody);
       await putEntryText(editablePath, out);
       rawRef.current = out;
       setRawText(out);
@@ -123,7 +128,10 @@ export function DocView({
     })();
 
     return () => { cancelled = true; };
-  }, [entry.path, editable, wikiIndex, reloadNonce]);
+    // NOT wikiIndex: it changes on every cross-window index refetch/focus, and
+    // reloading here would wipe unsaved edits. Cross-window content refresh is
+    // handled by the mtime effect below, gated on a non-dirty editor.
+  }, [entry.path, editable, reloadNonce]);
 
   // The refreshed index carries each file's mtime. If the *same* open doc's
   // mtime advances (another window saved it / external edit), pull the new body
