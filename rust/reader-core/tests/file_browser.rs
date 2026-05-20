@@ -22,6 +22,7 @@ fn temp_paths() -> ReaderPaths {
         trash_dir: vault.join("notes/.trash"),
         sources: workspace_root.join("sources"),
         index_db: reader_root.join("data/index.sqlite"),
+        vectors_db: reader_root.join("data/vectors.sqlite"),
         dist: reader_root.join("dist"),
     }
 }

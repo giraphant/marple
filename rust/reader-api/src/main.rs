@@ -273,10 +273,10 @@ async fn get_reader_data_file(
     if path
         .rsplit('/')
         .next()
-        .is_some_and(|name| name.starts_with("index.sqlite"))
+        .is_some_and(|name| name.starts_with("index.sqlite") || name.starts_with("vectors.sqlite"))
     {
         return Err(AppError(ReaderError::Forbidden(
-            "index database is not served directly".to_string(),
+            "database files are not served directly".to_string(),
         )));
     }
     serve_workspace_file(&state.paths, &format!("reader/data/{path}")).await

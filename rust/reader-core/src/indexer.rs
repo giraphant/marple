@@ -3,7 +3,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
-    time::{Duration, UNIX_EPOCH},
+    time::UNIX_EPOCH,
 };
 
 use anyhow::{Context, Result};
@@ -21,8 +21,6 @@ use crate::{ReaderError, ReaderPaths, ReaderResult};
 // sections are tiny — the slow embed phase of a reindex runs WITHOUT the lock,
 // so autosaves never block on a multi-minute reindex.
 static INDEX_WRITE_LOCK: Mutex<()> = Mutex::new(());
-
-const INDEX_BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct IndexStats {
@@ -207,10 +205,10 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
     })
 }
 
-/// Opt-in vector pass: load BGE-M3 and (re)populate `entry_vectors` in the
-/// already-built index. Decoupled from `build_sqlite_index` so the default
-/// build stays fast and model-free; hybrid search degrades to lexical until
-/// this runs. Heavy (downloads/loads a ~2.3 GB model) — an advanced action.
+/// Opt-in vector pass: load BGE-M3 and (re)build a FRESH `vectors.sqlite`
+/// holding only `entry_vectors`. Kept in its own DB so the fast, model-free
+/// `build_sqlite_index` never wipes embeddings; hybrid search degrades to
+/// lexical until this runs. Heavy (downloads/loads a ~2.3 GB model) — advanced.
 pub fn build_embeddings(paths: &ReaderPaths) -> ReaderResult<usize> {
     if !paths.index_db.is_file() {
         return Err(ReaderError::NotFound(
@@ -230,24 +228,37 @@ pub fn build_embeddings(paths: &ReaderPaths) -> ReaderResult<usize> {
         }
     }
 
-    let _guard = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut conn = Connection::open(&paths.index_db)
-        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
-    conn.busy_timeout(INDEX_BUSY_TIMEOUT)?;
-    let tx = conn.transaction()?;
-    tx.execute_batch(
-        r#"
-        DROP TABLE IF EXISTS entry_vectors_staging;
-        CREATE VIRTUAL TABLE entry_vectors_staging USING vec0(
-          path TEXT PRIMARY KEY,
-          embedding float[1024] distance_metric=cosine
-        );
-        "#,
-    )?;
-    embed_entries_into_staging(&tx, paths, &entries)?;
-    write_meta_keys(&tx)?;
-    swap_staging_into_live(&tx)?;
-    tx.commit()?;
+    fs::create_dir_all(paths.vectors_db.parent().ok_or_else(|| {
+        ReaderError::BadRequest("vectors database path has no parent".to_string())
+    })?)?;
+    let tmp = paths.vectors_db.with_extension("sqlite.tmp");
+    if tmp.exists() {
+        fs::remove_file(&tmp)?;
+    }
+    {
+        let mut conn = Connection::open(&tmp)
+            .with_context(|| format!("failed to open {}", tmp.display()))?;
+        conn.execute_batch(
+            r#"
+            PRAGMA journal_mode = OFF;
+            PRAGMA synchronous = OFF;
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE VIRTUAL TABLE entry_vectors_staging USING vec0(
+              path TEXT PRIMARY KEY,
+              embedding float[1024] distance_metric=cosine
+            );
+            "#,
+        )?;
+        let tx = conn.transaction()?;
+        embed_entries_into_staging(&tx, paths, &entries)?;
+        write_meta_keys(&tx)?;
+        swap_staging_into_live(&tx)?; // creates entry_vectors from staging
+        tx.commit()?;
+    }
+    // Atomic publish. A reader holding the old vectors.sqlite keeps its inode;
+    // new readers see the new file. Separate file from index_db, so a metadata
+    // reindex's own rename never touches this.
+    fs::rename(&tmp, &paths.vectors_db)?;
     Ok(entries.len())
 }
 
