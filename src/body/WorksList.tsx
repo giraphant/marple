@@ -101,7 +101,7 @@ function WorkCard({ item, wikiIndex, onClick }: {
             <a
               href="#"
               onClick={onTitleClick as unknown as JSX.MouseEventHandler<HTMLAnchorElement>}
-              class="text-[14px] font-semibold text-primary hover:text-amber-700 dark:hover:text-amber-300 transition leading-snug"
+              class="text-[14px] font-semibold text-primary hover:text-accent-text transition leading-snug"
             >
               {item.label}
             </a>
@@ -114,7 +114,7 @@ function WorkCard({ item, wikiIndex, onClick }: {
           {item.year}
         </span>
         {rating && rating > 0 && (
-          <span class="text-[11px] text-amber-600 dark:text-amber-400 tabular-nums whitespace-nowrap" title={`${rating} 星`}>
+          <span class="text-[11px] text-star tabular-nums whitespace-nowrap" title={`${rating} 星`}>
             {'★'.repeat(rating)}
           </span>
         )}

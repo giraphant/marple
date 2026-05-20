@@ -118,7 +118,7 @@ function QuoteCard({ item, wikiIndex }: { item: QuoteItem; wikiIndex: Map<string
   };
 
   return (
-    <figure class="group relative rounded-md bg-rose-50/40 dark:bg-rose-950/20 border-l-4 border-rose-300 dark:border-rose-700 pl-4 pr-3 py-3">
+    <figure class="group relative rounded-md bg-accent-bg/40 border-l-4 border-accent pl-4 pr-3 py-3">
       {/* `!border-l-0 !pl-0 !my-0` strips .prose-body's default 3-px blockquote
           frame so we don't get a double left bar inside the figure's pink
           frame. font-family puts Georgia/Charter first so English uses a
@@ -136,7 +136,7 @@ function QuoteCard({ item, wikiIndex }: { item: QuoteItem; wikiIndex: Map<string
           )}
           {item.source && (
             <span
-              class="inline-block px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-900"
+              class="inline-block px-1.5 py-0.5 rounded bg-accent-bg text-accent-text border border-accent/30"
               dangerouslySetInnerHTML={{ __html: sourceHtml }}
             />
           )}

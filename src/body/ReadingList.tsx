@@ -94,7 +94,7 @@ export function ReadingList({ content, wikiIndex }: Props) {
       {items.map((it) => (
         <li key={it.index} class="flex items-start gap-3 rounded-md border border-base bg-surface px-3 py-2 hover:border-strong transition">
           <span
-            class="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 text-[12px] font-semibold tabular-nums mt-0.5"
+            class="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-accent-bg text-accent-text text-[12px] font-semibold tabular-nums mt-0.5"
             aria-hidden="true"
           >
             {it.index}

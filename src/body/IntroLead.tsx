@@ -23,7 +23,7 @@ export function IntroLead({ content, wikiIndex }: Props) {
   );
   return (
     <div
-      class="my-3 border-l-2 border-amber-300/70 dark:border-amber-700/50 pl-4 text-[15px] leading-[1.85] text-primary [&_p:first-child]:mt-0 [&_p:last-child]:mb-0"
+      class="my-3 border-l-2 border-accent pl-4 text-[15px] leading-[1.85] text-primary [&_p:first-child]:mt-0 [&_p:last-child]:mb-0"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

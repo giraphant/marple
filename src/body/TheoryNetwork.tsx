@@ -134,7 +134,7 @@ function TheoryRow({ item, wikiIndex, onClick }: {
             <a
               href="#"
               onClick={onNameClick as unknown as JSX.MouseEventHandler<HTMLAnchorElement>}
-              class="text-[14px] font-semibold text-primary hover:text-amber-700 dark:hover:text-amber-300 transition"
+              class="text-[14px] font-semibold text-primary hover:text-accent-text transition"
             >
               {item.name}
             </a>
@@ -146,7 +146,7 @@ function TheoryRow({ item, wikiIndex, onClick }: {
         {item.keywords.map((k, i) => (
           <span
             key={i}
-            class="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border border-amber-200/60 dark:border-amber-900/60 leading-snug"
+            class="text-[11px] px-1.5 py-0.5 rounded bg-accent-bg text-accent-text border border-accent/30 leading-snug"
           >
             {k}
           </span>

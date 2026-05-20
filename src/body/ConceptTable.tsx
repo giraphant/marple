@@ -164,7 +164,7 @@ function colHeadCls(role: ColumnRole): string {
 function colBodyCls(role: ColumnRole): string {
   switch (role) {
     case 'name':        return 'font-semibold leading-snug';
-    case 'translation': return 'italic text-secondary text-[12px] leading-snug';
+    case 'translation': return 'text-secondary text-[12px] leading-snug';
     case 'coiner':      return 'text-secondary text-[12px] leading-snug';
     case 'refs':        return 'text-[12px]';
     case 'works':       return 'text-[12px] leading-snug';
@@ -200,7 +200,7 @@ function CellRender({ role, raw, wikiIndex }: { role: ColumnRole; raw: string; w
   if (role === 'coiner' || role === 'status') {
     const html = renderCellInline(raw, wikiIndex);
     return html
-      ? <span class="inline-block px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 text-[11px]" dangerouslySetInnerHTML={{ __html: html }} />
+      ? <span class="inline-block px-1.5 py-0.5 rounded bg-accent-bg text-accent-text text-[11px]" dangerouslySetInnerHTML={{ __html: html }} />
       : <span class="text-muted">—</span>;
   }
   // Default cell: inline markdown + resolved wikilinks.
