@@ -211,20 +211,20 @@ function computeMarkerDeco(view: EditorView): DecorationSet {
           // marker is right-aligned before the content column. text-indent pulls
           // the first line's marker back into the padding gutter so wrapped
           // continuation lines align with the body (hanging indent).
-          // Body column = 4.25em (normal 3em + 1.25em indent, same as blockquote)
-          // so the list is indented relative to normal paragraphs; deeper nesting
-          // adds 2em/level. The marker widget hangs in the gutter via -1.25em.
+          // List body indented 2 full-width chars (2em) past the normal 3em
+          // column → body at 5em; deeper nesting adds 2em/level. The marker
+          // widget occupies a 1em slot (text-indent -1em): marker sits at 4em
+          // with a ~half-width gap before the body at 5em.
           const nestedLevel = Math.floor(leadingSpaces / 2);
-          const padEm = 4.25 + nestedLevel * 2;
-          style = `padding-left: ${padEm}em; text-indent: -1.25em`;
+          const padEm = 5 + nestedLevel * 2;
+          style = `padding-left: ${padEm}em; text-indent: -1em`;
         } else if (isQuote) {
-          // Blockquote: body column = 4.25em (i.e. the normal 3em body column
-          // PLUS a 1.25em indent), so the quote is visibly indented relative to
-          // normal paragraphs. The fixed-width `>` marker (.cm-blockquote-marker,
-          // 1.25em) hangs in that indent gutter via `text-indent: -1.25em`,
-          // landing `>` at the 3em column and the body at 4.25em on the first
-          // line and on every wrapped line.
-          style = `padding-left: 4.25em; text-indent: -1.25em`;
+          // Blockquote: body indented 1 full-width char (1em) past the normal
+          // 3em column → body at 4em. The fixed-width `>` marker
+          // (.cm-blockquote-marker, 1em slot) hangs via `text-indent: -1em`,
+          // landing `>` at the 3em column with a ~half-width gap before the body
+          // at 4em (first line and every wrapped line).
+          style = `padding-left: 4em; text-indent: -1em`;
         } else {
           // heading: marker 挂在 padding gutter 里，content 在 body column。
           // hangLen = marker 字符数 + trailing space，用 ch 让对齐到 body 段落同列。

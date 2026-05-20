@@ -214,18 +214,17 @@
 
   .cm-list-rendered-marker {
     display: inline-flex;
-    justify-content: flex-end;
+    justify-content: flex-start;
     box-sizing: border-box;
-    /* width matches the list line's `text-indent: -1.25em` so the body column
-     * (= padding-left) is exact; padding-right is the marker→body gap, kept
-     * inside the box (border-box) so the total width stays 1.25em. */
-    width: 1.25em;
-    padding-right: 0.3em;
+    /* width matches the list line's `text-indent: -1em` so the body column
+     * (= padding-left) is exact; the marker sits at the slot's left and the
+     * leftover (~half-width) is the marker→body gap. */
+    width: 1em;
     margin-right: 0;
     color: rgb(var(--reader-marker));
     font-weight: 900;
     transform: scaleX(1.18);
-    transform-origin: right center;
+    transform-origin: left center;
     text-shadow: 0.045em 0 0 currentColor, -0.02em 0 0 currentColor;
     text-indent: 0;
     user-select: none;
@@ -262,11 +261,12 @@
   .cm-blockquote-marker {
     /* inline-flex (like .cm-list-rendered-marker) keeps a clean baseline; an
      * inline-block + overflow:hidden would shift the box baseline to its bottom
-     * edge and raise the `>` above the first body line. */
+     * edge and raise the `>` above the first body line. 1em slot matches the
+     * line's `text-indent: -1em`; the leftover after `>` is the ~half-width gap. */
     display: inline-flex;
     box-sizing: border-box;
-    width: 1.25em;
-    /* The line's `text-indent: -1.25em` is inherited; reset it or the `>` shifts. */
+    width: 1em;
+    /* The line's `text-indent: -1em` is inherited; reset it or the `>` shifts. */
     text-indent: 0;
   }
   .cm-blockquote-text,
