@@ -244,9 +244,14 @@ permanent recovery layer.
 | `src/components/Card.tsx` | One card in the grid |
 | `src/components/MiniRow.tsx` | One row inside property panel back-links |
 | `src/components/Dashboard.tsx` | Type stats: top themes, top-rated, count |
-| `src/components/DocView.tsx` | 3-pane reader: chapters rail / main body / property panel; auto-save loop lives here |
-| `src/components/NoteEditor.tsx` | CodeMirror 6 wrapper. Ulysses theme. Compartment-based hot reconfigure for settings change |
-| `src/components/PropertyPanel.tsx` | Right rail: ActionsRow (citation / PDF), editable fields, themes chips, derived back-links, "+ 新建批注" |
+| `src/components/DocView.tsx` | 2-pane reader: main body/editor + `RightPanel`; computes the heading outline (DOM in read mode, markdown in edit mode) + doc stats; auto-save loop lives here |
+| `src/components/RightPanel.tsx` | Tabbed right panel (目录 / 信息 / 统计), collapsible + width-draggable; merges the old left book-rail (本书) and right metadata. Prefs persisted via `doc-panel.ts` |
+| `src/components/NoteEditor.tsx` | CodeMirror 6 wrapper. Ulysses theme. Compartment-based hot reconfigure for settings change. `onViewReady(view\|null)` exposes the EditorView for outline scroll |
+| `src/components/PropertyPanel.tsx` | The 信息 tab's body: ActionsRow (citation / PDF), editable fields, themes chips, derived back-links, "+ 新建批注" |
+| `src/list-sort.ts` | Pure per-type list sort + extra filters (QUA-59) |
+| `src/doc-panel.ts` | Right-panel prefs (tab / collapsed / width) in localStorage |
+| `src/doc-outline.ts` | `extractHeadings(markdown)` for the edit-mode 目录 |
+| `src/doc-stats.ts` | `computeDocStats(body)` for the 统计 tab |
 | `src/components/ThemesView.tsx` | Theme index across all entries: chip grid sorted by count, with type breakdown dots |
 | `src/components/TrashView.tsx` | `.trash/` browser: restore / purge buttons |
 | `src/components/SettingsPanel.tsx` | Floating settings: font / size / line-height / allow LLM body edit |
@@ -308,6 +313,33 @@ No path-copying. unplugin-icons inlines the SVG at build time.
 is importable immediately. No vite config change needed.
 
 ## Recent Changes
+
+- 2026-05-20: Reader 四项改进 (QUA-55 / 58 / 59 / 57).
+  - **QUA-55 系统 PDF**: "打开 PDF" now opens the host's default PDF app via
+    `POST /api/open-pdf` instead of `window.open`. `reader-core`:
+    `resolve_source_pdf` (safe_join + ensure_under(sources) + `.pdf` + is_file,
+    pure/testable) and `open_in_system_app` (`open`/`xdg-open`, arg array — no
+    shell; `.status()` reaps the child; other platforms → `Unsupported`).
+  - **QUA-58 选区高亮**: the editor's blockquote / comment / `::mark::` washes
+    were opaque and hid drawSelection's selection layer (which paints below
+    `.cm-content`). Fixed by making those washes semi-transparent
+    (`--reader-quote/comment/mark-wash`, light+dark) so the selection shows
+    through and the opaque text on top stays readable. (A z-index + mix-blend
+    attempt failed: lifting the selection layer to its own stacking context
+    isolates it from the content backdrop.)
+  - **QUA-59 排序/筛选**: pure `list-sort.ts` (`sortEntries` /
+    `applyExtraFilters` / `asSortKey`), sort persisted in settings, filters
+    reset on type switch; controls in `ListView` header. No `status` field in
+    the vault → 状态 maps to `has_pdf`; no uniform creation time → only 更新时间
+    (mtime). With a query, 'default' keeps FTS rank; an explicit sort reorders
+    the current result set only.
+  - **QUA-57 右侧分 Tab**: `DocView` went 3-pane → 2-pane. New `RightPanel`
+    (目录 / 信息 / 统计) merges the old left book-rail into the 目录 tab and
+    hosts the property panel in 信息. Collapsible + width-draggable, persisted
+    via `doc-panel.ts`. Outline scroll: DOM ids + IntersectionObserver
+    scroll-spy in read mode; `NoteEditor.onViewReady` + scrollIntoView(line) in
+    edit mode. When tuning the editor blockquote bg, keep it on the `*-wash`
+    vars or QUA-58 regresses.
 
 - 2026-05-19: v0.10.0 — SQLite index + Rust backend migration + Vite 8.
   - `data/index.json` replaced by generated `data/index.sqlite`
@@ -582,6 +614,7 @@ Backend HTTP endpoints (`rust/reader-api`):
 | GET | `/reader/*`, `/vault/*.md`, `/sources/*.pdf`, `/reader/data/*` | static files |
 | GET | `/api/index` | read entries from `data/index.sqlite` |
 | POST | `/api/reindex` | rebuild SQLite in-process through Rust |
+| POST | `/api/open-pdf` | open `sources/<slug>.pdf` in the host's default PDF app (macOS `open` / Linux `xdg-open`) |
 | PUT | `/vault/**/*.md` | update existing md (frontmatter or body) |
 | POST | `/vault/notes/**/*.md` | create new note (409 if exists) |
 | DELETE | `/vault/notes/**/*.md` | soft-delete (move to `.trash/`) |

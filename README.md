@@ -71,15 +71,23 @@ background** — it never blocks the API or UI from starting:
   filter that theme across types
 - Free-text search across title / author / themes / preview / source
 - Rating filter (≥ 0..4 stars)
+- **Sort** each type list by 标题 / 作者 / 年份 / 评分 / 更新时间 (asc/desc;
+  persisted), plus a 筛选 popover (作者 substring, 仅含 PDF) — all combine with
+  search / rating / theme
 - 4-column card grid, lazy-paginated past 300 entries
 
 **Reading**
 
-- Click a card → opens in the current tab as a `DocView` (chapters rail
-  for books / 3-pane layout / markdown rendered with `[[wikilink]]`
-  resolution / property panel on the right)
+- Click a card → opens in the current tab as a `DocView` (center body +
+  a single tabbed right panel; markdown rendered with `[[wikilink]]`
+  resolution)
+- **Right panel** (tabbed, collapsible, width-draggable; state persisted):
+  - **目录** — book chapters (本书, formerly the left rail) + the current
+    doc's heading outline (本页). Click to jump; read mode scroll-spies the
+    current heading, edit mode scrolls the CodeMirror editor to the line
+  - **信息** — the editable property panel (frontmatter / themes / annotations)
+  - **统计** — char / word (CJK-aware) / paragraph counts + reading time
 - Wikilinks navigate within the current tab (history pushed)
-- "回到本书" jump on chapter pages
 
 **Editing**
 
@@ -135,9 +143,10 @@ background** — it never blocks the API or UI from starting:
 
 - "复制引用" → markdown-style citation to clipboard:
   `Author (year). *Title*. Source. https://doi.org/DOI`
-- "打开 PDF" → `window.open('/sources/<pdf_slug>.pdf')`. Button only
+- "打开 PDF" → opens `sources/<pdf_slug>.pdf` in the **host's default PDF
+  app** (Preview / Acrobat …) via `POST /api/open-pdf` — the local
+  reader-api shells out to `open` (macOS) / `xdg-open` (Linux). Button only
   appears when build-index found a matching PDF
-  (currently 514 / 12539 entries)
 
 ## Where files live
 
@@ -151,6 +160,8 @@ background** — it never blocks the API or UI from starting:
 | `src/frontmatter.ts` | yaml-based parse / serialize |
 | `src/wiki.ts` | `[[wikilink]]` resolver |
 | `src/settings.ts` | Settings type + persistence |
+| `src/list-sort.ts` | Per-type list sort + extra filters (pure) |
+| `src/doc-panel.ts` / `doc-outline.ts` / `doc-stats.ts` | Right-panel prefs / heading outline / doc stats (pure) |
 | `scripts/test-sql-index.mjs` | Validates SQLite schema, theme rows, and FTS smoke search |
 | `rust/reader-index` | CLI that walks `vault/` and emits `data/index.sqlite` |
 | `rust/reader-core` | Reusable Rust core: SQLite index build/read, path safety, vault/trash operations |
