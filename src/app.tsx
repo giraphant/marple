@@ -3,7 +3,7 @@ import type { Entry, EntryType, Tab, TabContent } from './types';
 import { activeContent } from './types';
 import { buildWikiIndex, splitAuthors } from './wiki';
 import { buildSearchIndex, searchDocuments } from './search';
-import { sortEntries, applyExtraFilters, defaultDirFor, type SortKey } from './list-sort';
+import { sortEntries, applyExtraFilters, defaultDirFor, asSortKey, asSortDir, type SortKey } from './list-sort';
 import { ListView } from './components/ListView';
 import { DocView } from './components/DocView';
 import { TrashView } from './components/TrashView';
@@ -132,9 +132,10 @@ export function App() {
 
   const sidebarTypes = useMemo(() => orderedTypes(settings), [settings]);
 
-  // Per-type list sort (QUA-59) — persisted in settings so it sticks.
-  const sortKey: SortKey = settings.sortKey ?? 'default';
-  const sortDir = settings.sortDir ?? 'desc';
+  // Per-type list sort (QUA-59) — persisted in settings so it sticks. Coerce
+  // from storage so a stale/corrupt value can't reach the comparator.
+  const sortKey: SortKey = asSortKey(settings.sortKey);
+  const sortDir = asSortDir(settings.sortDir);
   const onSortKeyChange = useCallback((key: SortKey) => {
     setSettings(prev => {
       const merged: Settings = {

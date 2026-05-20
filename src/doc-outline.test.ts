@@ -47,6 +47,27 @@ describe('extractHeadings', () => {
     expect(extractHeadings('#nospace\n# yes')).toEqual([{ level: 1, text: 'yes', line: 2 }]);
   });
 
+  it('keeps a trailing # with no preceding space (# C#) but strips a real closing sequence', () => {
+    expect(extractHeadings('# C#')).toEqual([{ level: 1, text: 'C#', line: 1 }]);
+    expect(extractHeadings('# Heading ##')).toEqual([{ level: 1, text: 'Heading', line: 1 }]);
+  });
+
+  it('a longer opening fence is not closed by a shorter one', () => {
+    const md = [
+      '````',           // 1: 4-tick open
+      '# still code',   // 2
+      '```',            // 3: 3-tick, too short to close
+      '# also code',    // 4
+      '````',           // 5: closes the 4-tick fence
+      '# Real',         // 6
+    ].join('\n');
+    expect(extractHeadings(md).map(h => h.text)).toEqual(['Real']);
+  });
+
+  it('skips empty headings (hashes with no text)', () => {
+    expect(extractHeadings('# \n## Real')).toEqual([{ level: 2, text: 'Real', line: 2 }]);
+  });
+
   it('returns empty for heading-free text', () => {
     expect(extractHeadings('just\nplain\ntext')).toEqual([]);
   });

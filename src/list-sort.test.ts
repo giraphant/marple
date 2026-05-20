@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Entry } from './types';
-import { sortEntries, applyExtraFilters, defaultDirFor } from './list-sort';
+import { sortEntries, applyExtraFilters, defaultDirFor, asSortKey, asSortDir } from './list-sort';
 
 function entry(over: Partial<Entry>): Entry {
   return {
@@ -60,13 +60,21 @@ describe('sortEntries', () => {
     expect(sortEntries(list, 'year', 'asc').map(e => e.path)).toEqual(['old', 'new', 'none']);
   });
 
-  it('sorts by rating_score', () => {
+  it('sorts by rating_score, treating 0 (unrated) as empty → last in both directions', () => {
     const list = [
       entry({ path: 'mid', rating_score: 3 }),
       entry({ path: 'top', rating_score: 5 }),
       entry({ path: 'none', rating_score: 0 }),
     ];
     expect(sortEntries(list, 'rating', 'desc').map(e => e.path)).toEqual(['top', 'mid', 'none']);
+    // unrated must stay last even ascending (not float to the top as a 0)
+    expect(sortEntries(list, 'rating', 'asc').map(e => e.path)).toEqual(['mid', 'top', 'none']);
+  });
+
+  it('no-ops on an unknown sort key instead of throwing', () => {
+    const list = [entry({ path: 'a', title: 'B' }), entry({ path: 'b', title: 'A' })];
+    // @ts-expect-error — exercising the runtime guard with a bad value
+    expect(sortEntries(list, 'bogus', 'asc')).toBe(list);
   });
 
   it('sorts by updated (mtime), empties last', () => {
@@ -129,5 +137,20 @@ describe('defaultDirFor', () => {
     expect(defaultDirFor('year')).toBe('desc');
     expect(defaultDirFor('rating')).toBe('desc');
     expect(defaultDirFor('updated')).toBe('desc');
+  });
+});
+
+describe('asSortKey / asSortDir', () => {
+  it('passes valid values through', () => {
+    expect(asSortKey('title')).toBe('title');
+    expect(asSortKey('default')).toBe('default');
+    expect(asSortDir('asc')).toBe('asc');
+  });
+  it('coerces invalid/corrupt persisted values to safe defaults', () => {
+    expect(asSortKey('bogus')).toBe('default');
+    expect(asSortKey(undefined)).toBe('default');
+    expect(asSortKey(42)).toBe('default');
+    expect(asSortDir('sideways')).toBe('desc');
+    expect(asSortDir(undefined)).toBe('desc');
   });
 });

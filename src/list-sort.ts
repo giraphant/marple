@@ -22,6 +22,18 @@ export const SORT_OPTIONS: ReadonlyArray<{ key: SortKey; label: string }> = [
   { key: 'updated', label: '更新时间' },
 ];
 
+const SORT_KEYS: ReadonlySet<string> = new Set(SORT_OPTIONS.map(o => o.key));
+
+/** Coerce a persisted/untrusted value to a valid SortKey (defaults to 'default'),
+ *  so a stale localStorage blob can't reach the comparator and throw. */
+export function asSortKey(v: unknown): SortKey {
+  return typeof v === 'string' && SORT_KEYS.has(v) ? (v as SortKey) : 'default';
+}
+
+export function asSortDir(v: unknown): SortDir {
+  return v === 'asc' || v === 'desc' ? v : 'desc';
+}
+
 /** Sensible default direction when the user switches to a sort key. */
 export function defaultDirFor(key: SortKey): SortDir {
   switch (key) {
@@ -64,7 +76,9 @@ function comparatorFor(key: Exclude<SortKey, 'default'>, dir: SortDir): (a: Entr
     case 'title':   return (a, b) => textCmp(a.title, b.title, dir);
     case 'author':  return (a, b) => textCmp(a.author, b.author, dir);
     case 'year':    return (a, b) => numCmp(toNum(a.year), toNum(b.year), dir);
-    case 'rating':  return (a, b) => numCmp(a.rating_score ?? 0, b.rating_score ?? 0, dir);
+    // rating_score 0 means "unrated" in this vault — treat as empty so it sorts
+    // last in both directions (matches the empties-last contract above).
+    case 'rating':  return (a, b) => numCmp(a.rating_score || null, b.rating_score || null, dir);
     case 'updated': return (a, b) => numCmp(a.mtime ?? null, b.mtime ?? null, dir);
   }
 }
@@ -72,7 +86,7 @@ function comparatorFor(key: Exclude<SortKey, 'default'>, dir: SortDir): (a: Entr
 /** Stable sort. `default` returns the list unchanged (preserves relevance /
  *  index order). Tie-breaks on original index so equal keys keep input order. */
 export function sortEntries(list: Entry[], key: SortKey, dir: SortDir): Entry[] {
-  if (key === 'default') return list;
+  if (key === 'default' || !SORT_KEYS.has(key)) return list;
   const cmp = comparatorFor(key, dir);
   return list
     .map((e, i) => [e, i] as const)
