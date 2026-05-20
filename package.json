@@ -7,6 +7,7 @@
   "scripts": {
     "build:index": "cargo run --release --manifest-path rust/Cargo.toml -p reader-index",
     "build:index:dev": "cargo run --manifest-path rust/Cargo.toml -p reader-index",
+    "build:embeddings": "cargo run --release --manifest-path rust/Cargo.toml -p reader-index -- embeddings",
     "api": "cargo run --release --manifest-path rust/Cargo.toml -p reader-api",
     "api:dev": "cargo run --manifest-path rust/Cargo.toml -p reader-api",
     "dev:vite": "vite",

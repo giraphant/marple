@@ -207,6 +207,50 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
     })
 }
 
+/// Opt-in vector pass: load BGE-M3 and (re)populate `entry_vectors` in the
+/// already-built index. Decoupled from `build_sqlite_index` so the default
+/// build stays fast and model-free; hybrid search degrades to lexical until
+/// this runs. Heavy (downloads/loads a ~2.3 GB model) — an advanced action.
+pub fn build_embeddings(paths: &ReaderPaths) -> ReaderResult<usize> {
+    if !paths.index_db.is_file() {
+        return Err(ReaderError::NotFound(
+            "index database missing; run the index build first".to_string(),
+        ));
+    }
+    crate::init_sqlite_vec();
+
+    let mut files = Vec::new();
+    walk_markdown(&paths.vault, &mut files)?;
+    files.sort();
+    let source_slugs = load_source_slugs(&paths.sources)?;
+    let mut entries = Vec::new();
+    for file in &files {
+        if let BuildOutcome::Indexed(entry) = build_indexed_entry(paths, file, &source_slugs)? {
+            entries.push(*entry);
+        }
+    }
+
+    let _guard = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut conn = Connection::open(&paths.index_db)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    conn.busy_timeout(INDEX_BUSY_TIMEOUT)?;
+    let tx = conn.transaction()?;
+    tx.execute_batch(
+        r#"
+        DROP TABLE IF EXISTS entry_vectors_staging;
+        CREATE VIRTUAL TABLE entry_vectors_staging USING vec0(
+          path TEXT PRIMARY KEY,
+          embedding float[1024] distance_metric=cosine
+        );
+        "#,
+    )?;
+    embed_entries_into_staging(&tx, paths, &entries)?;
+    write_meta_keys(&tx)?;
+    swap_staging_into_live(&tx)?;
+    tx.commit()?;
+    Ok(entries.len())
+}
+
 fn load_source_slugs(sources: &Path) -> Result<HashSet<String>> {
     let mut slugs = HashSet::new();
     let Ok(entries) = fs::read_dir(sources) else {
@@ -665,11 +709,6 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           value TEXT NOT NULL
         );
 
-        CREATE VIRTUAL TABLE entry_vectors_staging USING vec0(
-          path TEXT PRIMARY KEY,
-          embedding float[1024] distance_metric=cosine
-        );
-
         CREATE INDEX entries_type_rating_title_idx
           ON entries(type, rating_score DESC, title COLLATE NOCASE);
         CREATE INDEX entries_annotates_idx ON entries(annotates);
@@ -683,11 +722,8 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
         for entry in entries {
             insert_indexed_entry(&tx, entry)?;
         }
-
-        // Embed entries via BGE-M3 into entry_vectors_staging.
-        embed_entries_into_staging(&tx, paths, entries)?;
-        write_meta_keys(&tx)?;
-        swap_staging_into_live(&tx)?;
+        // Embeddings are a separate, opt-in pass (`build_embeddings`) so the
+        // default index build stays fast and model-free — no entry_vectors here.
     }
     tx.commit()?;
     drop(conn);
@@ -923,16 +959,17 @@ fn swap_staging_into_live(tx: &rusqlite::Transaction<'_>) -> ReaderResult<()> {
 }
 
 fn write_meta_keys(tx: &rusqlite::Transaction<'_>) -> ReaderResult<()> {
+    // INSERT OR REPLACE so re-running the embedding pass doesn't hit a PK clash.
     tx.execute(
-        "INSERT INTO meta(key, value) VALUES ('embed_model', ?)",
+        "INSERT OR REPLACE INTO meta(key, value) VALUES ('embed_model', ?)",
         params![EMBED_MODEL_ID],
     )?;
     tx.execute(
-        "INSERT INTO meta(key, value) VALUES ('embed_dim', ?)",
+        "INSERT OR REPLACE INTO meta(key, value) VALUES ('embed_dim', ?)",
         params![EMBED_DIM as i64],
     )?;
     tx.execute(
-        "INSERT INTO meta(key, value) VALUES ('embed_completed_at', ?)",
+        "INSERT OR REPLACE INTO meta(key, value) VALUES ('embed_completed_at', ?)",
         params![chrono::Utc::now().to_rfc3339()],
     )?;
     Ok(())

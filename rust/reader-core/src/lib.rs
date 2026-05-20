@@ -15,7 +15,9 @@ mod indexer;
 pub mod fuse;
 pub mod vector;
 
-pub use indexer::{build_sqlite_index, index_remove_file, index_upsert_file, IndexStats};
+pub use indexer::{
+    build_embeddings, build_sqlite_index, index_remove_file, index_upsert_file, IndexStats,
+};
 
 use std::sync::Once;
 static SQLITE_VEC_INIT: Once = Once::new();
