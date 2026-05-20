@@ -260,14 +260,14 @@
    * lines align with it. The `>` sits at the left of the slot (hanging), with
    * the slot's right edge at the body column. */
   .cm-blockquote-marker {
-    display: inline-block;
+    /* inline-flex (like .cm-list-rendered-marker) keeps a clean baseline; an
+     * inline-block + overflow:hidden would shift the box baseline to its bottom
+     * edge and raise the `>` above the first body line. */
+    display: inline-flex;
     box-sizing: border-box;
     width: 1.25em;
-    /* The line's `text-indent: -1.25em` is inherited; reset it here or the `>`
-     * gets shifted left and clipped by overflow. */
+    /* The line's `text-indent: -1.25em` is inherited; reset it or the `>` shifts. */
     text-indent: 0;
-    overflow: hidden;
-    white-space: nowrap;
   }
   .cm-blockquote-text,
   .cm-blockquote-text * {
