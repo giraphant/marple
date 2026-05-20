@@ -17,48 +17,11 @@ import {
   newIdeaDraft, ideaEntryFromDraft, reindex, fetchIndex, searchIndex as searchServerIndex,
 } from './api';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
+import { loadTabs, loadActiveIndex, saveTabs, saveActiveIndex, defaultTab } from './session';
 
-const TABS_KEY = 'qua-reader-tabs-v3';
-const ACTIVE_KEY = 'qua-reader-active-tab';
 const MAX_TABS = 16;
 const MAX_HISTORY = 50;
 const DEFAULT_TYPE: EntryType = 'paper-analysis';
-
-function defaultTab(): Tab {
-  return { history: [{ kind: 'list', type: DEFAULT_TYPE }], cursor: 0 };
-}
-
-function loadTabs(): Tab[] {
-  try {
-    const raw = localStorage.getItem(TABS_KEY);
-    if (!raw) return [defaultTab()];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) return [defaultTab()];
-    const clean = parsed.filter((t: unknown): t is Tab => {
-      if (!t || typeof t !== 'object') return false;
-      const obj = t as Record<string, unknown>;
-      if (!Array.isArray(obj.history) || typeof obj.cursor !== 'number') return false;
-      return obj.history.every((c: unknown) => {
-        if (!c || typeof c !== 'object') return false;
-        const cc = c as Record<string, unknown>;
-        return (cc.kind === 'list' && typeof cc.type === 'string')
-            || (cc.kind === 'doc' && typeof cc.path === 'string')
-            || (cc.kind === 'trash');
-      });
-    });
-    return clean.length > 0 ? clean : [defaultTab()];
-  } catch {
-    return [defaultTab()];
-  }
-}
-
-function loadActiveIndex(): number {
-  try {
-    const raw = localStorage.getItem(ACTIVE_KEY);
-    const n = raw == null ? 0 : parseInt(raw, 10);
-    return Number.isFinite(n) && n >= 0 ? n : 0;
-  } catch { return 0; }
-}
 
 /** Push a new content to a tab's history at `cursor + 1`, truncating any
  *  forward history (browser-style). No-op if it's the same as current. */
@@ -88,7 +51,7 @@ export function App() {
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tabs, setTabs] = useState<Tab[]>(() => loadTabs());
-  const [activeIndex, setActiveIndex] = useState<number>(() => loadActiveIndex());
+  const [activeIndex, setActiveIndex] = useState<number>(() => loadActiveIndex(loadTabs().length));
   const [paletteOpen, setPaletteOpen] = useState(false);
   // When the palette is triggered from a specific type's ListView (the
   // ListView header 🔍 button), that type's section gets promoted to the top
@@ -153,12 +116,8 @@ export function App() {
     s.setProperty('--reader-line-height', String(settings.lineHeight));
   }, [settings.fontFamily, settings.fontSize, settings.lineHeight]);
 
-  useEffect(() => {
-    try { localStorage.setItem(TABS_KEY, JSON.stringify(tabs)); } catch {}
-  }, [tabs]);
-  useEffect(() => {
-    try { localStorage.setItem(ACTIVE_KEY, String(activeIndex)); } catch {}
-  }, [activeIndex]);
+  useEffect(() => { saveTabs(tabs); }, [tabs]);
+  useEffect(() => { saveActiveIndex(activeIndex); }, [activeIndex]);
 
   const updateSettings = useCallback((next: Settings) => {
     setSettings(next);

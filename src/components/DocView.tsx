@@ -3,6 +3,7 @@ import type { Entry } from '../types';
 import { TYPE_BY_ID } from '../types';
 import { bookSlugOf } from '../wiki';
 import { fetchEntryText, putEntryText, replaceBody } from '../api';
+import { saveDecision } from '../live';
 import { PropertyPanel } from './PropertyPanel';
 import { NoteEditor, type EditorThemeConfig } from './NoteEditor';
 import { Icon } from './Icon';
@@ -25,7 +26,7 @@ interface Props {
   onDelete: (entry: Entry) => Promise<void>;
 }
 
-type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
+type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict';
 
 const SAVE_DEBOUNCE_MS = 1500;
 
@@ -41,6 +42,9 @@ export function DocView({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Bumping this re-runs the load effect (and remounts the editor via its key),
+  // used to pull a fresh copy from disk after a cross-window conflict.
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   const rawRef = useRef('');
   const bodyRef = useRef('');
@@ -61,6 +65,15 @@ export function DocView({
     if (statusRef.current !== 'dirty') return;
     setSaveStatus('saving');
     try {
+      // Optimistic-concurrency guard: re-read disk and bail if the file changed
+      // underneath us (another window / external edit). Never overwrite blind.
+      let disk: string | null;
+      try { disk = await fetchEntryText(editablePath); }
+      catch { disk = null; }
+      if (saveDecision(rawRef.current, disk) === 'conflict') {
+        setSaveStatus('conflict');
+        return;
+      }
       const out = replaceBody(rawRef.current, bodyRef.current);
       await putEntryText(editablePath, out);
       rawRef.current = out;
@@ -72,6 +85,8 @@ export function DocView({
       setSaveErr(e instanceof Error ? e.message : String(e));
     }
   }, [editablePath]);
+
+  const reloadFromDisk = useCallback(() => setReloadNonce(n => n + 1), []);
 
   // Flush on entry switch (cleanup runs with the old flushSave closure
   // that targets the previous editablePath).
@@ -106,7 +121,7 @@ export function DocView({
     })();
 
     return () => { cancelled = true; };
-  }, [entry.path, editable, wikiIndex]);
+  }, [entry.path, editable, wikiIndex, reloadNonce]);
 
   const handleEditorChange = useCallback((newBody: string) => {
     bodyRef.current = newBody;
@@ -187,7 +202,14 @@ export function DocView({
           {displayTitle}
         </div>
 
-        {editable && <SaveIndicator status={saveStatus} errMsg={saveErr} />}
+        {editable && (saveStatus === 'conflict' ? (
+          <span class="text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1.5" title="磁盘上的文件在你编辑期间被其他窗口或外部改动；为避免覆盖，自动保存已暂停">
+            文件已被其他窗口修改
+            <button onClick={reloadFromDisk} class="underline hover:text-primary">重载</button>
+          </span>
+        ) : (
+          <SaveIndicator status={saveStatus} errMsg={saveErr} />
+        ))}
 
         {canDelete && (
           <div class="relative">
@@ -252,6 +274,7 @@ export function DocView({
             ? <div class="px-8 py-10 text-sm text-muted">加载中…</div>
             : editable
               ? <NoteEditor
+                  key={`${entry.path}:${reloadNonce}`}
                   docId={entry.path}
                   initial={body}
                   theme={editorTheme}
@@ -291,6 +314,7 @@ function SaveIndicator({ status, errMsg }: { status: SaveStatus; errMsg: string 
     case 'saving': return <span class="text-[11px] text-muted">保存中…</span>;
     case 'saved':  return <span class="text-[11px] text-emerald-600 dark:text-emerald-400">已保存</span>;
     case 'error':  return <span class="text-[11px] text-red-600 dark:text-red-400" title={errMsg ?? ''}>保存失败</span>;
+    case 'conflict': return null; // rendered inline in the header with a reload action
   }
 }
 

@@ -47,11 +47,11 @@ const DEFAULTS: Settings = {
   citationFormat: 'inline-en',
 };
 
-const KEY = 'qua-reader-settings';
+export const SETTINGS_KEY = 'qua-reader-settings';
 
 export function loadSettings(): Settings {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...DEFAULTS };
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') return { ...DEFAULTS, ...parsed };
@@ -60,7 +60,7 @@ export function loadSettings(): Settings {
 }
 
 export function saveSettings(s: Settings): void {
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {}
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
 }
 
 /** Resolve a fontFamily preset into a concrete CSS font-family stack. */
