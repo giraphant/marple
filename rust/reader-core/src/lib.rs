@@ -12,11 +12,13 @@ use serde_json::Value;
 use thiserror::Error;
 
 mod indexer;
+pub mod embed_job;
 pub mod fuse;
 pub mod vector;
 
 pub use indexer::{
-    build_embeddings, build_sqlite_index, list_vault_files, parse_entry, IndexStats,
+    build_embeddings, build_embeddings_with_progress, build_sqlite_index, list_vault_files,
+    model_cache_ready, model_ready_marker, parse_entry, IndexStats,
 };
 
 use std::sync::Once;
@@ -355,6 +357,51 @@ fn search_entries_lex(paths: &ReaderPaths, options: &SearchOptions) -> ReaderRes
 /// metadata-only index has none, so hybrid degrades to lexical.
 fn vectors_available(paths: &ReaderPaths) -> bool {
     paths.vectors_db.is_file()
+}
+
+/// What the built `vectors.sqlite` actually contains — the truthful, on-disk
+/// view used by the embedding-status endpoint (survives restarts, unlike the
+/// in-memory job state). `None` when no vectors DB has been built yet.
+#[derive(Debug, Clone, Serialize)]
+pub struct VectorsSummary {
+    pub count: usize,
+    pub model: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+/// Read the on-disk vectors summary, or `None` if there is no usable vectors DB.
+/// Returns `None` not only when `vectors.sqlite` is absent but also when it
+/// cannot be opened or its `entry_vectors` table cannot be counted (a corrupt /
+/// half-written file). That way the status endpoint reports "not built" — which
+/// nudges a rebuild — instead of a misleading "built, 0 vectors". The live file
+/// is published by atomic rename, never written in place, so a concurrent build
+/// cannot make a healthy DB momentarily uncountable.
+pub fn vectors_summary(paths: &ReaderPaths) -> Option<VectorsSummary> {
+    if !paths.vectors_db.is_file() {
+        return None;
+    }
+    init_sqlite_vec();
+    let conn = Connection::open_with_flags(&paths.vectors_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .ok()?;
+    let count: usize = conn
+        .query_row("SELECT count(*) FROM entry_vectors", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .ok()?
+        .max(0) as usize;
+    let meta = |key: &str| -> Option<String> {
+        conn.query_row(
+            "SELECT value FROM meta WHERE key = ?",
+            [key],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+    };
+    Some(VectorsSummary {
+        count,
+        model: meta("embed_model"),
+        completed_at: meta("embed_completed_at"),
+    })
 }
 
 fn search_entries_hybrid(

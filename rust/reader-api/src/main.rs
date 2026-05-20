@@ -8,6 +8,7 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
+use reader_core::embed_job::{EmbedJob, EmbedOutcome};
 use reader_core::{ReaderError, ReaderPaths};
 use serde::Deserialize;
 use serde_json::json;
@@ -18,6 +19,10 @@ struct AppState {
     paths: Arc<ReaderPaths>,
     model: reader_core::vector::ModelHandle,
     reindex_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Background semantic-vector build job. Decoupled from `reindex_lock`:
+    /// embeddings write `vectors.sqlite`, reindex writes `index.sqlite`, so the
+    /// two run concurrently. Single-flight is enforced by the job itself.
+    embed_job: EmbedJob,
 }
 
 #[tokio::main]
@@ -40,7 +45,10 @@ async fn main() -> anyhow::Result<()> {
         paths,
         model,
         reindex_lock: Arc::new(tokio::sync::Mutex::new(())),
+        embed_job: EmbedJob::new(),
     };
+
+    maybe_auto_embed(&state);
 
     let app = Router::new()
         .route("/api/index", get(api_index))
@@ -49,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/search", get(api_search))
         .route("/api/reindex", post(api_reindex))
         .route("/api/embeddings", post(api_embeddings))
+        .route("/api/embeddings/status", get(api_embeddings_status))
         .route("/api/trash", get(api_trash_list))
         .route("/api/trash/:name/restore", post(api_trash_restore))
         .route("/api/trash/:name", delete(api_trash_purge))
@@ -79,6 +88,8 @@ async fn main() -> anyhow::Result<()> {
     println!("GET    /api/entry?path=...     -> live-parse one vault file's metadata");
     println!("GET    /api/search?q=...       -> search entries with SQLite FTS");
     println!("POST   /api/reindex            -> rebuild data/index.sqlite with Rust");
+    println!("POST   /api/embeddings         -> start background semantic-vector build (202)");
+    println!("GET    /api/embeddings/status  -> poll embedding job + on-disk vectors summary");
     println!("GET    /vault/**/*.md          -> read vault markdown");
     println!("PUT    /vault/**/*.md          -> update existing vault markdown");
     println!("POST   /vault/notes/**/*.md    -> create notes");
@@ -203,27 +214,118 @@ async fn api_reindex(State(state): State<AppState>) -> Result<Json<serde_json::V
 }
 
 /// Opt-in, heavy: (re)build the semantic vector embeddings. Loads the ~2.3 GB
-/// BGE-M3 model, so this is an advanced action triggered from Settings, not part
-/// of the normal (fast, model-free) index build.
-async fn api_embeddings(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
-    let _guard = match state.reindex_lock.try_lock() {
-        Ok(g) => g,
-        Err(_) => {
-            return Err(AppError(ReaderError::Conflict(
-                "an index/embedding build is already in progress".to_string(),
-            )))
+/// BGE-M3 model. Returns immediately — the build runs as a detached background
+/// job; clients poll `GET /api/embeddings/status`. Decoupled from `reindex_lock`
+/// (writes a separate `vectors.sqlite`), so a metadata reindex is never blocked.
+async fn api_embeddings(
+    State(state): State<AppState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if !state.embed_job.try_begin() {
+        // Already building → tell the client to just poll status.
+        return (
+            StatusCode::CONFLICT,
+            Json(embed_status_json(&state.paths, &state.embed_job)),
+        );
+    }
+    spawn_embed_job(state.paths.clone(), state.embed_job.clone());
+    (
+        StatusCode::ACCEPTED,
+        Json(embed_status_json(&state.paths, &state.embed_job)),
+    )
+}
+
+/// Current embedding job state + the truthful on-disk vectors summary (count /
+/// model / completed-at), so the UI shows "already built (N)" even after a
+/// restart cleared the in-memory job back to idle.
+async fn api_embeddings_status(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(embed_status_json(&state.paths, &state.embed_job))
+}
+
+/// Run the embedding build on a detached background task. Every join outcome —
+/// success, build error, or panic/cancel — drives the job to a terminal state,
+/// so a panic can never wedge it permanently at `Running` (which would 409 every
+/// later trigger until restart).
+fn spawn_embed_job(paths: Arc<ReaderPaths>, job: EmbedJob) {
+    tokio::spawn(async move {
+        let progress_job = job.clone();
+        let build_paths = paths.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            reader_core::build_embeddings_with_progress(&build_paths, &|done, total| {
+                progress_job.set_total(total);
+                progress_job.set_embedded(done);
+            })
+        })
+        .await;
+        match outcome {
+            Ok(Ok(n)) => job.settle(EmbedOutcome::Ok(n)),
+            Ok(Err(err)) => job.settle(EmbedOutcome::BuildError(err.to_string())),
+            Err(join) => job.settle(EmbedOutcome::Panicked(format!("embed task panicked: {join}"))),
         }
+    });
+}
+
+/// Boot gate for the background auto-embed: only when vectors are missing, an
+/// index exists to embed from, the model is already cached (no surprise 2.3 GB
+/// download), and the env opt-out is not set.
+fn should_auto_embed(
+    vectors_exist: bool,
+    index_exists: bool,
+    model_ready: bool,
+    env_disabled: bool,
+) -> bool {
+    !env_disabled && index_exists && model_ready && !vectors_exist
+}
+
+/// Kick off the background embedding build on startup when the gate allows it.
+/// Detached, so it never blocks the server from coming up.
+fn maybe_auto_embed(state: &AppState) {
+    let env_disabled = matches!(
+        env::var("READER_AUTO_EMBED").ok().as_deref(),
+        Some("0") | Some("false") | Some("off")
+    );
+    let vectors_exist = state.paths.vectors_db.is_file();
+    let index_exists = state.paths.index_db.is_file();
+    let model_ready = reader_core::model_cache_ready(&state.paths);
+
+    if should_auto_embed(vectors_exist, index_exists, model_ready, env_disabled) {
+        if state.embed_job.try_begin() {
+            println!("auto-embed: vectors missing + model cached -> building in background");
+            spawn_embed_job(state.paths.clone(), state.embed_job.clone());
+        }
+    } else if !vectors_exist && index_exists && !model_ready && !env_disabled {
+        println!(
+            "auto-embed skipped: BGE-M3 not cached yet — click 重建语义向量 once to download it"
+        );
+    }
+}
+
+/// Compose the embedding-status DTO from the in-memory job snapshot and the
+/// on-disk vectors summary. camelCase keys for the frontend.
+fn embed_status_json(paths: &ReaderPaths, job: &EmbedJob) -> serde_json::Value {
+    let s = job.snapshot();
+    let summary = reader_core::vectors_summary(paths);
+    let phase = match s.phase {
+        reader_core::embed_job::EmbedPhase::Idle => "idle",
+        reader_core::embed_job::EmbedPhase::Running => "running",
+        reader_core::embed_job::EmbedPhase::Done => "done",
+        reader_core::embed_job::EmbedPhase::Failed => "failed",
     };
-    let t0 = Instant::now();
-    let paths = state.paths.clone();
-    let embedded = tokio::task::spawn_blocking(move || reader_core::build_embeddings(&paths))
-        .await
-        .map_err(|err| AppError(ReaderError::Other(err.into())))??;
-    Ok(Json(json!({
-        "ok": true,
-        "tookMs": t0.elapsed().as_millis(),
-        "embedded": embedded
-    })))
+    // Prefer the persisted completion time (survives restart) over the job's.
+    let completed_at = summary
+        .as_ref()
+        .and_then(|v| v.completed_at.clone())
+        .or(s.completed_at);
+    json!({
+        "phase": phase,
+        "embedded": s.embedded,
+        "total": s.total,
+        "vectorsExist": summary.is_some(),
+        "vectorsCount": summary.as_ref().map(|v| v.count),
+        "model": summary.as_ref().and_then(|v| v.model.clone()),
+        "completedAt": completed_at,
+        "startedAt": s.started_at,
+        "error": s.error,
+    })
 }
 
 async fn api_trash_list(
@@ -371,6 +473,74 @@ impl From<anyhow::Error> for AppError {
 impl From<std::io::Error> for AppError {
     fn from(value: std::io::Error) -> Self {
         Self(ReaderError::Other(value.into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reader_core::embed_job::EmbedJob;
+
+    fn tmp_paths() -> ReaderPaths {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("reader-api-test-{nonce}"));
+        let reader_root = root.join("reader");
+        let vault = root.join("vault");
+        std::fs::create_dir_all(reader_root.join("data")).unwrap();
+        std::fs::create_dir_all(vault.join("notes/.trash")).unwrap();
+        ReaderPaths {
+            reader_root: reader_root.clone(),
+            workspace_root: root.clone(),
+            vault: vault.clone(),
+            notes_dir: vault.join("notes"),
+            trash_dir: vault.join("notes/.trash"),
+            sources: root.join("sources"),
+            index_db: reader_root.join("data/index.sqlite"),
+            vectors_db: reader_root.join("data/vectors.sqlite"),
+            dist: reader_root.join("dist"),
+        }
+    }
+
+    #[test]
+    fn auto_embed_only_when_missing_indexed_cached_and_enabled() {
+        // The happy path: vectors missing, index present, model cached, not disabled.
+        assert!(should_auto_embed(false, true, true, false));
+        // Any single blocker turns it off.
+        assert!(!should_auto_embed(true, true, true, false), "vectors already exist");
+        assert!(!should_auto_embed(false, false, true, false), "no index to embed from");
+        assert!(!should_auto_embed(false, true, false, false), "model not cached → no surprise download");
+        assert!(!should_auto_embed(false, true, true, true), "disabled by env");
+    }
+
+    #[test]
+    fn status_json_when_no_vectors_and_idle() {
+        let paths = tmp_paths();
+        let job = EmbedJob::new();
+        let v = embed_status_json(&paths, &job);
+        assert_eq!(v["phase"], "idle");
+        assert_eq!(v["vectorsExist"], false);
+        assert!(v["vectorsCount"].is_null());
+        assert!(v["model"].is_null());
+        assert_eq!(v["embedded"], 0);
+        assert_eq!(v["total"], 0);
+    }
+
+    #[test]
+    fn status_json_reports_real_vectors_count_after_build() {
+        let paths = tmp_paths();
+        // Placeholder index so build_embeddings proceeds; empty vault → 0 vectors,
+        // no model download.
+        std::fs::write(&paths.index_db, b"placeholder").unwrap();
+        reader_core::build_embeddings_with_progress(&paths, &|_, _| {}).unwrap();
+
+        let job = EmbedJob::new();
+        let v = embed_status_json(&paths, &job);
+        assert_eq!(v["vectorsExist"], true);
+        assert_eq!(v["vectorsCount"], 0);
+        assert_eq!(v["model"], "BAAI/bge-m3");
     }
 }
 

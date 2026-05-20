@@ -210,6 +210,17 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
 /// `build_sqlite_index` never wipes embeddings; hybrid search degrades to
 /// lexical until this runs. Heavy (downloads/loads a ~2.3 GB model) — advanced.
 pub fn build_embeddings(paths: &ReaderPaths) -> ReaderResult<usize> {
+    build_embeddings_with_progress(paths, &|_, _| {})
+}
+
+/// Same as [`build_embeddings`] but reports progress as `(embedded, total)`.
+/// `progress` fires once with `(0, total)` before embedding starts and again
+/// after each batch, so a background job can surface live progress. Runs on the
+/// calling (blocking) thread; the callback is invoked from that thread.
+pub fn build_embeddings_with_progress(
+    paths: &ReaderPaths,
+    progress: &dyn Fn(usize, usize),
+) -> ReaderResult<usize> {
     if !paths.index_db.is_file() {
         return Err(ReaderError::NotFound(
             "index database missing; run the index build first".to_string(),
@@ -250,7 +261,7 @@ pub fn build_embeddings(paths: &ReaderPaths) -> ReaderResult<usize> {
             "#,
         )?;
         let tx = conn.transaction()?;
-        embed_entries_into_staging(&tx, paths, &entries)?;
+        embed_entries_into_staging(&tx, paths, &entries, progress)?;
         write_meta_keys(&tx)?;
         swap_staging_into_live(&tx)?; // creates entry_vectors from staging
         tx.commit()?;
@@ -260,6 +271,25 @@ pub fn build_embeddings(paths: &ReaderPaths) -> ReaderResult<usize> {
     // reindex's own rename never touches this.
     fs::rename(&tmp, &paths.vectors_db)?;
     Ok(entries.len())
+}
+
+/// Path of the sentinel that proves BGE-M3 finished downloading at least once.
+/// Written only after a successful `TextEmbedding::try_new`, so a partial or
+/// corrupt download (which still leaves a non-empty cache dir) never trips the
+/// boot auto-embed gate.
+pub fn model_ready_marker(paths: &ReaderPaths) -> PathBuf {
+    paths
+        .reader_root
+        .join("data")
+        .join("models")
+        .join(".model-ready")
+}
+
+/// True once the embedding model is known-good in the local cache. Boot
+/// auto-embed only proceeds when this holds, so the server never kicks off a
+/// surprise ~2.3 GB download on its own.
+pub fn model_cache_ready(paths: &ReaderPaths) -> bool {
+    model_ready_marker(paths).is_file()
 }
 
 fn load_source_slugs(sources: &Path) -> Result<HashSet<String>> {
@@ -906,7 +936,10 @@ fn embed_entries_into_staging(
     tx: &rusqlite::Transaction<'_>,
     paths: &ReaderPaths,
     entries: &[IndexedEntry],
+    progress: &dyn Fn(usize, usize),
 ) -> ReaderResult<()> {
+    let total = entries.len();
+    progress(0, total);
     if entries.is_empty() {
         // No entries → nothing to embed; skip the 2.3 GB model init entirely.
         // A reindex of an empty/filtered vault should still produce a valid
@@ -926,11 +959,16 @@ fn embed_entries_into_staging(
     )
     .map_err(|e| ReaderError::Other(anyhow::anyhow!("init BGE-M3: {e}")))?;
 
+    // Model is fully loaded → record the ready sentinel so boot auto-embed may
+    // run unattended next time without risking a partial-download false positive.
+    if let Err(e) = fs::write(model_ready_marker(paths), b"ok") {
+        eprintln!("[reader-core] could not write model-ready marker: {e}");
+    }
+
     let mut insert_vec = tx.prepare(
         "INSERT INTO entry_vectors_staging(path, embedding) VALUES (?, ?)",
     )?;
 
-    let total = entries.len();
     for (batch_idx, chunk) in entries.chunks(EMBED_BATCH).enumerate() {
         let texts: Vec<String> = chunk
             .iter()
@@ -951,9 +989,10 @@ fn embed_entries_into_staging(
             let bytes: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
             insert_vec.execute(params![entry.path, bytes])?;
         }
-        let done = (batch_idx + 1) * EMBED_BATCH;
+        let done = ((batch_idx + 1) * EMBED_BATCH).min(total);
+        progress(done, total);
         if done.is_multiple_of(80) || done >= total {
-            eprintln!("  embedded {}/{}", done.min(total), total);
+            eprintln!("  embedded {done}/{total}");
         }
     }
     Ok(())

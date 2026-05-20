@@ -1,9 +1,10 @@
 import type { JSX } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import type { Settings, FontFamily, Theme } from '../settings';
 import { FONT_SIZE_OPTIONS, LINE_HEIGHT_OPTIONS, fontStack } from '../settings';
 import { CITATION_FORMATS } from '../citation';
-import { buildEmbeddings } from '../api';
+import { triggerEmbeddings, embeddingStatus } from '../api';
+import { formatEmbedStatus, isEmbedRunning, type EmbedStatus } from '../embedding';
 import { Icon } from './Icon';
 
 const THEME_OPTIONS: { id: Theme; label: string; hint: string }[] = [
@@ -169,48 +170,91 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
   );
 }
 
-/** Opt-in semantic-vector rebuild. Decoupled from the normal (fast) index so it
- *  doesn't slow everyday reindexing; needed only for hybrid/semantic search. */
+/** Opt-in semantic-vector build, fully backgrounded. Triggering returns at once;
+ *  the server runs the heavy model load + embed as a detached job. This panel
+ *  polls status (so it also reflects a build the server auto-started on boot)
+ *  and shows live progress instead of blocking on a multi-minute request. */
 function EmbeddingsRebuild() {
-  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
-  const [msg, setMsg] = useState<string | null>(null);
+  const [status, setStatus] = useState<EmbedStatus | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [pollKey, setPollKey] = useState(0);
+
+  // Poll once on mount and after each trigger; re-arm while a build is running.
+  // `following` is seeded from the status known when this effect started (set to
+  // running right before the trigger bumps pollKey), so a transient fetch error
+  // mid-build keeps retrying instead of freezing the panel with the button stuck
+  // disabled until the user reopens settings.
+  useEffect(() => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let following = status != null && isEmbedRunning(status);
+    const tick = async () => {
+      try {
+        const s = await embeddingStatus();
+        if (!alive) return;
+        setStatus(s);
+        setErr(null);
+        following = isEmbedRunning(s);
+        if (following) timer = setTimeout(tick, 1500);
+      } catch (e) {
+        if (!alive) return;
+        setErr(e instanceof Error ? e.message : String(e));
+        if (following) timer = setTimeout(tick, 1500);
+      }
+    };
+    tick();
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollKey]);
+
+  const running = status != null && isEmbedRunning(status);
 
   const run = async () => {
-    if (status === 'running') return;
-    setStatus('running');
-    setMsg(null);
+    if (running) return;
+    setErr(null);
     try {
-      const { embedded, tookMs } = await buildEmbeddings();
-      setStatus('done');
-      setMsg(`已嵌入 ${embedded} 条，用时 ${Math.round(tookMs / 1000)}s`);
+      const { status: s } = await triggerEmbeddings();
+      setStatus(s);
+      setPollKey(k => k + 1); // restart the poll loop to follow this build
     } catch (e) {
-      setStatus('error');
-      setMsg(e instanceof Error ? e.message : String(e));
+      setErr(e instanceof Error ? e.message : String(e));
     }
   };
+
+  const display = status ? formatEmbedStatus(status) : null;
+  const toneClass =
+    display?.tone === 'error'
+      ? 'text-red-600 dark:text-red-400'
+      : display?.tone === 'running'
+        ? 'text-secondary'
+        : 'text-muted';
 
   return (
     <div class="text-[12px] leading-snug">
       <div class="text-primary font-medium">语义向量（hybrid 搜索）</div>
       <div class="text-muted mt-0.5 mb-2">
         普通"重建索引"快且不含向量。语义/hybrid 搜索需要单独构建向量，会下载 ~2.3GB 模型、
-        可能数分钟；与元数据索引分离，重建元数据不会清掉它。
+        可能数分钟；构建在后台进行，可关闭设置继续使用。与元数据索引分离，重建元数据不会清掉它。
       </div>
       <button
         onClick={run}
-        disabled={status === 'running'}
+        disabled={running}
         class={`text-[12px] px-2.5 py-1 rounded border transition ${
-          status === 'running'
+          running
             ? 'bg-surface text-muted border-base cursor-not-allowed'
             : 'bg-surface text-secondary border-base hover:border-strong'
         }`}
       >
-        {status === 'running' ? '构建中…（下载模型，请稍候）' : '重建语义向量'}
+        {running ? '构建中…（后台运行，可关闭）' : '重建语义向量'}
       </button>
-      {msg && (
-        <div class={`mt-2 text-[11px] ${status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-muted'}`}>
-          {msg}
-        </div>
+      {display && (
+        <div class={`mt-2 text-[11px] ${toneClass}`}>{display.label}</div>
+      )}
+      {err && (
+        <div class="mt-1 text-[11px] text-red-600 dark:text-red-400">{err}</div>
       )}
     </div>
   );
