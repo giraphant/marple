@@ -72,6 +72,14 @@
   --reader-comment-bg: 232 241 227;
   --reader-delete:   255  95 139;  /* #ff5f8b 粉 — strikethrough */
 
+  /* QUA-58: 编辑器里 blockquote / comment / ::mark:: 的「底色」必须半透明，
+   * 否则盖住其下方的 drawSelection 选区层（拖选无高亮）。这里用饱和 accent +
+   * 低 alpha：over page 时是与原 *-bg 接近的淡色 wash，被选中时下层选区透出可见，
+   * 而正文文字在最上层、完全不透明、始终可读。 */
+  --reader-quote-wash:   rgb(189 105 63 / 0.12);
+  --reader-comment-wash: rgb(141 202 102 / 0.16);
+  --reader-mark-wash:    rgb(157 106 216 / 0.26);
+
   /* ------------------------------------------------------------- *
    * Reading typography tokens.
    *
@@ -144,6 +152,12 @@
   --reader-comment-fg: 123 195  68;
   --reader-comment-bg:  42  58  43;
   --reader-delete:   255  71 113;
+
+  /* Dark washes (see :root note). Saturated accent + low alpha over the dark
+   * page so the selection layer beneath shows through when text is selected. */
+  --reader-quote-wash:   rgb(236 221 217 / 0.10);
+  --reader-comment-wash: rgb(123 195  68 / 0.20);
+  --reader-mark-wash:    rgb(172 129 243 / 0.32);
 }
 
 @layer base {
@@ -214,7 +228,8 @@
 
   .cm-ulysses-mark {
     color: rgb(var(--reader-mark-fg)) !important;
-    background: rgb(var(--reader-mark-bg)) !important;
+    /* Semi-transparent so a drag-selection beneath it stays visible (QUA-58). */
+    background: var(--reader-mark-wash) !important;
     font-weight: 400;
     padding: 0 0.02em;
     box-decoration-break: clone;
@@ -225,8 +240,10 @@
     font-weight: 400 !important;
   }
   .cm-blockquote-line {
-    background: rgb(var(--reader-quote-bg)) !important;
-    box-shadow: -100vw 0 0 rgb(var(--reader-quote-bg)), 100vw 0 0 rgb(var(--reader-quote-bg)) !important;
+    /* Semi-transparent wash (QUA-58): lets the drag-selection layer beneath
+     * show through; text stays fully opaque on top, so it remains readable. */
+    background: var(--reader-quote-wash) !important;
+    box-shadow: -100vw 0 0 var(--reader-quote-wash), 100vw 0 0 var(--reader-quote-wash) !important;
   }
   .cm-blockquote-marker,
   .cm-blockquote-marker * {
@@ -239,8 +256,8 @@
     font-weight: 400 !important;
   }
   .cm-comment-line {
-    background: rgb(var(--reader-comment-bg)) !important;
-    box-shadow: -100vw 0 0 rgb(var(--reader-comment-bg)), 100vw 0 0 rgb(var(--reader-comment-bg)) !important;
+    background: var(--reader-comment-wash) !important;
+    box-shadow: -100vw 0 0 var(--reader-comment-wash), 100vw 0 0 var(--reader-comment-wash) !important;
   }
   .cm-comment,
   .cm-comment * {
