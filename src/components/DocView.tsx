@@ -55,6 +55,9 @@ export function DocView({
   // from the UI save status, which the queue may flip to "saved" while a newer
   // keystroke is still only in component state.
   const lastQueuedBodyRef = useRef('');
+  // True only after the current doc's body has loaded from disk. Guards against
+  // saving an empty body when a load failed or is still in progress.
+  const loadedOkRef = useRef(false);
   bodyRef.current = body;
   statusRef.current = saveStatus;
   currentPathRef.current = entry.path;
@@ -82,6 +85,7 @@ export function DocView({
       timerRef.current = null;
     }
     if (!editablePath) return;
+    if (!loadedOkRef.current) return; // never save a doc that didn't load OK
     if (bodyRef.current === lastQueuedBodyRef.current) return; // nothing new to save
     lastQueuedBodyRef.current = bodyRef.current;
     saveQueue.request(editablePath, bodyRef.current);
@@ -102,6 +106,8 @@ export function DocView({
   useEffect(() => {
     let cancelled = false;
     const path = entry.path;
+    loadedOkRef.current = false;
+    lastQueuedBodyRef.current = ''; // matches the cleared body, so a failed load saves nothing
     setLoading(true);
     setLoadError(false);
     setBody('');
@@ -115,6 +121,7 @@ export function DocView({
         const bodyOnly = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
         saveQueue.seedBase(path, text);
         lastQueuedBodyRef.current = bodyOnly;
+        loadedOkRef.current = true;
         bodyRef.current = bodyOnly;
         setBody(bodyOnly);
       } catch {
