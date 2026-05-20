@@ -263,6 +263,9 @@
     display: inline-block;
     box-sizing: border-box;
     width: 1.25em;
+    /* The line's `text-indent: -1.25em` is inherited; reset it here or the `>`
+     * gets shifted left and clipped by overflow. */
+    text-indent: 0;
     overflow: hidden;
     white-space: nowrap;
   }
