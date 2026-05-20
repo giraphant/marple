@@ -12,11 +12,13 @@ use serde_json::Value;
 use thiserror::Error;
 
 mod indexer;
+pub mod embed_job;
 pub mod fuse;
 pub mod vector;
 
 pub use indexer::{
-    build_embeddings, build_sqlite_index, list_vault_files, parse_entry, IndexStats,
+    build_embeddings, build_embeddings_with_progress, build_sqlite_index, list_vault_files,
+    model_cache_ready, model_ready_marker, parse_entry, IndexStats,
 };
 
 use std::sync::Once;
