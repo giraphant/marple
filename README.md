@@ -42,10 +42,24 @@ Useful one-offs:
 
 ```sh
 npm run build:index     # rebuild data/index.sqlite after vault changes
+npm run build:embeddings # build data/vectors.sqlite (downloads ~2.3 GB BGE-M3)
 npm run api             # run only the Rust reader-api backend
 npm run test:sql-index  # validate SQLite schema, themes mirror, and FTS
 npm run typecheck       # tsc --noEmit
 ```
+
+### Semantic vectors (hybrid search)
+
+The model-free index build above never touches embeddings. Semantic / hybrid
+search needs `data/vectors.sqlite`, built separately and **fully in the
+background** — it never blocks the API or UI from starting:
+
+- Trigger from ⚙ Settings → 重建语义向量, or `POST /api/embeddings` (returns
+  `202` immediately; poll `GET /api/embeddings/status`).
+- On startup the API auto-builds vectors if they're missing **and** the model is
+  already cached (a `data/models/.model-ready` sentinel, written after the first
+  successful download). Set `READER_AUTO_EMBED=0` to disable boot auto-build.
+- Until vectors exist, hybrid search transparently degrades to lexical.
 
 ## What it does
 
