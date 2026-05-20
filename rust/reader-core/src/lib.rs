@@ -15,7 +15,9 @@ mod indexer;
 pub mod fuse;
 pub mod vector;
 
-pub use indexer::{build_sqlite_index, IndexStats};
+pub use indexer::{
+    build_embeddings, build_sqlite_index, list_vault_files, parse_entry, IndexStats,
+};
 
 use std::sync::Once;
 static SQLITE_VEC_INIT: Once = Once::new();
@@ -45,6 +47,10 @@ pub struct ReaderPaths {
     pub trash_dir: PathBuf,
     pub sources: PathBuf,
     pub index_db: PathBuf,
+    /// Separate DB holding only the semantic vectors (entry_vectors). Kept apart
+    /// from index_db so a fast metadata reindex never wipes the (expensive)
+    /// embeddings.
+    pub vectors_db: PathBuf,
     pub dist: PathBuf,
 }
 
@@ -61,6 +67,7 @@ impl ReaderPaths {
         let notes_dir = vault.join("notes");
         Ok(Self {
             index_db: reader_root.join("data").join("index.sqlite"),
+            vectors_db: reader_root.join("data").join("vectors.sqlite"),
             trash_dir: notes_dir.join(".trash"),
             sources: workspace_root.join("sources"),
             dist: reader_root.join("dist"),
@@ -118,6 +125,14 @@ pub struct Entry {
     pub preview: String,
 }
 
+/// One vault file as seen by a plain directory walk — the file-browser's view
+/// of "what exists", independent of the metadata cache.
+#[derive(Debug, Serialize)]
+pub struct VaultFile {
+    pub path: String,
+    pub mtime: Option<i64>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TrashItem {
     pub name: String,
@@ -162,6 +177,8 @@ pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
 
     let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    // Wait briefly rather than erroring if an incremental write holds the lock.
+    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
 
     let mut stmt = conn.prepare(
         r#"
@@ -334,16 +351,10 @@ fn search_entries_lex(paths: &ReaderPaths, options: &SearchOptions) -> ReaderRes
     Ok(hits)
 }
 
-/// True if the index DB has an `entry_vectors` table (built by a
-/// vector-aware reader-index). Returns false for old indexes or any
-/// scenario where the vec0 table is missing or unreadable.
-fn vector_table_present(conn: &Connection) -> bool {
-    conn.query_row(
-        "SELECT 1 FROM sqlite_master WHERE name = 'entry_vectors' LIMIT 1",
-        [],
-        |_| Ok(()),
-    )
-    .is_ok()
+/// True once the separate vectors DB (vectors.sqlite) has been built. A
+/// metadata-only index has none, so hybrid degrades to lexical.
+fn vectors_available(paths: &ReaderPaths) -> bool {
+    paths.vectors_db.is_file()
 }
 
 fn search_entries_hybrid(
@@ -356,14 +367,9 @@ fn search_entries_hybrid(
 
     let lex_hits = search_entries_lex(paths, options)?;
 
-    // Compatibility check: a DB built with an older reader-index (or any
-    // index that hasn't run the vector pass yet) won't have entry_vectors.
-    // Probe early — before paying the cost of model load + query embed —
-    // and degrade to a lex-only result with a fallback marker.
-    crate::init_sqlite_vec();
-    let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
-    if !vector_table_present(&conn) {
+    // No vectors DB yet (metadata-only index / embeddings not built) → degrade
+    // to a lex-only result with a fallback marker, before paying model load.
+    if !vectors_available(paths) {
         let mut hits = lex_hits;
         for h in &mut hits {
             h.source = format!("{} (lex-fallback:no-vectors)", h.source);
@@ -371,20 +377,47 @@ fn search_entries_hybrid(
         return Ok(hits);
     }
 
+    crate::init_sqlite_vec();
+    let vec_conn = Connection::open_with_flags(&paths.vectors_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {}", paths.vectors_db.display()))?;
+
+    // Entries come from the metadata DB and drive the Rust-side type / rating /
+    // theme filter applied to vector candidates (the vectors DB has no entries).
+    let entries = load_entries(paths)?;
+    let entries_by_path: HashMap<String, Entry> =
+        entries.into_iter().map(|e| (e.path.clone(), e)).collect();
+    let entry_type = options.entry_type.as_deref();
+    let min_rating = options.min_rating;
+    let theme = options.theme.as_deref();
+    let accept = |path: &str| -> bool {
+        let Some(e) = entries_by_path.get(path) else { return false };
+        if let Some(t) = entry_type {
+            if e.entry_type != t {
+                return false;
+            }
+        }
+        if let Some(r) = min_rating {
+            if e.rating_score < r {
+                return false;
+            }
+        }
+        if let Some(th) = theme {
+            let has = e.themes.as_ref().map(|ts| ts.iter().any(|x| x == th)).unwrap_or(false);
+            if !has {
+                return false;
+            }
+        }
+        true
+    };
+
     // Embed the query. The model is shared across requests, but only one
     // embed call runs at a time (model has an internal Mutex).
     let qvec = runtime
         .block_on(model.embed_query(&options.query))
         .map_err(ReaderError::Other)?;
 
-    let vec_hits = crate::vector::vec_search(
-        &conn,
-        &qvec,
-        30,
-        options.entry_type.as_deref(),
-        options.min_rating,
-    )
-    .map_err(ReaderError::Other)?;
+    let vec_hits =
+        crate::vector::vec_search(&vec_conn, &qvec, 30, accept).map_err(ReaderError::Other)?;
 
     let lex_ranked: Vec<RankedItem> = lex_hits
         .iter()
@@ -410,9 +443,6 @@ fn search_entries_hybrid(
         .into_iter()
         .map(|h| (h.entry.path.clone(), h))
         .collect();
-    let entries = load_entries(paths)?;
-    let entries_by_path: HashMap<String, Entry> =
-        entries.into_iter().map(|e| (e.path.clone(), e)).collect();
 
     let mut out = Vec::with_capacity(fused.len());
     for f in fused.into_iter() {

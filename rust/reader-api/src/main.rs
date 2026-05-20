@@ -44,8 +44,11 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/api/index", get(api_index))
+        .route("/api/files", get(api_files))
+        .route("/api/entry", get(api_entry))
         .route("/api/search", get(api_search))
         .route("/api/reindex", post(api_reindex))
+        .route("/api/embeddings", post(api_embeddings))
         .route("/api/trash", get(api_trash_list))
         .route("/api/trash/:name/restore", post(api_trash_restore))
         .route("/api/trash/:name", delete(api_trash_purge))
@@ -72,6 +75,8 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     println!("reader api at http://localhost:{port}");
     println!("GET    /api/index              -> read entries from data/index.sqlite");
+    println!("GET    /api/files              -> list vault files (path + mtime)");
+    println!("GET    /api/entry?path=...     -> live-parse one vault file's metadata");
     println!("GET    /api/search?q=...       -> search entries with SQLite FTS");
     println!("POST   /api/reindex            -> rebuild data/index.sqlite with Rust");
     println!("GET    /vault/**/*.md          -> read vault markdown");
@@ -87,6 +92,49 @@ async fn api_index(State(state): State<AppState>) -> Result<Json<serde_json::Val
     Ok(Json(
         json!({ "items": items, "generatedFrom": "rust-sqlite" }),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+struct FilesParams {
+    /// Epoch-ms cutoff: when set, only files with mtime > since are returned
+    /// (the delta), so a no-op or small-edit sync ships almost nothing. `total`
+    /// is always the full file count so the client can detect deletions.
+    since: Option<i64>,
+}
+
+/// Cheap directory listing (path + mtime) — the file-browser's source of "what
+/// exists", independent of the metadata cache. With `?since=` it returns only
+/// the changed delta plus the total count.
+async fn api_files(
+    State(state): State<AppState>,
+    Query(params): Query<FilesParams>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let all = reader_core::list_vault_files(&state.paths)?;
+    let total = all.len();
+    let items: Vec<_> = match params.since {
+        Some(since) => all
+            .into_iter()
+            .filter(|f| f.mtime.is_none_or(|m| m > since))
+            .collect(),
+        None => all,
+    };
+    Ok(Json(json!({ "items": items, "total": total })))
+}
+
+#[derive(Debug, Deserialize)]
+struct EntryParams {
+    path: String,
+}
+
+/// Live-parse ONE vault file's metadata straight from disk (no DB). `entry` is
+/// null when the file is missing or has no usable type, so the client can skip
+/// non-entries without thrashing.
+async fn api_entry(
+    State(state): State<AppState>,
+    Query(params): Query<EntryParams>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let entry = reader_core::parse_entry(&state.paths, &params.path)?;
+    Ok(Json(json!({ "entry": entry })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,6 +202,30 @@ async fn api_reindex(State(state): State<AppState>) -> Result<Json<serde_json::V
     })))
 }
 
+/// Opt-in, heavy: (re)build the semantic vector embeddings. Loads the ~2.3 GB
+/// BGE-M3 model, so this is an advanced action triggered from Settings, not part
+/// of the normal (fast, model-free) index build.
+async fn api_embeddings(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    let _guard = match state.reindex_lock.try_lock() {
+        Ok(g) => g,
+        Err(_) => {
+            return Err(AppError(ReaderError::Conflict(
+                "an index/embedding build is already in progress".to_string(),
+            )))
+        }
+    };
+    let t0 = Instant::now();
+    let paths = state.paths.clone();
+    let embedded = tokio::task::spawn_blocking(move || reader_core::build_embeddings(&paths))
+        .await
+        .map_err(|err| AppError(ReaderError::Other(err.into())))??;
+    Ok(Json(json!({
+        "ok": true,
+        "tookMs": t0.elapsed().as_millis(),
+        "embedded": embedded
+    })))
+}
+
 async fn api_trash_list(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, AppError> {
@@ -195,6 +267,18 @@ async fn get_reader_data_file(
     State(state): State<AppState>,
     Path(path): Path<String>,
 ) -> Result<Response, AppError> {
+    // Never serve the live SQLite index or its WAL/journal sidecars via raw
+    // fs::read — that races concurrent incremental writes and can read a torn
+    // file. Clients use /api/index, not the DB file.
+    if path
+        .rsplit('/')
+        .next()
+        .is_some_and(|name| name.starts_with("index.sqlite") || name.starts_with("vectors.sqlite"))
+    {
+        return Err(AppError(ReaderError::Forbidden(
+            "database files are not served directly".to_string(),
+        )));
+    }
     serve_workspace_file(&state.paths, &format!("reader/data/{path}")).await
 }
 

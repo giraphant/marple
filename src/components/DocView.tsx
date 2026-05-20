@@ -3,6 +3,8 @@ import type { Entry } from '../types';
 import { TYPE_BY_ID } from '../types';
 import { bookSlugOf } from '../wiki';
 import { fetchEntryText, putEntryText, replaceBody } from '../api';
+import { createSaveQueue } from '../save-queue';
+import { bumpVaultVersion } from '../sync';
 import { PropertyPanel } from './PropertyPanel';
 import { NoteEditor, type EditorThemeConfig } from './NoteEditor';
 import { Icon } from './Icon';
@@ -25,7 +27,7 @@ interface Props {
   onDelete: (entry: Entry) => Promise<void>;
 }
 
-type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
+type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict';
 
 const SAVE_DEBOUNCE_MS = 1500;
 
@@ -34,44 +36,66 @@ export function DocView({
   citationFormat,
   onNavigate, onThemeClick, onUpdated, onCreateAnnotation, onDelete,
 }: Props) {
-  const [rawText, setRawText] = useState('');
   const [loadError, setLoadError] = useState(false);
   const [body, setBody] = useState('');
   const [loading, setLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Bumping this re-runs the load effect (and remounts the editor via its key),
+  // used to pull a fresh copy from disk after a cross-window conflict.
+  const [reloadNonce, setReloadNonce] = useState(0);
 
-  const rawRef = useRef('');
   const bodyRef = useRef('');
   const timerRef = useRef<number | null>(null);
   const statusRef = useRef<SaveStatus>('idle');
-  rawRef.current = rawText;
+  const currentPathRef = useRef(entry.path);
+  // The body most recently handed to the save queue (or freshly loaded).
+  // Dirtiness is CONTENT-based — comparing this to the live body — never derived
+  // from the UI save status, which the queue may flip to "saved" while a newer
+  // keystroke is still only in component state.
+  const lastQueuedBodyRef = useRef('');
+  // True only after the current doc's body has loaded from disk. Guards against
+  // saving an empty body when a load failed or is still in progress.
+  const loadedOkRef = useRef(false);
   bodyRef.current = body;
   statusRef.current = saveStatus;
+  currentPathRef.current = entry.path;
 
   const editablePath = entry.path;
 
-  const flushSave = useCallback(async () => {
+  // Per-path serialized save queue (see save-queue.ts). Created once; its deps
+  // are all stable. onStatus only touches UI state for the visible doc.
+  const saveQueue = useMemo(() => createSaveQueue({
+    fetchText: fetchEntryText,
+    putText: putEntryText,
+    replaceBody,
+    onStatus: (path, status, err) => {
+      if (path !== currentPathRef.current) return;
+      setSaveStatus(status);
+      if (status === 'error') setSaveErr(err ?? null);
+      else if (status === 'saved') setSaveErr(null);
+    },
+    onSaved: () => bumpVaultVersion(),
+  }), []);
+
+  const flushSave = useCallback(() => {
     if (timerRef.current != null) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
     if (!editablePath) return;
-    if (statusRef.current !== 'dirty') return;
-    setSaveStatus('saving');
-    try {
-      const out = replaceBody(rawRef.current, bodyRef.current);
-      await putEntryText(editablePath, out);
-      rawRef.current = out;
-      setRawText(out);
-      setSaveStatus('saved');
-      setSaveErr(null);
-    } catch (e) {
-      setSaveStatus('error');
-      setSaveErr(e instanceof Error ? e.message : String(e));
-    }
-  }, [editablePath]);
+    if (!loadedOkRef.current) return; // never save a doc that didn't load OK
+    if (bodyRef.current === lastQueuedBodyRef.current) return; // nothing new to save
+    lastQueuedBodyRef.current = bodyRef.current;
+    saveQueue.request(editablePath, bodyRef.current);
+  }, [editablePath, saveQueue]);
+
+  const reloadFromDisk = useCallback(() => {
+    // Discard any queued (conflicting) edits — the user chose the on-disk copy.
+    saveQueue.drop(entry.path);
+    setReloadNonce(n => n + 1);
+  }, [entry.path, saveQueue]);
 
   // Flush on entry switch (cleanup runs with the old flushSave closure
   // that targets the previous editablePath).
@@ -82,9 +106,10 @@ export function DocView({
   useEffect(() => {
     let cancelled = false;
     const path = entry.path;
+    loadedOkRef.current = false;
+    lastQueuedBodyRef.current = ''; // matches the cleared body, so a failed load saves nothing
     setLoading(true);
     setLoadError(false);
-    setRawText('');
     setBody('');
     setSaveStatus('idle');
     setSaveErr(null);
@@ -94,9 +119,10 @@ export function DocView({
         const text = await fetchEntryText(path);
         if (cancelled) return;
         const bodyOnly = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
-        rawRef.current = text;
+        saveQueue.seedBase(path, text);
+        lastQueuedBodyRef.current = bodyOnly;
+        loadedOkRef.current = true;
         bodyRef.current = bodyOnly;
-        setRawText(text);
         setBody(bodyOnly);
       } catch {
         if (!cancelled) setLoadError(true);
@@ -106,7 +132,30 @@ export function DocView({
     })();
 
     return () => { cancelled = true; };
-  }, [entry.path, editable, wikiIndex]);
+    // NOT wikiIndex: it changes on every cross-window index refetch/focus, and
+    // reloading here would wipe unsaved edits. Cross-window content refresh is
+    // handled by the mtime effect below, gated on a non-dirty editor.
+  }, [entry.path, editable, reloadNonce]);
+
+  // The refreshed index carries each file's mtime. If the *same* open doc's
+  // mtime advances (another window saved it / external edit), pull the new body
+  // — unless we have local unsaved edits, in which case the save-conflict guard
+  // handles it instead of clobbering.
+  const mtimeRef = useRef<{ path: string; mtime: number | null | undefined }>(
+    { path: entry.path, mtime: entry.mtime },
+  );
+  useEffect(() => {
+    const prev = mtimeRef.current;
+    mtimeRef.current = { path: entry.path, mtime: entry.mtime };
+    if (prev.path === entry.path && entry.mtime !== prev.mtime) {
+      // Only pull the new copy if we have nothing in progress: no un-queued
+      // local edits AND no save in flight. Otherwise the conflict guard / queue
+      // handle it without clobbering.
+      const clean = bodyRef.current === lastQueuedBodyRef.current
+        && (statusRef.current === 'idle' || statusRef.current === 'saved');
+      if (clean) reloadFromDisk();
+    }
+  }, [entry.path, entry.mtime, reloadFromDisk]);
 
   const handleEditorChange = useCallback((newBody: string) => {
     bodyRef.current = newBody;
@@ -126,7 +175,9 @@ export function DocView({
 
   useEffect(() => {
     const onUnload = (e: BeforeUnloadEvent) => {
-      if (statusRef.current === 'dirty') {
+      const unsaved = bodyRef.current !== lastQueuedBodyRef.current
+        || (statusRef.current !== 'idle' && statusRef.current !== 'saved');
+      if (unsaved) {
         e.preventDefault();
         e.returnValue = '';
       }
@@ -187,7 +238,14 @@ export function DocView({
           {displayTitle}
         </div>
 
-        {editable && <SaveIndicator status={saveStatus} errMsg={saveErr} />}
+        {editable && (saveStatus === 'conflict' ? (
+          <span class="text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1.5" title="磁盘上的文件在你编辑期间被其他窗口或外部改动；为避免覆盖，自动保存已暂停">
+            文件已被其他窗口修改
+            <button onClick={reloadFromDisk} class="underline hover:text-primary">重载</button>
+          </span>
+        ) : (
+          <SaveIndicator status={saveStatus} errMsg={saveErr} />
+        ))}
 
         {canDelete && (
           <div class="relative">
@@ -250,20 +308,27 @@ export function DocView({
         <div class="flex-1 min-w-0 flex flex-col">
           {loading
             ? <div class="px-8 py-10 text-sm text-muted">加载中…</div>
-            : editable
-              ? <NoteEditor
-                  docId={entry.path}
-                  initial={body}
-                  theme={editorTheme}
-                  onChange={handleEditorChange}
-                  onSaveShortcut={() => flushSave()}
-                />
-              : <div class="flex-1 overflow-auto scrollbar-thin">
-                  {loadError
-                    ? <p class="px-8 py-6 text-red-600 dark:text-red-400">加载失败</p>
-                    : <BodyView entry={entry} body={body} wikiIndex={wikiIndex} onWikiClick={onWikiClick} />
-                  }
+            : loadError
+              // Show the failure for editable docs too — never mount the editor
+              // on a failed load, or edits would be accepted but never saved.
+              ? <div class="flex-1 flex items-center justify-center text-sm">
+                  <div class="text-center">
+                    <div class="mb-2 text-red-600 dark:text-red-400">加载失败</div>
+                    <button onClick={reloadFromDisk} class="text-secondary underline">重试</button>
+                  </div>
                 </div>
+              : editable
+                ? <NoteEditor
+                    key={`${entry.path}:${reloadNonce}`}
+                    docId={entry.path}
+                    initial={body}
+                    theme={editorTheme}
+                    onChange={handleEditorChange}
+                    onSaveShortcut={() => flushSave()}
+                  />
+                : <div class="flex-1 overflow-auto scrollbar-thin">
+                    <BodyView entry={entry} body={body} wikiIndex={wikiIndex} onWikiClick={onWikiClick} />
+                  </div>
           }
         </div>
         <aside class="w-72 shrink-0 border-l border-base bg-page/60 overflow-auto scrollbar-thin">
@@ -291,6 +356,7 @@ function SaveIndicator({ status, errMsg }: { status: SaveStatus; errMsg: string 
     case 'saving': return <span class="text-[11px] text-muted">保存中…</span>;
     case 'saved':  return <span class="text-[11px] text-emerald-600 dark:text-emerald-400">已保存</span>;
     case 'error':  return <span class="text-[11px] text-red-600 dark:text-red-400" title={errMsg ?? ''}>保存失败</span>;
+    case 'conflict': return null; // rendered inline in the header with a reload action
   }
 }
 

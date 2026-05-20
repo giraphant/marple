@@ -30,7 +30,7 @@ export async function restoreTrash(name: string): Promise<string> {
   return json.restored ?? '';
 }
 
-/** Fetch the reader index from the SQLite-backed API. */
+/** Fetch the reader index (DB metadata cache snapshot) on boot. */
 export async function fetchIndex(): Promise<Entry[]> {
   const r = await fetch('/api/index');
   if (!r.ok) {
@@ -39,6 +39,43 @@ export async function fetchIndex(): Promise<Entry[]> {
   }
   const json = await r.json().catch(() => ({} as { items?: Entry[] }));
   return json.items ?? [];
+}
+
+export interface VaultFile {
+  path: string;
+  mtime: number | null;
+}
+
+export interface VaultFilesResult {
+  items: VaultFile[];
+  total: number;
+}
+
+/** Cheap directory listing — the file-browser's "what exists". With `since`
+ *  (epoch ms) only changed files come back (the delta); `total` is always the
+ *  full count so the caller can detect deletions. */
+export async function listFiles(since?: number): Promise<VaultFilesResult> {
+  const url = since != null ? `/api/files?since=${since}` : '/api/files';
+  const r = await fetch(url);
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`list files failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { items?: VaultFile[]; total?: number }));
+  const items = json.items ?? [];
+  return { items, total: json.total ?? items.length };
+}
+
+/** Live-parse one vault file's metadata straight from disk (no DB). Returns
+ *  null when the file is missing or has no usable type (not a renderable entry). */
+export async function fetchEntry(path: string): Promise<Entry | null> {
+  const r = await fetch('/api/entry?path=' + encodeURIComponent(path));
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`fetch entry failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { entry?: Entry | null }));
+  return json.entry ?? null;
 }
 
 export interface SearchHit {
@@ -91,6 +128,19 @@ export async function reindex(): Promise<{ tookMs: number }> {
   }
   const json = await r.json().catch(() => ({} as { tookMs?: number }));
   return { tookMs: json.tookMs ?? 0 };
+}
+
+/** Advanced/opt-in: (re)build semantic vector embeddings. Heavy — the server
+ *  loads a ~2.3 GB model — so this is a separate action from the normal index
+ *  rebuild and may take minutes. */
+export async function buildEmbeddings(): Promise<{ embedded: number; tookMs: number }> {
+  const r = await fetch('/api/embeddings', { method: 'POST' });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`build embeddings failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { embedded?: number; tookMs?: number }));
+  return { embedded: json.embedded ?? 0, tookMs: json.tookMs ?? 0 };
 }
 
 export async function purgeTrash(name: string): Promise<void> {

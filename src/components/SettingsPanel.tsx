@@ -1,7 +1,9 @@
 import type { JSX } from 'preact';
+import { useState } from 'preact/hooks';
 import type { Settings, FontFamily, Theme } from '../settings';
 import { FONT_SIZE_OPTIONS, LINE_HEIGHT_OPTIONS, fontStack } from '../settings';
 import { CITATION_FORMATS } from '../citation';
+import { buildEmbeddings } from '../api';
 import { Icon } from './Icon';
 
 const THEME_OPTIONS: { id: Theme; label: string; hint: string }[] = [
@@ -158,7 +160,58 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
             </div>
           </Field>
         </Section>
+
+        <Section title="高级">
+          <EmbeddingsRebuild />
+        </Section>
       </div>
+    </div>
+  );
+}
+
+/** Opt-in semantic-vector rebuild. Decoupled from the normal (fast) index so it
+ *  doesn't slow everyday reindexing; needed only for hybrid/semantic search. */
+function EmbeddingsRebuild() {
+  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const run = async () => {
+    if (status === 'running') return;
+    setStatus('running');
+    setMsg(null);
+    try {
+      const { embedded, tookMs } = await buildEmbeddings();
+      setStatus('done');
+      setMsg(`已嵌入 ${embedded} 条，用时 ${Math.round(tookMs / 1000)}s`);
+    } catch (e) {
+      setStatus('error');
+      setMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <div class="text-[12px] leading-snug">
+      <div class="text-primary font-medium">语义向量（hybrid 搜索）</div>
+      <div class="text-muted mt-0.5 mb-2">
+        普通"重建索引"快且不含向量。语义/hybrid 搜索需要单独构建向量，会下载 ~2.3GB 模型、
+        可能数分钟；与元数据索引分离，重建元数据不会清掉它。
+      </div>
+      <button
+        onClick={run}
+        disabled={status === 'running'}
+        class={`text-[12px] px-2.5 py-1 rounded border transition ${
+          status === 'running'
+            ? 'bg-surface text-muted border-base cursor-not-allowed'
+            : 'bg-surface text-secondary border-base hover:border-strong'
+        }`}
+      >
+        {status === 'running' ? '构建中…（下载模型，请稍候）' : '重建语义向量'}
+      </button>
+      {msg && (
+        <div class={`mt-2 text-[11px] ${status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-muted'}`}>
+          {msg}
+        </div>
+      )}
     </div>
   );
 }

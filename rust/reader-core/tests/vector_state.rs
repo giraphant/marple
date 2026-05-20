@@ -77,6 +77,7 @@ fn hybrid_on_legacy_index_falls_back_to_lex() {
         trash_dir: vault.join("notes/.trash"),
         sources: tmpdir.join("sources"),
         index_db,
+        vectors_db: reader_root.join("data/vectors.sqlite"),
         dist: reader_root.join("dist"),
     };
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -117,26 +118,25 @@ fn tempdir_for_test() -> std::path::PathBuf {
 }
 
 #[test]
-fn vec_search_filter_pushdown_returns_typed_only() {
+fn vec_search_accept_filter_excludes_rejected() {
     use rusqlite::Connection;
+    use std::collections::HashMap;
     reader_core::init_sqlite_vec();
+    // Vectors now live in their own DB with no entries table; the type/rating
+    // filter is applied in Rust via the `accept` closure.
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
-        "CREATE TABLE entries (path TEXT PRIMARY KEY, type TEXT, rating_score REAL DEFAULT 0);
-         CREATE VIRTUAL TABLE entry_vectors USING vec0(path TEXT PRIMARY KEY, embedding float[4] distance_metric=cosine);",
+        "CREATE VIRTUAL TABLE entry_vectors USING vec0(path TEXT PRIMARY KEY, embedding float[4] distance_metric=cosine);",
     )
     .unwrap();
     let bytes = |v: [f32; 4]| -> Vec<u8> { v.iter().flat_map(|f| f.to_le_bytes()).collect() };
-    for (path, ty, v) in [
+    let mut ty: HashMap<&str, &str> = HashMap::new();
+    for (path, t, v) in [
         ("a.md", "paper-analysis", [1.0_f32, 0.0, 0.0, 0.0]),
         ("b.md", "book-overview", [0.9, 0.1, 0.0, 0.0]),
         ("c.md", "paper-analysis", [0.0, 1.0, 0.0, 0.0]),
     ] {
-        conn.execute(
-            "INSERT INTO entries(path, type, rating_score) VALUES (?,?,1.0)",
-            rusqlite::params![path, ty],
-        )
-        .unwrap();
+        ty.insert(path, t);
         conn.execute(
             "INSERT INTO entry_vectors(path, embedding) VALUES (?, ?)",
             rusqlite::params![path, bytes(v)],
@@ -144,11 +144,11 @@ fn vec_search_filter_pushdown_returns_typed_only() {
         .unwrap();
     }
     let q = [1.0_f32, 0.0, 0.0, 0.0];
-    let hits =
-        reader_core::vector::vec_search(&conn, &q, 5, Some("paper-analysis"), None).unwrap();
+    let accept = |path: &str| ty.get(path).copied() == Some("paper-analysis");
+    let hits = reader_core::vector::vec_search(&conn, &q, 5, accept).unwrap();
     let paths: Vec<_> = hits.iter().map(|h| h.path.as_str()).collect();
     assert!(paths.contains(&"a.md"));
-    assert!(!paths.contains(&"b.md"), "type filter must exclude book-overview");
+    assert!(!paths.contains(&"b.md"), "accept filter must exclude book-overview");
 }
 
 #[tokio::test]
