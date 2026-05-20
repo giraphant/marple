@@ -71,6 +71,9 @@ interface Props {
   theme: EditorThemeConfig;
   onChange: (body: string) => void;
   onSaveShortcut?: () => void;
+  /** Exposes the live EditorView (or null on teardown) so the parent can drive
+   * imperative actions like scroll-to-line for the outline panel (QUA-57). */
+  onViewReady?: (view: EditorView | null) => void;
 }
 
 type SemanticTokenKind = 'wiki' | 'link' | 'image' | 'footnote';
@@ -799,15 +802,17 @@ function buildEditorTheme({ dark }: EditorThemeConfig): Extension {
 const editableCompartment = new Compartment();
 const themeCompartment = new Compartment();
 
-export function NoteEditor({ docId, initial, theme, onChange, onSaveShortcut }: Props) {
+export function NoteEditor({ docId, initial, theme, onChange, onSaveShortcut, onViewReady }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSaveShortcut);
+  const onViewReadyRef = useRef(onViewReady);
   const [popover, setPopover] = useState<SemanticPopover | null>(null);
   onChangeRef.current = onChange;
   onSaveRef.current = onSaveShortcut;
+  onViewReadyRef.current = onViewReady;
 
   const openSemanticPopover: OpenSemanticPopover = (view, token, rect) => {
     const width = token.kind === 'footnote' ? 360 : 360;
@@ -963,8 +968,9 @@ export function NoteEditor({ docId, initial, theme, onChange, onSaveShortcut }: 
 
     const view = new EditorView({ state, parent: hostRef.current });
     viewRef.current = view;
+    onViewReadyRef.current?.(view);
     requestAnimationFrame(() => normalizeLegacyFootnotePlaceholders(view));
-    return () => { view.destroy(); viewRef.current = null; };
+    return () => { onViewReadyRef.current?.(null); view.destroy(); viewRef.current = null; };
     // theme intentionally not in deps — handled by the hot-swap effect below
     // so we don't lose caret/selection/history when settings change.
     // initial intentionally not in deps — we don't reseed mid-edit.
