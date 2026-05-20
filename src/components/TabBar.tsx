@@ -54,7 +54,7 @@ function tabDisplay(tab: Tab, entryByPath: Map<string, Entry>): {
     return {
       icon: (
         <span
-          class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-amber-100 text-amber-700 dark:text-amber-400 dark:bg-amber-950/40 dark:text-amber-300"
+          class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-accent-bg text-accent-text"
           style={{ minWidth: '1.2em', minHeight: '1.2em', height: '1.2em', width: '1.2em' }}
         >
           <PhTag width="0.85em" height="0.85em" />
@@ -68,7 +68,7 @@ function tabDisplay(tab: Tab, entryByPath: Map<string, Entry>): {
     return {
       icon: (
         <span
-          class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-amber-100 text-amber-700 dark:text-amber-400 dark:bg-amber-950/40 dark:text-amber-300"
+          class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-accent-bg text-accent-text"
           style={{ minWidth: '1.2em', minHeight: '1.2em', height: '1.2em', width: '1.2em' }}
         >
           <PhChartLineUp width="0.85em" height="0.85em" />
@@ -205,7 +205,7 @@ export function TabBar({
                   onClick={(ev) => { ev.stopPropagation(); onTogglePin(i); }}
                   class={`px-0.5 inline-flex items-center transition ${
                     pinned
-                      ? 'text-amber-600 dark:text-amber-300 hover:text-amber-800 dark:hover:text-amber-200'
+                      ? 'text-accent-text hover:text-accent-text'
                       : 'text-muted hover:text-secondary opacity-0 group-hover:opacity-100'
                   }`}
                   title={pinned ? '取消固定' : '固定 tab'}

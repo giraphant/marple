@@ -108,7 +108,7 @@ export function RightPanel({
       <div
         onPointerDown={onDragStart}
         title="拖拽调整宽度"
-        class="absolute left-0 top-0 bottom-0 w-1.5 -ml-0.5 cursor-col-resize hover:bg-amber-300/40 z-10"
+        class="absolute left-0 top-0 bottom-0 w-1.5 -ml-0.5 cursor-col-resize hover:bg-accent/30 z-10"
       />
       <div class="flex items-center gap-0.5 px-2 py-1.5 border-b border-base shrink-0">
         {TABS.map(t => (
@@ -119,7 +119,7 @@ export function RightPanel({
             aria-label={t.label}
             class={`p-1.5 rounded transition ${
               tab === t.id
-                ? 'bg-inverse text-inverse-fg'
+                ? 'bg-accent-bg text-accent-text'
                 : 'text-muted hover:text-primary hover:bg-surface-2'
             }`}
           ><Icon name={t.icon} size={15} /></button>
@@ -197,7 +197,7 @@ function TocTab({
               style={{ paddingLeft: `${0.5 + Math.max(0, h.level - 1) * 0.75}rem` }}
               class={`w-full text-left py-1 pr-2 rounded text-[12px] leading-snug truncate transition ${
                 activeHeadingKey === h.key
-                  ? 'bg-surface-2 text-primary font-medium'
+                  ? 'bg-accent-bg text-accent-text font-medium'
                   : 'text-secondary hover:bg-surface-2 hover:text-primary'
               }`}
             >{h.text}</button>
@@ -247,7 +247,7 @@ function NavRow({ label, active, onClick }: {
       onClick={onClick}
       title={label}
       class={`w-full text-left px-2 py-1.5 rounded text-[12px] leading-snug truncate transition ${
-        active ? 'bg-inverse text-inverse-fg font-medium' : 'text-secondary hover:bg-surface-2 hover:text-primary'
+        active ? 'bg-accent-bg text-accent-text font-medium' : 'text-secondary hover:bg-surface-2 hover:text-primary'
       }`}
     >{label}</button>
   );

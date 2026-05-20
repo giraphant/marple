@@ -69,7 +69,7 @@ export function ListView({
               <button
                 onClick={onOpenSearch}
                 title="点击修改 (⌘K)"
-                class="inline-flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-200 dark:hover:bg-amber-900/40 transition"
+                class="inline-flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-accent-bg text-accent-text border border-accent/30 hover:bg-accent-bg transition"
               >
                 <Icon name="magnifying-glass" size={12} />
                 <span class="truncate max-w-[200px]">{query}</span>
@@ -99,7 +99,7 @@ export function ListView({
               <button
                 key={n}
                 onClick={() => onMinRatingChange(n)}
-                class={`px-1.5 py-0.5 rounded ${minRating === n ? 'bg-inverse text-inverse-fg' : 'hover:bg-surface-2'}`}
+                class={`px-1.5 py-0.5 rounded ${minRating === n ? 'bg-accent-bg text-accent-text' : 'hover:bg-surface-2'}`}
               >{n || '·'}</button>
             ))}
           </div>
@@ -108,8 +108,8 @@ export function ListView({
             type="button"
             class={`text-[11px] px-1.5 py-0.5 rounded ${
               searchMode === 'hybrid'
-                ? 'bg-purple-200 dark:bg-purple-800 text-purple-900 dark:text-purple-100'
-                : 'bg-zinc-200 dark:bg-zinc-700 text-secondary'
+                ? 'bg-accent-bg text-accent-text'
+                : 'bg-surface-2 text-secondary'
             }`}
             title="切换搜索模式（Cmd+K 后 Tab）"
             onClick={onToggleSearchMode}
@@ -149,7 +149,7 @@ export function ListView({
             <div class="text-[11px] text-muted">全文搜索中…</div>
           )}
           {searchError && (
-            <div class="text-[11px] text-red-600 dark:text-red-400" title={searchError}>
+            <div class="text-[11px] text-danger" title={searchError}>
               全文搜索失败，已使用本地匹配
             </div>
           )}
@@ -159,9 +159,9 @@ export function ListView({
             <span class="text-[11px] text-muted">主题筛选</span>
             <button
               onClick={onClearTheme}
-              class="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 hover:bg-amber-200  transition"
+              class="text-[11px] px-2 py-0.5 rounded bg-accent-bg text-accent-text border border-accent/30 hover:bg-accent-bg transition"
             >
-              {themeFilter} <span class="text-amber-600 dark:text-amber-400 ml-1">✕</span>
+              {themeFilter} <span class="text-accent-text ml-1">✕</span>
             </button>
           </div>
         )}
@@ -240,13 +240,13 @@ function FilterControl({
         onClick={() => setOpen(v => !v)}
         class={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border transition ${
           active
-            ? 'border-amber-300 dark:border-amber-700 bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300'
+            ? 'border-accent bg-accent-bg text-accent-text'
             : 'border-base text-secondary hover:bg-surface-2'
         }`}
         title="筛选（作者 / PDF）"
       >
         <Icon name="funnel" size={12} />
-        筛选{active && <span class="text-amber-600 dark:text-amber-400">•</span>}
+        筛选{active && <span class="text-accent-text">•</span>}
       </button>
       {open && (
         <div class="absolute left-0 top-full mt-1 z-20 bg-surface border border-base rounded shadow-lg p-3 w-[220px] space-y-2.5">
@@ -257,7 +257,7 @@ function FilterControl({
               value={authorFilter}
               placeholder="按作者筛选"
               onInput={(e) => onAuthorFilterChange((e.target as HTMLInputElement).value)}
-              class="mt-1 w-full px-2 py-1 border border-base rounded text-[12px] bg-page text-secondary focus:outline-none focus:border-amber-400 dark:focus:border-amber-600"
+              class="mt-1 w-full px-2 py-1 border border-base rounded text-[12px] bg-page text-secondary focus:outline-none focus:border-accent"
             />
           </label>
           {showPdf && (

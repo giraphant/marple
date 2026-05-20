@@ -75,10 +75,10 @@ export function Sidebar({
   // and shrink the hit-target down to a square.
   const rowCls = (active: boolean) => collapsed
     ? `mx-auto flex items-center justify-center w-9 h-9 my-0.5 rounded transition cursor-pointer ${
-        active ? 'bg-inverse text-inverse-fg' : 'text-secondary hover:bg-hover/60'
+        active ? 'bg-accent-bg text-accent-text' : 'text-secondary hover:bg-hover/60'
       }`
     : `w-full text-left px-2 py-1.5 rounded text-[12px] flex items-center gap-2 transition ${
-        active ? 'bg-inverse text-inverse-fg' : 'text-secondary hover:bg-hover/60'
+        active ? 'bg-accent-bg text-accent-text' : 'text-secondary hover:bg-hover/60'
       }`;
 
   const widthCls = collapsed ? 'w-14' : 'w-60';
@@ -151,13 +151,13 @@ export function Sidebar({
               title={collapsed ? `${t.label} · ${n}` : '拖拽以调整顺序'}
               class={`${rowCls(active)} cursor-grab active:cursor-grabbing ${
                 isDragging ? 'opacity-40' : ''
-              } ${isOver ? 'ring-1 ring-amber-400' : ''}`}
+              } ${isOver ? 'ring-1 ring-accent' : ''}`}
             >
               <TypeIcon type={t.id} />
               {!collapsed && (
                 <>
                   <span class="flex-1 truncate">{t.label}</span>
-                  <span class={`text-[11px] tabular-nums ${active ? 'text-white/70' : 'text-muted'}`}>{n}</span>
+                  <span class={`text-[11px] tabular-nums ${active ? 'text-accent-text' : 'text-muted'}`}>{n}</span>
                 </>
               )}
             </button>
@@ -175,7 +175,7 @@ export function Sidebar({
           class={rowCls(themesActive)}
         >
           <span
-            class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-amber-100 text-amber-700 dark:text-amber-400 dark:bg-amber-950/40 dark:text-amber-300"
+            class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-accent-bg text-accent-text"
             style={{ minHeight: '1.3em', minWidth: '1.3em', height: '1.3em', width: '1.3em' }}
             aria-hidden="true"
           >
@@ -184,7 +184,7 @@ export function Sidebar({
           {!collapsed && (
             <>
               <span class="flex-1 truncate">主题</span>
-              <span class={`text-[11px] tabular-nums ${themesActive ? 'text-white/70' : 'text-muted'}`}>{themesCount}</span>
+              <span class={`text-[11px] tabular-nums ${themesActive ? 'text-accent-text' : 'text-muted'}`}>{themesCount}</span>
             </>
           )}
         </button>
@@ -194,7 +194,7 @@ export function Sidebar({
           class={rowCls(activityActive)}
         >
           <span
-            class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-amber-100 text-amber-700 dark:text-amber-400 dark:bg-amber-950/40 dark:text-amber-300"
+            class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-accent-bg text-accent-text"
             style={{ minHeight: '1.3em', minWidth: '1.3em', height: '1.3em', width: '1.3em' }}
             aria-hidden="true"
           >
@@ -228,7 +228,7 @@ export function Sidebar({
           title={collapsed ? '回收站' : '回收站'}
           class={rowCls(trashActive)}
         >
-          <Icon name="trash" size={collapsed ? 16 : 13} class={trashActive ? 'text-white/80' : 'text-muted'} />
+          <Icon name="trash" size={collapsed ? 16 : 13} class={trashActive ? 'text-accent-text' : 'text-muted'} />
           {!collapsed && <span class="flex-1">回收站</span>}
         </button>
         <button
