@@ -46,16 +46,24 @@ export interface VaultFile {
   mtime: number | null;
 }
 
-/** Cheap directory listing (path + mtime) — the file-browser's "what exists".
- *  Diffed against in-memory entries to find files changed since the DB build. */
-export async function listFiles(): Promise<VaultFile[]> {
-  const r = await fetch('/api/files');
+export interface VaultFilesResult {
+  items: VaultFile[];
+  total: number;
+}
+
+/** Cheap directory listing — the file-browser's "what exists". With `since`
+ *  (epoch ms) only changed files come back (the delta); `total` is always the
+ *  full count so the caller can detect deletions. */
+export async function listFiles(since?: number): Promise<VaultFilesResult> {
+  const url = since != null ? `/api/files?since=${since}` : '/api/files';
+  const r = await fetch(url);
   if (!r.ok) {
     const msg = await r.text().catch(() => '');
     throw new Error(`list files failed: ${r.status} ${msg}`);
   }
-  const json = await r.json().catch(() => ({} as { items?: VaultFile[] }));
-  return json.items ?? [];
+  const json = await r.json().catch(() => ({} as { items?: VaultFile[]; total?: number }));
+  const items = json.items ?? [];
+  return { items, total: json.total ?? items.length };
 }
 
 /** Live-parse one vault file's metadata straight from disk (no DB). Returns
@@ -120,6 +128,19 @@ export async function reindex(): Promise<{ tookMs: number }> {
   }
   const json = await r.json().catch(() => ({} as { tookMs?: number }));
   return { tookMs: json.tookMs ?? 0 };
+}
+
+/** Advanced/opt-in: (re)build semantic vector embeddings. Heavy — the server
+ *  loads a ~2.3 GB model — so this is a separate action from the normal index
+ *  rebuild and may take minutes. */
+export async function buildEmbeddings(): Promise<{ embedded: number; tookMs: number }> {
+  const r = await fetch('/api/embeddings', { method: 'POST' });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`build embeddings failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { embedded?: number; tookMs?: number }));
+  return { embedded: json.embedded ?? 0, tookMs: json.tookMs ?? 0 };
 }
 
 export async function purgeTrash(name: string): Promise<void> {

@@ -48,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/entry", get(api_entry))
         .route("/api/search", get(api_search))
         .route("/api/reindex", post(api_reindex))
+        .route("/api/embeddings", post(api_embeddings))
         .route("/api/trash", get(api_trash_list))
         .route("/api/trash/:name/restore", post(api_trash_restore))
         .route("/api/trash/:name", delete(api_trash_purge))
@@ -93,12 +94,31 @@ async fn api_index(State(state): State<AppState>) -> Result<Json<serde_json::Val
     ))
 }
 
+#[derive(Debug, Deserialize)]
+struct FilesParams {
+    /// Epoch-ms cutoff: when set, only files with mtime > since are returned
+    /// (the delta), so a no-op or small-edit sync ships almost nothing. `total`
+    /// is always the full file count so the client can detect deletions.
+    since: Option<i64>,
+}
+
 /// Cheap directory listing (path + mtime) — the file-browser's source of "what
-/// exists", independent of the metadata cache. Clients diff this to find files
-/// changed since the last index build.
-async fn api_files(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
-    let items = reader_core::list_vault_files(&state.paths)?;
-    Ok(Json(json!({ "items": items })))
+/// exists", independent of the metadata cache. With `?since=` it returns only
+/// the changed delta plus the total count.
+async fn api_files(
+    State(state): State<AppState>,
+    Query(params): Query<FilesParams>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let all = reader_core::list_vault_files(&state.paths)?;
+    let total = all.len();
+    let items: Vec<_> = match params.since {
+        Some(since) => all
+            .into_iter()
+            .filter(|f| f.mtime.is_none_or(|m| m > since))
+            .collect(),
+        None => all,
+    };
+    Ok(Json(json!({ "items": items, "total": total })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -179,6 +199,30 @@ async fn api_reindex(State(state): State<AppState>) -> Result<Json<serde_json::V
         "byType": stats.by_type,
         "sourcePdfs": stats.source_pdfs,
         "skippedFrontmatterWithoutType": stats.skipped_frontmatter_without_type
+    })))
+}
+
+/// Opt-in, heavy: (re)build the semantic vector embeddings. Loads the ~2.3 GB
+/// BGE-M3 model, so this is an advanced action triggered from Settings, not part
+/// of the normal (fast, model-free) index build.
+async fn api_embeddings(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    let _guard = match state.reindex_lock.try_lock() {
+        Ok(g) => g,
+        Err(_) => {
+            return Err(AppError(ReaderError::Conflict(
+                "an index/embedding build is already in progress".to_string(),
+            )))
+        }
+    };
+    let t0 = Instant::now();
+    let paths = state.paths.clone();
+    let embedded = tokio::task::spawn_blocking(move || reader_core::build_embeddings(&paths))
+        .await
+        .map_err(|err| AppError(ReaderError::Other(err.into())))??;
+    Ok(Json(json!({
+        "ok": true,
+        "tookMs": t0.elapsed().as_millis(),
+        "embedded": embedded
     })))
 }
 

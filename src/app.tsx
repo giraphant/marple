@@ -169,13 +169,15 @@ export function App() {
   const entriesRef = useRef<Entry[] | null>(entries);
   entriesRef.current = entries;
   const knownMtimesRef = useRef<Map<string, number | null>>(new Map());
+  const lastSyncMtimeRef = useRef(0);
   const syncingRef = useRef(false);
   const syncTimerRef = useRef<number | null>(null);
 
-  // Cross-window / external freshness, the file-browser way: list the vault
-  // (cheap path+mtime), live-parse only files that are new or changed since we
-  // last saw them, and drop files that disappeared. No 12MB index refetch, no
-  // per-write DB work. A transient failure leaves the current list untouched.
+  // Cross-window / external freshness, the file-browser way. Pull only the
+  // delta (files with mtime > lastSync) and live-parse just the ones whose
+  // mtime actually changed vs what we last saw. A full listing is fetched only
+  // when the server's total file count disagrees with ours — i.e. a deletion
+  // (or odd add) happened — so the common no-op / edit sync ships almost nothing.
   const syncFromFiles = useCallback(() => {
     if (syncTimerRef.current != null) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = window.setTimeout(async () => {
@@ -183,30 +185,53 @@ export function App() {
       if (syncingRef.current) return;
       syncingRef.current = true;
       try {
-        let files;
-        try { files = await listFiles(); } catch { return; }
         const known = knownMtimesRef.current;
-        const fileSet = new Set(files.map(f => f.path));
-        const changed = files.filter(f => !known.has(f.path) || known.get(f.path) !== f.mtime);
-        const parsed = await Promise.all(changed.map(async f => {
-          try { return [f, await fetchEntry(f.path)] as const; }
-          catch { return [f, undefined] as const; } // fetch failed → leave as-is
-        }));
         const cur = entriesRef.current ?? [];
         const byPath = new Map(cur.map(e => [e.path, e]));
         let mutated = false;
-        for (const [f, entry] of parsed) {
-          if (entry === undefined) continue;
-          known.set(f.path, f.mtime);          // processed at this mtime (entry or not)
-          if (entry === null) { if (byPath.delete(f.path)) mutated = true; }
-          else { byPath.set(f.path, entry); mutated = true; }
+        let maxMtime = lastSyncMtimeRef.current;
+
+        // Parse only files new-or-changed vs `known`; upsert entries, drop
+        // null-parses (non-entries), and record the mtime we processed.
+        const processFiles = async (files: { path: string; mtime: number | null }[]) => {
+          const toParse = files.filter(f => !known.has(f.path) || known.get(f.path) !== f.mtime);
+          const parsed = await Promise.all(toParse.map(async f => {
+            try { return [f, await fetchEntry(f.path)] as const; }
+            catch { return [f, undefined] as const; } // fetch failed → leave as-is
+          }));
+          for (const [f, entry] of parsed) {
+            if (entry === undefined) continue;
+            known.set(f.path, f.mtime);
+            if (f.mtime != null && f.mtime > maxMtime) maxMtime = f.mtime;
+            if (entry === null) { if (byPath.delete(f.path)) mutated = true; }
+            else { byPath.set(f.path, entry); mutated = true; }
+          }
+        };
+
+        let delta;
+        try { delta = await listFiles(lastSyncMtimeRef.current || undefined); }
+        catch { return; } // keep current list on a transient failure
+        await processFiles(delta.items);
+
+        // Counts disagree → a deletion (or add with an older mtime) happened.
+        // One full listing reconciles: parse anything still unknown, drop files
+        // that no longer exist.
+        if (delta.total !== known.size) {
+          let full = null;
+          try { full = await listFiles(); } catch {}
+          if (full) {
+            const fileSet = new Set(full.items.map(f => f.path));
+            await processFiles(full.items);
+            for (const p of Array.from(byPath.keys())) {
+              if (!fileSet.has(p)) { byPath.delete(p); mutated = true; }
+            }
+            for (const p of Array.from(known.keys())) {
+              if (!fileSet.has(p)) known.delete(p);
+            }
+          }
         }
-        for (const p of Array.from(byPath.keys())) {
-          if (!fileSet.has(p)) { byPath.delete(p); mutated = true; }
-        }
-        for (const p of Array.from(known.keys())) {
-          if (!fileSet.has(p)) known.delete(p);
-        }
+
+        lastSyncMtimeRef.current = maxMtime;
         if (mutated) setEntries(Array.from(byPath.values()));
       } finally {
         syncingRef.current = false;
