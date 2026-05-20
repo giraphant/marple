@@ -51,9 +51,12 @@ export function DocView({
   const bodyRef = useRef('');
   const timerRef = useRef<number | null>(null);
   const statusRef = useRef<SaveStatus>('idle');
+  const savingRef = useRef(false);
+  const currentPathRef = useRef(entry.path);
   rawRef.current = rawText;
   bodyRef.current = body;
   statusRef.current = saveStatus;
+  currentPathRef.current = entry.path;
 
   const editablePath = entry.path;
 
@@ -63,13 +66,19 @@ export function DocView({
       timerRef.current = null;
     }
     if (!editablePath) return;
+    // Never run two saves at once: a save in flight reschedules itself below if
+    // the user kept typing, so re-entrancy here would overlap PUTs and race the
+    // shared refs.
+    if (savingRef.current) return;
     if (statusRef.current !== 'dirty') return;
     // Snapshot editor state BEFORE any await. On a switch-away flush the shared
     // refs are reset to the next doc as it loads, so reading them post-await
     // could write the wrong (or empty) content back into THIS file.
     const baseRaw = rawRef.current;
     const nextBody = bodyRef.current;
+    savingRef.current = true;
     setSaveStatus('saving');
+    let saved = false;
     try {
       // Optimistic-concurrency guard: re-read disk and bail if the file changed
       // underneath us (another window / external edit). Never overwrite blind.
@@ -84,12 +93,29 @@ export function DocView({
       await putEntryText(editablePath, out);
       rawRef.current = out;
       setRawText(out);
-      setSaveStatus('saved');
-      setSaveErr(null);
       bumpVaultVersion();
+      saved = true;
     } catch (e) {
       setSaveStatus('error');
       setSaveErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      savingRef.current = false;
+    }
+    if (!saved) return;
+    // The doc switched while we were saving: our snapshot was written correctly
+    // to the old file; don't touch the new doc's state.
+    if (currentPathRef.current !== editablePath) return;
+    if (bodyRef.current !== nextBody) {
+      // The user edited while the save was in flight — the on-disk copy is now
+      // stale. Stay dirty and reschedule so the newer text isn't lost.
+      setSaveStatus('dirty');
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
+        flushSave();
+      }, SAVE_DEBOUNCE_MS);
+    } else {
+      setSaveStatus('saved');
+      setSaveErr(null);
     }
   }, [editablePath]);
 
