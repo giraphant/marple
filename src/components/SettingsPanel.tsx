@@ -180,19 +180,26 @@ function EmbeddingsRebuild() {
   const [pollKey, setPollKey] = useState(0);
 
   // Poll once on mount and after each trigger; re-arm while a build is running.
+  // `following` is seeded from the status known when this effect started (set to
+  // running right before the trigger bumps pollKey), so a transient fetch error
+  // mid-build keeps retrying instead of freezing the panel with the button stuck
+  // disabled until the user reopens settings.
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let following = status != null && isEmbedRunning(status);
     const tick = async () => {
       try {
         const s = await embeddingStatus();
         if (!alive) return;
         setStatus(s);
         setErr(null);
-        if (isEmbedRunning(s)) timer = setTimeout(tick, 1500);
+        following = isEmbedRunning(s);
+        if (following) timer = setTimeout(tick, 1500);
       } catch (e) {
         if (!alive) return;
         setErr(e instanceof Error ? e.message : String(e));
+        if (following) timer = setTimeout(tick, 1500);
       }
     };
     tick();
@@ -200,6 +207,7 @@ function EmbeddingsRebuild() {
       alive = false;
       if (timer) clearTimeout(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pollKey]);
 
   const running = status != null && isEmbedRunning(status);

@@ -28,7 +28,6 @@ async fn disabled_state_is_sticky() {
 fn hybrid_on_legacy_index_falls_back_to_lex() {
     use reader_core::{ReaderPaths, SearchMode, SearchOptions};
     use rusqlite::Connection;
-    use std::path::PathBuf;
     reader_core::init_sqlite_vec();
 
     // Build a minimal index file that has entries but no entry_vectors.

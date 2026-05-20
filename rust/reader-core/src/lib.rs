@@ -369,27 +369,26 @@ pub struct VectorsSummary {
     pub completed_at: Option<String>,
 }
 
-/// Read the on-disk vectors summary, or `None` if `vectors.sqlite` is absent.
-/// Best-effort: a present-but-unreadable DB yields `count = 0` with empty meta
-/// rather than an error, so the status endpoint never fails because of it.
+/// Read the on-disk vectors summary, or `None` if there is no usable vectors DB.
+/// Returns `None` not only when `vectors.sqlite` is absent but also when it
+/// cannot be opened or its `entry_vectors` table cannot be counted (a corrupt /
+/// half-written file). That way the status endpoint reports "not built" — which
+/// nudges a rebuild — instead of a misleading "built, 0 vectors". The live file
+/// is published by atomic rename, never written in place, so a concurrent build
+/// cannot make a healthy DB momentarily uncountable.
 pub fn vectors_summary(paths: &ReaderPaths) -> Option<VectorsSummary> {
     if !paths.vectors_db.is_file() {
         return None;
     }
     init_sqlite_vec();
-    let conn = match Connection::open_with_flags(
-        &paths.vectors_db,
-        OpenFlags::SQLITE_OPEN_READ_ONLY,
-    ) {
-        Ok(conn) => conn,
-        Err(_) => return Some(VectorsSummary { count: 0, model: None, completed_at: None }),
-    };
+    let conn = Connection::open_with_flags(&paths.vectors_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .ok()?;
     let count: usize = conn
         .query_row("SELECT count(*) FROM entry_vectors", [], |row| {
             row.get::<_, i64>(0)
         })
-        .map(|n| n.max(0) as usize)
-        .unwrap_or(0);
+        .ok()?
+        .max(0) as usize;
     let meta = |key: &str| -> Option<String> {
         conn.query_row(
             "SELECT value FROM meta WHERE key = ?",
