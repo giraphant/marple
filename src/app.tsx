@@ -172,16 +172,6 @@ export function App() {
   const syncingRef = useRef(false);
   const syncTimerRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    fetchIndex().then(es => {
-      setEntries(es);
-      for (const e of es) knownMtimesRef.current.set(e.path, e.mtime ?? null);
-    }).catch(e => {
-      window.alert('加载索引失败：' + (e instanceof Error ? e.message : String(e)));
-      setEntries([]);
-    });
-  }, []);
-
   // Cross-window / external freshness, the file-browser way: list the vault
   // (cheap path+mtime), live-parse only files that are new or changed since we
   // last saw them, and drop files that disappeared. No 12MB index refetch, no
@@ -223,6 +213,20 @@ export function App() {
       }
     }, 250);
   }, []);
+
+  useEffect(() => {
+    fetchIndex().then(es => {
+      setEntries(es);
+      for (const e of es) knownMtimesRef.current.set(e.path, e.mtime ?? null);
+      // Reconcile the cache against the live file system immediately — picks up
+      // files added/changed/deleted since the last reindex (or while this window
+      // was closed) without waiting for a focus/storage event.
+      syncFromFiles();
+    }).catch(e => {
+      window.alert('加载索引失败：' + (e instanceof Error ? e.message : String(e)));
+      setEntries([]);
+    });
+  }, [syncFromFiles]);
 
   useEffect(() => {
     const unsubscribe = subscribeVaultChanges({
@@ -388,9 +392,27 @@ export function App() {
 
   const filtered = useMemo(() => {
     if (!query.trim()) return localFiltered;
-    if (listSearch && listSearch.key === listSearchKey && !listSearch.loading) return listSearch.entries;
-    return localFiltered;
-  }, [localFiltered, listSearch, listSearchKey, query]);
+    const serverReady = listSearch && listSearch.key === listSearchKey && !listSearch.loading;
+    if (!serverReady) return localFiltered;
+    // The server FTS reads the (possibly stale) DB cache. Reconcile against the
+    // live file-browser entries: keep server hits only if the path still exists
+    // (drops deleted/renamed), remap to the fresh entry, then append live client
+    // matches the stale index missed (e.g. just-created notes). Order: FTS rank
+    // first (covers body matches), then any extra fresh matches.
+    const seen = new Set<string>();
+    const out: Entry[] = [];
+    for (const hit of listSearch.entries) {
+      const live = entryByPath.get(hit.path);
+      if (live && live.type === activeListType && !seen.has(hit.path)) {
+        out.push(live);
+        seen.add(hit.path);
+      }
+    }
+    for (const e of localFiltered) {
+      if (!seen.has(e.path)) { out.push(e); seen.add(e.path); }
+    }
+    return out;
+  }, [localFiltered, listSearch, listSearchKey, query, entryByPath, activeListType]);
 
   // --- tab navigation: per-tab back/forward via history cursor ---
 
