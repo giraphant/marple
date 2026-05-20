@@ -237,14 +237,14 @@
   .prose-body li::marker { color: rgb(var(--reader-marker)); font-weight: 700; }
   /* blockquote: CJK 整段加 italic 会变浏览器伪斜体（geometric slant），非常丑。
    * 仅靠左 rule + 砖红色 + 文字颜色辨识，不加 italic。 */
-  .prose-body blockquote { border-left: 3px solid rgb(var(--reader-quote)); padding-left: 1em; color: rgb(var(--reader-quote)); margin: 0.8em 0; }
+  .prose-body blockquote { border-left: 3px solid rgb(var(--reader-quote-bar)); padding-left: 1em; color: rgb(var(--reader-quote)); margin: 0.8em 0; }
   .prose-body code { background: rgb(var(--reader-code-bg)); color: rgb(var(--reader-code)); padding: 0 0.3em; border-radius: 3px; font-size: 0.9em; }
   .prose-body a { color: rgb(var(--reader-link)); font-weight: 700; }
   .prose-body del { color: rgb(var(--reader-delete)); }
   .prose-body strong { font-weight: 700; color: rgb(var(--reader-strong)); }
   /* em 保留 italic — CJK glyph 在多数字体下不会真出 italic、自然降级为彩色，
    * 西文 glyph 出真 italic。两端都能识别 emphasis。 */
-  .prose-body em { color: rgb(var(--reader-em)); font-style: italic; font-weight: 600; }
+  .prose-body em { color: rgb(var(--reader-em)); font-style: normal; font-weight: 600; }
   .prose-body hr { border: none; border-top: 1px solid rgb(var(--border-base)); margin: 1.4em 0; }
 
   .cm-list-rendered-marker {
