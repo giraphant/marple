@@ -27,15 +27,14 @@ const COMPONENT: Record<EntryType, typeof PhArticle> = {
   'note':            PhLightbulb,
 };
 
-// Light: bg-X-100 + text-X-700. Dark: muted X-950 wash + X-300 fg so the
-// chips stay legible without glowing against the warm-dark canvas.
+// Each entry type maps to its design-token pair; dark values are baked into the tokens.
 const COLORS: Record<EntryType, { bg: string; fg: string }> = {
-  'paper-analysis':  { bg: 'bg-amber-100   dark:bg-amber-950/40',   fg: 'text-amber-700   dark:text-amber-300'   },
-  'book-overview':   { bg: 'bg-emerald-100 dark:bg-emerald-950/40', fg: 'text-emerald-700 dark:text-emerald-300' },
-  'chapter-summary': { bg: 'bg-teal-100    dark:bg-teal-950/40',    fg: 'text-teal-700    dark:text-teal-300'    },
-  'author-profile':  { bg: 'bg-sky-100     dark:bg-sky-950/40',     fg: 'text-sky-700     dark:text-sky-300'     },
-  'topic-synthesis': { bg: 'bg-violet-100  dark:bg-violet-950/40',  fg: 'text-violet-700  dark:text-violet-300'  },
-  'note':            { bg: 'bg-rose-100    dark:bg-rose-950/40',    fg: 'text-rose-700    dark:text-rose-300'    },
+  'paper-analysis':  { bg: 'bg-type-paper-bg',   fg: 'text-type-paper-fg'   },
+  'book-overview':   { bg: 'bg-type-book-bg',    fg: 'text-type-book-fg'    },
+  'chapter-summary': { bg: 'bg-type-chapter-bg', fg: 'text-type-chapter-fg' },
+  'author-profile':  { bg: 'bg-type-author-bg',  fg: 'text-type-author-fg'  },
+  'topic-synthesis': { bg: 'bg-type-topic-bg',   fg: 'text-type-topic-fg'   },
+  'note':            { bg: 'bg-type-note-bg',    fg: 'text-type-note-fg'    },
 };
 
 export function TypeIcon({ type, scale = 1.3 }: Props) {
