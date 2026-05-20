@@ -50,6 +50,11 @@ export function DocView({
   const timerRef = useRef<number | null>(null);
   const statusRef = useRef<SaveStatus>('idle');
   const currentPathRef = useRef(entry.path);
+  // The body most recently handed to the save queue (or freshly loaded).
+  // Dirtiness is CONTENT-based — comparing this to the live body — never derived
+  // from the UI save status, which the queue may flip to "saved" while a newer
+  // keystroke is still only in component state.
+  const lastQueuedBodyRef = useRef('');
   bodyRef.current = body;
   statusRef.current = saveStatus;
   currentPathRef.current = entry.path;
@@ -77,7 +82,8 @@ export function DocView({
       timerRef.current = null;
     }
     if (!editablePath) return;
-    if (statusRef.current !== 'dirty') return;
+    if (bodyRef.current === lastQueuedBodyRef.current) return; // nothing new to save
+    lastQueuedBodyRef.current = bodyRef.current;
     saveQueue.request(editablePath, bodyRef.current);
   }, [editablePath, saveQueue]);
 
@@ -108,6 +114,7 @@ export function DocView({
         if (cancelled) return;
         const bodyOnly = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
         saveQueue.seedBase(path, text);
+        lastQueuedBodyRef.current = bodyOnly;
         bodyRef.current = bodyOnly;
         setBody(bodyOnly);
       } catch {
@@ -134,9 +141,12 @@ export function DocView({
     const prev = mtimeRef.current;
     mtimeRef.current = { path: entry.path, mtime: entry.mtime };
     if (prev.path === entry.path && entry.mtime !== prev.mtime) {
-      if (statusRef.current === 'idle' || statusRef.current === 'saved') {
-        reloadFromDisk();
-      }
+      // Only pull the new copy if we have nothing in progress: no un-queued
+      // local edits AND no save in flight. Otherwise the conflict guard / queue
+      // handle it without clobbering.
+      const clean = bodyRef.current === lastQueuedBodyRef.current
+        && (statusRef.current === 'idle' || statusRef.current === 'saved');
+      if (clean) reloadFromDisk();
     }
   }, [entry.path, entry.mtime, reloadFromDisk]);
 
@@ -158,7 +168,9 @@ export function DocView({
 
   useEffect(() => {
     const onUnload = (e: BeforeUnloadEvent) => {
-      if (statusRef.current === 'dirty') {
+      const unsaved = bodyRef.current !== lastQueuedBodyRef.current
+        || (statusRef.current !== 'idle' && statusRef.current !== 'saved');
+      if (unsaved) {
         e.preventDefault();
         e.returnValue = '';
       }
