@@ -1,4 +1,5 @@
 import type { Entry } from './types';
+import type { EmbedStatus } from './embedding';
 import { parseFile, serializeFile } from './frontmatter';
 
 const NOTES_DIR = 'vault/notes/';
@@ -130,17 +131,28 @@ export async function reindex(): Promise<{ tookMs: number }> {
   return { tookMs: json.tookMs ?? 0 };
 }
 
-/** Advanced/opt-in: (re)build semantic vector embeddings. Heavy — the server
- *  loads a ~2.3 GB model — so this is a separate action from the normal index
- *  rebuild and may take minutes. */
-export async function buildEmbeddings(): Promise<{ embedded: number; tookMs: number }> {
+/** Advanced/opt-in: start a background semantic-vector build. Returns
+ *  immediately — the heavy model load + embed runs server-side as a detached
+ *  job; poll {@link embeddingStatus}. `started` is false when a build was
+ *  already running (HTTP 409); the caller just keeps polling. */
+export async function triggerEmbeddings(): Promise<{ started: boolean; status: EmbedStatus }> {
   const r = await fetch('/api/embeddings', { method: 'POST' });
+  if (r.status === 202 || r.status === 409) {
+    const status = await r.json() as EmbedStatus;
+    return { started: r.status === 202, status };
+  }
+  const msg = await r.text().catch(() => '');
+  throw new Error(`trigger embeddings failed: ${r.status} ${msg}`);
+}
+
+/** Poll the embedding job state + the truthful on-disk vectors summary. */
+export async function embeddingStatus(): Promise<EmbedStatus> {
+  const r = await fetch('/api/embeddings/status');
   if (!r.ok) {
     const msg = await r.text().catch(() => '');
-    throw new Error(`build embeddings failed: ${r.status} ${msg}`);
+    throw new Error(`embedding status failed: ${r.status} ${msg}`);
   }
-  const json = await r.json().catch(() => ({} as { embedded?: number; tookMs?: number }));
-  return { embedded: json.embedded ?? 0, tookMs: json.tookMs ?? 0 };
+  return await r.json() as EmbedStatus;
 }
 
 export async function purgeTrash(name: string): Promise<void> {
