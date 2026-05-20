@@ -2,7 +2,7 @@ import { useMemo, useState, useRef, useEffect } from 'preact/hooks';
 import type { JSX, ComponentChildren } from 'preact';
 import type { Entry, EntryType } from '../types';
 import { splitAuthors } from '../wiki';
-import { patchFrontmatter, applyFmToEntry } from '../api';
+import { patchFrontmatter, applyFmToEntry, openPdfExternal } from '../api';
 import { ratingToStars } from '../frontmatter';
 import { buildCitation, CITATION_FORMATS, type CitationFormat } from '../citation';
 import { MiniRow } from './MiniRow';
@@ -255,9 +255,14 @@ function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultFormat: Cit
     }
   };
 
-  const openPdf = () => {
+  const openPdf = async () => {
     if (!entry.pdf_slug) return;
-    window.open(`/sources/${entry.pdf_slug}.pdf`, '_blank', 'noopener');
+    setErr(null);
+    try {
+      await openPdfExternal(entry.pdf_slug);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '打开 PDF 失败');
+    }
   };
 
   const activeMeta = CITATION_FORMATS.find(f => f.id === format);
@@ -310,7 +315,7 @@ function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultFormat: Cit
         <button
           onClick={openPdf}
           class="px-2 py-1 rounded border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
-          title={`打开 sources/${entry.pdf_slug}.pdf`}
+          title={`用系统默认 PDF 阅读器打开 sources/${entry.pdf_slug}.pdf`}
         >打开 PDF</button>
       )}
       {err && <span class="text-red-600 dark:text-red-400 text-[10px]">{err}</span>}

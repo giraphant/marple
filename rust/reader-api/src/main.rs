@@ -56,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/entry", get(api_entry))
         .route("/api/search", get(api_search))
         .route("/api/reindex", post(api_reindex))
+        .route("/api/open-pdf", post(api_open_pdf))
         .route("/api/embeddings", post(api_embeddings))
         .route("/api/embeddings/status", get(api_embeddings_status))
         .route("/api/trash", get(api_trash_list))
@@ -88,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
     println!("GET    /api/entry?path=...     -> live-parse one vault file's metadata");
     println!("GET    /api/search?q=...       -> search entries with SQLite FTS");
     println!("POST   /api/reindex            -> rebuild data/index.sqlite with Rust");
+    println!("POST   /api/open-pdf           -> open sources/<slug>.pdf in the system PDF app");
     println!("POST   /api/embeddings         -> start background semantic-vector build (202)");
     println!("GET    /api/embeddings/status  -> poll embedding job + on-disk vectors summary");
     println!("GET    /vault/**/*.md          -> read vault markdown");
@@ -211,6 +213,29 @@ async fn api_reindex(State(state): State<AppState>) -> Result<Json<serde_json::V
         "sourcePdfs": stats.source_pdfs,
         "skippedFrontmatterWithoutType": stats.skipped_frontmatter_without_type
     })))
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenPdfParams {
+    slug: String,
+}
+
+/// Open a vault PDF with the host's default PDF application instead of the
+/// browser (QUA-55). Resolves `sources/<slug>.pdf` under the sources tree, then
+/// hands the absolute path to the OS opener as a single argument (no shell).
+/// Runs on a blocking thread because the opener is invoked synchronously.
+async fn api_open_pdf(
+    State(state): State<AppState>,
+    Json(params): Json<OpenPdfParams>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let paths = state.paths.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), ReaderError> {
+        let path = reader_core::resolve_source_pdf(&paths, &params.slug)?;
+        reader_core::open_in_system_app(&path)
+    })
+    .await
+    .map_err(|err| AppError(ReaderError::Other(err.into())))??;
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// Opt-in, heavy: (re)build the semantic vector embeddings. Loads the ~2.3 GB

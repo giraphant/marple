@@ -809,6 +809,57 @@ pub fn resolve_get_path(paths: &ReaderPaths, url_path: &str) -> ReaderResult<Pat
     Ok(path)
 }
 
+/// Resolve a PDF slug to its on-disk file under `sources/`. The slug is supplied
+/// by the client (build-index generates `pdf_slug`, but it round-trips through
+/// the browser, so treat it as untrusted): join `sources/<slug>.pdf`,
+/// canonicalize, and require the result to stay under `sources/`, end in `.pdf`,
+/// and be an existing file. Pure resolution with no side effects, so it can be
+/// unit-tested without launching anything.
+pub fn resolve_source_pdf(paths: &ReaderPaths, slug: &str) -> ReaderResult<PathBuf> {
+    let slug = slug.trim();
+    if slug.is_empty() {
+        return Err(ReaderError::BadRequest("empty pdf slug".to_string()));
+    }
+    let path = safe_join(&paths.workspace_root, &format!("sources/{slug}.pdf"))?;
+    ensure_under(&path, &paths.sources, "pdf must live under sources/")?;
+    if path.extension().and_then(|e| e.to_str()) != Some("pdf") {
+        return Err(ReaderError::Unsupported("only .pdf files allowed".to_string()));
+    }
+    if !path.is_file() {
+        return Err(ReaderError::NotFound("pdf not found".to_string()));
+    }
+    Ok(path)
+}
+
+/// Open an already-resolved file with the OS default application. macOS uses
+/// `open`, Linux `xdg-open`; other platforms return `Unsupported` (we don't ship
+/// an untested Windows `cmd /C start`, whose argument re-parsing is sensitive to
+/// crafted paths). The path is passed as a single `Command` argument — never via
+/// a shell — so there is no command-injection surface. `.status()` waits for the
+/// launcher (which hands off to the OS and returns immediately) and reaps the
+/// child, so no zombie is left behind.
+pub fn open_in_system_app(path: &Path) -> ReaderResult<()> {
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "linux") {
+        "xdg-open"
+    } else {
+        return Err(ReaderError::Unsupported(
+            "opening files in the system app is only supported on macOS and Linux".to_string(),
+        ));
+    };
+    let status = std::process::Command::new(program)
+        .arg(path)
+        .status()
+        .map_err(|e| ReaderError::Other(anyhow::anyhow!("failed to launch {program}: {e}")))?;
+    if !status.success() {
+        return Err(ReaderError::Other(anyhow::anyhow!(
+            "{program} exited with status {status}"
+        )));
+    }
+    Ok(())
+}
+
 pub fn put_markdown(paths: &ReaderPaths, url_path: &str, body: &[u8]) -> ReaderResult<f64> {
     if body.len() > 5 * 1024 * 1024 {
         return Err(ReaderError::BadRequest("payload too large".to_string()));
