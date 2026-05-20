@@ -1,6 +1,7 @@
 import type { EntryType, TypeMeta } from './types';
 import { TYPES } from './types';
 import type { CitationFormat } from './citation';
+import type { SortKey, SortDir } from './list-sort';
 
 export type FontFamily = 'sans' | 'serif' | 'mono';
 export type Theme = 'light' | 'dark' | 'system';
@@ -36,6 +37,11 @@ export interface Settings {
    * labels disappear; rows become square icon-buttons with hover tooltips.
    * Toggled by Cmd+B or the chevron at the sidebar's top. */
   sidebarCollapsed?: boolean;
+
+  /** Per-type list sort (QUA-59). Persisted so the chosen ordering sticks
+   * across sessions. 'default' preserves index/relevance order. */
+  sortKey?: SortKey;
+  sortDir?: SortDir;
 }
 
 const DEFAULTS: Settings = {

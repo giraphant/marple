@@ -3,6 +3,7 @@ import type { Entry, EntryType, Tab, TabContent } from './types';
 import { activeContent } from './types';
 import { buildWikiIndex, splitAuthors } from './wiki';
 import { buildSearchIndex, searchDocuments } from './search';
+import { sortEntries, applyExtraFilters, defaultDirFor, type SortKey } from './list-sort';
 import { ListView } from './components/ListView';
 import { DocView } from './components/DocView';
 import { TrashView } from './components/TrashView';
@@ -49,6 +50,8 @@ export function App() {
   const [query, setQuery] = useState('');
   const [minRating, setMinRating] = useState(0);
   const [themeFilter, setThemeFilter] = useState<string | null>(null);
+  const [authorFilter, setAuthorFilter] = useState('');
+  const [hasPdfOnly, setHasPdfOnly] = useState(false);
   const [limit, setLimit] = useState(300);
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -128,6 +131,28 @@ export function App() {
   }, []);
 
   const sidebarTypes = useMemo(() => orderedTypes(settings), [settings]);
+
+  // Per-type list sort (QUA-59) — persisted in settings so it sticks.
+  const sortKey: SortKey = settings.sortKey ?? 'default';
+  const sortDir = settings.sortDir ?? 'desc';
+  const onSortKeyChange = useCallback((key: SortKey) => {
+    setSettings(prev => {
+      const merged: Settings = {
+        ...prev, sortKey: key,
+        sortDir: key === 'default' ? 'desc' : defaultDirFor(key),
+      };
+      saveSettings(merged);
+      return merged;
+    });
+  }, []);
+  const onToggleSortDir = useCallback(() => {
+    setSettings(prev => {
+      const merged: Settings = { ...prev, sortDir: (prev.sortDir ?? 'desc') === 'asc' ? 'desc' : 'asc' };
+      saveSettings(merged);
+      return merged;
+    });
+  }, []);
+  const onClearExtraFilters = useCallback(() => { setAuthorFilter(''); setHasPdfOnly(false); }, []);
 
   const onReorderTypes = useCallback((next: EntryType[]) => {
     setSettings(prev => {
@@ -333,7 +358,9 @@ export function App() {
     return s.size;
   }, [entries]);
 
-  useEffect(() => { setLimit(300); setThemeFilter(null); }, [activeListType]);
+  useEffect(() => {
+    setLimit(300); setThemeFilter(null); setAuthorFilter(''); setHasPdfOnly(false);
+  }, [activeListType]);
 
   const typeEntries = useMemo(
     () => activeListType ? (entries ?? []).filter(e => e.type === activeListType) : [],
@@ -342,21 +369,26 @@ export function App() {
 
   const localFiltered = useMemo(() => {
     if (!activeListType) return [];
-    // Rating/theme filter on plain entries — no search index needed for the
-    // common no-query list path.
-    const base = typeEntries.filter(e => {
-      if (minRating && (e.rating_score || 0) < minRating) return false;
-      if (themeFilter && !(e.themes ?? []).some(t => t === themeFilter)) return false;
-      return true;
-    });
+    // Rating/theme/author/PDF filter on plain entries — no search index needed
+    // for the common no-query list path.
+    const base = applyExtraFilters(
+      typeEntries.filter(e => {
+        if (minRating && (e.rating_score || 0) < minRating) return false;
+        if (themeFilter && !(e.themes ?? []).some(t => t === themeFilter)) return false;
+        return true;
+      }),
+      { author: authorFilter, hasPdfOnly },
+    );
     const q = query.trim();
-    if (!q) return base;
+    // No query: sort the filtered list (QUA-59). 'default' leaves index order.
+    if (!q) return sortEntries(base, sortKey, sortDir);
     // Query: rank via the (lazily-built) search index, restricted to this type
-    // + the active filters. Instant client fallback ahead of server FTS.
+    // + the active filters. Keep relevance order unless the user picked a sort.
     const allowed = new Set(base.map(e => e.path));
     const docs = searchIndex.filter(doc => allowed.has(doc.entry.path));
-    return searchDocuments(docs, q).map(result => result.entry);
-  }, [typeEntries, searchIndex, query, minRating, themeFilter, activeListType]);
+    const ranked = searchDocuments(docs, q).map(result => result.entry);
+    return sortKey === 'default' ? ranked : sortEntries(ranked, sortKey, sortDir);
+  }, [typeEntries, searchIndex, query, minRating, themeFilter, authorFilter, hasPdfOnly, sortKey, sortDir, activeListType]);
 
   const listSearchKey = useMemo(() => JSON.stringify({
     q: query.trim(),
@@ -436,8 +468,11 @@ export function App() {
     for (const e of localFiltered) {
       if (!seen.has(e.path)) { out.push(e); seen.add(e.path); }
     }
-    return out;
-  }, [localFiltered, listSearch, listSearchKey, query, entryByPath, activeListType]);
+    // Server FTS doesn't know about the author / has-PDF filters, so apply them
+    // (and any explicit sort) to the merged result. 'default' keeps FTS rank.
+    const refined = applyExtraFilters(out, { author: authorFilter, hasPdfOnly });
+    return sortKey === 'default' ? refined : sortEntries(refined, sortKey, sortDir);
+  }, [localFiltered, listSearch, listSearchKey, query, entryByPath, activeListType, authorFilter, hasPdfOnly, sortKey, sortDir]);
 
   // --- tab navigation: per-tab back/forward via history cursor ---
 
@@ -744,6 +779,15 @@ export function App() {
             query={query}
             minRating={minRating}
             themeFilter={themeFilter}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            authorFilter={authorFilter}
+            hasPdfOnly={hasPdfOnly}
+            onSortKeyChange={onSortKeyChange}
+            onToggleSortDir={onToggleSortDir}
+            onAuthorFilterChange={setAuthorFilter}
+            onToggleHasPdf={setHasPdfOnly}
+            onClearExtraFilters={onClearExtraFilters}
             limit={limit}
             searchLoading={!!query.trim() && !!listSearch && listSearch.key === listSearchKey && listSearch.loading}
             searchError={listSearch && listSearch.key === listSearchKey ? listSearch.error : null}

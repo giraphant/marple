@@ -1,5 +1,7 @@
+import { useState, useRef, useEffect } from 'preact/hooks';
 import type { Entry, EntryType } from '../types';
 import { TYPE_BY_ID } from '../types';
+import { SORT_OPTIONS, type SortKey, type SortDir } from '../list-sort';
 import { Card } from './Card';
 import { Dashboard } from './Dashboard';
 import { Icon } from './Icon';
@@ -12,6 +14,10 @@ interface Props {
   query: string;
   minRating: number;
   themeFilter: string | null;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  authorFilter: string;
+  hasPdfOnly: boolean;
   limit: number;
   searchLoading: boolean;
   searchError: string | null;
@@ -21,19 +27,28 @@ interface Props {
   onClearQuery: () => void;
   onMinRatingChange: (n: number) => void;
   onClearTheme: () => void;
+  onSortKeyChange: (key: SortKey) => void;
+  onToggleSortDir: () => void;
+  onAuthorFilterChange: (v: string) => void;
+  onToggleHasPdf: (v: boolean) => void;
+  onClearExtraFilters: () => void;
   onLoadMore: () => void;
   onCardClick: (entry: Entry, modifiers: { meta: boolean }) => void;
   onThemeClick: (theme: string) => void;
 }
 
 export function ListView({
-  entries: _entries, type, typeEntries, filtered, query, minRating, themeFilter, limit,
+  entries: _entries, type, typeEntries, filtered, query, minRating, themeFilter,
+  sortKey, sortDir, authorFilter, hasPdfOnly, limit,
   searchLoading, searchError, searchMode, onToggleSearchMode,
-  onOpenSearch, onClearQuery, onMinRatingChange, onClearTheme, onLoadMore, onCardClick, onThemeClick,
+  onOpenSearch, onClearQuery, onMinRatingChange, onClearTheme,
+  onSortKeyChange, onToggleSortDir, onAuthorFilterChange, onToggleHasPdf, onClearExtraFilters,
+  onLoadMore, onCardClick, onThemeClick,
 }: Props) {
   void _entries;
   const typeMeta = TYPE_BY_ID[type];
-  const isFiltered = !!(query || themeFilter || minRating);
+  const extraActive = !!(authorFilter.trim() || hasPdfOnly);
+  const isFiltered = !!(query || themeFilter || minRating || extraActive);
   const visible = query ? filtered : filtered.slice(0, limit);
 
   return (
@@ -102,6 +117,34 @@ export function ListView({
             {searchMode === 'hybrid' ? '深度' : '快速'}
           </button>
 
+          <div class="flex items-center gap-1 text-[11px] text-secondary">
+            <span>排序</span>
+            <select
+              value={sortKey}
+              onChange={(e) => onSortKeyChange((e.target as HTMLSelectElement).value as SortKey)}
+              class="bg-surface border border-base rounded px-1 py-0.5 text-[11px] text-secondary focus:outline-none"
+            >
+              {SORT_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+            {sortKey !== 'default' && (
+              <button
+                onClick={onToggleSortDir}
+                title={sortDir === 'asc' ? '升序（点击切降序）' : '降序（点击切升序）'}
+                class="px-1.5 py-0.5 rounded hover:bg-surface-2 tabular-nums"
+              >{sortDir === 'asc' ? '↑' : '↓'}</button>
+            )}
+          </div>
+
+          <FilterControl
+            type={type}
+            authorFilter={authorFilter}
+            hasPdfOnly={hasPdfOnly}
+            active={extraActive}
+            onAuthorFilterChange={onAuthorFilterChange}
+            onToggleHasPdf={onToggleHasPdf}
+            onClear={onClearExtraFilters}
+          />
+
           {searchLoading && (
             <div class="text-[11px] text-muted">全文搜索中…</div>
           )}
@@ -160,6 +203,80 @@ export function ListView({
           )
         }
       </main>
+    </div>
+  );
+}
+
+/** QUA-59: author / has-PDF filters behind a small popover so the header stays
+ *  tidy. "有 PDF" only applies to papers and books (the types build-index scans
+ *  for a matching source PDF). */
+function FilterControl({
+  type, authorFilter, hasPdfOnly, active, onAuthorFilterChange, onToggleHasPdf, onClear,
+}: {
+  type: EntryType;
+  authorFilter: string;
+  hasPdfOnly: boolean;
+  active: boolean;
+  onAuthorFilterChange: (v: string) => void;
+  onToggleHasPdf: (v: boolean) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const showPdf = type === 'paper-analysis' || type === 'book-overview';
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  return (
+    <div class="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        class={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border transition ${
+          active
+            ? 'border-amber-300 dark:border-amber-700 bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300'
+            : 'border-base text-secondary hover:bg-surface-2'
+        }`}
+        title="筛选（作者 / PDF）"
+      >
+        <Icon name="funnel" size={12} />
+        筛选{active && <span class="text-amber-600 dark:text-amber-400">•</span>}
+      </button>
+      {open && (
+        <div class="absolute left-0 top-full mt-1 z-20 bg-surface border border-base rounded shadow-lg p-3 w-[220px] space-y-2.5">
+          <label class="block text-[11px] text-muted">
+            作者
+            <input
+              type="text"
+              value={authorFilter}
+              placeholder="按作者筛选"
+              onInput={(e) => onAuthorFilterChange((e.target as HTMLInputElement).value)}
+              class="mt-1 w-full px-2 py-1 border border-base rounded text-[12px] bg-page text-secondary focus:outline-none focus:border-amber-400 dark:focus:border-amber-600"
+            />
+          </label>
+          {showPdf && (
+            <label class="flex items-center gap-1.5 text-[11px] text-secondary cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hasPdfOnly}
+                onChange={(e) => onToggleHasPdf((e.target as HTMLInputElement).checked)}
+              />
+              仅含 PDF
+            </label>
+          )}
+          {active && (
+            <button onClick={onClear} class="text-[11px] text-muted hover:text-primary">
+              清空筛选
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
