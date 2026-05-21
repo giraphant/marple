@@ -7,6 +7,9 @@ import { Card } from './Card';
 import { Icon, type IconName } from './Icon';
 import { TypeIcon } from './TypeIcon';
 
+type ViewKey = 'all' | 'recent' | 'top';
+const VIEW_SEGMENTS: [ViewKey, string][] = [['all', '全部'], ['recent', '近期'], ['top', '高分']];
+
 type GroupKey = 'none' | 'year' | 'rating' | 'theme' | 'added';
 const GROUP_OPTIONS: { key: GroupKey; label: string }[] = [
   { key: 'none', label: '不分组' },
@@ -60,7 +63,13 @@ export function ListView({
   const extraActive = !!(authorFilter.trim() || hasPdfOnly);
   const filterActive = minRating > 0 || extraActive;
   const showPdf = type === 'paper-analysis' || type === 'book-overview';
-  const visible = query ? filtered : filtered.slice(0, limit);
+  const [view, setView] = useState<ViewKey>('all');
+  const viewSorted = useMemo(() => {
+    if (view === 'recent') return [...filtered].sort((a, b) => (b.added || 0) - (a.added || 0));
+    if (view === 'top') return [...filtered].sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0));
+    return filtered;
+  }, [filtered, view]);
+  const visible = query ? viewSorted : viewSorted.slice(0, limit);
 
   const [groupBy, setGroupBy] = useState<GroupKey>('none');
   const groups = useMemo(() => buildGroups(visible, groupBy), [visible, groupBy]);
@@ -93,16 +102,24 @@ export function ListView({
         {/* Pinned to 88px so this row's bottom edge meets the sidebar's 88px
             quick-actions divider — a bold title fills the height rather than
             leaving it empty. */}
-        <div class="px-8 h-[87px] flex items-center justify-between gap-4">
-          <div class="flex items-center gap-3 min-w-0">
+        <div class="px-8 h-[87px] flex items-center gap-4">
+          <div class="flex items-center gap-3 min-w-0 shrink-0">
             <TypeIcon type={type} scale={1.5} />
-            <div class="min-w-0">
-              <div class="text-[18px] font-bold tracking-[-0.01em] text-primary truncate leading-tight">{typeMeta?.label ?? type}</div>
-              <div class="text-[11.5px] text-muted mt-0.5"><span class="tabular-nums">{typeEntries.length}</span> 篇分析</div>
-            </div>
+            <div class="text-[18px] font-bold tracking-[-0.01em] text-primary truncate">{typeMeta?.label ?? type}</div>
           </div>
 
-          <div class="shrink-0 flex items-center gap-1.5">
+          {/* Quick-view segments (扩展位:之后挂固定筛选视图) */}
+          <div class="flex items-center gap-0.5 bg-surface-2 rounded-lg p-0.5 text-[12px] shrink-0">
+            {VIEW_SEGMENTS.map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                class={`px-2.5 py-1 rounded-md transition ${view === v ? 'bg-surface text-primary shadow-soft-sm' : 'text-secondary hover:text-primary'}`}
+              >{label}</button>
+            ))}
+          </div>
+
+          <div class="ml-auto shrink-0 flex items-center gap-1.5">
             <button
               onClick={onOpenSearch}
               title="搜索 (⌘K)"
@@ -111,9 +128,9 @@ export function ListView({
             >
               <Icon name="magnifying-glass" size={17} />
             </button>
-            {filtered.length !== typeEntries.length && (
-              <span class="text-[12px] text-muted tabular-nums px-1"># {filtered.length}</span>
-            )}
+            <span class="text-[12px] text-muted tabular-nums px-1">
+              # {filtered.length}{filtered.length !== typeEntries.length ? ` / ${typeEntries.length}` : ''}
+            </span>
 
             <Pop icon="funnel" active={filterActive} title="筛选（评分 / 作者 / PDF）" width="w-[230px]">
               <div class="space-y-3">
