@@ -139,6 +139,20 @@ export async function reindex(): Promise<{ tookMs: number; skipped: SkippedFile[
   return { tookMs: json.tookMs ?? 0, skipped: json.skipped ?? [] };
 }
 
+/** Cheap delta-sync: ask the server to bring the index into agreement with the
+ *  vault by diffing per-file mtimes (new/changed/deleted), instead of a full
+ *  rebuild. Called on window focus so quick search reflects external edits made
+ *  while away. */
+export async function reconcile(): Promise<{ upserted: number; removed: number; unchanged: number }> {
+  const r = await fetch('/api/reconcile', { method: 'POST' });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`reconcile failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { upserted?: number; removed?: number; unchanged?: number }));
+  return { upserted: json.upserted ?? 0, removed: json.removed ?? 0, unchanged: json.unchanged ?? 0 };
+}
+
 /** Advanced/opt-in: start a background semantic-vector build. Returns
  *  immediately — the heavy model load + embed runs server-side as a detached
  *  job; poll {@link embeddingStatus}. `started` is false when a build was

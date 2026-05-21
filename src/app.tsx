@@ -15,7 +15,7 @@ import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import {
   postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
-  newIdeaDraft, ideaEntryFromDraft, reindex, fetchIndex, searchIndex as searchServerIndex,
+  newIdeaDraft, ideaEntryFromDraft, reindex, reconcile, fetchIndex, searchIndex as searchServerIndex,
   listFiles, fetchEntry,
 } from './api';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
@@ -203,6 +203,7 @@ export function App() {
   const lastSyncMtimeRef = useRef(0);
   const syncingRef = useRef(false);
   const syncTimerRef = useRef<number | null>(null);
+  const lastReconcileRef = useRef(0);
 
   // Cross-window / external freshness, the file-browser way. Pull only the
   // delta (files with mtime > lastSync) and live-parse just the ones whose
@@ -289,7 +290,18 @@ export function App() {
       onVaultChanged: syncFromFiles,
       onSettingsChanged: () => setSettings(loadSettings()),
     });
-    const onVisible = () => { if (document.visibilityState === 'visible') syncFromFiles(); };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      syncFromFiles();
+      // Also delta-sync the server FTS so quick search reflects external edits
+      // the instant you switch back — best-effort, throttled so rapid window
+      // toggles don't hammer it (the background watcher covers steady state).
+      const now = Date.now();
+      if (now - lastReconcileRef.current > 3000) {
+        lastReconcileRef.current = now;
+        reconcile().catch(() => {});
+      }
+    };
     window.addEventListener('focus', onVisible);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
