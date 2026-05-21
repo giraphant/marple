@@ -54,7 +54,7 @@ export function ListView({
   return (
     <div class="flex-1 flex flex-col min-h-0">
       <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
-        <div class="px-8 pt-5 pb-2.5 flex items-center justify-between gap-4">
+        <div class="px-8 pt-3.5 pb-2.5 flex items-center justify-between gap-4">
           <div class="flex items-baseline gap-2.5 min-w-0">
             <div class="text-[22px] font-bold tracking-[-0.02em] text-primary truncate">
               {typeMeta?.label ?? type}
@@ -94,7 +94,7 @@ export function ListView({
           )}
         </div>
 
-        <div class="px-8 pb-3 flex items-center gap-3 flex-wrap">
+        <div class="px-8 pb-1.5 flex items-center gap-3 flex-wrap">
           <div class="flex items-center gap-1 text-[11px] text-secondary">
             <span>评分 ≥</span>
             {[0, 1, 2, 3, 4].map(n => (
