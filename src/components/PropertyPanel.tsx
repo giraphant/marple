@@ -297,46 +297,46 @@ export function ActionsRow({ entry, defaultFormat, hasTranslation }: { entry: En
 
   return (
     <div class="flex items-center gap-2 -mt-1 text-[11px] flex-wrap">
-      <div class="inline-flex rounded-lg border border-base bg-surface overflow-hidden">
-        <button
-          onClick={copyCitation}
-          class="px-2 py-1 hover:bg-page text-secondary hover:text-primary transition"
-          title={`格式：${activeMeta?.label ?? format}\n\n预览：${preview.slice(0, 200) || '(字段不全)'}`}
-        >
-          {copied ? '✓ 已复制' : '复制引用'}
-        </button>
-        <div class="relative" ref={menuRef}>
+      <div class="relative" ref={menuRef}>
+        <div class="inline-flex rounded-lg border border-base bg-surface overflow-hidden">
+          <button
+            onClick={copyCitation}
+            class="px-2 py-1 hover:bg-page text-secondary hover:text-primary transition"
+            title={`格式：${activeMeta?.label ?? format}\n\n预览：${preview.slice(0, 200) || '(字段不全)'}`}
+          >
+            {copied ? '✓ 已复制' : '复制引用'}
+          </button>
           <button
             onClick={() => setMenuOpen(v => !v)}
             class="px-1.5 py-1 border-l border-base hover:bg-page text-muted hover:text-primary transition"
             title="切换引用格式"
             aria-label="切换引用格式"
           >▾</button>
-          {menuOpen && (
-            <div class="absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded-xl shadow-soft-lg py-1 w-[260px]">
-              {CITATION_FORMATS.map(f => {
-                const isActive = f.id === format;
-                const ex = buildCitation(entry, f.id);
-                return (
-                  <button
-                    key={f.id}
-                    onClick={() => { setFormat(f.id); setMenuOpen(false); }}
-                    class={`w-full text-left px-3 py-1.5 hover:bg-page ${isActive ? 'bg-page' : ''}`}
-                  >
-                    <div class="text-[12px] text-primary flex items-center gap-1.5">
-                      <span class={`inline-block w-1 h-1 rounded-full ${isActive ? 'bg-accent' : 'bg-transparent'}`} />
-                      {f.label}
-                      <span class="text-muted text-[10px] ml-1">{f.hint}</span>
-                    </div>
-                    <div class="text-[11px] text-muted mt-0.5 truncate">
-                      {ex || <span class="text-muted">字段不全</span>}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
         </div>
+        {menuOpen && (
+          <div class="absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded-xl shadow-soft-lg py-1 w-[260px]">
+            {CITATION_FORMATS.map(f => {
+              const isActive = f.id === format;
+              const ex = buildCitation(entry, f.id);
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => { setFormat(f.id); setMenuOpen(false); }}
+                  class={`w-full text-left px-3 py-1.5 hover:bg-page ${isActive ? 'bg-page' : ''}`}
+                >
+                  <div class="text-[12px] text-primary flex items-center gap-1.5">
+                    <span class={`inline-block w-1 h-1 rounded-full ${isActive ? 'bg-accent' : 'bg-transparent'}`} />
+                    {f.label}
+                    <span class="text-muted text-[10px] ml-1">{f.hint}</span>
+                  </div>
+                  <div class="text-[11px] text-muted mt-0.5 truncate">
+                    {ex || <span class="text-muted">字段不全</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
       {readTargets.length === 1 && (
         <button
@@ -345,30 +345,30 @@ export function ActionsRow({ entry, defaultFormat, hasTranslation }: { entry: En
         >{readTargets[0].label}</button>
       )}
       {readTargets.length >= 2 && (
-        <div class="inline-flex rounded-lg border border-base bg-surface overflow-hidden">
-          <button
-            onClick={readTargets[0].run}
-            class="px-2 py-1 hover:bg-page text-secondary hover:text-primary transition"
-          >{readTargets[0].label}</button>
-          <div class="relative" ref={readMenuRef}>
+        <div class="relative" ref={readMenuRef}>
+          <div class="inline-flex rounded-lg border border-base bg-surface overflow-hidden">
+            <button
+              onClick={readTargets[0].run}
+              class="px-2 py-1 hover:bg-page text-secondary hover:text-primary transition"
+            >{readTargets[0].label}</button>
             <button
               onClick={() => setReadMenuOpen(v => !v)}
               class="px-1.5 py-1 border-l border-base hover:bg-page text-muted hover:text-primary transition"
               title="其它阅读方式"
               aria-label="其它阅读方式"
             >▾</button>
-            {readMenuOpen && (
-              <div class="absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded-xl shadow-soft-lg py-1 w-[140px]">
-                {readTargets.slice(1).map(t => (
-                  <button
-                    key={t.label}
-                    onClick={() => { t.run(); setReadMenuOpen(false); }}
-                    class="w-full text-left px-3 py-1.5 text-[12px] text-primary hover:bg-page"
-                  >{t.label}</button>
-                ))}
-              </div>
-            )}
           </div>
+          {readMenuOpen && (
+            <div class="absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded-xl shadow-soft-lg py-1 w-[140px]">
+              {readTargets.slice(1).map(t => (
+                <button
+                  key={t.label}
+                  onClick={() => { t.run(); setReadMenuOpen(false); }}
+                  class="w-full text-left px-3 py-1.5 text-[12px] text-primary hover:bg-page"
+                >{t.label}</button>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {err && <span class="text-danger text-[10px]">{err}</span>}
