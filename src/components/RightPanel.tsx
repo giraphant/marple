@@ -86,7 +86,7 @@ export function RightPanel({
           onClick={() => setCollapsed(false)}
           title="展开面板"
           class="p-1.5 rounded-lg text-muted hover:text-primary hover:bg-surface-2"
-        ><Icon name="caret-left" size={14} /></button>
+        ><Icon name="sidebar" size={16} class="-scale-x-100" /></button>
         <div class="w-5 border-t border-base my-1" />
         {TABS.map(t => (
           <button
@@ -129,7 +129,7 @@ export function RightPanel({
           onClick={() => setCollapsed(true)}
           title="折叠面板"
           class="p-1.5 rounded-lg text-muted hover:text-primary hover:bg-surface-2"
-        ><Icon name="caret-right" size={14} /></button>
+        ><Icon name="sidebar" size={16} class="-scale-x-100" /></button>
       </div>
 
       <div class="flex-1 overflow-auto scrollbar-thin min-h-0">

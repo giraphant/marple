@@ -99,7 +99,7 @@ export function Sidebar({
           aria-label={collapsed ? '展开侧栏' : '折叠侧栏'}
           class="text-muted hover:text-primary p-1 inline-flex items-center rounded hover:bg-hover/60"
         >
-          <Icon name={collapsed ? 'caret-right' : 'caret-left'} size={14} />
+          <Icon name="sidebar" size={16} />
         </button>
       </div>
 

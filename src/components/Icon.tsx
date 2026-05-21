@@ -23,6 +23,7 @@ import PhFunnel from '~icons/ph/funnel';
 import PhListBullets from '~icons/ph/list-bullets';
 import PhInfo from '~icons/ph/info';
 import PhChartBar from '~icons/ph/chart-bar';
+import PhSidebarSimple from '~icons/ph/sidebar-simple';
 
 export type IconName =
   | 'plus'
@@ -39,7 +40,8 @@ export type IconName =
   | 'funnel'
   | 'list-bullets'
   | 'info'
-  | 'chart-bar';
+  | 'chart-bar'
+  | 'sidebar';
 
 const COMPONENT: Record<IconName, typeof PhPlus> = {
   plus: PhPlus,
@@ -57,6 +59,7 @@ const COMPONENT: Record<IconName, typeof PhPlus> = {
   'list-bullets': PhListBullets,
   info: PhInfo,
   'chart-bar': PhChartBar,
+  sidebar: PhSidebarSimple,
 };
 
 interface Props {
