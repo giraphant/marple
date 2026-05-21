@@ -54,7 +54,7 @@ export function ListView({
   return (
     <div class="flex-1 flex flex-col min-h-0">
       <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
-        <div class="px-8 py-4 flex items-center gap-4 flex-wrap">
+        <div class="px-8 pt-5 pb-2.5 flex items-center justify-between gap-4">
           <div class="flex items-baseline gap-2.5 min-w-0">
             <div class="text-[22px] font-bold tracking-[-0.02em] text-primary truncate">
               {typeMeta?.label ?? type}
@@ -65,11 +65,11 @@ export function ListView({
           </div>
 
           {query ? (
-            <div class="inline-flex items-center gap-1">
+            <div class="inline-flex items-center gap-1 shrink-0">
               <button
                 onClick={onOpenSearch}
                 title="点击修改 (⌘K)"
-                class="inline-flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-accent-bg text-accent-text border border-accent/30 hover:bg-accent-bg transition"
+                class="inline-flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-lg bg-accent-bg text-accent-text border border-accent/30 transition"
               >
                 <Icon name="magnifying-glass" size={12} />
                 <span class="truncate max-w-[200px]">{query}</span>
@@ -77,7 +77,7 @@ export function ListView({
               <button
                 onClick={onClearQuery}
                 title="清空"
-                class="text-muted hover:text-primary p-1 rounded hover:bg-hover/60"
+                class="text-muted hover:text-primary p-1 rounded-lg hover:bg-hover/60"
               >
                 <Icon name="x" size={12} />
               </button>
@@ -87,26 +87,28 @@ export function ListView({
               onClick={onOpenSearch}
               title="搜索 (⌘K)"
               aria-label="搜索"
-              class="text-muted hover:text-primary p-1.5 rounded hover:bg-hover/60"
+              class="shrink-0 text-muted hover:text-primary p-1.5 rounded-lg hover:bg-hover/60"
             >
               <Icon name="magnifying-glass" size={16} />
             </button>
           )}
+        </div>
 
+        <div class="px-8 pb-3 flex items-center gap-3 flex-wrap">
           <div class="flex items-center gap-1 text-[11px] text-secondary">
             <span>评分 ≥</span>
             {[0, 1, 2, 3, 4].map(n => (
               <button
                 key={n}
                 onClick={() => onMinRatingChange(n)}
-                class={`px-1.5 py-0.5 rounded ${minRating === n ? 'bg-accent-bg text-accent-text' : 'hover:bg-surface-2'}`}
+                class={`px-1.5 py-0.5 rounded-md ${minRating === n ? 'bg-accent-bg text-accent-text' : 'hover:bg-surface-2'}`}
               >{n || '·'}</button>
             ))}
           </div>
 
           <button
             type="button"
-            class={`text-[11px] px-1.5 py-0.5 rounded ${
+            class={`text-[11px] px-2 py-0.5 rounded-md ${
               searchMode === 'hybrid'
                 ? 'bg-accent-bg text-accent-text'
                 : 'bg-surface-2 text-secondary'
@@ -122,7 +124,7 @@ export function ListView({
             <select
               value={sortKey}
               onChange={(e) => onSortKeyChange((e.target as HTMLSelectElement).value as SortKey)}
-              class="bg-surface border border-base rounded px-1 py-0.5 text-[11px] text-secondary focus:outline-none"
+              class="bg-surface border border-base rounded-md px-1.5 py-0.5 text-[11px] text-secondary focus:outline-none"
             >
               {SORT_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
             </select>
@@ -130,7 +132,7 @@ export function ListView({
               <button
                 onClick={onToggleSortDir}
                 title={sortDir === 'asc' ? '升序（点击切降序）' : '降序（点击切升序）'}
-                class="px-1.5 py-0.5 rounded hover:bg-surface-2 tabular-nums"
+                class="px-1.5 py-0.5 rounded-md hover:bg-surface-2 tabular-nums"
               >{sortDir === 'asc' ? '↑' : '↓'}</button>
             )}
           </div>
