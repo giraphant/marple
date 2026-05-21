@@ -53,6 +53,9 @@ struct IndexedEntry {
     has_pdf: bool,
     mtime: Option<i64>,
     preview: String,
+    /// Character count of the normalized body — a content-depth signal the card
+    /// grid uses to size the preview proportionally (longer analysis → taller card).
+    body_len: i64,
     body_text: String,
     search_text: String,
 }
@@ -129,6 +132,7 @@ fn build_indexed_entry(
         .and_then(flatten_author);
 
     let body_text = normalize_body_for_search(body);
+    let body_len = body_text.chars().count() as i64;
     let preview = first_paragraph(body);
     let search_text = search_text(&[
         rel.as_str(),
@@ -157,6 +161,7 @@ fn build_indexed_entry(
         has_pdf,
         mtime: meta.and_then(|m| mtime_ms(&m).ok()),
         preview,
+        body_len,
         body_text,
         search_text,
     })))
@@ -441,8 +446,13 @@ fn unquote(raw: &str) -> String {
     trimmed.to_string()
 }
 
+/// Lead prose for the card preview. Accumulates real paragraphs (skipping the
+/// metadata header, headings and rules) up to ~800 chars so the card can size
+/// the preview proportionally to how much there is to read.
 fn first_paragraph(body: &str) -> String {
+    const MAX_CHARS: usize = 800;
     let normalized = body.replace("\r\n", "\n");
+    let mut out = String::new();
     for paragraph in normalized.split("\n\n") {
         let trimmed = paragraph.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("---") {
@@ -457,15 +467,16 @@ fn first_paragraph(body: &str) -> String {
         if is_kv_label(trimmed.lines().next().unwrap_or("").trim()) {
             continue;
         }
-        return trimmed
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .chars()
-            .take(320)
-            .collect();
+        let cleaned = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&cleaned);
+        if out.chars().count() >= MAX_CHARS {
+            break;
+        }
     }
-    String::new()
+    out.chars().take(MAX_CHARS).collect()
 }
 
 /// True for a bold "label：value" / "label: value" line — the shape of the
@@ -734,7 +745,8 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           pdf_slug TEXT,
           has_pdf INTEGER NOT NULL DEFAULT 0,
           mtime INTEGER,
-          preview TEXT NOT NULL DEFAULT ''
+          preview TEXT NOT NULL DEFAULT '',
+          body_len INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE entry_text (
@@ -818,8 +830,8 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
         INSERT INTO entries (
           path, type, book, title, author, year_json, rating_json, rating_score,
           themes_json, topic, source, doi, chapters_analyzed, annotates, created,
-          pdf_slug, has_pdf, mtime, preview
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          pdf_slug, has_pdf, mtime, preview, body_len
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         params![
             entry.path,
@@ -841,6 +853,7 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
             if entry.has_pdf { 1 } else { 0 },
             entry.mtime,
             entry.preview,
+            entry.body_len,
         ],
     )?;
 
@@ -914,6 +927,7 @@ impl IndexedEntry {
             pdf_slug: self.pdf_slug,
             mtime: self.mtime,
             preview: self.preview,
+            body_len: self.body_len,
         }
     }
 }

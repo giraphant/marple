@@ -31,6 +31,9 @@ export interface Entry {
   /** File mtime in epoch ms. Used for the activity heatmap. */
   mtime?: number | null;
   preview: string;
+  /** Character count of the analysis body — drives the card's proportional
+   *  preview length (longer analysis → more preview shown). */
+  body_len?: number;
 }
 
 export type EditableField =

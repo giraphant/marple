@@ -128,6 +128,7 @@ pub struct Entry {
     pub pdf_slug: Option<String>,
     pub mtime: Option<i64>,
     pub preview: String,
+    pub body_len: i64,
 }
 
 /// One vault file as seen by a plain directory walk — the file-browser's view
@@ -190,7 +191,7 @@ pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
         SELECT
           path, type, book, title, author, year_json, rating_json, rating_score,
           themes_json, topic, source, doi, chapters_analyzed, annotates, created,
-          pdf_slug, has_pdf, mtime, preview
+          pdf_slug, has_pdf, mtime, preview, body_len
         FROM entries
         ORDER BY
           type,
@@ -1152,6 +1153,7 @@ fn row_to_entry(row: &Row<'_>) -> rusqlite::Result<Entry> {
         has_pdf: row.get::<_, i64>(16)? != 0,
         mtime: row.get(17)?,
         preview: row.get::<_, Option<String>>(18)?.unwrap_or_default(),
+        body_len: row.get::<_, Option<i64>>(19)?.unwrap_or_default(),
     })
 }
 

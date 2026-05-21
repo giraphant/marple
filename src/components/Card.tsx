@@ -82,6 +82,10 @@ export function Card({ entry, onClick, onThemeClick }: Props) {
   const themes = entry.themes ?? [];
   const fallbackTitle = entry.path.split('/').pop()!.replace(/\.md$/, '');
   const preview = entry.preview ? plainPreview(entry.preview) : '';
+  // Preview is the real scan target (titles are often uninformative), so show
+  // more of it, and size it to the analysis depth: longer body → more lines →
+  // taller card, making the masonry height a legible "how much is here" signal.
+  const previewLines = Math.max(3, Math.min(12, Math.round(((entry.body_len ?? 0) - 1000) / 1500) + 3));
   return (
     <div
       class="card bg-surface border border-base rounded-2xl p-5 shadow-soft hover:shadow-soft-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-soft cursor-pointer flex flex-col gap-2.5 transition"
@@ -104,7 +108,10 @@ export function Card({ entry, onClick, onThemeClick }: Props) {
       </div>
 
       {preview && (
-        <div class="text-[12px] text-muted leading-relaxed line-clamp-4">{preview}</div>
+        <div
+          class="text-[12.5px] text-secondary leading-relaxed overflow-hidden"
+          style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: String(previewLines) }}
+        >{preview}</div>
       )}
 
       {themes.length > 0 && <ThemeChips themes={themes} onThemeClick={onThemeClick} />}
