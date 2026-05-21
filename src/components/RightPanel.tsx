@@ -161,7 +161,13 @@ function TocTab({
   onNavigate: (entry: Entry, modifiers: { meta: boolean }) => void;
 }) {
   const hasBook = !!(bookContext && (bookContext.overview || bookContext.chapters.length));
-  if (!hasBook && headings.length === 0) {
+  // 本页大纲跳过文档标题级 H1(标题已在文档头),从其下一级开始;缩进按"最浅一级"归零,
+  // 标准纯 H2 文档即平铺无缩进,只有出现 H3+ 子节时才相对缩进。仅当确有更深级标题时
+  // 才过滤 H1,以免把"只有 H1"的文档大纲清空。
+  const hasSub = headings.some(h => h.level > 1);
+  const pageHeadings = hasSub ? headings.filter(h => h.level > 1) : headings;
+  const minLevel = pageHeadings.reduce((m, h) => Math.min(m, h.level), 99);
+  if (!hasBook && pageHeadings.length === 0) {
     return <div class="px-4 py-6 text-[12px] text-muted">无目录</div>;
   }
   return (
@@ -186,15 +192,15 @@ function TocTab({
           ))}
         </div>
       )}
-      {headings.length > 0 ? (
+      {pageHeadings.length > 0 ? (
         <div class="px-2">
           {hasBook && <SectionLabel>本页</SectionLabel>}
-          {headings.map(h => (
+          {pageHeadings.map(h => (
             <button
               key={h.key}
               onClick={() => onHeadingClick(h.key)}
               title={h.text}
-              style={{ paddingLeft: `${0.5 + Math.max(0, h.level - 1) * 0.75}rem` }}
+              style={{ paddingLeft: `${0.5 + Math.max(0, h.level - minLevel) * 0.75}rem` }}
               class={`w-full text-left py-1.5 pr-2 rounded-lg text-[12px] leading-snug truncate transition ${
                 activeHeadingKey === h.key
                   ? 'bg-accent-bg text-accent-text font-medium'
