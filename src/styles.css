@@ -230,10 +230,7 @@
   .prose-body h4 { font-size: 1.05em; font-weight: 700; margin: 1.1em 0 0.3em;  color: rgb(var(--reader-heading)); }
   .prose-body h5,
   .prose-body h6 { font-size: 1em;    font-weight: 600; margin: 0.9em 0 0.3em; }
-  /* 中文阅读偏好两端对齐:CJK 等宽,justify 右边齐整不留豁口。
-   * text-justify:inter-character 让中英混排时分散更自然。 */
-  .prose-body p { margin: 0.65em 0; text-align: justify; text-justify: inter-character; }
-  .prose-body li { text-align: justify; text-justify: inter-character; }
+  .prose-body p { margin: 0.65em 0; }
   /* Tailwind preflight 把 ul/ol 的 list-style 清掉了；显式复原。Blush
    * marker = 紫色 + bold（unorderedList/orderedList traits="bold"）。 */
   .prose-body ul { margin: 0.6em 0; padding-left: 1.5em; list-style-type: disc; }

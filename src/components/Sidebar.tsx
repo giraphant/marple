@@ -235,14 +235,14 @@ export function Sidebar({
         </button>
         <button
           onClick={onOpenSettings}
-          title={collapsed ? '设置' : undefined}
+          title={collapsed ? '系统设置' : undefined}
           class={collapsed
             ? 'mx-auto flex items-center justify-center w-9 h-9 rounded-xl text-secondary hover:bg-hover/60'
             : 'w-full text-left px-2.5 py-2 rounded-xl text-[12.5px] flex items-center gap-2.5 text-secondary hover:bg-hover/60'
           }
         >
           <span class="shrink-0 inline-flex items-center justify-center w-4 h-4"><Icon name="gear" size={collapsed ? 16 : 14} class="text-muted" /></span>
-          {!collapsed && <span class="flex-1">设置</span>}
+          {!collapsed && <span class="flex-1">系统设置</span>}
         </button>
       </div>
     </aside>
