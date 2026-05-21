@@ -24,6 +24,8 @@ interface Props {
   editable: boolean;
   editorTheme: EditorThemeConfig;
   citationFormat: CitationFormat;
+  /** Whether this entry has a translated PDF (gates the 「打开译本」 action). */
+  hasTranslation: boolean;
   onNavigate: (entry: Entry, modifiers: { meta: boolean }) => void;
   onThemeClick: (theme: string, fromType?: Entry['type']) => void;
   onUpdated: (updated: Entry) => void;
@@ -37,7 +39,7 @@ const SAVE_DEBOUNCE_MS = 1500;
 
 export function DocView({
   entry, entries, authorIndex, annotationIndex, wikiIndex, editable, editorTheme,
-  citationFormat,
+  citationFormat, hasTranslation,
   onNavigate, onThemeClick, onUpdated, onCreateAnnotation, onDelete,
 }: Props) {
   const [loadError, setLoadError] = useState(false);
@@ -315,18 +317,26 @@ export function DocView({
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
-      <div class="bg-surface/95 backdrop-blur border-b border-base px-6 py-3 flex items-center gap-3 relative shrink-0">
-        <span class={`text-[11px] px-1.5 py-0.5 rounded border ${tMeta.accent}`}>{tMeta.label}</span>
-        <div class="text-[14px] font-medium text-primary flex-1 truncate">
-          {displayTitle}
+      <div class="bg-surface/95 backdrop-blur border-b border-base px-8 py-3.5 flex items-center gap-3 relative z-30 shrink-0">
+        <span class={`text-[11px] px-2 py-0.5 rounded-lg font-medium shrink-0 ${tMeta.accent}`}>{tMeta.label}</span>
+        <div class="flex items-baseline gap-2.5 min-w-0 flex-1">
+          <span class="text-[15px] font-semibold tracking-[-0.01em] text-primary truncate">{displayTitle}</span>
+          {(entry.type === 'paper-analysis' || entry.type === 'book-overview' || entry.type === 'chapter-summary')
+            && (entry.author || entry.year || entry.rating) && (
+            <span class="hidden md:inline-flex shrink-0 items-baseline gap-2 text-[12px] text-muted">
+              {entry.author && <span class="truncate max-w-[240px]">{entry.author}</span>}
+              {entry.year && <span class="tabular-nums">· {entry.year}</span>}
+              {entry.rating && <span class="text-star tracking-tight">{entry.rating}</span>}
+            </span>
+          )}
         </div>
 
         {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
-          <ActionsRow entry={entry} defaultFormat={citationFormat} />
+          <ActionsRow entry={entry} defaultFormat={citationFormat} hasTranslation={hasTranslation} />
         )}
 
         {editable && (saveStatus === 'conflict' ? (
-          <span class="text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1.5" title="磁盘上的文件在你编辑期间被其他窗口或外部改动；为避免覆盖，自动保存已暂停">
+          <span class="text-[11px] text-accent-text inline-flex items-center gap-1.5" title="磁盘上的文件在你编辑期间被其他窗口或外部改动；为避免覆盖，自动保存已暂停">
             文件已被其他窗口修改
             <button onClick={reloadFromDisk} class="underline hover:text-primary">重载</button>
           </span>
@@ -342,10 +352,10 @@ export function DocView({
               title="更多"
             ><Icon name="dots-three" size={16} /></button>
             {menuOpen && (
-              <div class="absolute right-0 top-full mt-1 bg-surface border border-base rounded shadow-lg py-1 min-w-[160px] z-10">
+              <div class="absolute right-0 top-full mt-1 bg-surface border border-base rounded-xl shadow-soft-lg py-1 min-w-[160px] z-10">
                 <button
                   onClick={handleDelete}
-                  class="w-full text-left px-3 py-1.5 text-[12px] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30"
+                  class="w-full text-left px-3 py-1.5 text-[12px] text-danger hover:bg-danger-bg"
                 >移到回收站…</button>
               </div>
             )}
@@ -362,7 +372,7 @@ export function DocView({
               // on a failed load, or edits would be accepted but never saved.
               ? <div class="flex-1 flex items-center justify-center text-sm">
                   <div class="text-center">
-                    <div class="mb-2 text-red-600 dark:text-red-400">加载失败</div>
+                    <div class="mb-2 text-danger">加载失败</div>
                     <button onClick={reloadFromDisk} class="text-secondary underline">重试</button>
                   </div>
                 </div>
@@ -412,8 +422,8 @@ function SaveIndicator({ status, errMsg }: { status: SaveStatus; errMsg: string 
     case 'idle':   return null;
     case 'dirty':  return <span class="text-[11px] text-muted">未保存…</span>;
     case 'saving': return <span class="text-[11px] text-muted">保存中…</span>;
-    case 'saved':  return <span class="text-[11px] text-emerald-600 dark:text-emerald-400">已保存</span>;
-    case 'error':  return <span class="text-[11px] text-red-600 dark:text-red-400" title={errMsg ?? ''}>保存失败</span>;
+    case 'saved':  return <span class="text-[11px] text-success">已保存</span>;
+    case 'error':  return <span class="text-[11px] text-danger" title={errMsg ?? ''}>保存失败</span>;
     case 'conflict': return null; // rendered inline in the header with a reload action
   }
 }

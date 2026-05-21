@@ -64,6 +64,13 @@ struct IndexedEntry {
     has_pdf: bool,
     mtime: Option<i64>,
     preview: String,
+    /// Character count of the normalized body — a content-depth signal the card
+    /// grid uses to size the preview proportionally (longer analysis → taller card).
+    body_len: i64,
+    /// Epoch-ms of the file's first git commit (its real ingestion date), 0 if
+    /// unknown. Drives the dashboard's "近期入库" recency, since file mtimes were
+    /// flattened by a bulk vault rewrite.
+    added: i64,
     body_text: String,
     search_text: String,
 }
@@ -113,9 +120,16 @@ fn build_indexed_entry(
         "book-overview" => book_slug(&rel),
         _ => None,
     };
+    // Exact slug→file match first; if missing, a conservative fuzzy match (same
+    // lastname + strong title-token overlap + unique winner) so the many books
+    // whose dir-slug was truncated/reworded still link to their source PDF.
+    // pdf_slug stays the vault slug (stable id; translations key off it) — the
+    // fuzzy resolution happens again at open time in resolve_source_pdf.
     let has_pdf = pdf_slug
         .as_ref()
-        .map(|slug| source_slugs.contains(slug))
+        .map(|slug| {
+            source_slugs.contains(slug) || crate::fuzzy_pick_source(slug, source_slugs).is_some()
+        })
         .unwrap_or(false);
 
     let title = if entry_type == "note" {
@@ -137,6 +151,7 @@ fn build_indexed_entry(
         .and_then(flatten_author);
 
     let body_text = normalize_body_for_search(body);
+    let body_len = body_text.chars().count() as i64;
     let preview = first_paragraph(body);
     let search_text = search_text(&[
         rel.as_str(),
@@ -165,6 +180,8 @@ fn build_indexed_entry(
         has_pdf,
         mtime: meta.and_then(|m| mtime_ms(&m).ok()),
         preview,
+        body_len,
+        added: 0,
         body_text,
         search_text,
     })))
@@ -178,6 +195,7 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
     files.sort();
 
     let source_slugs = load_source_slugs(&paths.sources)?;
+    let added_dates = git_added_dates(&paths.workspace_root);
     let mut entries = Vec::new();
     let mut skipped_frontmatter_without_type = 0usize;
     let mut skipped: Vec<SkippedFile> = Vec::new();
@@ -185,7 +203,8 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
     for file in &files {
         let outcome = build_indexed_entry(paths, file, &source_slugs)?;
         let reason = match outcome {
-            BuildOutcome::Indexed(entry) => {
+            BuildOutcome::Indexed(mut entry) => {
+                entry.added = added_dates.get(&entry.path).copied().unwrap_or(0);
                 entries.push(*entry);
                 continue;
             }
@@ -622,8 +641,13 @@ fn unquote(raw: &str) -> String {
     trimmed.to_string()
 }
 
+/// Lead prose for the card preview. Accumulates real paragraphs (skipping the
+/// metadata header, headings and rules) up to ~800 chars so the card can size
+/// the preview proportionally to how much there is to read.
 fn first_paragraph(body: &str) -> String {
+    const MAX_CHARS: usize = 800;
     let normalized = body.replace("\r\n", "\n");
+    let mut out = String::new();
     for paragraph in normalized.split("\n\n") {
         let trimmed = paragraph.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("---") {
@@ -632,15 +656,94 @@ fn first_paragraph(body: &str) -> String {
         if trimmed.starts_with("**") && trimmed.ends_with("**") && trimmed.len() < 80 {
             continue;
         }
-        return trimmed
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .chars()
-            .take(320)
-            .collect();
+        // Skip leading metadata blocks (e.g. "**英文原标题**：…\n**作者**：…"):
+        // analysis docs open with bold "label：value" lines that merely echo the
+        // title/author already shown on the card, not real prose.
+        if is_kv_label(trimmed.lines().next().unwrap_or("").trim()) {
+            continue;
+        }
+        let cleaned = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&cleaned);
+        if out.chars().count() >= MAX_CHARS {
+            break;
+        }
     }
-    String::new()
+    out.chars().take(MAX_CHARS).collect()
+}
+
+/// Map every vault file to the epoch-ms of its first git commit (true ingestion
+/// date). One `git log` over the repo; first occurrence wins because `--reverse`
+/// walks oldest-first. Empty map on any git failure (the field just falls to 0).
+fn git_added_dates(workspace_root: &Path) -> HashMap<String, i64> {
+    let mut map = HashMap::new();
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(workspace_root)
+        .args([
+            "log",
+            "--diff-filter=A",
+            "--reverse",
+            "--format=%aI",
+            "--name-only",
+            "--",
+            "vault",
+        ])
+        .output();
+    let Ok(output) = output else { return map };
+    if !output.status.success() {
+        return map;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut current: i64 = 0;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(line) {
+            current = dt.timestamp_millis();
+        } else {
+            map.entry(line.to_string()).or_insert(current);
+        }
+    }
+    map
+}
+
+/// First-git-commit epoch-ms for a single vault path (incremental parse), 0 if
+/// unknown or uncommitted.
+fn git_added_date(workspace_root: &Path, rel_path: &str) -> i64 {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(workspace_root)
+        .args(["log", "--diff-filter=A", "--reverse", "--format=%aI", "--", rel_path])
+        .output();
+    let Ok(output) = output else { return 0 };
+    if !output.status.success() {
+        return 0;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|l| chrono::DateTime::parse_from_rfc3339(l.trim()).ok())
+        .map(|dt| dt.timestamp_millis())
+        .unwrap_or(0)
+}
+
+/// True for a bold "label：value" / "label: value" line — the shape of the
+/// metadata header that opens analysis docs.
+fn is_kv_label(line: &str) -> bool {
+    if !line.starts_with("**") {
+        return false;
+    }
+    match line[2..].find("**") {
+        Some(close) => {
+            let after = line[2 + close + 2..].trim_start();
+            after.starts_with('：') || after.starts_with(':')
+        }
+        None => false,
+    }
 }
 
 fn first_heading(body: &str) -> Option<String> {
@@ -894,7 +997,9 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           pdf_slug TEXT,
           has_pdf INTEGER NOT NULL DEFAULT 0,
           mtime INTEGER,
-          preview TEXT NOT NULL DEFAULT ''
+          preview TEXT NOT NULL DEFAULT '',
+          body_len INTEGER NOT NULL DEFAULT 0,
+          added INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE entry_text (
@@ -978,8 +1083,8 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
         INSERT INTO entries (
           path, type, book, title, author, year_json, rating_json, rating_score,
           themes_json, topic, source, doi, chapters_analyzed, annotates, created,
-          pdf_slug, has_pdf, mtime, preview
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          pdf_slug, has_pdf, mtime, preview, body_len, added
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         params![
             entry.path,
@@ -1001,6 +1106,8 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
             if entry.has_pdf { 1 } else { 0 },
             entry.mtime,
             entry.preview,
+            entry.body_len,
+            entry.added,
         ],
     )?;
 
@@ -1074,6 +1181,8 @@ impl IndexedEntry {
             pdf_slug: self.pdf_slug,
             mtime: self.mtime,
             preview: self.preview,
+            body_len: self.body_len,
+            added: self.added,
         }
     }
 }
@@ -1110,7 +1219,10 @@ pub fn parse_entry(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<Option<c
     }
     let source_slugs = load_source_slugs(&paths.sources)?;
     match build_indexed_entry(paths, &target, &source_slugs)? {
-        BuildOutcome::Indexed(entry) => Ok(Some(entry.into_public())),
+        BuildOutcome::Indexed(mut entry) => {
+            entry.added = git_added_date(&paths.workspace_root, &entry.path);
+            Ok(Some(entry.into_public()))
+        }
         _ => Ok(None),
     }
 }
@@ -1333,5 +1445,28 @@ type: chapter-summary
             strip_wiki("[[shaun-gallagher|Shaun Gallagher]]"),
             "Shaun Gallagher"
         );
+    }
+
+    #[test]
+    fn first_paragraph_skips_metadata_header() {
+        // Analysis docs open with a bold "label：value" metadata block that just
+        // echoes title/author. The preview should skip it and grab real prose.
+        let body = "**英文原标题**：After Innovation, Turn to Maintenance\n\
+**作者**：Andrew L. Russell, Lee Vinsel\n\
+**出处**：Technology and Culture\n\n\
+## 核心论点\n\n\
+本文主张维护比创新更能解释技术与社会的真实关系。";
+        assert_eq!(
+            first_paragraph(body),
+            "本文主张维护比创新更能解释技术与社会的真实关系。"
+        );
+    }
+
+    #[test]
+    fn is_kv_label_matches_bold_label_lines() {
+        assert!(is_kv_label("**作者**：Lee Vinsel"));
+        assert!(is_kv_label("**Source**: Technology and Culture"));
+        assert!(!is_kv_label("这是一段正文,不是元数据。"));
+        assert!(!is_kv_label("**强调** 出现在句中但不是标签。"));
     }
 }

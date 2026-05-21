@@ -54,7 +54,7 @@ export function TrashView({ onRestored }: Props) {
       <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
         <div class="px-6 py-3 flex items-center gap-4">
           <div class="flex items-baseline gap-2 min-w-0">
-            <div class="text-[18px] font-semibold tracking-tight text-primary">回收站</div>
+            <div class="text-[18px] font-semibold tracking-tight text-primary">回收站点</div>
             <div class="text-[11px] text-muted tabular-nums">
               {items ? items.length : '…'}
             </div>
@@ -69,7 +69,7 @@ export function TrashView({ onRestored }: Props) {
 
       <main class="flex-1 overflow-auto scrollbar-thin px-6 py-4">
         {err && (
-          <div class="text-[12px] text-red-700 dark:text-red-300 bg-red-50 border border-red-200 dark:border-red-900 rounded px-3 py-2 mb-4">
+          <div class="text-[12px] text-danger bg-danger-bg border border-danger/30 rounded px-3 py-2 mb-4">
             {err}
           </div>
         )}
@@ -79,7 +79,7 @@ export function TrashView({ onRestored }: Props) {
         )}
 
         {items && items.length === 0 && (
-          <div class="text-sm text-muted py-10 text-center">回收站为空</div>
+          <div class="text-sm text-muted py-10 text-center">回收站点为空</div>
         )}
 
         {items && items.length > 0 && (
@@ -87,7 +87,7 @@ export function TrashView({ onRestored }: Props) {
             {items.map(it => (
               <div
                 key={it.name}
-                class="flex items-center gap-3 px-3 py-2 rounded border border-base bg-surface hover:border-strong"
+                class="flex items-center gap-3 px-4 py-3 rounded-xl border border-base bg-surface shadow-soft hover:shadow-soft-lg transition"
               >
                 <div class="flex-1 min-w-0">
                   <div class="text-[13px] text-primary truncate">
@@ -102,12 +102,12 @@ export function TrashView({ onRestored }: Props) {
                 <button
                   onClick={() => onRestore(it.name)}
                   disabled={busy === it.name}
-                  class="text-[12px] px-2.5 py-1 rounded bg-inverse text-inverse-fg hover:bg-inverse/80 disabled:opacity-50"
+                  class="text-[12px] px-2.5 py-1 rounded bg-accent-bg text-accent-text hover:bg-accent/20 disabled:opacity-50"
                 >恢复</button>
                 <button
                   onClick={() => onPurge(it.name)}
                   disabled={busy === it.name}
-                  class="text-[12px] px-2.5 py-1 rounded border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
+                  class="text-[12px] px-2.5 py-1 rounded border border-danger/30 text-danger hover:bg-danger-bg disabled:opacity-50"
                 >永久删除</button>
               </div>
             ))}

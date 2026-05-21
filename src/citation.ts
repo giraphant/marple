@@ -6,8 +6,8 @@ export type CitationFormat = 'inline-en' | 'inline-zh' | 'title' | 'markdown';
 export const CITATION_FORMATS: { id: CitationFormat; label: string; hint: string; example: string }[] = [
   { id: 'inline-en', label: '夹注 (英文)', hint: '括号 + 半角逗号',  example: '(Clark, 1998)' },
   { id: 'inline-zh', label: '夹注 (中文)', hint: '全角括号 + 全角逗号', example: '（Clark，1998）' },
-  { id: 'title',     label: '仅标题',     hint: '纯书 / 文章名',   example: 'Being There' },
-  { id: 'markdown',  label: '完整 Markdown', hint: '作者 + 年份 + 斜体标题 + 来源 + DOI', example: 'Clark (1998). *Being There*. MIT Press.' },
+  { id: 'title',     label: '标题',       hint: '纯书 / 文章名',   example: 'Being There' },
+  { id: 'markdown',  label: '文献目录',   hint: '作者 + 年份 + 标题 + 来源', example: 'Clark (1998). *Being There*. MIT Press.' },
 ];
 
 /** Extract the surname from a single author string.

@@ -2,7 +2,7 @@ import { useMemo, useState, useRef, useEffect } from 'preact/hooks';
 import type { JSX, ComponentChildren } from 'preact';
 import type { Entry, EntryType } from '../types';
 import { splitAuthors } from '../wiki';
-import { patchFrontmatter, applyFmToEntry, openPdfExternal } from '../api';
+import { patchFrontmatter, applyFmToEntry, openPdfExternal, openTranslationExternal } from '../api';
 import { ratingToStars } from '../frontmatter';
 import { buildCitation, CITATION_FORMATS, type CitationFormat } from '../citation';
 import { MiniRow } from './MiniRow';
@@ -120,14 +120,14 @@ export function PropertyPanel({
   return (
     <div class="p-5 space-y-5 text-[12px] text-secondary">
       {err && (
-        <div class="text-[11px] px-2 py-1 rounded bg-red-50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-900 dark:bg-red-950/40">
+        <div class="text-[11px] px-2 py-1 rounded bg-danger-bg text-danger border border-danger/30">
           保存失败：{err}
         </div>
       )}
 
       {entry.type === 'note' && annotatesTarget && (
-        <div class="text-[11px] px-2 py-1.5 rounded bg-rose-50 text-rose-800 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900">
-          批注于 <button onClick={() => onOpen(annotatesTarget)} class="font-medium underline hover:text-rose-900 dark:hover:text-rose-200">
+        <div class="text-[11px] px-2 py-1.5 rounded bg-type-note-bg text-type-note-fg border border-type-note-fg/25">
+          批注于 <button onClick={() => onOpen(annotatesTarget)} class="font-medium underline hover:text-type-note-fg">
             {annotatesTarget.title || annotatesTarget.path.split('/').pop()}
           </button>
         </div>
@@ -137,7 +137,9 @@ export function PropertyPanel({
         const fields = FIELDS_BY_TYPE[entry.type];
         if (fields.size === 0) return null;
         return (
-          <dl class={`space-y-2 ${saving ? 'opacity-60 pointer-events-none' : ''}`}>
+          <div>
+            <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">属性</div>
+            <dl class={`space-y-2 ${saving ? 'opacity-60 pointer-events-none' : ''}`}>
             {fields.has('rating') && <RatingRow value={entry.rating_score} save={save} />}
             {fields.has('year') && <TextRow label="年份" value={entry.year} field="year" parse={parseYear} save={save} />}
             {fields.has('author') && <AuthorRow entry={entry} backlinks={backlinks} onOpen={onOpen} save={save} />}
@@ -150,7 +152,8 @@ export function PropertyPanel({
                 <dd class="min-w-0 tabular-nums">{entry.chapters_analyzed}</dd>
               </div>
             )}
-          </dl>
+            </dl>
+          </div>
         );
       })()}
 
@@ -165,7 +168,7 @@ export function PropertyPanel({
             <button
               onClick={handleCreate}
               disabled={creatingNote}
-              class="text-[10px] text-rose-700 hover:text-rose-900 dark:hover:text-rose-200 px-1.5 py-0.5 rounded hover:bg-rose-50 border border-rose-200 disabled:opacity-50"
+              class="text-[10px] text-type-note-fg hover:bg-type-note-bg border border-type-note-fg/25 px-1.5 py-0.5 rounded disabled:opacity-50"
             >
               {creatingNote ? '创建中…' : '+ 新建批注'}
             </button>
@@ -217,7 +220,7 @@ export function PropertyPanel({
   );
 }
 
-export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultFormat: CitationFormat }) {
+export function ActionsRow({ entry, defaultFormat, hasTranslation }: { entry: Entry; defaultFormat: CitationFormat; hasTranslation?: boolean }) {
   // Per-document override so the user can pick another format on the fly
   // without going back to settings. Resets when entry changes.
   const [format, setFormat] = useState<CitationFormat>(defaultFormat);
@@ -225,6 +228,8 @@ export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultForm
   const [err, setErr] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [readMenuOpen, setReadMenuOpen] = useState(false);
+  const readMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setFormat(defaultFormat); }, [defaultFormat, entry.path]);
 
@@ -237,6 +242,16 @@ export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultForm
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [menuOpen]);
+
+  // Click-outside to close the read (原文/译本) menu.
+  useEffect(() => {
+    if (!readMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (readMenuRef.current && !readMenuRef.current.contains(e.target as Node)) setReadMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [readMenuOpen]);
 
   const copyCitation = async () => {
     setErr(null);
@@ -257,64 +272,105 @@ export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultForm
     try {
       await openPdfExternal(entry.pdf_slug);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '打开 PDF 失败');
+      setErr(e instanceof Error ? e.message : '打开原文失败');
+    }
+  };
+
+  const openTranslation = async () => {
+    if (!entry.pdf_slug) return;
+    setErr(null);
+    try {
+      await openTranslationExternal(entry.pdf_slug);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '打开译本失败');
     }
   };
 
   const activeMeta = CITATION_FORMATS.find(f => f.id === format);
   const preview = buildCitation(entry, format);
 
+  // Read targets share one control like 复制引用: a primary button (原文) + a ▾
+  // that folds out the alternatives (译本). Only the available ones appear.
+  const readTargets: { label: string; run: () => void }[] = [];
+  if (entry.has_pdf && entry.pdf_slug) readTargets.push({ label: '阅读原文', run: openPdf });
+  if (hasTranslation && entry.pdf_slug) readTargets.push({ label: '阅读译本', run: openTranslation });
+
   return (
     <div class="flex items-center gap-2 -mt-1 text-[11px] flex-wrap">
-      <div class="inline-flex rounded border border-base bg-surface overflow-hidden">
-        <button
-          onClick={copyCitation}
-          class="px-2 py-1 hover:bg-page text-secondary hover:text-primary transition"
-          title={`格式：${activeMeta?.label ?? format}\n\n预览：${preview.slice(0, 200) || '(字段不全)'}`}
-        >
-          {copied ? '✓ 已复制' : '复制引用'}
-        </button>
-        <div class="relative" ref={menuRef}>
+      <div class="relative" ref={menuRef}>
+        <div class="inline-flex rounded-lg border border-base bg-surface overflow-hidden">
+          <button
+            onClick={copyCitation}
+            class="px-2 py-1 hover:bg-page text-secondary hover:text-primary transition"
+            title={`格式：${activeMeta?.label ?? format}\n\n预览：${preview.slice(0, 200) || '(字段不全)'}`}
+          >
+            {copied ? '✓ 已复制' : '复制引用'}
+          </button>
           <button
             onClick={() => setMenuOpen(v => !v)}
             class="px-1.5 py-1 border-l border-base hover:bg-page text-muted hover:text-primary transition"
             title="切换引用格式"
             aria-label="切换引用格式"
           >▾</button>
-          {menuOpen && (
-            <div class="absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded shadow-lg py-1 w-[260px]">
-              {CITATION_FORMATS.map(f => {
-                const isActive = f.id === format;
-                const ex = buildCitation(entry, f.id);
-                return (
-                  <button
-                    key={f.id}
-                    onClick={() => { setFormat(f.id); setMenuOpen(false); }}
-                    class={`w-full text-left px-3 py-1.5 hover:bg-page ${isActive ? 'bg-page' : ''}`}
-                  >
-                    <div class="text-[12px] text-primary flex items-center gap-1.5">
-                      <span class={`inline-block w-1 h-1 rounded-full ${isActive ? 'bg-amber-500' : 'bg-transparent'}`} />
-                      {f.label}
-                      <span class="text-muted text-[10px] ml-1">{f.hint}</span>
-                    </div>
-                    <div class="text-[11px] text-muted mt-0.5 truncate">
-                      {ex || <span class="italic">字段不全</span>}
-                    </div>
-                  </button>
-                );
-              })}
+        </div>
+        {menuOpen && (
+          <div class="absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded-xl shadow-soft-lg py-1 w-[260px]">
+            {CITATION_FORMATS.map(f => {
+              const isActive = f.id === format;
+              const ex = buildCitation(entry, f.id);
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => { setFormat(f.id); setMenuOpen(false); }}
+                  class={`w-full text-left px-3 py-1.5 ${isActive ? 'bg-accent-bg' : 'hover:bg-page'}`}
+                >
+                  <div class={`text-[12px] flex items-center gap-1.5 ${isActive ? 'text-accent-text font-medium' : 'text-primary'}`}>
+                    {f.label}
+                    <span class={`text-[10px] ${isActive ? 'text-accent-text/70' : 'text-muted'}`}>{f.hint}</span>
+                  </div>
+                  <div class={`text-[11px] mt-0.5 truncate ${isActive ? 'text-accent-text/80' : 'text-muted'}`}>
+                    {ex || <span class="text-muted">字段不全</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {readTargets.length === 1 && (
+        <button
+          onClick={readTargets[0].run}
+          class="px-2 py-1 rounded-lg border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
+        >{readTargets[0].label}</button>
+      )}
+      {readTargets.length >= 2 && (
+        <div class="relative" ref={readMenuRef}>
+          <div class="inline-flex rounded-lg border border-base bg-surface overflow-hidden">
+            <button
+              onClick={readTargets[0].run}
+              class="px-2 py-1 hover:bg-page text-secondary hover:text-primary transition"
+            >{readTargets[0].label}</button>
+            <button
+              onClick={() => setReadMenuOpen(v => !v)}
+              class="px-1.5 py-1 border-l border-base hover:bg-page text-muted hover:text-primary transition"
+              title="其它阅读方式"
+              aria-label="其它阅读方式"
+            >▾</button>
+          </div>
+          {readMenuOpen && (
+            <div class="absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded-xl shadow-soft-lg py-1 w-[140px]">
+              {readTargets.slice(1).map(t => (
+                <button
+                  key={t.label}
+                  onClick={() => { t.run(); setReadMenuOpen(false); }}
+                  class="w-full text-left px-3 py-1.5 text-[12px] text-primary hover:bg-page"
+                >{t.label}</button>
+              ))}
             </div>
           )}
         </div>
-      </div>
-      {entry.has_pdf && entry.pdf_slug && (
-        <button
-          onClick={openPdf}
-          class="px-2 py-1 rounded border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
-          title={`用系统默认 PDF 阅读器打开 sources/${entry.pdf_slug}.pdf`}
-        >打开 PDF</button>
       )}
-      {err && <span class="text-red-600 dark:text-red-400 text-[10px]">{err}</span>}
+      {err && <span class="text-danger text-[10px]">{err}</span>}
     </div>
   );
 }
@@ -343,7 +399,7 @@ function RatingRow({ value, save }: { value: number; save: SaveFn }) {
   if (!editing) {
     return (
       <Row label="评分">
-        <button class="text-amber-600 dark:text-amber-400 text-left hover:bg-surface-2 px-1 -mx-1 rounded" onClick={() => setEditing(true)}>
+        <button class="text-star text-left hover:bg-surface-2 px-1 -mx-1 rounded" onClick={() => setEditing(true)}>
           {display}
         </button>
       </Row>
@@ -358,7 +414,7 @@ function RatingRow({ value, save }: { value: number; save: SaveFn }) {
               await save(fm => ({ ...fm, rating: ratingToStars(n) }));
               setEditing(false);
             }}
-            class="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 px-0.5"
+            class="text-star hover:text-star px-0.5"
             title={`${n} 星`}
           >
             {n <= value ? '★' : '☆'}
@@ -369,7 +425,7 @@ function RatingRow({ value, save }: { value: number; save: SaveFn }) {
             await save(fm => ({ ...fm, rating: null }));
             setEditing(false);
           }}
-          class="ml-2 text-[10px] text-muted hover:text-red-600 dark:hover:text-red-400 dark:text-red-400"
+          class="ml-2 text-[10px] text-muted hover:text-danger"
           title="清空"
         >清空</button>
         <button onClick={() => setEditing(false)} class="ml-1 text-[10px] text-muted hover:text-secondary">取消</button>
@@ -438,7 +494,7 @@ function TextRow({
           if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
         }}
         onBlur={commit}
-        class="w-full px-1.5 py-0.5 border border-amber-300 dark:border-amber-700 rounded text-[12px] focus:outline-none focus:border-amber-500 dark:focus:border-amber-400 bg-amber-50/30 dark:bg-amber-950/30"
+        class="w-full px-1.5 py-0.5 border border-accent rounded text-[12px] focus:outline-none focus:border-accent bg-accent-bg/40"
       />
     </Row>
   );
@@ -467,7 +523,7 @@ function AuthorRow({
     <Row label="作者">
       <div class="flex items-center gap-1">
         {backlinks.authorProfile ? (
-          <button onClick={() => onOpen(backlinks.authorProfile!)} class="text-sky-700 dark:text-sky-300 hover:underline text-left flex-1 min-w-0 truncate">
+          <button onClick={() => onOpen(backlinks.authorProfile!)} class="text-accent-text hover:underline text-left flex-1 min-w-0 truncate">
             {entry.author}
           </button>
         ) : (
@@ -491,7 +547,7 @@ function DoiRow({ value, save }: { value: string | null; save: SaveFn }) {
         {value
           ? (
             <div class="flex items-center gap-1">
-              <a href={`https://doi.org/${value}`} target="_blank" rel="noopener" class="text-sky-700 dark:text-sky-300 hover:underline font-mono text-[11px] break-all flex-1 min-w-0">
+              <a href={`https://doi.org/${value}`} target="_blank" rel="noopener" class="text-accent-text hover:underline font-mono text-[11px] break-all flex-1 min-w-0">
                 {value}
               </a>
               <button onClick={() => { setDraft(value); setEditing(true); }} class="text-muted hover:text-secondary px-1 inline-flex items-center" title="编辑"><Icon name="pencil" size={11} /></button>
@@ -523,7 +579,7 @@ function DoiRow({ value, save }: { value: string | null; save: SaveFn }) {
           if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
         }}
         onBlur={commit}
-        class="w-full px-1.5 py-0.5 border border-amber-300 dark:border-amber-700 rounded font-mono text-[11px] focus:outline-none focus:border-amber-500 dark:focus:border-amber-400 bg-amber-50/30 dark:bg-amber-950/30"
+        class="w-full px-1.5 py-0.5 border border-accent rounded font-mono text-[11px] focus:outline-none focus:border-accent bg-accent-bg/40"
       />
     </Row>
   );
@@ -570,9 +626,9 @@ function ThemesEditor({
       </div>
       <div class="flex flex-wrap gap-1">
         {themes.map(th => (
-          <span key={th} class="text-[11px] inline-flex items-center gap-0.5 rounded border border-base bg-page hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:border-amber-300 dark:hover:border-amber-700 transition">
-            <button onClick={() => onThemeClick(th)} class="px-1.5 py-0.5 hover:text-amber-800 dark:hover:text-amber-200">{th}</button>
-            <button onClick={() => remove(th)} title="移除" class="px-1 text-muted hover:text-red-600 dark:hover:text-red-400 dark:text-red-400 border-l border-base inline-flex items-center"><Icon name="x" size={10} /></button>
+          <span key={th} class="text-[11px] inline-flex items-center gap-0.5 rounded border border-base bg-page hover:bg-accent-bg hover:border-accent transition">
+            <button onClick={() => onThemeClick(th)} class="px-1.5 py-0.5 hover:text-accent-text">{th}</button>
+            <button onClick={() => remove(th)} title="移除" class="px-1 text-muted hover:text-danger border-l border-base inline-flex items-center"><Icon name="x" size={10} /></button>
           </span>
         ))}
         {themes.length === 0 && !adding && (
@@ -591,7 +647,7 @@ function ThemesEditor({
               if (e.key === 'Enter') { e.preventDefault(); addOne(draft).then(() => setAdding(false)); }
               if (e.key === 'Escape') { e.preventDefault(); setAdding(false); setDraft(''); }
             }}
-            class="w-full px-2 py-1 border border-amber-300 dark:border-amber-700 rounded text-[12px] focus:outline-none focus:border-amber-500 dark:focus:border-amber-400 bg-amber-50/30 dark:bg-amber-950/30"
+            class="w-full px-2 py-1 border border-accent rounded text-[12px] focus:outline-none focus:border-accent bg-accent-bg/40"
           />
         </div>
       )}

@@ -12,10 +12,10 @@ const DAYS = 7;    // rows: Sun..Sat
 
 const INTENSITY_CLASS = [
   'bg-surface-2 border border-base',
-  'bg-amber-100',
-  'bg-amber-300',
-  'bg-amber-500',
-  'bg-amber-700',
+  'bg-accent/20',
+  'bg-accent/40',
+  'bg-accent/70',
+  'bg-accent',
 ];
 
 function bucket(n: number): number {

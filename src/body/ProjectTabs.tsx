@@ -80,7 +80,7 @@ export function ProjectTabs({ content, wikiIndex, entryKey }: Props) {
   const cur = tabs[Math.min(active, tabs.length - 1)];
 
   return (
-    <div class="my-3 border border-base rounded-lg overflow-hidden bg-surface">
+    <div class="my-4 border border-base rounded-xl overflow-hidden bg-surface shadow-soft">
       <div role="tablist" class="flex flex-wrap gap-px bg-surface-2 px-2 pt-2">
         {tabs.map((t, i) => {
           const isActive = i === active;

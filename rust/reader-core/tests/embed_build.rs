@@ -40,6 +40,7 @@ fn empty_vault_build_reports_zero_progress_and_writes_vectors_db() {
         index_db,
         vectors_db: reader_root.join("data/vectors.sqlite"),
         dist: reader_root.join("dist"),
+        translations: tmp.join("processing").join("translations"),
     };
 
     let progress: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
@@ -92,6 +93,7 @@ fn build_embeddings_errors_when_index_missing() {
         index_db: reader_root.join("data/index.sqlite"), // does NOT exist
         vectors_db: reader_root.join("data/vectors.sqlite"),
         dist: reader_root.join("dist"),
+        translations: tmp.join("processing").join("translations"),
     };
 
     let err = reader_core::build_embeddings_with_progress(&paths, &|_, _| {});

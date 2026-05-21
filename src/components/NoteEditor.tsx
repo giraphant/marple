@@ -789,9 +789,9 @@ function buildEditorTheme({ dark }: EditorThemeConfig): Extension {
     },
 
     '.cm-strong': { fontWeight: '700', color: p.strong },
-    // emph: 粉色 + italic — CJK glyph 自然 fallback 成普通字重的彩色文本，
-    // 西文 glyph 出真 italic。两端都能识别。
-    '.cm-em': { color: p.em, fontStyle: 'italic' },
+    // emph: 仅上色、不斜体 — 中文绝不用 italic（浏览器伪斜体很丑）；西文也统一
+    // 不斜，靠颜色识别强调。
+    '.cm-em': { color: p.em, fontStyle: 'normal' },
     '.cm-code': inlineCodeStyle,
 
     '.cm-markup': { color: p.markup },

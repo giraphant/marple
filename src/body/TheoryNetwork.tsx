@@ -12,7 +12,7 @@ import { resolveWikilinks } from '../wiki';
  *   - Antonio Gramsci（霸权理论、伦理国家）——Bennett 的系统批判对象…
  *
  * We render each entry as a compact card: bold name, comma-split keywords
- * as amber chips, then the relationship prose on the next line. Names
+ * as accent chips, then the relationship prose on the next line. Names
  * wrapped in `[[wikilink]]` become clickable if the linked entry exists.
  */
 
@@ -127,14 +127,14 @@ function TheoryRow({ item, wikiIndex, onClick }: {
   };
 
   return (
-    <li class="px-3 py-2 rounded-md border border-base bg-surface hover:border-strong transition">
+    <li class="px-4 py-3 rounded-xl border border-base bg-surface shadow-soft hover:shadow-soft-lg transition">
       <div class="flex flex-wrap items-center gap-1.5">
         {item.entry
           ? (
             <a
               href="#"
               onClick={onNameClick as unknown as JSX.MouseEventHandler<HTMLAnchorElement>}
-              class="text-[14px] font-semibold text-primary hover:text-amber-700 dark:hover:text-amber-300 transition"
+              class="text-[14px] font-semibold text-primary hover:text-accent-text transition"
             >
               {item.name}
             </a>
@@ -146,7 +146,7 @@ function TheoryRow({ item, wikiIndex, onClick }: {
         {item.keywords.map((k, i) => (
           <span
             key={i}
-            class="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border border-amber-200/60 dark:border-amber-900/60 leading-snug"
+            class="text-[11px] px-1.5 py-0.5 rounded bg-accent-bg text-accent-text border border-accent/30 leading-snug"
           >
             {k}
           </span>

@@ -20,30 +20,32 @@
  *
  * Tailwind registers these as colors named `page` / `surface` / `primary` etc.,
  * see tailwind.config.js. Use them like `bg-surface text-primary border-base`.
- * Accent colors (amber/rose/emerald/sky/violet/teal) keep Tailwind's palette;
- * dark adjustments live as `dark:` modifiers where contrast needs help.
+ * Accent / state / type colors also flow through tokens (--accent, --accent-text,
+ * --accent-bg, --danger, --success, --star, --type-*-{fg,bg}), registered in
+ * tailwind.config.js. Components use `bg-accent` / `text-accent-text` /
+ * `bg-type-paper-bg` etc. — never raw palette literals.
  * --------------------------------------------------------------- */
 :root {
   /* Blush light: Blush 原 bg #f5f5f5 / fg #444444 + chrome 用 Blush
    * quote/code 砖红 hue 派生的暖灰 scale，让 header / cards 与 page
    * 自然分层，而不是几个近白色撞在一起没层次。 */
-  --bg-page:        245 245 245;  /* #f5f5f5 — Blush bg */
-  --bg-surface:     252 248 246;  /* #fcf8f6 — 暖白，header / 卡片 elevation */
-  --bg-surface-2:   241 234 230;  /* #f1eae6 — sticky header / hover */
-  --bg-hover:       232 220 213;  /* #e8dcd5 */
+  --bg-page:        250 247 242;
+  --bg-surface:     255 255 255;
+  --bg-surface-2:   241 235 225;
+  --bg-hover:       236 228 216;
 
-  --text-primary:    68  68  68;  /* #444 — Blush fg */
-  --text-secondary: 107  95  89;  /* #6b5f59 — 暖灰 secondary */
-  --text-muted:     156 142 135;  /* #9c8e87 */
-  --text-faint:     200 185 177;  /* #c8b9b1 */
+  --text-primary:    51  47  44;
+  --text-secondary: 111 101  93;
+  --text-muted:     155 144 136;
+  --text-faint:     197 188 178;
 
-  --border-base:    215 200 192;  /* #d7c8c0 — 暖灰可见边 */
-  --border-strong:  192 172 162;  /* #c0aca2 */
+  --border-base:    236 227 214;
+  --border-strong:  222 211 195;
 
   /* 链接保留旧 sky 蓝 — 此处是 chrome / wikilink 的旧轨道，
    * 阅读模式内文的 link 走 --reader-link。 */
-  --accent-link:      3 105 161;
-  --accent-link-bg: 240 249 255;
+  --accent-link:    154  80  36;
+  --accent-link-bg: 247 230 217;
 
   --bg-inverse:      68  68  68;
   --text-inverse:   245 245 245;
@@ -52,20 +54,21 @@
    * Reading content accents — ported from Ulysses Blush theme.
    * 同时被 .prose-body (阅读模式) 和 .cm-* (NoteEditor) 引用。
    * ============================================================ */
-  --reader-heading:  250 150   0;  /* #fa9600 橙 — H1–H6 */
-  --reader-fg:        68  68  68;  /* #444444 — Blush body fg */
-  --reader-strong:   157 106 216;  /* #9d6ad8 紫 */
-  --reader-em:       255  95 139;  /* #ff5f8b 粉 */
-  --reader-quote:    189 105  63;  /* #bd693f 砖红 */
-  --reader-quote-marker: 223 198 183;
-  --reader-quote-bg: 245 235 226;
-  --reader-code:      61 147 234;  /* #3d93ea — Blush palette idx 8 */
-  --reader-code-bg:  232 238 245;  /* #e8eef5 — light blue code wash */
-  --reader-link:     246 107   0;  /* #f66b00 深橙 */
+  --reader-heading:  168  90  44;
+  --reader-fg:        51  47  44;
+  --reader-strong:    51  47  44;
+  --reader-em:       156  90  46;
+  --reader-quote:    111 101  93;
+  --reader-quote-marker: 220 192 168;
+  --reader-quote-bg: 244 233 226;
+  --reader-code:     180  97  47;
+  --reader-code-bg:  244 233 226;
+  --reader-link:     154  80  36;
   --reader-link-token-fg:     229 115  44;  /* sampled Ulysses capsule text */
   --reader-link-token-border: 233 160 100;  /* sampled Ulysses capsule border */
   --reader-link-token-bg:     242 227 213;  /* sampled Ulysses capsule fill */
-  --reader-marker:   157 106 216;  /* #9d6ad8 紫 — list ul/ol marker */
+  --reader-quote-bar: 220 192 168;
+  --reader-marker:   180  97  47;
   --reader-mark-fg:   117  88 153;
   --reader-mark-bg:   203 178 237;
   --reader-comment-fg: 141 202 102;
@@ -101,6 +104,23 @@
    * This split mirrors Obsidian's `--font-text-*` vs `--font-ui-*`
    * convention.
    * ------------------------------------------------------------- */
+  /* accent / 状态层（QUA-63） */
+  --accent:        194 112  61;
+  --accent-text:   154  80  36;
+  --accent-bg:     247 230 217;
+  --danger:        179  80  63;
+  --danger-bg:     246 224 219;
+  --success:        95 117  68;
+  --star:          207 155  62;
+
+  /* 类型层（QUA-63）fg / bg */
+  --type-paper-fg:   180  97  47;  --type-paper-bg:   244 225 212;
+  --type-book-fg:    110 123  67;  --type-book-bg:    232 235 214;
+  --type-chapter-fg:  63 128 116;  --type-chapter-bg: 216 233 228;
+  --type-author-fg:   79 107 143;  --type-author-bg:  222 229 238;
+  --type-topic-fg:   125  90 134;  --type-topic-bg:   233 224 234;
+  --type-note-fg:    168  87 117;  --type-note-bg:    243 223 230;
+
   --reader-font-family: "PingFang SC", "PingFang TC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", system-ui, sans-serif;
   --reader-font-size: 16px;
   --reader-line-height: 1.78;
@@ -112,41 +132,58 @@
  * elevation cues; text/bg pairs target WCAG AA (4.5:1+) on body text.
  */
 .dark {
-  /* Blush dark palette — bg #2a2229 深酒红、fg #ecddd9 暖奶白 + 冷暖 accent。 */
-  --bg-page:         42  34  41;   /* #2a2229 — Blush dark bg */
-  --bg-surface:      54  46  53;   /* 一档浅，卡片 / panel */
-  --bg-surface-2:    66  56  64;   /* sticky header / hover */
-  --bg-hover:        82  70  79;
+  --bg-page:         30  27  24;
+  --bg-surface:      40  36  32;
+  --bg-surface-2:    48  43  38;
+  --bg-hover:        58  52  46;
 
-  --text-primary:   236 221 217;   /* #ecddd9 — Blush dark fg */
-  --text-secondary: 195 178 173;
-  --text-muted:     140 124 121;
-  --text-faint:      90  78  86;
+  --text-primary:   236 229 223;
+  --text-secondary: 184 173 163;
+  --text-muted:     138 128 119;
+  --text-faint:      90  82  75;
 
-  --border-base:     66  56  64;
-  --border-strong:   95  82  93;
+  --border-base:     54  48  42;
+  --border-strong:   72  64  56;
 
-  --accent-link:    125 211 252;
-  --accent-link-bg:  17  29  42;
+  --accent-link:    230 168 127;
+  --accent-link-bg:  70  51  40;
 
   --bg-inverse:     236 221 217;
   --text-inverse:    42  34  41;
 
+  /* accent / 状态层（暗） */
+  --accent:        216 137  90;
+  --accent-text:   230 168 127;
+  --accent-bg:      70  51  40;
+  --danger:        212 121 106;
+  --danger-bg:      65  46  41;
+  --success:       159 181 111;
+  --star:          216 178  90;
+
+  /* 类型层（暗）fg / bg */
+  --type-paper-fg:   217 154 110;  --type-paper-bg:    65  45  31;
+  --type-book-fg:    167 182 115;  --type-book-bg:     50  50  36;
+  --type-chapter-fg: 111 179 163;  --type-chapter-bg:  40  52  47;
+  --type-author-fg:  138 166 200;  --type-author-bg:   44  48  55;
+  --type-topic-fg:   183 147 189;  --type-topic-bg:    55  44  53;
+  --type-note-fg:    207 138 163;  --type-note-bg:     65  44  49;
+
   /* Reading accents — dark palette */
-  --reader-heading:  238 181   0;  /* #eeb500 黄 */
-  --reader-fg:       236 221 217;  /* #ecddd9 — Blush dark fg */
-  --reader-strong:   172 129 243;  /* #ac81f3 紫 */
-  --reader-em:       255  71 113;  /* #ff4771 粉 */
-  --reader-quote:    236 221 217;  /* #ecddd9 同正文 — dark 下用色弱区分 */
+  --reader-heading:  220 154  85;
+  --reader-fg:       236 229 223;
+  --reader-strong:   236 229 223;
+  --reader-em:       223 154 110;
+  --reader-quote:    184 173 163;
+  --reader-quote-bar:106  88  74;
   --reader-quote-marker: 139 122 132;
   --reader-quote-bg: 60 48 55;
-  --reader-code:       0 151 222;  /* #0097de — dark inline code */
-  --reader-code-bg:   38  53  69;
-  --reader-link:       0 151 222;  /* #0097de 青 */
+  --reader-code:     223 154 110;
+  --reader-code-bg:   58  46  38;
+  --reader-link:     230 168 127;
   --reader-link-token-fg:       0 151 222;
   --reader-link-token-border:  73 129 163;
   --reader-link-token-bg:      38  53  69;
-  --reader-marker:   236 221 217;  /* 奶白 marker + bold */
+  --reader-marker:   223 154 110;
   --reader-mark-fg:   203 178 237;
   --reader-mark-bg:    77  58 102;
   --reader-comment-fg: 123 195  68;
@@ -200,16 +237,15 @@
   .prose-body ol { margin: 0.6em 0; padding-left: 1.5em; list-style-type: decimal; }
   .prose-body li { margin: 0.25em 0; }
   .prose-body li::marker { color: rgb(var(--reader-marker)); font-weight: 700; }
-  /* blockquote: CJK 整段加 italic 会变浏览器伪斜体（geometric slant），非常丑。
-   * 仅靠左 rule + 砖红色 + 文字颜色辨识，不加 italic。 */
-  .prose-body blockquote { border-left: 3px solid rgb(var(--reader-quote)); padding-left: 1em; color: rgb(var(--reader-quote)); margin: 0.8em 0; }
+  /* blockquote: 中性左 rule + 中性文字辨识，不加 italic（CJK 伪斜体很丑）。 */
+  .prose-body blockquote { border-left: 3px solid rgb(var(--reader-quote-bar)); padding-left: 1em; color: rgb(var(--reader-quote)); margin: 0.8em 0; }
   .prose-body code { background: rgb(var(--reader-code-bg)); color: rgb(var(--reader-code)); padding: 0 0.3em; border-radius: 3px; font-size: 0.9em; }
   .prose-body a { color: rgb(var(--reader-link)); font-weight: 700; }
   .prose-body del { color: rgb(var(--reader-delete)); }
   .prose-body strong { font-weight: 700; color: rgb(var(--reader-strong)); }
   /* em 保留 italic — CJK glyph 在多数字体下不会真出 italic、自然降级为彩色，
    * 西文 glyph 出真 italic。两端都能识别 emphasis。 */
-  .prose-body em { color: rgb(var(--reader-em)); font-style: italic; font-weight: 600; }
+  .prose-body em { color: rgb(var(--reader-em)); font-style: normal; font-weight: 600; }
   .prose-body hr { border: none; border-top: 1px solid rgb(var(--border-base)); margin: 1.4em 0; }
 
   .cm-list-rendered-marker {

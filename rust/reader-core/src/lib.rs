@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -49,6 +49,8 @@ pub struct ReaderPaths {
     pub notes_dir: PathBuf,
     pub trash_dir: PathBuf,
     pub sources: PathBuf,
+    /// Translated PDFs, named `<slug>-zh.pdf` (produced by the quasi translate pass).
+    pub translations: PathBuf,
     pub index_db: PathBuf,
     /// Separate DB holding only the semantic vectors (entry_vectors). Kept apart
     /// from index_db so a fast metadata reindex never wipes the (expensive)
@@ -73,6 +75,7 @@ impl ReaderPaths {
             vectors_db: reader_root.join("data").join("vectors.sqlite"),
             trash_dir: notes_dir.join(".trash"),
             sources: workspace_root.join("sources"),
+            translations: workspace_root.join("processing").join("translations"),
             dist: reader_root.join("dist"),
             reader_root,
             workspace_root,
@@ -126,6 +129,8 @@ pub struct Entry {
     pub pdf_slug: Option<String>,
     pub mtime: Option<i64>,
     pub preview: String,
+    pub body_len: i64,
+    pub added: i64,
 }
 
 /// One vault file as seen by a plain directory walk — the file-browser's view
@@ -188,7 +193,7 @@ pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
         SELECT
           path, type, book, title, author, year_json, rating_json, rating_score,
           themes_json, topic, source, doi, chapters_analyzed, annotates, created,
-          pdf_slug, has_pdf, mtime, preview
+          pdf_slug, has_pdf, mtime, preview, body_len, added
         FROM entries
         ORDER BY
           type,
@@ -810,12 +815,130 @@ pub fn resolve_get_path(paths: &ReaderPaths, url_path: &str) -> ReaderResult<Pat
     Ok(path)
 }
 
+const SLUG_STOPWORDS: &[&str] = &[
+    "the", "of", "a", "an", "and", "to", "in", "on", "for", "from", "at", "by",
+    "with", "de", "la", "le", "el", "und", "der", "die", "das",
+];
+
+fn is_year_token(t: &str) -> bool {
+    t.len() == 4 && t.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Trailing 4-digit year of a slug, if any (`smith-body-2020` → 2020).
+fn slug_year(slug: &str) -> Option<i32> {
+    slug.split('-')
+        .rev()
+        .find(|t| is_year_token(t))
+        .and_then(|t| t.parse().ok())
+}
+
+/// Significant title tokens of a slug: drop the leading lastname (compared
+/// separately), the 4-digit year, and common stopwords; lowercase the rest.
+fn slug_title_tokens(slug: &str) -> HashSet<String> {
+    slug.split('-')
+        .skip(1)
+        .filter(|t| !t.is_empty() && !is_year_token(t) && !SLUG_STOPWORDS.contains(t))
+        .map(|t| t.to_ascii_lowercase())
+        .collect()
+}
+
+/// Scan `sources/` for `*.pdf` and return the bare file stems (slugs).
+fn source_stem_set(sources: &Path) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let Ok(entries) = fs::read_dir(sources) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_pdf = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("pdf"))
+            .unwrap_or(false);
+        if !is_pdf {
+            continue;
+        }
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            out.insert(stem.to_string());
+        }
+    }
+    out
+}
+
+/// Conservative fuzzy match of an expected slug to an actual source stem, used
+/// when exact `sources/<slug>.pdf` is missing. Vault slugs follow
+/// `{lastname}-{title-slug}-{year}`, but titles get truncated or reworded, so
+/// exact match misses many books. Requirements (all must hold): same leading
+/// lastname token; ≥ 2 shared significant title tokens; Jaccard ≥ 0.6; and a
+/// single clear winner (only one candidate, or the top beats the runner-up by
+/// > 0.15). Year handling is asymmetric: when the significant titles are
+/// *identical* the year is ignored (so typos like 1883→1983 and reprint
+/// editions still match), but a merely *partial* title overlap also requires the
+/// years to be within 5 — a shorter title can be a strict subset of a different
+/// work by the same author (e.g. a sequel with a longer title), and the year is
+/// what tells those apart. This strictness keeps false positives (opening the
+/// wrong PDF) near zero, at the cost of leaving the hardest mismatches
+/// unmatched. Pure and deterministic — unit-testable.
+pub fn fuzzy_pick_source(expected: &str, candidates: &HashSet<String>) -> Option<String> {
+    let exp_tokens: Vec<&str> = expected.split('-').filter(|t| !t.is_empty()).collect();
+    if exp_tokens.is_empty() {
+        return None;
+    }
+    let exp_last = exp_tokens[0].to_ascii_lowercase();
+    let exp_title = slug_title_tokens(expected);
+    if exp_title.len() < 2 {
+        return None; // too little signal to match safely
+    }
+    let exp_year = slug_year(expected);
+
+    let mut scored: Vec<(f64, &str)> = Vec::new();
+    for cand in candidates {
+        let cand_tokens: Vec<&str> = cand.split('-').filter(|t| !t.is_empty()).collect();
+        if cand_tokens.is_empty() {
+            continue;
+        }
+        if cand_tokens[0].to_ascii_lowercase() != exp_last {
+            continue;
+        }
+        let cand_title = slug_title_tokens(cand);
+        let inter = exp_title.intersection(&cand_title).count();
+        if inter < 2 {
+            continue;
+        }
+        let union = exp_title.union(&cand_title).count();
+        if union == 0 {
+            continue;
+        }
+        let jac = inter as f64 / union as f64;
+        if jac < 0.6 {
+            continue;
+        }
+        // Identical titles are high-confidence; a partial overlap must also have
+        // close years (a subset title can be a different, more-specific work).
+        let identical = exp_title == cand_title;
+        let year_close = match (exp_year, slug_year(cand)) {
+            (Some(a), Some(b)) => (a - b).abs() <= 5,
+            _ => false,
+        };
+        if identical || year_close {
+            scored.push((jac, cand.as_str()));
+        }
+    }
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    match scored.as_slice() {
+        [(_, s)] => Some((*s).to_string()),
+        [(j0, s0), (j1, _), ..] if j0 - j1 > 0.15 => Some((*s0).to_string()),
+        _ => None,
+    }
+}
+
 /// Resolve a PDF slug to its on-disk file under `sources/`. The slug is supplied
 /// by the client (build-index generates `pdf_slug`, but it round-trips through
 /// the browser, so treat it as untrusted): join `sources/<slug>.pdf`,
 /// canonicalize, and require the result to stay under `sources/`, end in `.pdf`,
-/// and be an existing file. Pure resolution with no side effects, so it can be
-/// unit-tested without launching anything.
+/// and be an existing file. When the exact file is missing, fall back to a
+/// conservative fuzzy match (see `fuzzy_pick_source`). Pure resolution with no
+/// side effects, so it can be unit-tested without launching anything.
 pub fn resolve_source_pdf(paths: &ReaderPaths, slug: &str) -> ReaderResult<PathBuf> {
     let slug = slug.trim();
     if slug.is_empty() {
@@ -826,10 +949,73 @@ pub fn resolve_source_pdf(paths: &ReaderPaths, slug: &str) -> ReaderResult<PathB
     if path.extension().and_then(|e| e.to_str()) != Some("pdf") {
         return Err(ReaderError::Unsupported("only .pdf files allowed".to_string()));
     }
+    if path.is_file() {
+        return Ok(path);
+    }
+    // Exact file missing — try a conservative fuzzy match against sources/.
+    if let Some(matched) = fuzzy_pick_source(slug, &source_stem_set(&paths.sources)) {
+        let fpath = safe_join(&paths.workspace_root, &format!("sources/{matched}.pdf"))?;
+        ensure_under(&fpath, &paths.sources, "pdf must live under sources/")?;
+        if fpath.is_file() {
+            return Ok(fpath);
+        }
+    }
+    Err(ReaderError::NotFound("pdf not found".to_string()))
+}
+
+/// Resolve a slug to its translated PDF under `processing/translations/`, named
+/// `<slug>-zh.pdf`. Same untrusted-input discipline as `resolve_source_pdf`:
+/// safe-join, require it stays under the translations dir, end in `.pdf`, and be
+/// an existing file. Pure resolution, no side effects.
+pub fn resolve_translation_pdf(paths: &ReaderPaths, slug: &str) -> ReaderResult<PathBuf> {
+    let slug = slug.trim();
+    if slug.is_empty() {
+        return Err(ReaderError::BadRequest("empty translation slug".to_string()));
+    }
+    let path = safe_join(
+        &paths.workspace_root,
+        &format!("processing/translations/{slug}-zh.pdf"),
+    )?;
+    ensure_under(
+        &path,
+        &paths.translations,
+        "translation must live under processing/translations/",
+    )?;
+    if path.extension().and_then(|e| e.to_str()) != Some("pdf") {
+        return Err(ReaderError::Unsupported("only .pdf files allowed".to_string()));
+    }
     if !path.is_file() {
-        return Err(ReaderError::NotFound("pdf not found".to_string()));
+        return Err(ReaderError::NotFound("translation not found".to_string()));
     }
     Ok(path)
+}
+
+/// List slugs that have a translated PDF under `processing/translations/`
+/// (files named `<slug>-zh.pdf`); returns the bare `<slug>` for each. Read live
+/// so a newly-dropped translation appears without a reindex.
+pub fn list_translation_slugs(paths: &ReaderPaths) -> Vec<String> {
+    let mut slugs = Vec::new();
+    let Ok(entries) = fs::read_dir(&paths.translations) else {
+        return slugs;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_pdf = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("pdf"))
+            .unwrap_or(false);
+        if !is_pdf {
+            continue;
+        }
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            if let Some(slug) = stem.strip_suffix("-zh") {
+                slugs.push(slug.to_string());
+            }
+        }
+    }
+    slugs.sort();
+    slugs
 }
 
 /// Open an already-resolved file with the OS default application. macOS uses
@@ -969,6 +1155,8 @@ fn row_to_entry(row: &Row<'_>) -> rusqlite::Result<Entry> {
         has_pdf: row.get::<_, i64>(16)? != 0,
         mtime: row.get(17)?,
         preview: row.get::<_, Option<String>>(18)?.unwrap_or_default(),
+        body_len: row.get::<_, Option<i64>>(19)?.unwrap_or_default(),
+        added: row.get::<_, Option<i64>>(20)?.unwrap_or_default(),
     })
 }
 

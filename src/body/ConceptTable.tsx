@@ -24,11 +24,11 @@ import { parseMarkdownTable } from './sections';
 
 type ColumnRole =
   | 'name'         // 概念    — primary, bold
-  | 'translation'  // 英文    — italic muted small
+  | 'translation'  // 英文    — muted small
   | 'coiner'       // 提出者  — chip (wraps when long)
   | 'refs'         // 出现章节 — split into chips
   | 'definition'   // 定义    — prose, widest column
-  | 'works'        // 来源作品 — italic, wikilinks preserved
+  | 'works'        // 来源作品 — wikilinks preserved
   | 'evolution'    // 演化轨迹 — prose
   | 'status'       // 当前状态 — chip
   | 'unknown';
@@ -107,7 +107,7 @@ export function ConceptTable({ content, wikiIndex, onWikiClick }: Props) {
 
   return (
     <div
-      class="my-3 overflow-hidden rounded-lg border border-base bg-surface"
+      class="my-4 overflow-hidden rounded-xl border border-base bg-surface shadow-soft"
       onClick={onClick as unknown as JSX.MouseEventHandler<HTMLDivElement>}
     >
       <div class="overflow-x-auto">
@@ -164,7 +164,7 @@ function colHeadCls(role: ColumnRole): string {
 function colBodyCls(role: ColumnRole): string {
   switch (role) {
     case 'name':        return 'font-semibold leading-snug';
-    case 'translation': return 'italic text-secondary text-[12px] leading-snug';
+    case 'translation': return 'text-secondary text-[12px] leading-snug';
     case 'coiner':      return 'text-secondary text-[12px] leading-snug';
     case 'refs':        return 'text-[12px]';
     case 'works':       return 'text-[12px] leading-snug';
@@ -200,7 +200,7 @@ function CellRender({ role, raw, wikiIndex }: { role: ColumnRole; raw: string; w
   if (role === 'coiner' || role === 'status') {
     const html = renderCellInline(raw, wikiIndex);
     return html
-      ? <span class="inline-block px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 text-[11px]" dangerouslySetInnerHTML={{ __html: html }} />
+      ? <span class="inline-block px-1.5 py-0.5 rounded bg-accent-bg text-accent-text text-[11px]" dangerouslySetInnerHTML={{ __html: html }} />
       : <span class="text-muted">—</span>;
   }
   // Default cell: inline markdown + resolved wikilinks.

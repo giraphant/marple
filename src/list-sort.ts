@@ -10,8 +10,9 @@ import type { Entry } from './types';
  * top.
  */
 
-export type SortKey = 'default' | 'title' | 'author' | 'year' | 'rating' | 'updated';
+export type SortKey = 'default' | 'title' | 'author' | 'year' | 'rating' | 'updated' | 'added';
 export type SortDir = 'asc' | 'desc';
+export type SortField = Exclude<SortKey, 'default'>;
 
 export const SORT_OPTIONS: ReadonlyArray<{ key: SortKey; label: string }> = [
   { key: 'default', label: '默认' },
@@ -20,7 +21,21 @@ export const SORT_OPTIONS: ReadonlyArray<{ key: SortKey; label: string }> = [
   { key: 'year', label: '年份' },
   { key: 'rating', label: '评分' },
   { key: 'updated', label: '更新时间' },
+  { key: 'added', label: '入库时间' },
 ];
+
+/** Fields available to the multi-sort UI (no 'default' — an empty clause list
+ *  IS the default/index order). */
+export const SORT_FIELDS: ReadonlyArray<{ field: SortField; label: string }> = [
+  { field: 'rating', label: '评分' },
+  { field: 'year', label: '年份' },
+  { field: 'added', label: '入库时间' },
+  { field: 'updated', label: '更新时间' },
+  { field: 'title', label: '标题' },
+  { field: 'author', label: '作者' },
+];
+
+const SORT_FIELD_SET: ReadonlySet<string> = new Set(SORT_FIELDS.map(f => f.field));
 
 const SORT_KEYS: ReadonlySet<string> = new Set(SORT_OPTIONS.map(o => o.key));
 
@@ -80,6 +95,7 @@ function comparatorFor(key: Exclude<SortKey, 'default'>, dir: SortDir): (a: Entr
     // last in both directions (matches the empties-last contract above).
     case 'rating':  return (a, b) => numCmp(a.rating_score || null, b.rating_score || null, dir);
     case 'updated': return (a, b) => numCmp(a.mtime ?? null, b.mtime ?? null, dir);
+    case 'added':   return (a, b) => numCmp(a.added || null, b.added || null, dir);
   }
 }
 
@@ -91,6 +107,44 @@ export function sortEntries(list: Entry[], key: SortKey, dir: SortDir): Entry[] 
   return list
     .map((e, i) => [e, i] as const)
     .sort((x, y) => cmp(x[0], y[0]) || x[1] - y[1])
+    .map(([e]) => e);
+}
+
+/** One level of a multi-sort: a field plus its direction. The clause list is
+ *  applied in order, each level breaking ties of the level above it. */
+export interface SortClause {
+  field: SortField;
+  dir: SortDir;
+}
+
+/** Validate an untrusted value (e.g. a persisted settings blob) into a clean
+ *  SortClause list. Drops anything malformed so a stale store can't crash sort. */
+export function coerceSortClauses(v: unknown): SortClause[] {
+  if (!Array.isArray(v)) return [];
+  const out: SortClause[] = [];
+  for (const c of v) {
+    if (c && typeof c === 'object' && SORT_FIELD_SET.has((c as SortClause).field)) {
+      out.push({ field: (c as SortClause).field, dir: asSortDir((c as SortClause).dir) });
+    }
+  }
+  return out;
+}
+
+/** Multi-level stable sort. Empty clause list returns the input unchanged
+ *  (preserves relevance / index order). Ties fall through to the next clause,
+ *  then to original index so equal keys keep input order. */
+export function sortEntriesMulti(list: Entry[], clauses: SortClause[]): Entry[] {
+  if (clauses.length === 0) return list;
+  const cmps = clauses.map(c => comparatorFor(c.field, c.dir));
+  return list
+    .map((e, i) => [e, i] as const)
+    .sort((x, y) => {
+      for (const cmp of cmps) {
+        const r = cmp(x[0], y[0]);
+        if (r) return r;
+      }
+      return x[1] - y[1];
+    })
     .map(([e]) => e);
 }
 

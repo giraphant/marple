@@ -105,7 +105,7 @@ export function ChapterFlow({ content, wikiIndex }: Props) {
           without `!` the line gets pushed 24px to the left of the dots and
           disappears outside the prose-body's left edge. `[&>li]:my-0` keeps
           the LI margins from prose-body out of the timeline gap math. */}
-      <ol class="relative my-3 ml-3 !pl-0 list-none border-l-2 border-amber-300 dark:border-amber-700/60 space-y-5 [&>li]:my-0">
+      <ol class="relative my-3 ml-3 !pl-0 list-none border-l-2 border-accent space-y-5 [&>li]:my-0">
         {parsed.nodes.map((n, i) => (
           <li key={i} class="relative pl-6">
             {/* `-left-px` + `-translate-x-1/2` puts the dot's center on the
@@ -113,7 +113,7 @@ export function ChapterFlow({ content, wikiIndex }: Props) {
                 visually "passes through" the dot (classic timeline trick). */}
             <span
               aria-hidden="true"
-              class="absolute -left-px top-[0.45em] -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-amber-400 dark:bg-amber-500 ring-4 ring-page"
+              class="absolute -left-px top-[0.45em] -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-accent ring-4 ring-page"
             />
             <div class="text-[14px] font-semibold text-primary leading-snug">
               {n.title}

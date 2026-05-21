@@ -46,7 +46,7 @@ function tabDisplay(tab: Tab, entryByPath: Map<string, Entry>): {
           <Icon name="trash" size={10} />
         </span>
       ),
-      title: '回收站',
+      title: '回收站点',
       type: null,
     };
   }
@@ -54,7 +54,7 @@ function tabDisplay(tab: Tab, entryByPath: Map<string, Entry>): {
     return {
       icon: (
         <span
-          class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-amber-100 text-amber-700 dark:text-amber-400 dark:bg-amber-950/40 dark:text-amber-300"
+          class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-accent-bg text-accent-text"
           style={{ minWidth: '1.2em', minHeight: '1.2em', height: '1.2em', width: '1.2em' }}
         >
           <PhTag width="0.85em" height="0.85em" />
@@ -68,7 +68,7 @@ function tabDisplay(tab: Tab, entryByPath: Map<string, Entry>): {
     return {
       icon: (
         <span
-          class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-amber-100 text-amber-700 dark:text-amber-400 dark:bg-amber-950/40 dark:text-amber-300"
+          class="shrink-0 inline-flex items-center justify-center rounded-[0.33em] bg-accent-bg text-accent-text"
           style={{ minWidth: '1.2em', minHeight: '1.2em', height: '1.2em', width: '1.2em' }}
         >
           <PhChartLineUp width="0.85em" height="0.85em" />
@@ -103,12 +103,12 @@ export function TabBar({
   // means "after the last tab". Slot N means "before tab N (after tab N-1)".
   const [dropSlot, setDropSlot] = useState<number | null>(null);
   return (
-    <div class="bg-surface-2 border-b border-base flex items-center gap-1 px-2 py-1.5 overflow-x-auto scrollbar-thin">
+    <div class="bg-page border-b border-base flex items-center gap-1 px-2.5 py-2 overflow-x-auto scrollbar-thin">
       <button
         onClick={onBack}
         disabled={!canBack}
         title="后退 (Cmd+[)"
-        class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:bg-hover/60 hover:text-primary disabled:opacity-30 disabled:hover:bg-transparent"
+        class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-xl text-muted hover:bg-hover/60 hover:text-primary disabled:opacity-30 disabled:hover:bg-transparent"
       >
         <Icon name="caret-left" />
       </button>
@@ -116,7 +116,7 @@ export function TabBar({
         onClick={onForward}
         disabled={!canForward}
         title="前进 (Cmd+])"
-        class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:bg-hover/60 hover:text-primary disabled:opacity-30 disabled:hover:bg-transparent"
+        class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-xl text-muted hover:bg-hover/60 hover:text-primary disabled:opacity-30 disabled:hover:bg-transparent"
       >
         <Icon name="caret-right" />
       </button>
@@ -175,18 +175,18 @@ export function TabBar({
                 onReorder(from, adjusted);
               }}
               onDragEnd={() => { setDragFrom(null); setDropSlot(null); }}
-              class={`group relative flex items-center gap-1.5 py-1 text-[12px] rounded-md border cursor-pointer select-none min-w-0 transition ${
+              class={`group relative flex items-center gap-1.5 py-1.5 text-[12px] rounded-xl border cursor-pointer select-none min-w-0 transition ${
                 pinned ? 'pl-2.5 pr-1.5 max-w-[180px]' : 'pl-2.5 pr-1.5 max-w-[220px]'
               } ${
                 active
-                  ? 'bg-surface border-strong text-primary shadow-sm'
+                  ? 'bg-surface border-base text-primary shadow-soft-sm font-medium'
                   : 'bg-transparent border-transparent text-muted hover:bg-hover/60 hover:text-secondary'
               } ${isDragging ? 'opacity-40' : ''}`}
               style={{
                 boxShadow: showLeftIndicator
-                  ? 'inset 2px 0 0 0 #0c0a09'
+                  ? 'inset 2px 0 0 0 rgb(194 112 61)'
                   : showRightIndicator
-                    ? 'inset -2px 0 0 0 #0c0a09'
+                    ? 'inset -2px 0 0 0 rgb(194 112 61)'
                     : undefined,
               }}
               onClick={() => onActivate(i)}
@@ -205,7 +205,7 @@ export function TabBar({
                   onClick={(ev) => { ev.stopPropagation(); onTogglePin(i); }}
                   class={`px-0.5 inline-flex items-center transition ${
                     pinned
-                      ? 'text-amber-600 dark:text-amber-300 hover:text-amber-800 dark:hover:text-amber-200'
+                      ? 'text-accent-text hover:text-accent-text'
                       : 'text-muted hover:text-secondary opacity-0 group-hover:opacity-100'
                   }`}
                   title={pinned ? '取消固定' : '固定 tab'}
@@ -228,7 +228,7 @@ export function TabBar({
       <button
         onClick={onNewTab}
         title="新建 tab"
-        class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded text-muted hover:bg-hover/60 hover:text-primary"
+        class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-xl text-muted hover:bg-hover/60 hover:text-primary"
       ><Icon name="plus" /></button>
     </div>
   );

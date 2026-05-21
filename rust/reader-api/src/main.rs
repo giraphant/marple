@@ -67,6 +67,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/reindex", post(api_reindex))
         .route("/api/reconcile", post(api_reconcile))
         .route("/api/open-pdf", post(api_open_pdf))
+        .route("/api/translations", get(api_translations))
+        .route("/api/open-translation", post(api_open_translation))
         .route("/api/embeddings", post(api_embeddings))
         .route("/api/embeddings/status", get(api_embeddings_status))
         .route("/api/trash", get(api_trash_list))
@@ -309,6 +311,29 @@ async fn api_open_pdf(
     let paths = state.paths.clone();
     tokio::task::spawn_blocking(move || -> Result<(), ReaderError> {
         let path = reader_core::resolve_source_pdf(&paths, &params.slug)?;
+        reader_core::open_in_system_app(&path)
+    })
+    .await
+    .map_err(|err| AppError(ReaderError::Other(err.into())))??;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// List the slugs that have a translated PDF under `processing/translations/`.
+/// Read live (cheap dir scan) so newly-added translations need no reindex.
+async fn api_translations(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let slugs = reader_core::list_translation_slugs(&state.paths);
+    Json(json!(slugs))
+}
+
+/// Open a translated PDF (`processing/translations/<slug>-zh.pdf`) in the host's
+/// default PDF app. Mirrors `api_open_pdf` (same untrusted-slug discipline).
+async fn api_open_translation(
+    State(state): State<AppState>,
+    Json(params): Json<OpenPdfParams>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let paths = state.paths.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), ReaderError> {
+        let path = reader_core::resolve_translation_pdf(&paths, &params.slug)?;
         reader_core::open_in_system_app(&path)
     })
     .await

@@ -31,6 +31,11 @@ export interface Entry {
   /** File mtime in epoch ms. Used for the activity heatmap. */
   mtime?: number | null;
   preview: string;
+  /** Character count of the analysis body — drives the card's proportional
+   *  preview length (longer analysis → more preview shown). */
+  body_len?: number;
+  /** Epoch-ms of the file's first git commit (true ingestion date), 0 if unknown. */
+  added?: number;
 }
 
 export type EditableField =
@@ -50,12 +55,12 @@ export interface TypeMeta {
 }
 
 export const TYPES: TypeMeta[] = [
-  { id: 'paper-analysis',  label: '论文', accent: 'bg-amber-100  text-amber-800  border-amber-200'  },
-  { id: 'book-overview',   label: '图书', accent: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-  { id: 'author-profile',  label: '作者', accent: 'bg-sky-100    text-sky-800    border-sky-200'    },
-  { id: 'topic-synthesis', label: '主题', accent: 'bg-violet-100 text-violet-800 border-violet-200' },
-  { id: 'chapter-summary', label: '章节', accent: 'bg-teal-100   text-teal-800   border-teal-200'   },
-  { id: 'note',            label: '笔记', accent: 'bg-rose-100   text-rose-800   border-rose-200'   },
+  { id: 'paper-analysis',  label: '论文', accent: 'bg-type-paper-bg   text-type-paper-fg   border-type-paper-fg/25'   },
+  { id: 'book-overview',   label: '图书', accent: 'bg-type-book-bg    text-type-book-fg    border-type-book-fg/25'    },
+  { id: 'author-profile',  label: '作者', accent: 'bg-type-author-bg  text-type-author-fg  border-type-author-fg/25'  },
+  { id: 'topic-synthesis', label: '主题', accent: 'bg-type-topic-bg   text-type-topic-fg   border-type-topic-fg/25'   },
+  { id: 'chapter-summary', label: '章节', accent: 'bg-type-chapter-bg text-type-chapter-fg border-type-chapter-fg/25' },
+  { id: 'note',            label: '笔记', accent: 'bg-type-note-bg    text-type-note-fg    border-type-note-fg/25'    },
 ];
 
 export const TYPE_BY_ID: Record<string, TypeMeta> = Object.fromEntries(

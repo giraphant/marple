@@ -24,6 +24,7 @@ fn temp_paths() -> ReaderPaths {
         index_db: reader_root.join("data/index.sqlite"),
         vectors_db: reader_root.join("data/vectors.sqlite"),
         dist: reader_root.join("dist"),
+        translations: workspace_root.join("processing").join("translations"),
     }
 }
 
@@ -34,6 +35,21 @@ fn resolves_existing_source_pdf() {
     std::fs::write(&pdf, b"%PDF-1.4 test").unwrap();
 
     let resolved = resolve_source_pdf(&paths, "smith-body-2020").expect("should resolve");
+    assert_eq!(resolved, pdf.canonicalize().unwrap());
+}
+
+#[test]
+fn resolves_truncated_slug_via_fuzzy_fallback() {
+    // The vault slug dropped a title word; no exact file exists, but the source
+    // dir holds the full-title PDF — fuzzy fallback should still find it.
+    let paths = temp_paths();
+    let pdf = paths
+        .sources
+        .join("ahmed-queer-phenomenology-2006.pdf");
+    std::fs::write(&pdf, b"%PDF-1.4 test").unwrap();
+
+    let resolved = resolve_source_pdf(&paths, "ahmed-orientations-queer-phenomenology-2006")
+        .expect("fuzzy fallback should resolve");
     assert_eq!(resolved, pdf.canonicalize().unwrap());
 }
 

@@ -85,15 +85,15 @@ export function RightPanel({
         <button
           onClick={() => setCollapsed(false)}
           title="展开面板"
-          class="p-1.5 rounded text-muted hover:text-primary hover:bg-surface-2"
-        ><Icon name="caret-left" size={14} /></button>
+          class="p-1.5 rounded-lg text-muted hover:text-primary hover:bg-surface-2"
+        ><Icon name="sidebar" size={16} class="-scale-x-100" /></button>
         <div class="w-5 border-t border-base my-1" />
         {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => selectTab(t.id)}
             title={t.label}
-            class="p-1.5 rounded text-muted hover:text-primary hover:bg-surface-2"
+            class="p-1.5 rounded-lg text-muted hover:text-primary hover:bg-surface-2"
           ><Icon name={t.icon} size={15} /></button>
         ))}
       </aside>
@@ -108,18 +108,18 @@ export function RightPanel({
       <div
         onPointerDown={onDragStart}
         title="拖拽调整宽度"
-        class="absolute left-0 top-0 bottom-0 w-1.5 -ml-0.5 cursor-col-resize hover:bg-amber-300/40 z-10"
+        class="absolute left-0 top-0 bottom-0 w-1.5 -ml-0.5 cursor-col-resize hover:bg-accent/30 z-10"
       />
-      <div class="flex items-center gap-0.5 px-2 py-1.5 border-b border-base shrink-0">
+      <div class="flex items-center gap-1 px-2.5 py-2 border-b border-base shrink-0">
         {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => selectTab(t.id)}
             title={t.label}
             aria-label={t.label}
-            class={`p-1.5 rounded transition ${
+            class={`p-1.5 rounded-lg transition ${
               tab === t.id
-                ? 'bg-inverse text-inverse-fg'
+                ? 'bg-accent-bg text-accent-text'
                 : 'text-muted hover:text-primary hover:bg-surface-2'
             }`}
           ><Icon name={t.icon} size={15} /></button>
@@ -128,8 +128,8 @@ export function RightPanel({
         <button
           onClick={() => setCollapsed(true)}
           title="折叠面板"
-          class="p-1.5 rounded text-muted hover:text-primary hover:bg-surface-2"
-        ><Icon name="caret-right" size={14} /></button>
+          class="p-1.5 rounded-lg text-muted hover:text-primary hover:bg-surface-2"
+        ><Icon name="sidebar" size={16} class="-scale-x-100" /></button>
       </div>
 
       <div class="flex-1 overflow-auto scrollbar-thin min-h-0">
@@ -161,7 +161,13 @@ function TocTab({
   onNavigate: (entry: Entry, modifiers: { meta: boolean }) => void;
 }) {
   const hasBook = !!(bookContext && (bookContext.overview || bookContext.chapters.length));
-  if (!hasBook && headings.length === 0) {
+  // 本页大纲跳过文档标题级 H1(标题已在文档头),从其下一级开始;缩进按"最浅一级"归零,
+  // 标准纯 H2 文档即平铺无缩进,只有出现 H3+ 子节时才相对缩进。仅当确有更深级标题时
+  // 才过滤 H1,以免把"只有 H1"的文档大纲清空。
+  const hasSub = headings.some(h => h.level > 1);
+  const pageHeadings = hasSub ? headings.filter(h => h.level > 1) : headings;
+  const minLevel = pageHeadings.reduce((m, h) => Math.min(m, h.level), 99);
+  if (!hasBook && pageHeadings.length === 0) {
     return <div class="px-4 py-6 text-[12px] text-muted">无目录</div>;
   }
   return (
@@ -186,18 +192,18 @@ function TocTab({
           ))}
         </div>
       )}
-      {headings.length > 0 ? (
+      {pageHeadings.length > 0 ? (
         <div class="px-2">
           {hasBook && <SectionLabel>本页</SectionLabel>}
-          {headings.map(h => (
+          {pageHeadings.map(h => (
             <button
               key={h.key}
               onClick={() => onHeadingClick(h.key)}
               title={h.text}
-              style={{ paddingLeft: `${0.5 + Math.max(0, h.level - 1) * 0.75}rem` }}
-              class={`w-full text-left py-1 pr-2 rounded text-[12px] leading-snug truncate transition ${
+              style={{ paddingLeft: `${0.5 + Math.max(0, h.level - minLevel) * 0.75}rem` }}
+              class={`w-full text-left py-1.5 pr-2 rounded-lg text-[12px] leading-snug truncate transition ${
                 activeHeadingKey === h.key
-                  ? 'bg-surface-2 text-primary font-medium'
+                  ? 'bg-accent-bg text-accent-text font-medium'
                   : 'text-secondary hover:bg-surface-2 hover:text-primary'
               }`}
             >{h.text}</button>
@@ -219,8 +225,8 @@ function StatsTab({ stats }: { stats: DocStats }) {
     ['预计阅读', stats.minutes > 0 ? `${stats.minutes} 分钟` : '—'],
   ];
   return (
-    <div class="p-4">
-      <SectionLabel>统计</SectionLabel>
+    <div class="p-5">
+      <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">统计</div>
       <dl class="space-y-1.5 text-[12px]">
         {rows.map(([k, v]) => (
           <div key={k} class="flex items-baseline justify-between gap-3">
@@ -234,7 +240,7 @@ function StatsTab({ stats }: { stats: DocStats }) {
 }
 
 function SectionLabel({ children }: { children: ComponentChildren }) {
-  return <div class="text-[10px] uppercase tracking-wider text-muted font-semibold px-2 mb-1">{children}</div>;
+  return <div class="sticky top-0 z-10 bg-page/95 backdrop-blur-sm text-[11px] uppercase tracking-wider text-muted font-semibold px-2 py-1.5">{children}</div>;
 }
 
 function NavRow({ label, active, onClick }: {
@@ -246,8 +252,8 @@ function NavRow({ label, active, onClick }: {
     <button
       onClick={onClick}
       title={label}
-      class={`w-full text-left px-2 py-1.5 rounded text-[12px] leading-snug truncate transition ${
-        active ? 'bg-inverse text-inverse-fg font-medium' : 'text-secondary hover:bg-surface-2 hover:text-primary'
+      class={`w-full text-left px-2.5 py-2 rounded-lg text-[12px] leading-snug truncate transition ${
+        active ? 'bg-accent-bg text-accent-text font-medium' : 'text-secondary hover:bg-surface-2 hover:text-primary'
       }`}
     >{label}</button>
   );
