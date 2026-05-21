@@ -38,7 +38,7 @@ export function Dashboard({ typeEntries, onThemeClick, onOpen }: Props) {
   if (!hasThemes && !hasRecent) return null;
 
   return (
-    <section class={`mb-5 bg-surface border border-base rounded-2xl shadow-soft p-5 grid grid-cols-1 gap-5 ${hasThemes && hasRecent ? 'lg:grid-cols-[1fr_360px]' : ''}`}>
+    <section class={`mb-6 grid grid-cols-1 gap-5 ${hasThemes && hasRecent ? 'lg:grid-cols-[1fr_360px]' : ''}`}>
       {hasThemes && (
         <div class="min-w-0">
           <div class="text-[11px] uppercase tracking-wider text-muted font-medium mb-2">高频主题</div>
