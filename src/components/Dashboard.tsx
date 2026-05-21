@@ -31,7 +31,7 @@ export function Dashboard({ type, typeEntries, onThemeClick, onOpen }: Props) {
   const typeMeta = TYPE_BY_ID[type] ?? { label: type, accent: '' };
 
   return (
-    <section class="mb-4 bg-surface border border-base rounded-lg p-4 grid grid-cols-1 lg:grid-cols-[260px_1fr_320px] gap-5">
+    <section class="mb-5 bg-surface border border-base rounded-2xl shadow-soft p-5 grid grid-cols-1 lg:grid-cols-[260px_1fr_320px] gap-5">
       <div class="space-y-1.5">
         <div class="text-[11px] uppercase tracking-wider text-muted font-semibold">{typeMeta.label}</div>
         <div class="text-2xl font-semibold tabular-nums">{stats.total}</div>

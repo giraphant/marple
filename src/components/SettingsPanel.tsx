@@ -32,7 +32,7 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
   return (
     <div class="fixed inset-0 bg-black/30 z-40" onClick={onClose}>
       <div
-        class="absolute top-12 right-4 w-[520px] max-h-[calc(100vh-80px)] overflow-auto scrollbar-thin bg-surface border border-base rounded-lg shadow-xl"
+        class="absolute top-12 right-4 w-[520px] max-h-[calc(100vh-80px)] overflow-auto scrollbar-thin bg-surface border border-base rounded-2xl shadow-soft-lg"
         onClick={e => e.stopPropagation()}
       >
         <div class="flex items-center justify-between px-5 py-3 border-b border-base sticky top-0 bg-surface/95 backdrop-blur">

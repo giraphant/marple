@@ -87,7 +87,7 @@ export function TrashView({ onRestored }: Props) {
             {items.map(it => (
               <div
                 key={it.name}
-                class="flex items-center gap-3 px-3 py-2 rounded border border-base bg-surface hover:border-strong"
+                class="flex items-center gap-3 px-4 py-3 rounded-xl border border-base bg-surface shadow-soft hover:shadow-soft-lg transition"
               >
                 <div class="flex-1 min-w-0">
                   <div class="text-[13px] text-primary truncate">

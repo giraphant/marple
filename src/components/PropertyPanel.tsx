@@ -282,7 +282,7 @@ export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultForm
             aria-label="切换引用格式"
           >▾</button>
           {menuOpen && (
-            <div class="absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded shadow-lg py-1 w-[260px]">
+            <div class="absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded-xl shadow-soft-lg py-1 w-[260px]">
               {CITATION_FORMATS.map(f => {
                 const isActive = f.id === format;
                 const ex = buildCitation(entry, f.id);

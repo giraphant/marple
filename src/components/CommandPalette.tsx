@@ -193,7 +193,7 @@ export function CommandPalette({
       onKeyDown={handleKey}
     >
       <div
-        class="w-full max-w-[720px] bg-surface border border-base rounded-lg shadow-2xl overflow-hidden"
+        class="w-full max-w-[720px] bg-surface border border-base rounded-2xl shadow-soft-lg overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         <div class="flex items-center gap-2 px-3 border-b border-base">
