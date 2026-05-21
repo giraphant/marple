@@ -322,17 +322,14 @@ export function ActionsRow({ entry, defaultFormat, hasTranslation }: { entry: En
                 <button
                   key={f.id}
                   onClick={() => { setFormat(f.id); setMenuOpen(false); }}
-                  class={`w-full text-left px-3 py-1.5 flex items-start gap-1.5 hover:bg-page ${isActive ? 'bg-page' : ''}`}
+                  class={`w-full text-left px-3 py-1.5 ${isActive ? 'bg-accent-bg' : 'hover:bg-page'}`}
                 >
-                  <span class={`mt-[7px] shrink-0 inline-block w-1 h-1 rounded-full ${isActive ? 'bg-accent' : 'bg-transparent'}`} />
-                  <div class="min-w-0 flex-1">
-                    <div class="text-[12px] text-primary flex items-center gap-1.5">
-                      {f.label}
-                      <span class="text-muted text-[10px]">{f.hint}</span>
-                    </div>
-                    <div class="text-[11px] text-muted mt-0.5 truncate">
-                      {ex || <span class="text-muted">字段不全</span>}
-                    </div>
+                  <div class={`text-[12px] flex items-center gap-1.5 ${isActive ? 'text-accent-text font-medium' : 'text-primary'}`}>
+                    {f.label}
+                    <span class={`text-[10px] ${isActive ? 'text-accent-text/70' : 'text-muted'}`}>{f.hint}</span>
+                  </div>
+                  <div class={`text-[11px] mt-0.5 truncate ${isActive ? 'text-accent-text/80' : 'text-muted'}`}>
+                    {ex || <span class="text-muted">字段不全</span>}
                   </div>
                 </button>
               );
