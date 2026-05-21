@@ -2,7 +2,11 @@ import { useState, useRef, useEffect, useMemo } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { Entry, EntryType } from '../types';
 import { TYPE_BY_ID } from '../types';
-import { SORT_OPTIONS, type SortKey, type SortDir } from '../list-sort';
+import { SORT_FIELDS, defaultDirFor, type SortClause, type SortField } from '../list-sort';
+import {
+  FILTER_FIELDS, FILTER_FIELD_BY_ID, makeClause, clauseReady, clauseLabel,
+  type FilterClause, type FilterMatch, type FilterField,
+} from '../list-filter';
 import { Card } from './Card';
 import { Icon, type IconName } from './Icon';
 import { TypeIcon } from './TypeIcon';
@@ -25,12 +29,9 @@ interface Props {
   typeEntries: Entry[];
   filtered: Entry[];
   query: string;
-  minRating: number;
-  themeFilter: string | null;
-  sortKey: SortKey;
-  sortDir: SortDir;
-  authorFilter: string;
-  hasPdfOnly: boolean;
+  filters: FilterClause[];
+  filterMatch: FilterMatch;
+  sortClauses: SortClause[];
   limit: number;
   searchLoading: boolean;
   searchError: string | null;
@@ -38,31 +39,28 @@ interface Props {
   onToggleSearchMode: () => void;
   onOpenSearch: () => void;
   onClearQuery: () => void;
-  onMinRatingChange: (n: number) => void;
-  onClearTheme: () => void;
-  onSortKeyChange: (key: SortKey) => void;
-  onToggleSortDir: () => void;
-  onAuthorFilterChange: (v: string) => void;
-  onToggleHasPdf: (v: boolean) => void;
-  onClearExtraFilters: () => void;
+  onFiltersChange: (filters: FilterClause[]) => void;
+  onMatchChange: (m: FilterMatch) => void;
+  onSortChange: (clauses: SortClause[]) => void;
   onLoadMore: () => void;
   onCardClick: (entry: Entry, modifiers: { meta: boolean }) => void;
   onThemeClick: (theme: string) => void;
+  onAuthorClick: (author: string) => void;
 }
 
 export function ListView({
-  entries: _entries, type, typeEntries, filtered, query, minRating, themeFilter,
-  sortKey, sortDir, authorFilter, hasPdfOnly, limit,
+  entries: _entries, type, typeEntries, filtered, query,
+  filters, filterMatch, sortClauses, limit,
   searchLoading, searchError,
-  onOpenSearch, onClearQuery, onMinRatingChange, onClearTheme,
-  onSortKeyChange, onToggleSortDir, onAuthorFilterChange, onToggleHasPdf, onClearExtraFilters,
-  onLoadMore, onCardClick, onThemeClick,
+  onOpenSearch, onClearQuery,
+  onFiltersChange, onMatchChange, onSortChange,
+  onLoadMore, onCardClick, onThemeClick, onAuthorClick,
 }: Props) {
   void _entries;
   const typeMeta = TYPE_BY_ID[type];
-  const extraActive = !!(authorFilter.trim() || hasPdfOnly);
-  const filterActive = minRating > 0 || extraActive;
-  const showPdf = type === 'paper-analysis' || type === 'book-overview';
+  const readyFilters = useMemo(() => filters.filter(clauseReady), [filters]);
+  const filterActive = readyFilters.length > 0;
+
   const [view, setView] = useState<ViewKey>('all');
   const viewSorted = useMemo(() => {
     if (view === 'recent') return [...filtered].sort((a, b) => (b.added || 0) - (a.added || 0));
@@ -74,16 +72,34 @@ export function ListView({
   const [groupBy, setGroupBy] = useState<GroupKey>('none');
   const groups = useMemo(() => buildGroups(visible, groupBy), [visible, groupBy]);
 
+  // --- filter clause editing ---
+  const setClause = (id: string, patch: Partial<FilterClause>) =>
+    onFiltersChange(filters.map(c => (c.id === id ? { ...c, ...patch } : c)));
+  const setClauseField = (id: string, field: FilterField) =>
+    onFiltersChange(filters.map(c => (c.id === id ? makeClauseKeepId(c.id, field) : c)));
+  const removeClause = (id: string) => onFiltersChange(filters.filter(c => c.id !== id));
+  const addClause = () => onFiltersChange([...filters, makeClause('rating')]);
+
+  // --- sort clause editing ---
+  const setSort = (i: number, patch: Partial<SortClause>) =>
+    onSortChange(sortClauses.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  const removeSort = (i: number) => onSortChange(sortClauses.filter((_, j) => j !== i));
+  const addSort = () => {
+    const used = new Set(sortClauses.map(s => s.field));
+    const next = SORT_FIELDS.find(f => !used.has(f.field)) ?? SORT_FIELDS[0];
+    onSortChange([...sortClauses, { field: next.field, dir: defaultDirFor(next.field) }]);
+  };
+
   const renderCard = (e: Entry) => (
     <Card
       entry={e}
       onClick={(entry, ev) => onCardClick(entry, { meta: ev.metaKey || ev.ctrlKey })}
       onThemeClick={onThemeClick}
-      onAuthorClick={onAuthorFilterChange}
+      onAuthorClick={onAuthorClick}
     />
   );
 
-  const loadMore = (!query && !themeFilter && filtered.length > limit) ? (
+  const loadMore = (!query && groupBy === 'none' && filtered.length > limit) ? (
     <div class="text-center mt-6">
       <button
         onClick={onLoadMore}
@@ -97,11 +113,9 @@ export function ListView({
   return (
     <div class="flex-1 flex flex-col min-h-0">
       <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
-        {/* One header row: type label on the left; search + count + filter /
-            sort / group icon menus on the right, sized a touch larger. */}
-        {/* Pinned to 88px so this row's bottom edge meets the sidebar's 88px
-            quick-actions divider — a bold title fills the height rather than
-            leaving it empty. */}
+        {/* One header row: type label on the left; quick-view segments in the
+            middle; search + count + filter / sort / group icon menus on the
+            right. Pinned to 88px so the bottom edge meets the sidebar divider. */}
         <div class="px-8 h-[87px] flex items-center gap-4">
           <div class="flex items-center gap-3 min-w-0 shrink-0">
             <TypeIcon type={type} scale={1.5} />
@@ -132,67 +146,73 @@ export function ListView({
               # {filtered.length}{filtered.length !== typeEntries.length ? ` / ${typeEntries.length}` : ''}
             </span>
 
-            <Pop icon="funnel" active={filterActive} title="筛选（评分 / 作者 / PDF）" width="w-[230px]">
-              <div class="space-y-3">
-                <div>
-                  <div class="text-[11px] text-muted mb-1">评分 ≥</div>
-                  <div class="flex items-center gap-1">
-                    {[0, 1, 2, 3, 4].map(n => (
-                      <button
-                        key={n}
-                        onClick={() => onMinRatingChange(n)}
-                        class={`px-2 py-0.5 rounded-md text-[11px] tabular-nums ${minRating === n ? 'bg-accent-bg text-accent-text' : 'text-secondary hover:bg-surface-2'}`}
-                      >{n || '任意'}</button>
-                    ))}
-                  </div>
+            <Pop icon="funnel" active={filterActive} title="多重筛选" width="w-[340px]">
+              <div class="flex items-center gap-2 text-[11.5px] text-secondary px-0.5 mb-2">
+                满足
+                <div class="flex gap-0.5 bg-surface-2 rounded-md p-0.5">
+                  {(['all', 'any'] as FilterMatch[]).map(m => (
+                    <button
+                      key={m}
+                      onClick={() => onMatchChange(m)}
+                      class={`px-2 py-0.5 rounded text-[11px] transition ${filterMatch === m ? 'bg-surface text-primary shadow-soft-sm' : 'text-secondary hover:text-primary'}`}
+                    >{m === 'all' ? '全部' : '任一'}</button>
+                  ))}
                 </div>
-                <label class="block text-[11px] text-muted">
-                  作者
-                  <input
-                    type="text"
-                    value={authorFilter}
-                    placeholder="按作者筛选"
-                    onInput={(e) => onAuthorFilterChange((e.target as HTMLInputElement).value)}
-                    class="mt-1 w-full px-2 py-1 border border-base rounded-md text-[12px] bg-page text-secondary focus:outline-none focus:border-accent"
-                  />
-                </label>
-                {showPdf && (
-                  <label class="flex items-center gap-1.5 text-[11px] text-secondary cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={hasPdfOnly}
-                      onChange={(e) => onToggleHasPdf((e.target as HTMLInputElement).checked)}
-                    />
-                    仅含 PDF
-                  </label>
+                条件
+              </div>
+
+              <div class="space-y-1.5">
+                {filters.length === 0 && (
+                  <div class="text-[11.5px] text-muted px-0.5 py-1">还没有筛选条件</div>
                 )}
-                {filterActive && (
-                  <button onClick={() => { onMinRatingChange(0); onClearExtraFilters(); }} class="text-[11px] text-muted hover:text-primary">
-                    清空全部筛选
-                  </button>
+                {filters.map(c => (
+                  <FilterRow
+                    key={c.id}
+                    clause={c}
+                    onField={(field) => setClauseField(c.id, field)}
+                    onOp={(op) => setClause(c.id, { op })}
+                    onValue={(value) => setClause(c.id, { value })}
+                    onRemove={() => removeClause(c.id)}
+                  />
+                ))}
+              </div>
+
+              <div class="flex items-center gap-2 mt-2.5 pt-2 border-t border-base">
+                <button
+                  onClick={addClause}
+                  class="text-[12px] text-accent-text bg-accent-bg rounded-md px-2.5 py-1 hover:bg-accent/15 transition"
+                >+ 添加筛选</button>
+                {filters.length > 0 && (
+                  <button onClick={() => onFiltersChange([])} class="text-[11.5px] text-muted hover:text-primary ml-auto">清空</button>
                 )}
               </div>
             </Pop>
 
-            <Pop icon="sort" active={sortKey !== 'default'} title="排序" width="w-[190px]">
-              <div class="text-[11px] text-muted px-1 pb-1">排序依据</div>
-              <div class="space-y-0.5">
-                {SORT_OPTIONS.map(o => (
-                  <button
-                    key={o.key}
-                    onClick={() => onSortKeyChange(o.key)}
-                    class={`w-full text-left px-2 py-1 rounded-md text-[12px] ${sortKey === o.key ? 'bg-accent-bg text-accent-text' : 'text-secondary hover:bg-surface-2'}`}
-                  >{o.label}</button>
+            <Pop icon="sort" active={sortClauses.length > 0} title="多重排序" width="w-[280px]">
+              <div class="text-[11px] text-muted px-0.5 pb-1.5">排序（按顺序生效）</div>
+              <div class="space-y-1.5">
+                {sortClauses.length === 0 && (
+                  <div class="text-[11.5px] text-muted px-0.5 py-1">默认顺序</div>
+                )}
+                {sortClauses.map((s, i) => (
+                  <SortRow
+                    key={s.field + i}
+                    clause={s}
+                    onField={(field) => setSort(i, { field, dir: defaultDirFor(field) })}
+                    onToggleDir={() => setSort(i, { dir: s.dir === 'asc' ? 'desc' : 'asc' })}
+                    onRemove={() => removeSort(i)}
+                  />
                 ))}
               </div>
-              {sortKey !== 'default' && (
+              <div class="flex items-center gap-2 mt-2.5 pt-2 border-t border-base">
                 <button
-                  onClick={onToggleSortDir}
-                  class="mt-1.5 pt-1.5 w-full text-left px-2 text-[11px] text-muted hover:text-primary border-t border-base"
-                >
-                  方向：{sortDir === 'asc' ? '升序 ↑' : '降序 ↓'}（点击切换）
-                </button>
-              )}
+                  onClick={addSort}
+                  class="text-[12px] text-accent-text bg-accent-bg rounded-md px-2.5 py-1 hover:bg-accent/15 transition"
+                >+ 添加排序</button>
+                {sortClauses.length > 0 && (
+                  <button onClick={() => onSortChange([])} class="text-[11.5px] text-muted hover:text-primary ml-auto">恢复默认</button>
+                )}
+              </div>
             </Pop>
 
             <Pop icon="group" active={groupBy !== 'none'} title="分组" width="w-[170px]">
@@ -210,13 +230,15 @@ export function ListView({
           </div>
         </div>
 
-        {(query || filterActive || themeFilter) && (
+        {(query || filterActive) && (
           <div class="px-8 pb-2.5 flex items-center gap-2 flex-wrap">
             {query && <FilterChip label={`搜索：${query}`} onClear={onClearQuery} />}
-            {minRating > 0 && <FilterChip label={`评分 ≥ ${minRating}`} onClear={() => onMinRatingChange(0)} />}
-            {themeFilter && <FilterChip label={themeFilter} onClear={onClearTheme} />}
-            {authorFilter.trim() && <FilterChip label={authorFilter} onClear={() => onAuthorFilterChange('')} />}
-            {hasPdfOnly && <FilterChip label="有 PDF" onClear={() => onToggleHasPdf(false)} />}
+            {readyFilters.length > 1 && (
+              <span class="text-[11px] text-muted">{filterMatch === 'all' ? '满足全部' : '满足任一'}</span>
+            )}
+            {readyFilters.map(c => (
+              <FilterChip key={c.id} label={clauseLabel(c)} onClear={() => removeClause(c.id)} />
+            ))}
             {searchLoading && <span class="text-[11px] text-muted">全文搜索中…</span>}
             {searchError && <span class="text-[11px] text-danger" title={searchError}>全文搜索失败，已用本地匹配</span>}
           </div>
@@ -260,6 +282,94 @@ export function ListView({
   );
 }
 
+/** Build a clause for `field` reusing an existing id, so swapping a row's field
+ *  resets its op/value without remounting the row. */
+function makeClauseKeepId(id: string, field: FilterField): FilterClause {
+  return { ...makeClause(field), id };
+}
+
+const SELECT_CLASS =
+  'bg-page border border-base rounded-md text-[12px] px-1.5 py-1 text-primary focus:outline-none focus:border-accent';
+
+/** One editable filter clause: 字段 + 操作符 + 值 + 移除. */
+function FilterRow({ clause, onField, onOp, onValue, onRemove }: {
+  clause: FilterClause;
+  onField: (f: FilterField) => void;
+  onOp: (op: FilterClause['op']) => void;
+  onValue: (v: string) => void;
+  onRemove: () => void;
+}) {
+  const def = FILTER_FIELD_BY_ID[clause.field];
+  return (
+    <div class="flex items-center gap-1.5">
+      <select
+        value={clause.field}
+        onChange={(e) => onField((e.target as HTMLSelectElement).value as FilterField)}
+        class={`${SELECT_CLASS} shrink-0`}
+      >
+        {FILTER_FIELDS.map(f => <option key={f.field} value={f.field}>{f.label}</option>)}
+      </select>
+      <select
+        value={clause.op}
+        onChange={(e) => onOp((e.target as HTMLSelectElement).value as FilterClause['op'])}
+        class={`${SELECT_CLASS} shrink-0`}
+        disabled={def.ops.length <= 1}
+      >
+        {def.ops.map(o => <option key={o.op} value={o.op}>{o.label}</option>)}
+      </select>
+      {def.input === 'none' ? (
+        <span class="flex-1 min-w-0 text-[12px] text-muted px-1">—</span>
+      ) : (
+        <input
+          type={def.input === 'number' ? 'number' : 'text'}
+          value={clause.value}
+          placeholder={def.placeholder}
+          onInput={(e) => onValue((e.target as HTMLInputElement).value)}
+          class="flex-1 min-w-0 bg-surface border border-base rounded-md text-[12px] px-2 py-1 text-primary placeholder:text-muted focus:outline-none focus:border-accent"
+        />
+      )}
+      <button
+        onClick={onRemove}
+        aria-label="移除条件"
+        class="shrink-0 w-6 h-6 rounded-md text-muted hover:text-primary hover:bg-surface-2 flex items-center justify-center transition"
+      >
+        <Icon name="x" size={12} />
+      </button>
+    </div>
+  );
+}
+
+/** One editable sort level: 字段 + 升降 + 移除. */
+function SortRow({ clause, onField, onToggleDir, onRemove }: {
+  clause: SortClause;
+  onField: (f: SortField) => void;
+  onToggleDir: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div class="flex items-center gap-1.5">
+      <select
+        value={clause.field}
+        onChange={(e) => onField((e.target as HTMLSelectElement).value as SortField)}
+        class={`${SELECT_CLASS} flex-1 min-w-0`}
+      >
+        {SORT_FIELDS.map(f => <option key={f.field} value={f.field}>{f.label}</option>)}
+      </select>
+      <button
+        onClick={onToggleDir}
+        class="shrink-0 text-[11.5px] text-secondary bg-page border border-base rounded-md px-2 py-1 hover:border-accent transition"
+      >{clause.dir === 'asc' ? '升序 ↑' : '降序 ↓'}</button>
+      <button
+        onClick={onRemove}
+        aria-label="移除排序"
+        class="shrink-0 w-6 h-6 rounded-md text-muted hover:text-primary hover:bg-surface-2 flex items-center justify-center transition"
+      >
+        <Icon name="x" size={12} />
+      </button>
+    </div>
+  );
+}
+
 /** A removable active-filter chip shown in the toolbar; click to clear. */
 function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
   return (
@@ -268,7 +378,7 @@ function FilterChip({ label, onClear }: { label: string; onClear: () => void }) 
       title="点击移除"
       class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-accent-bg text-accent-text border border-accent/30 hover:bg-accent/15 transition"
     >
-      <span class="truncate max-w-[160px]">{label}</span>
+      <span class="truncate max-w-[180px]">{label}</span>
       <span aria-hidden="true">✕</span>
     </button>
   );

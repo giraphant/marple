@@ -3,7 +3,8 @@ import type { Entry, EntryType, Tab, TabContent } from './types';
 import { activeContent } from './types';
 import { buildWikiIndex, splitAuthors } from './wiki';
 import { buildSearchIndex, searchDocuments } from './search';
-import { sortEntries, applyExtraFilters, defaultDirFor, asSortKey, asSortDir, type SortKey } from './list-sort';
+import { sortEntriesMulti, coerceSortClauses, type SortClause } from './list-sort';
+import { applyFilters, makeClause, type FilterClause, type FilterMatch } from './list-filter';
 import { ListView } from './components/ListView';
 import { DocView } from './components/DocView';
 import { TrashView } from './components/TrashView';
@@ -51,10 +52,11 @@ export function App() {
   // Fetched live on boot; gates the 「打开译本」 button.
   const [translationSlugs, setTranslationSlugs] = useState<Set<string>>(() => new Set());
   const [query, setQuery] = useState('');
-  const [minRating, setMinRating] = useState(0);
-  const [themeFilter, setThemeFilter] = useState<string | null>(null);
-  const [authorFilter, setAuthorFilter] = useState('');
-  const [hasPdfOnly, setHasPdfOnly] = useState(false);
+  // Flat multi-filter (QUA-63): a list of {field, op, value} clauses combined
+  // by `filterMatch` (AND/OR). Ephemeral per browsing session; cleared on an
+  // explicit sidebar type pick. Theme/author card clicks append clauses here.
+  const [filters, setFilters] = useState<FilterClause[]>([]);
+  const [filterMatch, setFilterMatch] = useState<FilterMatch>('all');
   const [limit, setLimit] = useState(300);
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -135,28 +137,23 @@ export function App() {
 
   const sidebarTypes = useMemo(() => orderedTypes(settings), [settings]);
 
-  // Per-type list sort (QUA-59) — persisted in settings so it sticks. Coerce
-  // from storage so a stale/corrupt value can't reach the comparator.
-  const sortKey: SortKey = asSortKey(settings.sortKey);
-  const sortDir = asSortDir(settings.sortDir);
-  const onSortKeyChange = useCallback((key: SortKey) => {
+  // Multi-level list sort (QUA-63) — persisted globally in settings so it
+  // sticks. Seed from the legacy single sortKey/sortDir for upgrading users;
+  // coerce so a stale/corrupt value can't reach the comparator.
+  const sortClauses = useMemo<SortClause[]>(() => {
+    if (settings.sortClauses) return coerceSortClauses(settings.sortClauses);
+    if (settings.sortKey && settings.sortKey !== 'default') {
+      return coerceSortClauses([{ field: settings.sortKey, dir: settings.sortDir ?? 'desc' }]);
+    }
+    return [];
+  }, [settings.sortClauses, settings.sortKey, settings.sortDir]);
+  const onSortChange = useCallback((next: SortClause[]) => {
     setSettings(prev => {
-      const merged: Settings = {
-        ...prev, sortKey: key,
-        sortDir: key === 'default' ? 'desc' : defaultDirFor(key),
-      };
+      const merged: Settings = { ...prev, sortClauses: next };
       saveSettings(merged);
       return merged;
     });
   }, []);
-  const onToggleSortDir = useCallback(() => {
-    setSettings(prev => {
-      const merged: Settings = { ...prev, sortDir: (prev.sortDir ?? 'desc') === 'asc' ? 'desc' : 'asc' };
-      saveSettings(merged);
-      return merged;
-    });
-  }, []);
-  const onClearExtraFilters = useCallback(() => { setAuthorFilter(''); setHasPdfOnly(false); }, []);
 
   const onReorderTypes = useCallback((next: EntryType[]) => {
     setSettings(prev => {
@@ -364,7 +361,7 @@ export function App() {
   }, [entries]);
 
   useEffect(() => {
-    setLimit(300); setThemeFilter(null); setAuthorFilter(''); setHasPdfOnly(false);
+    setLimit(300);
   }, [activeListType]);
 
   const typeEntries = useMemo(
@@ -374,34 +371,25 @@ export function App() {
 
   const localFiltered = useMemo(() => {
     if (!activeListType) return [];
-    // Rating/theme/author/PDF filter on plain entries — no search index needed
-    // for the common no-query list path.
-    const base = applyExtraFilters(
-      typeEntries.filter(e => {
-        if (minRating && (e.rating_score || 0) < minRating) return false;
-        if (themeFilter && !(e.themes ?? []).some(t => t === themeFilter)) return false;
-        return true;
-      }),
-      { author: authorFilter, hasPdfOnly },
-    );
+    // Multi-filter on plain entries — no search index needed for the common
+    // no-query list path.
+    const base = applyFilters(typeEntries, filters, filterMatch);
     const q = query.trim();
-    // No query: sort the filtered list (QUA-59). 'default' leaves index order.
-    if (!q) return sortEntries(base, sortKey, sortDir);
+    // No query: apply the multi-sort (empty clause list leaves index order).
+    if (!q) return sortEntriesMulti(base, sortClauses);
     // Query: rank via the (lazily-built) search index, restricted to this type
     // + the active filters. Keep relevance order unless the user picked a sort.
     const allowed = new Set(base.map(e => e.path));
     const docs = searchIndex.filter(doc => allowed.has(doc.entry.path));
     const ranked = searchDocuments(docs, q).map(result => result.entry);
-    return sortKey === 'default' ? ranked : sortEntries(ranked, sortKey, sortDir);
-  }, [typeEntries, searchIndex, query, minRating, themeFilter, authorFilter, hasPdfOnly, sortKey, sortDir, activeListType]);
+    return sortClauses.length === 0 ? ranked : sortEntriesMulti(ranked, sortClauses);
+  }, [typeEntries, searchIndex, query, filters, filterMatch, sortClauses, activeListType]);
 
   const listSearchKey = useMemo(() => JSON.stringify({
     q: query.trim(),
     type: activeListType,
-    minRating,
-    themeFilter,
     mode: searchMode,
-  }), [query, activeListType, minRating, themeFilter, searchMode]);
+  }), [query, activeListType, searchMode]);
 
   useEffect(() => {
     const q = query.trim();
@@ -418,11 +406,11 @@ export function App() {
     ));
 
     const timer = window.setTimeout(() => {
+      // Server FTS does pure text ranking; all field filters are applied
+      // client-side after reconciliation so AND/OR clauses stay correct.
       searchServerIndex({
         q,
         type: activeListType,
-        minRating,
-        theme: themeFilter,
         limit: 500,
         mode: searchMode,
         signal: controller.signal,
@@ -450,7 +438,7 @@ export function App() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [activeListType, query, minRating, themeFilter, searchMode, listSearchKey, localFiltered]);
+  }, [activeListType, query, searchMode, listSearchKey, localFiltered]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return localFiltered;
@@ -473,11 +461,12 @@ export function App() {
     for (const e of localFiltered) {
       if (!seen.has(e.path)) { out.push(e); seen.add(e.path); }
     }
-    // Server FTS doesn't know about the author / has-PDF filters, so apply them
-    // (and any explicit sort) to the merged result. 'default' keeps FTS rank.
-    const refined = applyExtraFilters(out, { author: authorFilter, hasPdfOnly });
-    return sortKey === 'default' ? refined : sortEntries(refined, sortKey, sortDir);
-  }, [localFiltered, listSearch, listSearchKey, query, entryByPath, activeListType, authorFilter, hasPdfOnly, sortKey, sortDir]);
+    // Server FTS knows nothing about the field filters, so apply the whole
+    // clause set (and any explicit sort) to the merged result. Empty sort
+    // clause list keeps FTS rank.
+    const refined = applyFilters(out, filters, filterMatch);
+    return sortClauses.length === 0 ? refined : sortEntriesMulti(refined, sortClauses);
+  }, [localFiltered, listSearch, listSearchKey, query, entryByPath, activeListType, filters, filterMatch, sortClauses]);
 
   // --- tab navigation: per-tab back/forward via history cursor ---
 
@@ -611,10 +600,14 @@ export function App() {
 
   // --- semantic actions called by views ---
 
-  // Sidebar type pick: replace current tab content (push to history).
+  // Sidebar type pick: replace current tab content (push to history) and reset
+  // to a clean slate — clear query, all filters, and pagination.
   const openListType = useCallback((type: EntryType) => {
     navigateInActiveTab({ kind: 'list', type });
     setQuery('');
+    setFilters([]);
+    setFilterMatch('all');
+    setLimit(300);
   }, [navigateInActiveTab]);
 
   const openTrash = useCallback(() => {
@@ -660,19 +653,35 @@ export function App() {
     setPaletteOpen(false);
     setQuery(q);                                    // preserve current query
     setLimit(300);                                  // reset pagination
-    setThemeFilter(null);                           // clear unrelated filter
+    setFilters([]);                                 // clear unrelated filters
+    setFilterMatch('all');
     navigateInActiveTab({ kind: 'list', type });
     // Do NOT call openListType(): it clears the query, which is the opposite of
     // what we want here.
   }, [navigateInActiveTab]);
 
-  const applyThemeFilter = useCallback((th: string, fromType?: EntryType) => {
+  // Append a clause from a card / doc click (theme chip, author name). Switches
+  // to the target list and adds the clause unless an identical one already
+  // exists. Keeps any other active filters so clicks compose.
+  const addFilterClause = useCallback((field: 'theme' | 'author', value: string, fromType?: EntryType) => {
     const targetType = fromType ?? activeListType;
     if (targetType) navigateInActiveTab({ kind: 'list', type: targetType });
-    setThemeFilter(th);
+    setFilters(prev => {
+      if (prev.some(c => c.field === field && c.value === value)) return prev;
+      return [...prev, makeClause(field, undefined, value)];
+    });
     setQuery('');
     setLimit(300);
   }, [navigateInActiveTab, activeListType]);
+
+  const applyThemeFilter = useCallback(
+    (th: string, fromType?: EntryType) => addFilterClause('theme', th, fromType),
+    [addFilterClause],
+  );
+  const applyAuthorFilter = useCallback(
+    (name: string, fromType?: EntryType) => addFilterClause('author', name, fromType),
+    [addFilterClause],
+  );
 
   const onUpdated = useCallback((updated: Entry) => {
     setEntries(prev => prev ? prev.map(e => e.path === updated.path ? updated : e) : prev);
@@ -782,17 +791,12 @@ export function App() {
             typeEntries={typeEntries}
             filtered={filtered}
             query={query}
-            minRating={minRating}
-            themeFilter={themeFilter}
-            sortKey={sortKey}
-            sortDir={sortDir}
-            authorFilter={authorFilter}
-            hasPdfOnly={hasPdfOnly}
-            onSortKeyChange={onSortKeyChange}
-            onToggleSortDir={onToggleSortDir}
-            onAuthorFilterChange={setAuthorFilter}
-            onToggleHasPdf={setHasPdfOnly}
-            onClearExtraFilters={onClearExtraFilters}
+            filters={filters}
+            filterMatch={filterMatch}
+            sortClauses={sortClauses}
+            onFiltersChange={setFilters}
+            onMatchChange={setFilterMatch}
+            onSortChange={onSortChange}
             limit={limit}
             searchLoading={!!query.trim() && !!listSearch && listSearch.key === listSearchKey && listSearch.loading}
             searchError={listSearch && listSearch.key === listSearchKey ? listSearch.error : null}
@@ -800,11 +804,10 @@ export function App() {
             onToggleSearchMode={toggleSearchMode}
             onOpenSearch={() => { setPaletteSourceType(activeTabContent.type); setPaletteOpen(true); }}
             onClearQuery={() => setQuery('')}
-            onMinRatingChange={setMinRating}
-            onClearTheme={() => setThemeFilter(null)}
             onLoadMore={() => setLimit(limit + 500)}
             onCardClick={openDoc}
             onThemeClick={(th) => applyThemeFilter(th, activeTabContent.type)}
+            onAuthorClick={(name) => applyAuthorFilter(name, activeTabContent.type)}
           />
         )}
 

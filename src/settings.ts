@@ -1,7 +1,7 @@
 import type { EntryType, TypeMeta } from './types';
 import { TYPES } from './types';
 import type { CitationFormat } from './citation';
-import type { SortKey, SortDir } from './list-sort';
+import type { SortKey, SortDir, SortClause } from './list-sort';
 
 export type FontFamily = 'sans' | 'serif' | 'mono';
 export type Theme = 'light' | 'dark' | 'system';
@@ -38,10 +38,14 @@ export interface Settings {
    * Toggled by Cmd+B or the chevron at the sidebar's top. */
   sidebarCollapsed?: boolean;
 
-  /** Per-type list sort (QUA-59). Persisted so the chosen ordering sticks
-   * across sessions. 'default' preserves index/relevance order. */
+  /** Legacy single-level sort (QUA-59). Read once to seed `sortClauses` for
+   * users upgrading; no longer written. 'default' preserves index order. */
   sortKey?: SortKey;
   sortDir?: SortDir;
+
+  /** Multi-level list sort (QUA-63). Applied in order; empty = index order.
+   * Persisted globally so the chosen ordering sticks across sessions. */
+  sortClauses?: SortClause[];
 }
 
 const DEFAULTS: Settings = {
