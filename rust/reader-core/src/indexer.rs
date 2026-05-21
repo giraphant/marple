@@ -451,6 +451,12 @@ fn first_paragraph(body: &str) -> String {
         if trimmed.starts_with("**") && trimmed.ends_with("**") && trimmed.len() < 80 {
             continue;
         }
+        // Skip leading metadata blocks (e.g. "**英文原标题**：…\n**作者**：…"):
+        // analysis docs open with bold "label：value" lines that merely echo the
+        // title/author already shown on the card, not real prose.
+        if is_kv_label(trimmed.lines().next().unwrap_or("").trim()) {
+            continue;
+        }
         return trimmed
             .split_whitespace()
             .collect::<Vec<_>>()
@@ -460,6 +466,21 @@ fn first_paragraph(body: &str) -> String {
             .collect();
     }
     String::new()
+}
+
+/// True for a bold "label：value" / "label: value" line — the shape of the
+/// metadata header that opens analysis docs.
+fn is_kv_label(line: &str) -> bool {
+    if !line.starts_with("**") {
+        return false;
+    }
+    match line[2..].find("**") {
+        Some(close) => {
+            let after = line[2 + close + 2..].trim_start();
+            after.starts_with('：') || after.starts_with(':')
+        }
+        None => false,
+    }
 }
 
 fn first_heading(body: &str) -> Option<String> {
@@ -1124,5 +1145,28 @@ type: chapter-summary
             strip_wiki("[[shaun-gallagher|Shaun Gallagher]]"),
             "Shaun Gallagher"
         );
+    }
+
+    #[test]
+    fn first_paragraph_skips_metadata_header() {
+        // Analysis docs open with a bold "label：value" metadata block that just
+        // echoes title/author. The preview should skip it and grab real prose.
+        let body = "**英文原标题**：After Innovation, Turn to Maintenance\n\
+**作者**：Andrew L. Russell, Lee Vinsel\n\
+**出处**：Technology and Culture\n\n\
+## 核心论点\n\n\
+本文主张维护比创新更能解释技术与社会的真实关系。";
+        assert_eq!(
+            first_paragraph(body),
+            "本文主张维护比创新更能解释技术与社会的真实关系。"
+        );
+    }
+
+    #[test]
+    fn is_kv_label_matches_bold_label_lines() {
+        assert!(is_kv_label("**作者**：Lee Vinsel"));
+        assert!(is_kv_label("**Source**: Technology and Culture"));
+        assert!(!is_kv_label("这是一段正文,不是元数据。"));
+        assert!(!is_kv_label("**强调** 出现在句中但不是标签。"));
     }
 }
