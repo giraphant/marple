@@ -95,9 +95,10 @@ export function ListView({
             leaving it empty. */}
         <div class="px-8 h-[87px] flex items-center justify-between gap-4">
           <div class="flex items-center gap-3 min-w-0">
-            <TypeIcon type={type} scale={1.7} />
-            <div class="text-[24px] font-bold tracking-[-0.02em] text-primary truncate">
-              {typeMeta?.label ?? type}
+            <TypeIcon type={type} scale={1.5} />
+            <div class="min-w-0">
+              <div class="text-[18px] font-bold tracking-[-0.01em] text-primary truncate leading-tight">{typeMeta?.label ?? type}</div>
+              <div class="text-[11.5px] text-muted mt-0.5"><span class="tabular-nums">{typeEntries.length}</span> 篇分析</div>
             </div>
           </div>
 
@@ -110,9 +111,9 @@ export function ListView({
             >
               <Icon name="magnifying-glass" size={17} />
             </button>
-            <span class="text-[12px] text-muted tabular-nums px-1">
-              # {filtered.length}{filtered.length !== typeEntries.length ? ` / ${typeEntries.length}` : ''}
-            </span>
+            {filtered.length !== typeEntries.length && (
+              <span class="text-[12px] text-muted tabular-nums px-1"># {filtered.length}</span>
+            )}
 
             <Pop icon="funnel" active={filterActive} title="筛选（评分 / 作者 / PDF）" width="w-[230px]">
               <div class="space-y-3">
