@@ -182,11 +182,12 @@ export function ListView({
           ? <div class="text-sm text-muted py-20 text-center">没有匹配的条目</div>
           : (
             <>
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {visible.map(e => (
                   <Card
                     entry={e}
                     onClick={(entry, ev) => onCardClick(entry, { meta: ev.metaKey || ev.ctrlKey })}
+                    onThemeClick={onThemeClick}
                     key={e.path}
                   />
                 ))}
