@@ -103,7 +103,7 @@ export function TabBar({
   // means "after the last tab". Slot N means "before tab N (after tab N-1)".
   const [dropSlot, setDropSlot] = useState<number | null>(null);
   return (
-    <div class="bg-surface-2 border-b border-base flex items-center gap-1 px-2.5 py-2 overflow-x-auto scrollbar-thin">
+    <div class="bg-page border-b border-base flex items-center gap-1 px-2.5 py-2 overflow-x-auto scrollbar-thin">
       <button
         onClick={onBack}
         disabled={!canBack}
