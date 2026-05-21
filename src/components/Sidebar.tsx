@@ -74,11 +74,11 @@ export function Sidebar({
   // Shared row class. In collapsed mode we drop the label, center contents,
   // and shrink the hit-target down to a square.
   const rowCls = (active: boolean) => collapsed
-    ? `mx-auto flex items-center justify-center w-9 h-9 my-0.5 rounded transition cursor-pointer ${
+    ? `mx-auto flex items-center justify-center w-9 h-9 my-1 rounded-xl transition cursor-pointer ${
         active ? 'bg-accent-bg text-accent-text' : 'text-secondary hover:bg-hover/60'
       }`
-    : `w-full text-left px-2 py-1.5 rounded text-[12px] flex items-center gap-2 transition ${
-        active ? 'bg-accent-bg text-accent-text' : 'text-secondary hover:bg-hover/60'
+    : `w-full text-left px-2.5 py-2 rounded-xl text-[12.5px] flex items-center gap-2.5 transition ${
+        active ? 'bg-accent-bg text-accent-text font-medium' : 'text-secondary hover:bg-hover/60'
       }`;
 
   const widthCls = collapsed ? 'w-14' : 'w-60';
@@ -88,9 +88,9 @@ export function Sidebar({
       {/* Header: app name + collapse chevron. */}
       <div class={`border-b border-base flex items-center ${collapsed ? 'justify-center px-1 py-3' : 'justify-between px-4 py-3'}`}>
         {!collapsed && (
-          <div class="min-w-0">
-            <div class="text-[13px] font-semibold tracking-tight text-primary">qua</div>
-            <div class="text-[10px] text-muted uppercase tracking-wider mt-0.5">reader</div>
+          <div class="min-w-0 flex items-center gap-2.5">
+            <span class="shrink-0 w-7 h-7 rounded-[10px] bg-accent text-white flex items-center justify-center font-bold text-[14px]" aria-hidden="true">q</span>
+            <span class="text-[14px] font-bold tracking-[-0.01em] text-primary truncate">qua reader</span>
           </div>
         )}
         <button
@@ -109,19 +109,19 @@ export function Sidebar({
           onClick={onNewIdeaNote}
           title="新建独立 idea note"
           class={collapsed
-            ? 'mx-auto flex items-center justify-center w-9 h-9 rounded text-secondary hover:bg-hover/60'
-            : 'w-full text-left px-2 py-1.5 rounded text-[12px] hover:bg-hover/60 flex items-center gap-2 text-secondary'
+            ? 'mx-auto flex items-center justify-center w-9 h-9 rounded-xl text-accent-text hover:bg-accent/15 transition'
+            : 'w-full text-left px-2.5 py-2 rounded-xl text-[12.5px] bg-accent-bg text-accent-text font-medium hover:bg-accent/15 flex items-center gap-2.5 transition'
           }
         >
-          <Icon name="plus" size={collapsed ? 16 : 13} class="text-muted" />
+          <Icon name="plus" size={collapsed ? 16 : 13} class="text-accent-text" />
           {!collapsed && <span>新建笔记</span>}
         </button>
         <button
           onClick={onOpenSearch}
           title="超级检索 (⌘K)"
           class={collapsed
-            ? 'mx-auto flex items-center justify-center w-9 h-9 rounded text-secondary hover:bg-hover/60'
-            : 'w-full text-left px-2 py-1.5 rounded text-[12px] hover:bg-hover/60 flex items-center gap-2 text-secondary'
+            ? 'mx-auto flex items-center justify-center w-9 h-9 rounded-xl text-secondary hover:bg-hover/60 transition'
+            : 'w-full text-left px-2.5 py-2 rounded-xl text-[12.5px] hover:bg-hover/60 flex items-center gap-2.5 text-secondary transition'
           }
         >
           <Icon name="magnifying-glass" size={collapsed ? 16 : 13} class="text-muted" />
