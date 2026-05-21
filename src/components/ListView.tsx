@@ -5,6 +5,7 @@ import { SORT_OPTIONS, type SortKey, type SortDir } from '../list-sort';
 import { Card } from './Card';
 import { Dashboard } from './Dashboard';
 import { Icon } from './Icon';
+import { TypeIcon } from './TypeIcon';
 
 interface Props {
   entries: Entry[];
@@ -54,13 +55,11 @@ export function ListView({
   return (
     <div class="flex-1 flex flex-col min-h-0">
       <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
-        <div class="px-8 pt-3.5 pb-2.5 flex items-center justify-between gap-4">
-          <div class="flex items-baseline gap-2.5 min-w-0">
-            <div class="text-[22px] font-bold tracking-[-0.02em] text-primary truncate">
+        <div class="px-8 pt-4 pb-2 flex items-center justify-between gap-4">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <TypeIcon type={type} scale={1.4} />
+            <div class="text-[20px] font-bold tracking-[-0.02em] text-primary truncate">
               {typeMeta?.label ?? type}
-            </div>
-            <div class="text-[12px] text-muted tabular-nums">
-              {filtered.length}{filtered.length !== typeEntries.length && <span> / {typeEntries.length}</span>}
             </div>
           </div>
 
@@ -118,22 +117,27 @@ export function ListView({
           {searchLoading && <span class="text-[11px] text-muted">全文搜索中…</span>}
           {searchError && <span class="text-[11px] text-danger" title={searchError}>全文搜索失败，已用本地匹配</span>}
 
-          <div class="ml-auto shrink-0 flex items-center gap-1 text-[11px] text-secondary">
-            <span class="text-muted">排序</span>
-            <select
-              value={sortKey}
-              onChange={(e) => onSortKeyChange((e.target as HTMLSelectElement).value as SortKey)}
-              class="bg-surface border border-base rounded-md px-1.5 py-0.5 text-[11px] text-secondary focus:outline-none"
-            >
-              {SORT_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
-            </select>
-            {sortKey !== 'default' && (
-              <button
-                onClick={onToggleSortDir}
-                title={sortDir === 'asc' ? '升序（点击切降序）' : '降序（点击切升序）'}
-                class="px-1.5 py-0.5 rounded-md hover:bg-surface-2 tabular-nums"
-              >{sortDir === 'asc' ? '↑' : '↓'}</button>
-            )}
+          <div class="ml-auto shrink-0 flex items-center gap-3 text-[11px]">
+            <span class="text-muted tabular-nums">
+              # {filtered.length}{filtered.length !== typeEntries.length ? ` / ${typeEntries.length}` : ''}
+            </span>
+            <div class="flex items-center gap-1 text-secondary">
+              <span class="text-muted">排序</span>
+              <select
+                value={sortKey}
+                onChange={(e) => onSortKeyChange((e.target as HTMLSelectElement).value as SortKey)}
+                class="bg-surface border border-base rounded-md px-1.5 py-0.5 text-[11px] text-secondary focus:outline-none"
+              >
+                {SORT_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+              {sortKey !== 'default' && (
+                <button
+                  onClick={onToggleSortDir}
+                  title={sortDir === 'asc' ? '升序（点击切降序）' : '降序（点击切升序）'}
+                  class="px-1.5 py-0.5 rounded-md hover:bg-surface-2 tabular-nums"
+                >{sortDir === 'asc' ? '↑' : '↓'}</button>
+              )}
+            </div>
           </div>
         </div>
       </header>
