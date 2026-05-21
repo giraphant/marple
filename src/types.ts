@@ -11,6 +11,8 @@ export interface Entry {
   type: EntryType;
   book: string | null;
   title: string | null;
+  title_en?: string | null;
+  title_cn?: string | null;
   author: string | null;
   year: number | string | null;
   rating: string | number | null;
@@ -19,6 +21,8 @@ export interface Entry {
   topic: string | null;
   source: string | null;
   doi: string | null;
+  publisher?: string | null;
+  isbn?: string | null;
   chapters_analyzed: number | null;
   /** For notes: vault-relative path of the file this note annotates. */
   annotates: string | null;

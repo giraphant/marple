@@ -415,9 +415,17 @@ export function applyFmToEntry(entry: Entry, fm: Record<string, unknown>): Entry
   if ('year' in fm) next.year = fm.year as Entry['year'];
   if ('author' in fm) next.author = flattenAuthor(fm.author);
   if ('title' in fm) next.title = fm.title as Entry['title'];
+  if ('title_en' in fm) next.title_en = textCell(fm.title_en);
+  if ('chapter_title_en' in fm && !('title_en' in fm)) next.title_en = textCell(fm.chapter_title_en);
+  if ('title_cn' in fm) next.title_cn = textCell(fm.title_cn);
+  if ('title_zh' in fm && !('title_cn' in fm)) next.title_cn = textCell(fm.title_zh);
+  if ('chapter_title_cn' in fm && !('title_cn' in fm)) next.title_cn = textCell(fm.chapter_title_cn);
+  if ('chapter_title_zh' in fm && !('title_cn' in fm) && !('chapter_title_cn' in fm)) next.title_cn = textCell(fm.chapter_title_zh);
   if ('source' in fm) next.source = fm.source as Entry['source'];
   if ('topic' in fm) next.topic = fm.topic as Entry['topic'];
   if ('doi' in fm) next.doi = fm.doi as Entry['doi'];
+  if ('publisher' in fm) next.publisher = textCell(fm.publisher);
+  if ('isbn' in fm) next.isbn = textCell(fm.isbn);
   if ('themes' in fm) next.themes = Array.isArray(fm.themes) ? fm.themes as string[] : null;
   if ('annotates' in fm) next.annotates = (fm.annotates as string | null) ?? null;
   if ('created' in fm) next.created = fm.created != null ? String(fm.created) : null;
@@ -441,4 +449,10 @@ function flattenAuthor(v: unknown): string | null {
   if (v == null) return null;
   if (Array.isArray(v)) return v.map(String).filter(Boolean).join(', ');
   return typeof v === 'string' ? v : String(v);
+}
+
+function textCell(v: unknown): string | null {
+  if (v == null) return null;
+  const text = String(v).trim();
+  return text === '' ? null : text;
 }

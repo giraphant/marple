@@ -5,11 +5,15 @@
 use reader_core::{
     build_sqlite_index, load_entries, reconcile_index, remove_entry, upsert_entry, ReaderPaths,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn temp_paths() -> ReaderPaths {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let root = std::env::temp_dir().join(format!("qua-rc-{}-{}", std::process::id(), nanos));
+    let seq = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("qua-rc-{}-{}-{}", std::process::id(), nanos, seq));
     let workspace_root = root.clone();
     let vault = workspace_root.join("vault");
     let reader_root = workspace_root.join("reader");
@@ -22,6 +26,7 @@ fn temp_paths() -> ReaderPaths {
         notes_dir: vault.join("notes"),
         trash_dir: vault.join("notes/.trash"),
         sources: workspace_root.join("sources"),
+        translations: workspace_root.join("processing/translations"),
         index_db: reader_root.join("data/index.sqlite"),
         vectors_db: reader_root.join("data/vectors.sqlite"),
         dist: reader_root.join("dist"),
@@ -36,6 +41,34 @@ fn write_file(paths: &ReaderPaths, rel: &str, contents: &str) {
 
 fn entry<'a>(paths: &ReaderPaths, rel: &str) -> Option<reader_core::Entry> {
     load_entries(paths).unwrap().into_iter().find(|e| e.path == rel)
+}
+
+#[test]
+fn load_entries_rebuilds_legacy_entry_schema() {
+    let paths = temp_paths();
+    write_file(
+        &paths,
+        "vault/books/test-book/00-overview.md",
+        "---\ntype: book\ntitle: Test Book\npublisher: Test Press\nisbn: 12345\n---\n\n# 测试书\n\nbody\n",
+    );
+    let conn = rusqlite::Connection::open(&paths.index_db).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE entries (path TEXT PRIMARY KEY, type TEXT NOT NULL, book TEXT, title TEXT, author TEXT, year_json TEXT, rating_json TEXT, rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topic TEXT, source TEXT, doi TEXT, chapters_analyzed INTEGER, annotates TEXT, created TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER, preview TEXT NOT NULL DEFAULT '');",
+    )
+    .unwrap();
+    drop(conn);
+
+    let entries = load_entries(&paths).unwrap();
+    let book = entries
+        .iter()
+        .find(|e| e.path == "vault/books/test-book/00-overview.md")
+        .unwrap();
+
+    assert_eq!(book.title_cn.as_deref(), Some("测试书"));
+    assert_eq!(book.publisher.as_deref(), Some("Test Press"));
+    assert_eq!(book.isbn.as_deref(), Some("12345"));
+
+    let _ = std::fs::remove_dir_all(&paths.workspace_root);
 }
 
 /// A new file added to the vault after the build is picked up by reconcile.

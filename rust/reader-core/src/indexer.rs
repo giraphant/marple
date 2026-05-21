@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OpenFlags};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
@@ -21,6 +21,8 @@ use crate::{ReaderError, ReaderPaths, ReaderResult};
 // sections are tiny — the slow embed phase of a reindex runs WITHOUT the lock,
 // so autosaves never block on a multi-minute reindex.
 static INDEX_WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+const REQUIRED_ENTRY_COLUMNS: &[&str] = &["title_en", "title_cn", "publisher", "isbn"];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct IndexStats {
@@ -49,6 +51,8 @@ struct IndexedEntry {
     entry_type: String,
     book: Option<String>,
     title: Option<String>,
+    title_en: Option<String>,
+    title_cn: Option<String>,
     author: Option<String>,
     year: Option<JsonValue>,
     rating: Option<JsonValue>,
@@ -57,6 +61,8 @@ struct IndexedEntry {
     topic: Option<String>,
     source: Option<String>,
     doi: Option<String>,
+    publisher: Option<String>,
+    isbn: Option<String>,
     chapters_analyzed: Option<i64>,
     annotates: Option<String>,
     created: Option<String>,
@@ -149,6 +155,10 @@ fn build_indexed_entry(
     let author = field(&frontmatter, "author")
         .or_else(|| field(&frontmatter, "authors"))
         .and_then(flatten_author);
+    let title_en = title_en_value(&frontmatter);
+    let title_cn = title_cn_value(&frontmatter, &entry_type, body, title.as_deref());
+    let publisher = truthy_field_text(&frontmatter, "publisher").map(|s| strip_wiki(&s));
+    let isbn = truthy_field_text(&frontmatter, "isbn");
 
     let body_text = normalize_body_for_search(body);
     let body_len = body_text.chars().count() as i64;
@@ -156,7 +166,11 @@ fn build_indexed_entry(
     let search_text = search_text(&[
         rel.as_str(),
         title.as_deref().unwrap_or_default(),
+        title_en.as_deref().unwrap_or_default(),
+        title_cn.as_deref().unwrap_or_default(),
         author.as_deref().unwrap_or_default(),
+        publisher.as_deref().unwrap_or_default(),
+        isbn.as_deref().unwrap_or_default(),
         body_text.as_str(),
     ]);
 
@@ -165,6 +179,8 @@ fn build_indexed_entry(
         entry_type,
         book,
         title,
+        title_en,
+        title_cn,
         author,
         year,
         rating,
@@ -173,6 +189,8 @@ fn build_indexed_entry(
         topic: truthy_field_text(&frontmatter, "topic"),
         source: truthy_field_text(&frontmatter, "source"),
         doi: truthy_field_text(&frontmatter, "doi"),
+        publisher,
+        isbn,
         chapters_analyzed: field(&frontmatter, "chapters_analyzed").and_then(int_value),
         annotates: truthy_field_text(&frontmatter, "annotates"),
         created: field(&frontmatter, "created").and_then(text_value),
@@ -263,6 +281,28 @@ pub struct ReconcileStats {
     pub unchanged: usize,
 }
 
+pub(crate) fn index_schema_current(paths: &ReaderPaths) -> ReaderResult<bool> {
+    if !paths.index_db.is_file() {
+        return Ok(false);
+    }
+    let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    entries_schema_current(&conn)
+}
+
+fn entries_schema_current(conn: &Connection) -> ReaderResult<bool> {
+    let mut stmt = conn.prepare("PRAGMA table_info(entries)")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut columns = HashSet::new();
+    for row in rows {
+        columns.insert(row?);
+    }
+    Ok(REQUIRED_ENTRY_COLUMNS
+        .iter()
+        .all(|column| columns.contains(*column)))
+}
+
 /// Bring the live index into agreement with the vault by diffing per-file
 /// mtimes — new/modified files are re-indexed, vanished files are dropped, and
 /// matching fingerprints are left untouched. Self-healing: correctness does not
@@ -272,6 +312,14 @@ pub fn reconcile_index(paths: &ReaderPaths) -> ReaderResult<ReconcileStats> {
     // No index yet → a delta has nothing to diff against. Fall back to a full
     // build so the first call is still correct.
     if !paths.index_db.is_file() {
+        let stats = build_sqlite_index(paths)?;
+        return Ok(ReconcileStats {
+            upserted: stats.entries,
+            removed: 0,
+            unchanged: 0,
+        });
+    }
+    if !index_schema_current(paths)? {
         let stats = build_sqlite_index(paths)?;
         return Ok(ReconcileStats {
             upserted: stats.entries,
@@ -350,6 +398,9 @@ pub fn upsert_entry(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<bool> {
         return Err(ReaderError::NotFound(
             "index database missing; run npm run build:index in reader/".to_string(),
         ));
+    }
+    if !index_schema_current(paths)? {
+        build_sqlite_index(paths)?;
     }
     let source_slugs = load_source_slugs(&paths.sources)?;
     let abs = paths.workspace_root.join(rel_path);
@@ -764,6 +815,33 @@ fn first_heading(body: &str) -> Option<String> {
     None
 }
 
+fn first_chinese_h1(body: &str) -> Option<String> {
+    for line in body.lines() {
+        let trimmed = line.trim();
+        let hashes = trimmed.chars().take_while(|c| *c == '#').count();
+        if hashes != 1 {
+            continue;
+        }
+        let rest = &trimmed[hashes..];
+        if rest.starts_with(char::is_whitespace) {
+            let heading = rest.trim();
+            if !heading.is_empty() && contains_cjk(heading) {
+                return Some(heading.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn contains_cjk(value: &str) -> bool {
+    value.chars().any(|c| {
+        matches!(
+            c,
+            '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}'
+        )
+    })
+}
+
 fn rating_score(value: &YamlValue) -> f64 {
     match value {
         YamlValue::Number(n) => n.as_f64().unwrap_or_default(),
@@ -860,6 +938,32 @@ fn field_text(mapping: &Mapping, name: &str) -> Option<String> {
 
 fn truthy_field_text(mapping: &Mapping, name: &str) -> Option<String> {
     field(mapping, name).and_then(|value| text_value(value).filter(|s| !s.is_empty()))
+}
+
+fn title_en_value(mapping: &Mapping) -> Option<String> {
+    truthy_field_text(mapping, "title_en")
+        .or_else(|| truthy_field_text(mapping, "chapter_title_en"))
+        .map(|s| strip_wiki(&s))
+}
+
+fn title_cn_value(
+    mapping: &Mapping,
+    entry_type: &str,
+    body: &str,
+    title: Option<&str>,
+) -> Option<String> {
+    truthy_field_text(mapping, "title_cn")
+        .or_else(|| truthy_field_text(mapping, "title_zh"))
+        .or_else(|| truthy_field_text(mapping, "chapter_title_cn"))
+        .or_else(|| truthy_field_text(mapping, "chapter_title_zh"))
+        .map(|s| strip_wiki(&s))
+        .or_else(|| {
+            if entry_type == "book-overview" {
+                first_chinese_h1(body).filter(|heading| title != Some(heading.as_str()))
+            } else {
+                None
+            }
+        })
 }
 
 fn field_json(mapping: &Mapping, name: &str) -> Option<JsonValue> {
@@ -983,6 +1087,8 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           type TEXT NOT NULL,
           book TEXT,
           title TEXT,
+          title_en TEXT,
+          title_cn TEXT,
           author TEXT,
           year_json TEXT,
           rating_json TEXT,
@@ -991,6 +1097,8 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           topic TEXT,
           source TEXT,
           doi TEXT,
+          publisher TEXT,
+          isbn TEXT,
           chapters_analyzed INTEGER,
           annotates TEXT,
           created TEXT,
@@ -1081,16 +1189,18 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
     conn.execute(
         r#"
         INSERT INTO entries (
-          path, type, book, title, author, year_json, rating_json, rating_score,
-          themes_json, topic, source, doi, chapters_analyzed, annotates, created,
-          pdf_slug, has_pdf, mtime, preview, body_len, added
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          path, type, book, title, title_en, title_cn, author, year_json, rating_json,
+          rating_score, themes_json, topic, source, doi, publisher, isbn, chapters_analyzed,
+          annotates, created, pdf_slug, has_pdf, mtime, preview, body_len, added
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         params![
             entry.path,
             entry.entry_type,
             entry.book,
             entry.title,
+            entry.title_en,
+            entry.title_cn,
             entry.author,
             json_cell(&entry.year),
             json_cell(&entry.rating),
@@ -1099,6 +1209,8 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
             entry.topic,
             entry.source,
             entry.doi,
+            entry.publisher,
+            entry.isbn,
             entry.chapters_analyzed,
             entry.annotates,
             entry.created,
@@ -1127,6 +1239,12 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
         params![entry.path, entry.search_text],
     )?;
 
+    let fts_title = search_text(&[
+        entry.title.as_deref().unwrap_or_default(),
+        entry.title_en.as_deref().unwrap_or_default(),
+        entry.title_cn.as_deref().unwrap_or_default(),
+    ]);
+
     conn.execute(
         r#"
         INSERT INTO entry_search (
@@ -1136,7 +1254,7 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
         params![
             entry.path,
             entry.entry_type,
-            entry.title,
+            fts_title,
             entry.author,
             entry.book,
             entry.themes.as_ref().map(|themes| themes.join(" ")),
@@ -1166,6 +1284,8 @@ impl IndexedEntry {
             entry_type: self.entry_type,
             book: self.book,
             title: self.title,
+            title_en: self.title_en,
+            title_cn: self.title_cn,
             author: self.author,
             year: self.year,
             rating: self.rating,
@@ -1174,6 +1294,8 @@ impl IndexedEntry {
             topic: self.topic,
             source: self.source,
             doi: self.doi,
+            publisher: self.publisher,
+            isbn: self.isbn,
             chapters_analyzed: self.chapters_analyzed,
             annotates: self.annotates,
             created: self.created,
@@ -1444,6 +1566,36 @@ type: chapter-summary
         assert_eq!(
             strip_wiki("[[shaun-gallagher|Shaun Gallagher]]"),
             "Shaun Gallagher"
+        );
+    }
+
+    #[test]
+    fn merges_chapter_title_aliases() {
+        let raw = r#"type: chapter
+chapter_title_en: Getting Things Unfolded
+chapter_title_cn: 第1章 展开事物
+"#;
+        let mapping = parse_frontmatter(raw).expect("frontmatter should parse");
+
+        assert_eq!(
+            title_en_value(&mapping).as_deref(),
+            Some("Getting Things Unfolded")
+        );
+        assert_eq!(
+            title_cn_value(&mapping, "chapter-summary", "", None).as_deref(),
+            Some("第1章 展开事物")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_chinese_book_h1() {
+        let raw = "type: book\ntitle: Atlas of AI\n";
+        let mapping = parse_frontmatter(raw).expect("frontmatter should parse");
+        let body = "# AI地图集：人工智能的权力、政治与行星代价\n\n## 核心论点";
+
+        assert_eq!(
+            title_cn_value(&mapping, "book-overview", body, Some("Atlas of AI")).as_deref(),
+            Some("AI地图集：人工智能的权力、政治与行星代价")
         );
     }
 

@@ -5,6 +5,7 @@ import { splitAuthors } from '../wiki';
 import { patchFrontmatter, applyFmToEntry, openPdfExternal, openTranslationExternal } from '../api';
 import { ratingToStars } from '../frontmatter';
 import { buildCitation, CITATION_FORMATS, type CitationFormat } from '../citation';
+import { deriveBibliographicInfo } from '../bibliographic-info';
 import { MiniRow } from './MiniRow';
 import { Icon } from './Icon';
 
@@ -103,6 +104,7 @@ export function PropertyPanel({
     return out;
   }, [entry, entries, authorIndex]);
 
+  const biblio = useMemo(() => deriveBibliographicInfo(entry, entries), [entry, entries]);
   const themes = entry.themes ?? [];
   const myAnnotations = annotationIndex.get(entry.path) ?? [];
   const annotatesTarget = entry.type === 'note' && entry.annotates
@@ -156,6 +158,19 @@ export function PropertyPanel({
           </div>
         );
       })()}
+
+      {(biblio.book || biblio.rows.length > 0) && (
+        <Section title="书目信息">
+          {biblio.book && <MiniRow entry={biblio.book} onClick={onOpen} />}
+          {biblio.rows.length > 0 && (
+            <dl class="space-y-2 pt-1">
+              {biblio.rows.map(row => (
+                <ReadOnlyRow label={row.label} value={row.value} key={`${row.label}:${row.value}`} />
+              ))}
+            </dl>
+          )}
+        </Section>
+      )}
 
       <ThemesEditor themes={themes} onThemeClick={onThemeClick} save={save} disabled={saving} />
 
@@ -389,6 +404,15 @@ function Row({ label, children }: { label: string; children: ComponentChildren }
     <div class="editable-row grid grid-cols-[60px_1fr] gap-2 items-start">
       <dt class="text-muted text-[11px] pt-0.5">{label}</dt>
       <dd class="min-w-0">{children}</dd>
+    </div>
+  );
+}
+
+function ReadOnlyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div class="grid grid-cols-[60px_1fr] gap-2 items-start">
+      <dt class="text-muted text-[11px] pt-0.5">{label}</dt>
+      <dd class="min-w-0 text-secondary break-words">{value}</dd>
     </div>
   );
 }

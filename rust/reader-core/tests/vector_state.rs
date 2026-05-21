@@ -40,7 +40,7 @@ fn hybrid_on_legacy_index_falls_back_to_lex() {
 
     let conn = Connection::open(&index_db).unwrap();
     conn.execute_batch(
-        "CREATE TABLE entries (path TEXT PRIMARY KEY, type TEXT NOT NULL, book TEXT, title TEXT, author TEXT, year_json TEXT, rating_json TEXT, rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topic TEXT, source TEXT, doi TEXT, chapters_analyzed INTEGER, annotates TEXT, created TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER, preview TEXT NOT NULL DEFAULT '');
+        "CREATE TABLE entries (path TEXT PRIMARY KEY, type TEXT NOT NULL, book TEXT, title TEXT, title_en TEXT, title_cn TEXT, author TEXT, year_json TEXT, rating_json TEXT, rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topic TEXT, source TEXT, doi TEXT, publisher TEXT, isbn TEXT, chapters_analyzed INTEGER, annotates TEXT, created TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER, preview TEXT NOT NULL DEFAULT '', body_len INTEGER NOT NULL DEFAULT 0, added INTEGER NOT NULL DEFAULT 0);
          CREATE VIRTUAL TABLE entry_search USING fts5(path UNINDEXED, type UNINDEXED, title, author, book, themes, topic, source, year, preview, doi, body);
          CREATE VIRTUAL TABLE entry_trigram USING fts5(path UNINDEXED, type UNINDEXED, text, tokenize = 'trigram');
          CREATE TABLE entry_text (path TEXT PRIMARY KEY, search_text TEXT NOT NULL);",

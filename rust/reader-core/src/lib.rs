@@ -114,6 +114,8 @@ pub struct Entry {
     pub entry_type: String,
     pub book: Option<String>,
     pub title: Option<String>,
+    pub title_en: Option<String>,
+    pub title_cn: Option<String>,
     pub author: Option<String>,
     pub year: Option<Value>,
     pub rating: Option<Value>,
@@ -122,6 +124,8 @@ pub struct Entry {
     pub topic: Option<String>,
     pub source: Option<String>,
     pub doi: Option<String>,
+    pub publisher: Option<String>,
+    pub isbn: Option<String>,
     pub chapters_analyzed: Option<i64>,
     pub annotates: Option<String>,
     pub created: Option<String>,
@@ -176,12 +180,20 @@ pub struct SearchHit {
     pub source: String,
 }
 
+fn ensure_index_schema(paths: &ReaderPaths) -> ReaderResult<()> {
+    if !indexer::index_schema_current(paths)? {
+        indexer::build_sqlite_index(paths)?;
+    }
+    Ok(())
+}
+
 pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
     if !paths.index_db.is_file() {
         return Err(ReaderError::NotFound(
             "index database missing; run npm run build:index in reader/".to_string(),
         ));
     }
+    ensure_index_schema(paths)?;
 
     let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
@@ -191,9 +203,9 @@ pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
     let mut stmt = conn.prepare(
         r#"
         SELECT
-          path, type, book, title, author, year_json, rating_json, rating_score,
-          themes_json, topic, source, doi, chapters_analyzed, annotates, created,
-          pdf_slug, has_pdf, mtime, preview, body_len, added
+          path, type, book, title, title_en, title_cn, author, year_json, rating_json,
+          rating_score, themes_json, topic, source, doi, publisher, isbn, chapters_analyzed,
+          annotates, created, pdf_slug, has_pdf, mtime, preview, body_len, added
         FROM entries
         ORDER BY
           type,
@@ -238,6 +250,7 @@ fn search_entries_lex(paths: &ReaderPaths, options: &SearchOptions) -> ReaderRes
             "index database missing; run npm run build:index in reader/".to_string(),
         ));
     }
+    ensure_index_schema(paths)?;
 
     let query = options.query.trim();
     if query.is_empty() {
@@ -1132,31 +1145,35 @@ pub fn reader_dist_file(paths: &ReaderPaths, route_path: &str) -> ReaderResult<P
 }
 
 fn row_to_entry(row: &Row<'_>) -> rusqlite::Result<Entry> {
-    let year_json: Option<String> = row.get(5)?;
-    let rating_json: Option<String> = row.get(6)?;
-    let themes_json: Option<String> = row.get(8)?;
+    let year_json: Option<String> = row.get("year_json")?;
+    let rating_json: Option<String> = row.get("rating_json")?;
+    let themes_json: Option<String> = row.get("themes_json")?;
     Ok(Entry {
-        path: row.get(0)?,
-        entry_type: row.get(1)?,
-        book: row.get(2)?,
-        title: row.get(3)?,
-        author: row.get(4)?,
+        path: row.get("path")?,
+        entry_type: row.get("type")?,
+        book: row.get("book")?,
+        title: row.get("title")?,
+        title_en: row.get("title_en")?,
+        title_cn: row.get("title_cn")?,
+        author: row.get("author")?,
         year: parse_json_cell(year_json),
         rating: parse_json_cell(rating_json),
-        rating_score: row.get::<_, Option<f64>>(7)?.unwrap_or_default(),
+        rating_score: row.get::<_, Option<f64>>("rating_score")?.unwrap_or_default(),
         themes: parse_json_cell(themes_json),
-        topic: row.get(9)?,
-        source: row.get(10)?,
-        doi: row.get(11)?,
-        chapters_analyzed: row.get(12)?,
-        annotates: row.get(13)?,
-        created: row.get(14)?,
-        pdf_slug: row.get(15)?,
-        has_pdf: row.get::<_, i64>(16)? != 0,
-        mtime: row.get(17)?,
-        preview: row.get::<_, Option<String>>(18)?.unwrap_or_default(),
-        body_len: row.get::<_, Option<i64>>(19)?.unwrap_or_default(),
-        added: row.get::<_, Option<i64>>(20)?.unwrap_or_default(),
+        topic: row.get("topic")?,
+        source: row.get("source")?,
+        doi: row.get("doi")?,
+        publisher: row.get("publisher")?,
+        isbn: row.get("isbn")?,
+        chapters_analyzed: row.get("chapters_analyzed")?,
+        annotates: row.get("annotates")?,
+        created: row.get("created")?,
+        pdf_slug: row.get("pdf_slug")?,
+        has_pdf: row.get::<_, i64>("has_pdf")? != 0,
+        mtime: row.get("mtime")?,
+        preview: row.get::<_, Option<String>>("preview")?.unwrap_or_default(),
+        body_len: row.get::<_, Option<i64>>("body_len")?.unwrap_or_default(),
+        added: row.get::<_, Option<i64>>("added")?.unwrap_or_default(),
     })
 }
 

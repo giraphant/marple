@@ -26,6 +26,11 @@ try {
   assert.ok(tables.has('entry_themes'), 'entry_themes table missing');
   assert.ok(tables.has('entry_search'), 'entry_search FTS table missing');
 
+  const entryColumns = new Set(db.prepare('PRAGMA table_info(entries)').all().map(row => row.name));
+  for (const column of ['title_en', 'title_cn', 'publisher', 'isbn']) {
+    assert.ok(entryColumns.has(column), `entries.${column} column missing`);
+  }
+
   const total = db.prepare('SELECT count(*) AS n FROM entries').get().n;
   const searchTotal = db.prepare('SELECT count(*) AS n FROM entry_search').get().n;
   assert.ok(total > 0, 'entries table is empty');
@@ -43,6 +48,22 @@ try {
     const n = db.prepare('SELECT count(*) AS n FROM entries WHERE type = ?').get(type).n;
     assert.ok(n > 0, `expected indexed rows for ${type}`);
   }
+
+  const bookMetadataRows = db.prepare(`
+    SELECT count(*) AS n
+    FROM entries
+    WHERE type = 'book-overview'
+      AND (publisher IS NOT NULL OR isbn IS NOT NULL OR title_cn IS NOT NULL)
+  `).get().n;
+  assert.ok(bookMetadataRows > 0, 'expected book overview rows with bibliographic metadata');
+
+  const chapterTitleRows = db.prepare(`
+    SELECT count(*) AS n
+    FROM entries
+    WHERE type = 'chapter-summary'
+      AND (title_en IS NOT NULL OR title_cn IS NOT NULL)
+  `).get().n;
+  assert.ok(chapterTitleRows > 0, 'expected chapter title alias metadata');
 
   const badThemeRows = db.prepare(`
     SELECT count(*) AS n
