@@ -228,6 +228,8 @@ export function ActionsRow({ entry, defaultFormat, hasTranslation }: { entry: En
   const [err, setErr] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [readMenuOpen, setReadMenuOpen] = useState(false);
+  const readMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setFormat(defaultFormat); }, [defaultFormat, entry.path]);
 
@@ -240,6 +242,16 @@ export function ActionsRow({ entry, defaultFormat, hasTranslation }: { entry: En
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [menuOpen]);
+
+  // Click-outside to close the read (原文/译本) menu.
+  useEffect(() => {
+    if (!readMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (readMenuRef.current && !readMenuRef.current.contains(e.target as Node)) setReadMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [readMenuOpen]);
 
   const copyCitation = async () => {
     setErr(null);
@@ -277,9 +289,15 @@ export function ActionsRow({ entry, defaultFormat, hasTranslation }: { entry: En
   const activeMeta = CITATION_FORMATS.find(f => f.id === format);
   const preview = buildCitation(entry, format);
 
+  // Read targets share one control like 复制引用: a primary button (原文) + a ▾
+  // that folds out the alternatives (译本). Only the available ones appear.
+  const readTargets: { label: string; run: () => void }[] = [];
+  if (entry.has_pdf && entry.pdf_slug) readTargets.push({ label: '阅读原文', run: openPdf });
+  if (hasTranslation && entry.pdf_slug) readTargets.push({ label: '阅读译本', run: openTranslation });
+
   return (
     <div class="flex items-center gap-2 -mt-1 text-[11px] flex-wrap">
-      <div class="inline-flex rounded border border-base bg-surface overflow-hidden">
+      <div class="inline-flex rounded-lg border border-base bg-surface overflow-hidden">
         <button
           onClick={copyCitation}
           class="px-2 py-1 hover:bg-page text-secondary hover:text-primary transition"
@@ -320,19 +338,38 @@ export function ActionsRow({ entry, defaultFormat, hasTranslation }: { entry: En
           )}
         </div>
       </div>
-      {entry.has_pdf && entry.pdf_slug && (
+      {readTargets.length === 1 && (
         <button
-          onClick={openPdf}
+          onClick={readTargets[0].run}
           class="px-2 py-1 rounded-lg border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
-          title={`用系统默认 PDF 阅读器打开 sources/${entry.pdf_slug}.pdf`}
-        >阅读原文</button>
+        >{readTargets[0].label}</button>
       )}
-      {hasTranslation && entry.pdf_slug && (
-        <button
-          onClick={openTranslation}
-          class="px-2 py-1 rounded-lg border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
-          title={`用系统默认 PDF 阅读器打开译本 processing/translations/${entry.pdf_slug}-zh.pdf`}
-        >打开译本</button>
+      {readTargets.length >= 2 && (
+        <div class="inline-flex rounded-lg border border-base bg-surface overflow-hidden">
+          <button
+            onClick={readTargets[0].run}
+            class="px-2 py-1 hover:bg-page text-secondary hover:text-primary transition"
+          >{readTargets[0].label}</button>
+          <div class="relative" ref={readMenuRef}>
+            <button
+              onClick={() => setReadMenuOpen(v => !v)}
+              class="px-1.5 py-1 border-l border-base hover:bg-page text-muted hover:text-primary transition"
+              title="其它阅读方式"
+              aria-label="其它阅读方式"
+            >▾</button>
+            {readMenuOpen && (
+              <div class="absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded-xl shadow-soft-lg py-1 w-[140px]">
+                {readTargets.slice(1).map(t => (
+                  <button
+                    key={t.label}
+                    onClick={() => { t.run(); setReadMenuOpen(false); }}
+                    class="w-full text-left px-3 py-1.5 text-[12px] text-primary hover:bg-page"
+                  >{t.label}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
       {err && <span class="text-danger text-[10px]">{err}</span>}
     </div>
