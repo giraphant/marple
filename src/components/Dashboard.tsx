@@ -1,6 +1,5 @@
 import { useMemo } from 'preact/hooks';
 import type { Entry, EntryType } from '../types';
-import { TYPE_BY_ID } from '../types';
 import { MiniRow } from './MiniRow';
 
 interface Props {
@@ -10,11 +9,12 @@ interface Props {
   onOpen: (entry: Entry) => void;
 }
 
-export function Dashboard({ type, typeEntries, onThemeClick, onOpen }: Props) {
+// The total count lives in the list header and the average rating across a whole
+// corpus isn't actionable, so the dashboard drops the vanity stat column and
+// keeps only the two navigational blocks: frequent themes and top picks.
+export function Dashboard({ typeEntries, onThemeClick, onOpen }: Props) {
   const stats = useMemo(() => {
     const total = typeEntries.length;
-    const rated = typeEntries.filter(e => e.rating_score > 0);
-    const avg = rated.length ? rated.reduce((s, e) => s + e.rating_score, 0) / rated.length : 0;
     const top = [...typeEntries]
       .sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0))
       .slice(0, 6);
@@ -23,33 +23,28 @@ export function Dashboard({ type, typeEntries, onThemeClick, onOpen }: Props) {
       counts.set(th, (counts.get(th) ?? 0) + 1);
     }
     const topThemes = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 18);
-    return { total, avg, top, topThemes };
+    return { total, top, topThemes };
   }, [typeEntries]);
 
   if (stats.total === 0) return null;
 
-  const typeMeta = TYPE_BY_ID[type] ?? { label: type, accent: '' };
+  const hasThemes = stats.topThemes.length > 0;
+  const hasTop = stats.top.length > 0 && stats.top[0].rating_score > 0;
+  if (!hasThemes && !hasTop) return null;
 
   return (
-    <section class="mb-5 bg-surface border border-base rounded-2xl shadow-soft p-5 grid grid-cols-1 lg:grid-cols-[260px_1fr_320px] gap-5">
-      <div class="space-y-1.5">
-        <div class="text-[11px] uppercase tracking-wider text-muted font-semibold">{typeMeta.label}</div>
-        <div class="text-2xl font-semibold tabular-nums">{stats.total}</div>
-        {stats.avg > 0 && (
-          <div class="text-[12px] text-secondary">
-            平均评分 <span class="text-star">{'★'.repeat(Math.round(stats.avg))}</span>
-            <span class="text-muted tabular-nums"> ({stats.avg.toFixed(2)})</span>
-          </div>
-        )}
-        <div class="text-[12px] text-secondary">{stats.topThemes.length} 个 themes</div>
-      </div>
-
-      {stats.topThemes.length > 0 && (
+    <section
+      class={`mb-5 bg-surface border border-base rounded-2xl shadow-soft p-5 grid grid-cols-1 gap-5 ${
+        hasThemes && hasTop ? 'lg:grid-cols-[1fr_320px]' : ''
+      }`}
+    >
+      {hasThemes && (
         <div class="min-w-0">
           <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">高频主题</div>
           <div class="flex flex-wrap gap-1.5">
             {stats.topThemes.map(([th, n]) => (
               <button
+                key={th}
                 onClick={() => onThemeClick(th)}
                 class="text-[11px] px-2 py-0.5 rounded border border-base bg-page text-primary hover:bg-accent-bg hover:border-accent hover:text-accent-text transition"
               >
@@ -60,8 +55,8 @@ export function Dashboard({ type, typeEntries, onThemeClick, onOpen }: Props) {
         </div>
       )}
 
-      {stats.top.length > 0 && stats.top[0].rating_score > 0 && (
-        <div class="min-w-0 border-t lg:border-t-0 lg:border-l border-base lg:pl-5 pt-3 lg:pt-0">
+      {hasTop && (
+        <div class={`min-w-0 ${hasThemes ? 'border-t lg:border-t-0 lg:border-l border-base lg:pl-5 pt-3 lg:pt-0' : ''}`}>
           <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">高分推荐</div>
           <div class="space-y-0.5">
             {stats.top.map(e => <MiniRow entry={e} onClick={onOpen} key={e.path} />)}
