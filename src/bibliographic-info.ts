@@ -22,7 +22,7 @@ export function deriveBibliographicInfo(entry: Entry, entries: Entry[]): Bibliog
   const translationHref = cleanBibliographicText(meta.translation_douban_url ?? entry.translation_douban_url);
   if (translationTitle || translationHref) {
     rows.push({
-      label: '中文译本',
+      label: '中文版',
       value: translationTitle ?? '豆瓣条目',
       ...(translationHref ? { href: translationHref } : {}),
     });

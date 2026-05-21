@@ -85,7 +85,7 @@ describe('deriveBibliographicInfo', () => {
     const info = deriveBibliographicInfo(overview, [overview]);
 
     expect(info.rows).toContainEqual({
-      label: '中文译本',
+      label: '中文版',
       value: '非學校化社會',
       href: 'https://book.douban.com/subject/1997483/',
     });
