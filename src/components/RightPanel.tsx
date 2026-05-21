@@ -225,8 +225,8 @@ function StatsTab({ stats }: { stats: DocStats }) {
     ['预计阅读', stats.minutes > 0 ? `${stats.minutes} 分钟` : '—'],
   ];
   return (
-    <div class="p-4">
-      <SectionLabel>统计</SectionLabel>
+    <div class="p-5">
+      <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">统计</div>
       <dl class="space-y-1.5 text-[12px]">
         {rows.map(([k, v]) => (
           <div key={k} class="flex items-baseline justify-between gap-3">
@@ -240,7 +240,7 @@ function StatsTab({ stats }: { stats: DocStats }) {
 }
 
 function SectionLabel({ children }: { children: ComponentChildren }) {
-  return <div class="sticky top-0 z-10 bg-page/95 backdrop-blur-sm text-[10px] uppercase tracking-wider text-muted font-semibold px-2 py-1.5">{children}</div>;
+  return <div class="sticky top-0 z-10 bg-page/95 backdrop-blur-sm text-[11px] uppercase tracking-wider text-muted font-semibold px-2 py-1.5">{children}</div>;
 }
 
 function NavRow({ label, active, onClick }: {

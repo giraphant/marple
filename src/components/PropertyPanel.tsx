@@ -137,7 +137,9 @@ export function PropertyPanel({
         const fields = FIELDS_BY_TYPE[entry.type];
         if (fields.size === 0) return null;
         return (
-          <dl class={`space-y-2 ${saving ? 'opacity-60 pointer-events-none' : ''}`}>
+          <div>
+            <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">属性</div>
+            <dl class={`space-y-2 ${saving ? 'opacity-60 pointer-events-none' : ''}`}>
             {fields.has('rating') && <RatingRow value={entry.rating_score} save={save} />}
             {fields.has('year') && <TextRow label="年份" value={entry.year} field="year" parse={parseYear} save={save} />}
             {fields.has('author') && <AuthorRow entry={entry} backlinks={backlinks} onOpen={onOpen} save={save} />}
@@ -150,7 +152,8 @@ export function PropertyPanel({
                 <dd class="min-w-0 tabular-nums">{entry.chapters_analyzed}</dd>
               </div>
             )}
-          </dl>
+            </dl>
+          </div>
         );
       })()}
 
