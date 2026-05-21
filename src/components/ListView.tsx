@@ -156,15 +156,30 @@ export function ListView({
             </div>
           )}
         </div>
-        {themeFilter && (
-          <div class="px-6 pb-2 flex items-center gap-2">
-            <span class="text-[11px] text-muted">主题筛选</span>
-            <button
-              onClick={onClearTheme}
-              class="text-[11px] px-2 py-0.5 rounded bg-accent-bg text-accent-text border border-accent/30 hover:bg-accent-bg transition"
-            >
-              {themeFilter} <span class="text-accent-text ml-1">✕</span>
-            </button>
+        {(themeFilter || authorFilter.trim()) && (
+          <div class="px-8 pb-2 flex items-center gap-2 flex-wrap">
+            {themeFilter && (
+              <>
+                <span class="text-[11px] text-muted">主题筛选</span>
+                <button
+                  onClick={onClearTheme}
+                  class="text-[11px] px-2 py-0.5 rounded bg-accent-bg text-accent-text border border-accent/30 hover:bg-accent-bg transition"
+                >
+                  {themeFilter} <span class="text-accent-text ml-1">✕</span>
+                </button>
+              </>
+            )}
+            {authorFilter.trim() && (
+              <>
+                <span class="text-[11px] text-muted">作者筛选</span>
+                <button
+                  onClick={() => onAuthorFilterChange('')}
+                  class="text-[11px] px-2 py-0.5 rounded bg-accent-bg text-accent-text border border-accent/30 hover:bg-accent-bg transition"
+                >
+                  {authorFilter} <span class="text-accent-text ml-1">✕</span>
+                </button>
+              </>
+            )}
           </div>
         )}
       </header>
@@ -189,6 +204,7 @@ export function ListView({
                       entry={e}
                       onClick={(entry, ev) => onCardClick(entry, { meta: ev.metaKey || ev.ctrlKey })}
                       onThemeClick={onThemeClick}
+                      onAuthorClick={onAuthorFilterChange}
                     />
                   </div>
                 ))}

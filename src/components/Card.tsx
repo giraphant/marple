@@ -1,5 +1,6 @@
 import { useRef, useState, useLayoutEffect } from 'preact/hooks';
 import type { Entry } from '../types';
+import { splitAuthors } from '../wiki';
 
 /** The preview is raw analysis-doc text and may still carry inline markdown.
  *  Strip the common markers so the card shows clean prose. */
@@ -76,10 +77,13 @@ interface Props {
   onClick: (entry: Entry, ev: MouseEvent) => void;
   /** Click a theme chip to filter by it (stops the card's open-on-click). */
   onThemeClick?: (theme: string) => void;
+  /** Click an author name to filter by it (stops the card's open-on-click). */
+  onAuthorClick?: (author: string) => void;
 }
 
-export function Card({ entry, onClick, onThemeClick }: Props) {
+export function Card({ entry, onClick, onThemeClick, onAuthorClick }: Props) {
   const themes = entry.themes ?? [];
+  const authors = splitAuthors(entry.author);
   const fallbackTitle = entry.path.split('/').pop()!.replace(/\.md$/, '');
   const preview = entry.preview ? plainPreview(entry.preview) : '';
   // Preview is the real scan target (titles are often uninformative), so show
@@ -95,7 +99,16 @@ export function Card({ entry, onClick, onThemeClick }: Props) {
         {(entry.author || entry.year || entry.rating) && (
           <div class="flex items-baseline justify-between gap-2 text-[11px]">
             <div class="min-w-0 line-clamp-1">
-              {entry.author && <span class="font-medium text-secondary">{entry.author}</span>}
+              {authors.map((a, i) => (
+                <span key={a + i}>
+                  {i > 0 ? <span class="text-muted">, </span> : null}
+                  <span
+                    onClick={(ev: MouseEvent) => { ev.stopPropagation(); onAuthorClick?.(a); }}
+                    class="font-medium text-secondary hover:text-accent-text cursor-pointer transition"
+                    title={`按作者筛选：${a}`}
+                  >{a}</span>
+                </span>
+              ))}
               {entry.author && entry.year ? <span class="text-muted"> · </span> : null}
               {entry.year && <span class="text-secondary tabular-nums">{entry.year}</span>}
             </div>
