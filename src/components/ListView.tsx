@@ -182,7 +182,7 @@ export function ListView({
           ? <div class="text-sm text-muted py-20 text-center">没有匹配的条目</div>
           : (
             <>
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 items-start">
                 {visible.map(e => (
                   <Card
                     entry={e}

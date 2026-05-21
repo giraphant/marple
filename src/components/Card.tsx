@@ -1,5 +1,22 @@
 import type { Entry } from '../types';
 
+/** The preview is raw analysis-doc text and often opens with a markdown
+ *  metadata block. Strip the common markers so the card shows clean prose
+ *  instead of literal **bold** / # / [link](url) noise. */
+function plainPreview(s: string): string {
+  return s
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/(\*\*|__)(.*?)\1/g, '$2')
+    .replace(/(\*|_)(.*?)\1/g, '$2')
+    .replace(/^>\s?/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 interface Props {
   entry: Entry;
   /** Receives the entry and the mouse event so callers can read modifier keys
@@ -12,12 +29,13 @@ interface Props {
 export function Card({ entry, onClick, onThemeClick }: Props) {
   const themes = entry.themes ?? [];
   const fallbackTitle = entry.path.split('/').pop()!.replace(/\.md$/, '');
+  const preview = entry.preview ? plainPreview(entry.preview) : '';
   // Cards only ever render inside a single-type list, so the type badge would be
   // identical on every card — dropped for scannability. Title leads; author·year
   // collapse into one muted meta line; the preview is demoted under both.
   return (
     <div
-      class="card bg-surface border border-base rounded-2xl p-4 shadow-soft hover:shadow-soft-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-soft cursor-pointer flex flex-col gap-2 transition"
+      class="card bg-surface border border-base rounded-2xl p-5 shadow-soft hover:shadow-soft-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-soft cursor-pointer flex flex-col gap-2.5 transition"
       onClick={(ev: MouseEvent) => onClick(entry, ev)}
     >
       <div class="flex items-start justify-between gap-2.5">
@@ -37,12 +55,12 @@ export function Card({ entry, onClick, onThemeClick }: Props) {
         </div>
       )}
 
-      {entry.preview && (
-        <div class="text-[12px] text-muted line-clamp-2 leading-relaxed">{entry.preview}</div>
+      {preview && (
+        <div class="text-[12px] text-muted line-clamp-2 leading-relaxed">{preview}</div>
       )}
 
       {themes.length > 0 && (
-        <div class="flex flex-wrap gap-1.5 mt-auto pt-2.5 border-t border-base">
+        <div class="flex flex-wrap gap-1.5 pt-2.5 border-t border-base">
           {themes.slice(0, 3).map(th => (
             <button
               key={th}
