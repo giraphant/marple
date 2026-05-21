@@ -1,8 +1,8 @@
+import { useRef, useState, useLayoutEffect } from 'preact/hooks';
 import type { Entry } from '../types';
 
-/** The preview is raw analysis-doc text and often opens with a markdown
- *  metadata block. Strip the common markers so the card shows clean prose
- *  instead of literal **bold** / # / [link](url) noise. */
+/** The preview is raw analysis-doc text and may still carry inline markdown.
+ *  Strip the common markers so the card shows clean prose. */
 function plainPreview(s: string): string {
   return s
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
@@ -15,6 +15,58 @@ function plainPreview(s: string): string {
     .replace(/^[-*+]\s+/gm, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** Theme chips kept to a single line: render only as many as fit the card
+ *  width, collapse the rest into a "+N". Widths are measured once (chip text is
+ *  static) and the fit is recomputed on resize. */
+function ThemeChips({ themes, onThemeClick }: { themes: string[]; onThemeClick?: (t: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const widths = useRef<number[]>([]);
+  const [count, setCount] = useState(themes.length);
+  const themesKey = themes.join('');
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const chipEls = Array.from(el.querySelectorAll<HTMLElement>('[data-chip]'));
+    if (chipEls.length === themes.length) {
+      widths.current = chipEls.map(c => c.offsetWidth);
+    }
+    const fit = (avail: number) => {
+      const gap = 6;
+      const badge = 30; // reserved width for the "+N" marker
+      let used = 0;
+      for (let i = 0; i < widths.current.length; i++) {
+        used += (i > 0 ? gap : 0) + widths.current[i];
+        const moreAfter = i < widths.current.length - 1;
+        if (used + (moreAfter ? gap + badge : 0) > avail) return i;
+      }
+      return widths.current.length;
+    };
+    const apply = () => setCount(fit(el.clientWidth));
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [themesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const shown = themes.slice(0, count);
+  const extra = themes.length - shown.length;
+  return (
+    <div ref={ref} class="flex flex-nowrap items-center gap-1.5 pt-2.5 border-t border-base overflow-hidden">
+      {shown.map(th => (
+        <button
+          data-chip
+          key={th}
+          onClick={(ev: MouseEvent) => { ev.stopPropagation(); onThemeClick?.(th); }}
+          class="shrink-0 whitespace-nowrap text-[10.5px] px-2 py-0.5 bg-page text-secondary rounded-md hover:bg-accent-bg hover:text-accent-text transition"
+          title={`按主题筛选：${th}`}
+        >{th}</button>
+      ))}
+      {extra > 0 && <span class="shrink-0 text-[10.5px] text-muted self-center">+{extra}</span>}
+    </div>
+  );
 }
 
 interface Props {
@@ -30,50 +82,32 @@ export function Card({ entry, onClick, onThemeClick }: Props) {
   const themes = entry.themes ?? [];
   const fallbackTitle = entry.path.split('/').pop()!.replace(/\.md$/, '');
   const preview = entry.preview ? plainPreview(entry.preview) : '';
-  // Cards only ever render inside a single-type list, so the type badge would be
-  // identical on every card — dropped for scannability. Title leads; author·year
-  // collapse into one muted meta line; the preview is demoted under both.
   return (
     <div
       class="card bg-surface border border-base rounded-2xl p-5 shadow-soft hover:shadow-soft-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-soft cursor-pointer flex flex-col gap-2.5 transition"
       onClick={(ev: MouseEvent) => onClick(entry, ev)}
     >
-      <div class="flex items-start justify-between gap-2.5">
+      <div class="flex flex-col gap-1">
+        {(entry.author || entry.year || entry.rating) && (
+          <div class="flex items-baseline justify-between gap-2 text-[11px]">
+            <div class="min-w-0 line-clamp-1">
+              {entry.author && <span class="font-medium text-secondary">{entry.author}</span>}
+              {entry.author && entry.year ? <span class="text-muted"> · </span> : null}
+              {entry.year && <span class="text-secondary tabular-nums">{entry.year}</span>}
+            </div>
+            {entry.rating && <span class="shrink-0 text-star tabular-nums">{entry.rating}</span>}
+          </div>
+        )}
         <div class="font-semibold text-[15px] leading-snug line-clamp-2 text-primary tracking-[-0.01em]">
           {entry.title || fallbackTitle}
         </div>
-        {entry.rating && (
-          <span class="shrink-0 mt-0.5 text-[12px] text-star tabular-nums">{entry.rating}</span>
-        )}
       </div>
 
-      {(entry.author || entry.year) && (
-        <div class="text-[11.5px] text-muted line-clamp-1">
-          {entry.author}
-          {entry.author && entry.year ? <span> · </span> : null}
-          {entry.year && <span class="tabular-nums">{entry.year}</span>}
-        </div>
-      )}
-
       {preview && (
-        <div class="text-[12px] text-muted line-clamp-2 leading-relaxed">{preview}</div>
+        <div class="text-[12px] text-muted leading-relaxed line-clamp-4">{preview}</div>
       )}
 
-      {themes.length > 0 && (
-        <div class="flex flex-wrap gap-1.5 pt-2.5 border-t border-base">
-          {themes.slice(0, 3).map(th => (
-            <button
-              key={th}
-              onClick={(ev: MouseEvent) => { ev.stopPropagation(); onThemeClick?.(th); }}
-              class="text-[10.5px] px-2 py-0.5 bg-page text-secondary rounded-md hover:bg-accent-bg hover:text-accent-text transition"
-              title={`按主题筛选：${th}`}
-            >{th}</button>
-          ))}
-          {themes.length > 3 && (
-            <span class="text-[10.5px] text-muted self-center">+{themes.length - 3}</span>
-          )}
-        </div>
-      )}
+      {themes.length > 0 && <ThemeChips themes={themes} onThemeClick={onThemeClick} />}
     </div>
   );
 }
