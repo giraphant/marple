@@ -28,8 +28,19 @@ pub struct IndexStats {
     pub entries: usize,
     pub source_pdfs: usize,
     pub skipped_frontmatter_without_type: usize,
+    /// Files that have frontmatter but were left out of the index, with the
+    /// reason. Surfaced (CLI + reindex API) so a dropped entry is never silent.
+    pub skipped: Vec<SkippedFile>,
     pub by_type: BTreeMap<String, usize>,
     pub output: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkippedFile {
+    pub path: String,
+    /// "no-type" (frontmatter present but no `type` field) or "unknown-type"
+    /// (a `type` value that maps to no known entry kind).
+    pub reason: &'static str,
 }
 
 #[derive(Debug)]
@@ -69,7 +80,11 @@ struct IndexedEntry {
 /// stat (the incremental path just ignores non-`Indexed` outcomes).
 enum BuildOutcome {
     Indexed(Box<IndexedEntry>),
+    /// Has frontmatter but no `type` field.
     SkippedNoType,
+    /// Has a `type` whose value maps to no known entry kind.
+    SkippedUnknownType,
+    /// No frontmatter fence at all — a plain markdown file, not an entry.
     Skipped,
 }
 
@@ -91,7 +106,7 @@ fn build_indexed_entry(
         return Ok(BuildOutcome::SkippedNoType);
     };
     let Some(entry_type) = canonical_type(&raw_type) else {
-        return Ok(BuildOutcome::Skipped);
+        return Ok(BuildOutcome::SkippedUnknownType);
     };
 
     let rel = slash_relative(&paths.workspace_root, file);
@@ -183,16 +198,27 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
     let added_dates = git_added_dates(&paths.workspace_root);
     let mut entries = Vec::new();
     let mut skipped_frontmatter_without_type = 0usize;
+    let mut skipped: Vec<SkippedFile> = Vec::new();
 
     for file in &files {
-        match build_indexed_entry(paths, file, &source_slugs)? {
+        let outcome = build_indexed_entry(paths, file, &source_slugs)?;
+        let reason = match outcome {
             BuildOutcome::Indexed(mut entry) => {
                 entry.added = added_dates.get(&entry.path).copied().unwrap_or(0);
                 entries.push(*entry);
+                continue;
             }
-            BuildOutcome::SkippedNoType => skipped_frontmatter_without_type += 1,
-            BuildOutcome::Skipped => {}
-        }
+            BuildOutcome::SkippedNoType => {
+                skipped_frontmatter_without_type += 1;
+                "no-type"
+            }
+            BuildOutcome::SkippedUnknownType => "unknown-type",
+            BuildOutcome::Skipped => continue,
+        };
+        skipped.push(SkippedFile {
+            path: slash_relative(&paths.workspace_root, file),
+            reason,
+        });
     }
 
     entries.sort_by(|a, b| {
@@ -221,9 +247,163 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
         entries: entries.len(),
         source_pdfs: source_slugs.len(),
         skipped_frontmatter_without_type,
+        skipped,
         by_type,
         output: paths.index_db.clone(),
     })
+}
+
+/// What a delta reconcile changed. `unchanged` is the cheap common case (file
+/// fingerprint matches the index), `upserted` covers new + modified entries,
+/// `removed` covers files that disappeared from the vault.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ReconcileStats {
+    pub upserted: usize,
+    pub removed: usize,
+    pub unchanged: usize,
+}
+
+/// Bring the live index into agreement with the vault by diffing per-file
+/// mtimes — new/modified files are re-indexed, vanished files are dropped, and
+/// matching fingerprints are left untouched. Self-healing: correctness does not
+/// depend on catching every filesystem event, so any trigger (watcher, write
+/// hook, on-focus, boot) is just a latency hint. O(changes) to apply.
+pub fn reconcile_index(paths: &ReaderPaths) -> ReaderResult<ReconcileStats> {
+    // No index yet → a delta has nothing to diff against. Fall back to a full
+    // build so the first call is still correct.
+    if !paths.index_db.is_file() {
+        let stats = build_sqlite_index(paths)?;
+        return Ok(ReconcileStats {
+            upserted: stats.entries,
+            removed: 0,
+            unchanged: 0,
+        });
+    }
+
+    let source_slugs = load_source_slugs(&paths.sources)?;
+
+    // Current vault fingerprints: workspace-relative path -> mtime (ms).
+    let mut files = Vec::new();
+    walk_markdown(&paths.vault, &mut files)?;
+    let mut fs_map: HashMap<String, i64> = HashMap::with_capacity(files.len());
+    for file in &files {
+        if let Some(mt) = fs::metadata(file).ok().and_then(|m| mtime_ms(&m).ok()) {
+            fs_map.insert(slash_relative(&paths.workspace_root, file), mt);
+        }
+    }
+
+    let _lock = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let conn = Connection::open(&paths.index_db)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+
+    // Indexed fingerprints.
+    let indexed: HashMap<String, Option<i64>> = {
+        let mut stmt = conn.prepare("SELECT path, mtime FROM entries")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (path, mtime) = row?;
+            map.insert(path, mtime);
+        }
+        map
+    };
+
+    let mut stats = ReconcileStats::default();
+
+    // New or modified: fingerprint missing or differs → re-index.
+    for (rel, mt) in &fs_map {
+        match indexed.get(rel) {
+            Some(Some(idx_mt)) if idx_mt == mt => stats.unchanged += 1,
+            _ => {
+                let abs = paths.workspace_root.join(rel);
+                if upsert_path_in_conn(&conn, paths, &source_slugs, &abs, rel)? {
+                    stats.upserted += 1;
+                }
+                // Non-entry files (no/unknown type) parse to nothing and simply
+                // stay out of the index — not counted as upserted.
+            }
+        }
+    }
+
+    // Vanished: indexed but no longer on disk → drop.
+    for rel in indexed.keys() {
+        if !fs_map.contains_key(rel) {
+            delete_path_rows(&conn, rel)?;
+            stats.removed += 1;
+        }
+    }
+
+    Ok(stats)
+}
+
+/// Re-index a single vault file in place (delete its old rows, insert fresh
+/// ones if it still parses to an entry). For event-driven updates — a file
+/// watcher or the reader's own write handlers call this per changed path.
+/// Returns true when the file is now an indexed entry, false when it is not an
+/// entry (and was therefore only removed). `rel_path` is workspace-relative,
+/// e.g. `vault/papers/foo.md`.
+pub fn upsert_entry(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<bool> {
+    if !paths.index_db.is_file() {
+        return Err(ReaderError::NotFound(
+            "index database missing; run npm run build:index in reader/".to_string(),
+        ));
+    }
+    let source_slugs = load_source_slugs(&paths.sources)?;
+    let abs = paths.workspace_root.join(rel_path);
+    let _lock = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let conn = Connection::open(&paths.index_db)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    upsert_path_in_conn(&conn, paths, &source_slugs, &abs, rel_path)
+}
+
+/// Drop a single path's rows from the live index. Returns true if anything was
+/// removed. For deletes/renames detected by the watcher or write handlers.
+pub fn remove_entry(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<bool> {
+    if !paths.index_db.is_file() {
+        return Ok(false);
+    }
+    let _lock = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let conn = Connection::open(&paths.index_db)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    delete_path_rows(&conn, rel_path)
+}
+
+/// Delete every row for one workspace-relative path across the metadata + FTS
+/// tables. Returns whether an `entries` row existed. The FTS5 tables are regular
+/// (not external-content), so `DELETE … WHERE path = ?` removes the row.
+fn delete_path_rows(conn: &Connection, rel: &str) -> ReaderResult<bool> {
+    let existed = conn.execute("DELETE FROM entries WHERE path = ?", params![rel])? > 0;
+    conn.execute("DELETE FROM entry_text WHERE path = ?", params![rel])?;
+    conn.execute("DELETE FROM entry_themes WHERE path = ?", params![rel])?;
+    conn.execute("DELETE FROM entry_search WHERE path = ?", params![rel])?;
+    conn.execute("DELETE FROM entry_trigram WHERE path = ?", params![rel])?;
+    Ok(existed)
+}
+
+/// Re-index one file inside an already-open connection: drop its old rows, then
+/// insert fresh ones if it still parses to an entry. Returns true when the file
+/// is now an indexed entry. Caller holds INDEX_WRITE_LOCK; sharing the open
+/// connection lets `reconcile_index` apply a whole delta in one pass.
+fn upsert_path_in_conn(
+    conn: &Connection,
+    paths: &ReaderPaths,
+    source_slugs: &HashSet<String>,
+    abs: &Path,
+    rel: &str,
+) -> ReaderResult<bool> {
+    delete_path_rows(conn, rel)?;
+    match build_indexed_entry(paths, abs, source_slugs)? {
+        BuildOutcome::Indexed(entry) => {
+            insert_indexed_entry(conn, &entry)?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
 }
 
 /// Opt-in vector pass: load BGE-M3 and (re)build a FRESH `vectors.sqlite`
@@ -379,10 +559,16 @@ fn parse_file(text: &str) -> (Option<Mapping>, &str) {
 }
 
 fn parse_frontmatter(raw: &str) -> Option<Mapping> {
-    match serde_yaml::from_str::<YamlValue>(raw).ok() {
-        Some(YamlValue::Mapping(mapping)) => Some(mapping),
-        _ if raw.contains("\\\"") => parse_lenient_mapping(raw),
-        _ => None,
+    match serde_yaml::from_str::<YamlValue>(raw) {
+        Ok(YamlValue::Mapping(mapping)) => Some(mapping),
+        // Any YAML error (or a non-mapping document) falls back to a tolerant
+        // line parse so one malformed field — an unquoted value with an inner
+        // colon, a stray `()`, an unescaped/unclosed inner quote — degrades
+        // that single field instead of silently dropping the whole entry from
+        // the index. Externally-edited files (Obsidian/Ulysses) drift into
+        // these states; losing the entry from search is worse than a slightly
+        // off field value.
+        _ => parse_lenient_mapping(raw),
     }
 }
 
@@ -1216,13 +1402,41 @@ year: 2022
     }
 
     #[test]
-    fn rejects_frontmatter_that_legacy_yaml_skipped() {
+    fn rescues_unquoted_inner_colon_frontmatter() {
+        // Unquoted value with an inner colon is invalid YAML. Rather than drop
+        // the whole entry from the index, the lenient parser recovers the
+        // well-formed fields (type/author) so the file stays searchable.
         let raw = r#"book: Understanding Dogs: Living and Working with Canine Companions
 author: Clinton Sanders
 type: chapter-summary
 "#;
 
-        assert!(parse_frontmatter(raw).is_none());
+        let mapping = parse_frontmatter(raw).expect("lenient parse should rescue the entry");
+        assert_eq!(
+            field_text(&mapping, "type").as_deref(),
+            Some("chapter-summary")
+        );
+        assert_eq!(
+            field_text(&mapping, "author").as_deref(),
+            Some("Clinton Sanders")
+        );
+    }
+
+    #[test]
+    fn rescues_unescaped_inner_quotes_frontmatter() {
+        // A CJK title with unescaped ASCII quotes inside a double-quoted value
+        // is invalid YAML; the lenient parser keeps the inner quotes literal.
+        let raw = "type: chapter-summary\ntitle: \"第14章 理解\"自然\"概念\"\nyear: 2018\n";
+
+        let mapping = parse_frontmatter(raw).expect("lenient parse should rescue the entry");
+        assert_eq!(
+            field_text(&mapping, "type").as_deref(),
+            Some("chapter-summary")
+        );
+        assert_eq!(
+            field_text(&mapping, "title").as_deref(),
+            Some("第14章 理解\"自然\"概念")
+        );
     }
 
     #[test]

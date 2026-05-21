@@ -34,11 +34,14 @@ fn main() -> anyhow::Result<()> {
             .display()
     );
     println!("by type: {:?}", stats.by_type);
-    if stats.skipped_frontmatter_without_type > 0 {
+    if !stats.skipped.is_empty() {
         println!(
-            "skipped {} files with frontmatter but no usable type",
-            stats.skipped_frontmatter_without_type
+            "skipped {} files with frontmatter but no usable type:",
+            stats.skipped.len()
         );
+        for s in &stats.skipped {
+            println!("  [{}] {}", s.reason, s.path);
+        }
     }
     Ok(())
 }
