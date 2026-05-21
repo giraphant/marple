@@ -315,39 +315,50 @@ export function DocView({
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
-      <div class="bg-surface/95 backdrop-blur border-b border-base px-8 py-4 flex items-center gap-3 relative shrink-0">
-        <span class={`text-[11px] px-2 py-0.5 rounded-lg font-medium ${tMeta.accent}`}>{tMeta.label}</span>
-        <div class="text-[15px] font-semibold tracking-[-0.01em] text-primary flex-1 truncate">
-          {displayTitle}
+      <div class="bg-surface/95 backdrop-blur border-b border-base px-8 pt-4 pb-3 relative shrink-0">
+        <div class="flex items-center gap-3">
+          <span class={`text-[11px] px-2 py-0.5 rounded-lg font-medium ${tMeta.accent}`}>{tMeta.label}</span>
+          <div class="text-[15px] font-semibold tracking-[-0.01em] text-primary flex-1 truncate">
+            {displayTitle}
+          </div>
+
+          {editable && (saveStatus === 'conflict' ? (
+            <span class="text-[11px] text-accent-text inline-flex items-center gap-1.5" title="磁盘上的文件在你编辑期间被其他窗口或外部改动；为避免覆盖，自动保存已暂停">
+              文件已被其他窗口修改
+              <button onClick={reloadFromDisk} class="underline hover:text-primary">重载</button>
+            </span>
+          ) : (
+            <SaveIndicator status={saveStatus} errMsg={saveErr} />
+          ))}
+
+          {canDelete && (
+            <div class="relative">
+              <button
+                onClick={() => setMenuOpen(v => !v)}
+                class="text-muted hover:text-primary p-1 inline-flex items-center"
+                title="更多"
+              ><Icon name="dots-three" size={16} /></button>
+              {menuOpen && (
+                <div class="absolute right-0 top-full mt-1 bg-surface border border-base rounded-xl shadow-soft-lg py-1 min-w-[160px] z-10">
+                  <button
+                    onClick={handleDelete}
+                    class="w-full text-left px-3 py-1.5 text-[12px] text-danger hover:bg-danger-bg"
+                  >移到回收站…</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
-          <ActionsRow entry={entry} defaultFormat={citationFormat} />
-        )}
-
-        {editable && (saveStatus === 'conflict' ? (
-          <span class="text-[11px] text-accent-text inline-flex items-center gap-1.5" title="磁盘上的文件在你编辑期间被其他窗口或外部改动；为避免覆盖，自动保存已暂停">
-            文件已被其他窗口修改
-            <button onClick={reloadFromDisk} class="underline hover:text-primary">重载</button>
-          </span>
-        ) : (
-          <SaveIndicator status={saveStatus} errMsg={saveErr} />
-        ))}
-
-        {canDelete && (
-          <div class="relative">
-            <button
-              onClick={() => setMenuOpen(v => !v)}
-              class="text-muted hover:text-primary p-1 inline-flex items-center"
-              title="更多"
-            ><Icon name="dots-three" size={16} /></button>
-            {menuOpen && (
-              <div class="absolute right-0 top-full mt-1 bg-surface border border-base rounded-xl shadow-soft-lg py-1 min-w-[160px] z-10">
-                <button
-                  onClick={handleDelete}
-                  class="w-full text-left px-3 py-1.5 text-[12px] text-danger hover:bg-danger-bg"
-                >移到回收站…</button>
-              </div>
+        {(entry.type === 'paper-analysis' || entry.type === 'book-overview' || entry.type === 'chapter-summary') && (
+          <div class="flex items-center gap-3 mt-2.5">
+            <div class="flex items-center gap-2 flex-1 min-w-0 text-[12px] text-muted flex-wrap">
+              {entry.author && <span class="truncate">{entry.author}</span>}
+              {entry.year && <span class="tabular-nums">· {entry.year}</span>}
+              {entry.rating && <span class="text-star tracking-tight">{entry.rating}</span>}
+            </div>
+            {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
+              <ActionsRow entry={entry} defaultFormat={citationFormat} />
             )}
           </div>
         )}

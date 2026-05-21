@@ -234,7 +234,7 @@ function StatsTab({ stats }: { stats: DocStats }) {
 }
 
 function SectionLabel({ children }: { children: ComponentChildren }) {
-  return <div class="text-[10px] uppercase tracking-wider text-muted font-semibold px-2 mb-1">{children}</div>;
+  return <div class="sticky top-0 z-10 bg-page/95 backdrop-blur-sm text-[10px] uppercase tracking-wider text-muted font-semibold px-2 py-1.5">{children}</div>;
 }
 
 function NavRow({ label, active, onClick }: {
