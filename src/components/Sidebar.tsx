@@ -103,8 +103,12 @@ export function Sidebar({
         </button>
       </div>
 
-      {/* Quick actions: new note + super-search. Both share the same row style. */}
-      <div class={`border-b border-base ${collapsed ? 'px-1 py-2' : 'px-2 py-2'} space-y-0.5`}>
+      {/* Quick actions: new note + super-search. Both share the same row style.
+          Expanded height is pinned to 88px so this divider lines up exactly with
+          the list-view header's bottom border across the sidebar/content seam —
+          the buttons' 12.5px text otherwise yields a 88.5px fractional height
+          that renders as a 1px step on Retina. */}
+      <div class={`border-b border-base ${collapsed ? 'px-1 py-2' : 'px-2 py-2 h-[88px]'} space-y-0.5`}>
         <button
           onClick={onNewIdeaNote}
           title="新建独立 idea note"
