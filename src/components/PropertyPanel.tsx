@@ -257,7 +257,7 @@ export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultForm
     try {
       await openPdfExternal(entry.pdf_slug);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '打开 PDF 失败');
+      setErr(e instanceof Error ? e.message : '打开原文失败');
     }
   };
 
@@ -310,9 +310,9 @@ export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultForm
       {entry.has_pdf && entry.pdf_slug && (
         <button
           onClick={openPdf}
-          class="px-2 py-1 rounded border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
+          class="px-2 py-1 rounded-lg border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
           title={`用系统默认 PDF 阅读器打开 sources/${entry.pdf_slug}.pdf`}
-        >打开 PDF</button>
+        >阅读原文</button>
       )}
       {err && <span class="text-danger text-[10px]">{err}</span>}
     </div>
