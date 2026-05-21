@@ -113,7 +113,7 @@ export function Sidebar({
             : 'w-full text-left px-2.5 py-2 rounded-xl text-[12.5px] bg-accent-bg text-accent-text font-medium hover:bg-accent/15 flex items-center gap-2.5 transition'
           }
         >
-          <Icon name="plus" size={collapsed ? 16 : 13} class="text-accent-text" />
+          <span class="shrink-0 inline-flex items-center justify-center w-4 h-4"><Icon name="plus" size={collapsed ? 16 : 14} class="text-accent-text" /></span>
           {!collapsed && <span>新建笔记</span>}
         </button>
         <button
@@ -124,7 +124,7 @@ export function Sidebar({
             : 'w-full text-left px-2.5 py-2 rounded-xl text-[12.5px] hover:bg-hover/60 flex items-center gap-2.5 text-secondary transition'
           }
         >
-          <Icon name="magnifying-glass" size={collapsed ? 16 : 13} class="text-muted" />
+          <span class="shrink-0 inline-flex items-center justify-center w-4 h-4"><Icon name="magnifying-glass" size={collapsed ? 16 : 14} class="text-muted" /></span>
           {!collapsed && <span>超级检索</span>}
         </button>
       </div>
@@ -213,14 +213,16 @@ export function Sidebar({
             : '重新扫描 vault/ 生成索引（处理新 paper / author 后用）'
           }
           class={collapsed
-            ? 'mx-auto flex items-center justify-center w-9 h-9 rounded text-secondary hover:bg-hover/60 disabled:opacity-50 disabled:cursor-wait'
-            : 'w-full text-left px-2 py-1.5 rounded text-[12px] flex items-center gap-2 text-secondary hover:bg-hover/60 disabled:opacity-50 disabled:cursor-wait'
+            ? 'mx-auto flex items-center justify-center w-9 h-9 rounded-xl text-secondary hover:bg-hover/60 disabled:opacity-50 disabled:cursor-wait'
+            : 'w-full text-left px-2.5 py-2 rounded-xl text-[12.5px] flex items-center gap-2.5 text-secondary hover:bg-hover/60 disabled:opacity-50 disabled:cursor-wait'
           }
         >
-          <PhArrowsClockwise
-            width={collapsed ? 16 : 13} height={collapsed ? 16 : 13}
-            class={`text-muted shrink-0 ${reindexing ? 'animate-spin' : ''}`}
-          />
+          <span class="shrink-0 inline-flex items-center justify-center w-4 h-4">
+            <PhArrowsClockwise
+              width={collapsed ? 16 : 14} height={collapsed ? 16 : 14}
+              class={`text-muted ${reindexing ? 'animate-spin' : ''}`}
+            />
+          </span>
           {!collapsed && <span class="flex-1">{reindexing ? '索引中…' : '重建索引'}</span>}
         </button>
         <button
@@ -228,18 +230,18 @@ export function Sidebar({
           title={collapsed ? '回收站' : '回收站'}
           class={rowCls(trashActive)}
         >
-          <Icon name="trash" size={collapsed ? 16 : 13} class={trashActive ? 'text-accent-text' : 'text-muted'} />
+          <span class="shrink-0 inline-flex items-center justify-center w-4 h-4"><Icon name="trash" size={collapsed ? 16 : 14} class={trashActive ? 'text-accent-text' : 'text-muted'} /></span>
           {!collapsed && <span class="flex-1">回收站</span>}
         </button>
         <button
           onClick={onOpenSettings}
           title={collapsed ? '设置' : undefined}
           class={collapsed
-            ? 'mx-auto flex items-center justify-center w-9 h-9 rounded text-secondary hover:bg-hover/60'
-            : 'w-full text-left px-2 py-1.5 rounded text-[12px] flex items-center gap-2 text-secondary hover:bg-hover/60'
+            ? 'mx-auto flex items-center justify-center w-9 h-9 rounded-xl text-secondary hover:bg-hover/60'
+            : 'w-full text-left px-2.5 py-2 rounded-xl text-[12.5px] flex items-center gap-2.5 text-secondary hover:bg-hover/60'
           }
         >
-          <Icon name="gear" size={collapsed ? 16 : 13} class="text-muted" />
+          <span class="shrink-0 inline-flex items-center justify-center w-4 h-4"><Icon name="gear" size={collapsed ? 16 : 14} class="text-muted" /></span>
           {!collapsed && <span class="flex-1">设置</span>}
         </button>
       </div>
