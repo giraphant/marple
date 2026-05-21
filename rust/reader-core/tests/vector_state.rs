@@ -78,6 +78,7 @@ fn hybrid_on_legacy_index_falls_back_to_lex() {
         index_db,
         vectors_db: reader_root.join("data/vectors.sqlite"),
         dist: reader_root.join("dist"),
+        translations: tmpdir.join("processing").join("translations"),
     };
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

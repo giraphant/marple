@@ -98,9 +98,16 @@ fn build_indexed_entry(
         "book-overview" => book_slug(&rel),
         _ => None,
     };
+    // Exact slug→file match first; if missing, a conservative fuzzy match (same
+    // lastname + strong title-token overlap + unique winner) so the many books
+    // whose dir-slug was truncated/reworded still link to their source PDF.
+    // pdf_slug stays the vault slug (stable id; translations key off it) — the
+    // fuzzy resolution happens again at open time in resolve_source_pdf.
     let has_pdf = pdf_slug
         .as_ref()
-        .map(|slug| source_slugs.contains(slug))
+        .map(|slug| {
+            source_slugs.contains(slug) || crate::fuzzy_pick_source(slug, source_slugs).is_some()
+        })
         .unwrap_or(false);
 
     let title = if entry_type == "note" {

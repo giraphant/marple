@@ -27,6 +27,7 @@ fn fixture_paths() -> ReaderPaths {
         index_db: reader_root.join("data/index.sqlite"),
         vectors_db: reader_root.join("data/vectors.sqlite"),
         dist: reader_root.join("dist"),
+        translations: workspace_root.join("processing").join("translations"),
     }
 }
 
