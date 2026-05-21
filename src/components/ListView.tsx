@@ -87,13 +87,16 @@ export function ListView({
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
-      <header class="bg-surface/95 backdrop-blur sticky top-0 z-10">
+      <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
         {/* One header row: type label on the left; search + count + filter /
             sort / group icon menus on the right, sized a touch larger. */}
-        <div class="px-8 py-3 flex items-center justify-between gap-4">
-          <div class="flex items-center gap-2.5 min-w-0">
-            <TypeIcon type={type} scale={1.5} />
-            <div class="text-[20px] font-bold tracking-[-0.02em] text-primary truncate">
+        {/* Pinned to 88px so this row's bottom edge meets the sidebar's 88px
+            quick-actions divider — a bold title fills the height rather than
+            leaving it empty. */}
+        <div class="px-8 h-[87px] flex items-center justify-between gap-4">
+          <div class="flex items-center gap-3 min-w-0">
+            <TypeIcon type={type} scale={1.7} />
+            <div class="text-[24px] font-bold tracking-[-0.02em] text-primary truncate">
               {typeMeta?.label ?? type}
             </div>
           </div>
