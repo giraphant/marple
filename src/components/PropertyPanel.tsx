@@ -2,7 +2,7 @@ import { useMemo, useState, useRef, useEffect } from 'preact/hooks';
 import type { JSX, ComponentChildren } from 'preact';
 import type { Entry, EntryType } from '../types';
 import { splitAuthors } from '../wiki';
-import { patchFrontmatter, applyFmToEntry, openPdfExternal } from '../api';
+import { patchFrontmatter, applyFmToEntry, openPdfExternal, openTranslationExternal } from '../api';
 import { ratingToStars } from '../frontmatter';
 import { buildCitation, CITATION_FORMATS, type CitationFormat } from '../citation';
 import { MiniRow } from './MiniRow';
@@ -220,7 +220,7 @@ export function PropertyPanel({
   );
 }
 
-export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultFormat: CitationFormat }) {
+export function ActionsRow({ entry, defaultFormat, hasTranslation }: { entry: Entry; defaultFormat: CitationFormat; hasTranslation?: boolean }) {
   // Per-document override so the user can pick another format on the fly
   // without going back to settings. Resets when entry changes.
   const [format, setFormat] = useState<CitationFormat>(defaultFormat);
@@ -261,6 +261,16 @@ export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultForm
       await openPdfExternal(entry.pdf_slug);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '打开原文失败');
+    }
+  };
+
+  const openTranslation = async () => {
+    if (!entry.pdf_slug) return;
+    setErr(null);
+    try {
+      await openTranslationExternal(entry.pdf_slug);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '打开译本失败');
     }
   };
 
@@ -316,6 +326,13 @@ export function ActionsRow({ entry, defaultFormat }: { entry: Entry; defaultForm
           class="px-2 py-1 rounded-lg border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
           title={`用系统默认 PDF 阅读器打开 sources/${entry.pdf_slug}.pdf`}
         >阅读原文</button>
+      )}
+      {hasTranslation && entry.pdf_slug && (
+        <button
+          onClick={openTranslation}
+          class="px-2 py-1 rounded-lg border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
+          title={`用系统默认 PDF 阅读器打开译本 processing/translations/${entry.pdf_slug}-zh.pdf`}
+        >打开译本</button>
       )}
       {err && <span class="text-danger text-[10px]">{err}</span>}
     </div>

@@ -16,7 +16,7 @@ import { TabBar } from './components/TabBar';
 import {
   postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
   newIdeaDraft, ideaEntryFromDraft, reindex, fetchIndex, searchIndex as searchServerIndex,
-  listFiles, fetchEntry,
+  listFiles, fetchEntry, fetchTranslationSlugs,
 } from './api';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
 import { loadTabs, loadActiveIndex, saveTabs, saveActiveIndex, defaultTab } from './session';
@@ -47,6 +47,9 @@ function contentEq(a: TabContent, b: TabContent): boolean {
 
 export function App() {
   const [entries, setEntries] = useState<Entry[] | null>(null);
+  // Slugs that have a translated PDF (processing/translations/<slug>-zh.pdf).
+  // Fetched live on boot; gates the 「打开译本」 button.
+  const [translationSlugs, setTranslationSlugs] = useState<Set<string>>(() => new Set());
   const [query, setQuery] = useState('');
   const [minRating, setMinRating] = useState(0);
   const [themeFilter, setThemeFilter] = useState<string | null>(null);
@@ -277,6 +280,7 @@ export function App() {
       window.alert('加载索引失败：' + (e instanceof Error ? e.message : String(e)));
       setEntries([]);
     });
+    fetchTranslationSlugs().then(s => setTranslationSlugs(new Set(s)));
   }, [syncFromFiles]);
 
   useEffect(() => {
@@ -816,6 +820,7 @@ export function App() {
                 editable={editable}
                 editorTheme={editorTheme}
                 citationFormat={settings.citationFormat}
+                hasTranslation={translationSlugs.has(activeDocEntry.pdf_slug ?? '')}
                 onNavigate={navigateInTab}
                 onThemeClick={applyThemeFilter}
                 onUpdated={onUpdated}

@@ -24,6 +24,8 @@ interface Props {
   editable: boolean;
   editorTheme: EditorThemeConfig;
   citationFormat: CitationFormat;
+  /** Whether this entry has a translated PDF (gates the 「打开译本」 action). */
+  hasTranslation: boolean;
   onNavigate: (entry: Entry, modifiers: { meta: boolean }) => void;
   onThemeClick: (theme: string, fromType?: Entry['type']) => void;
   onUpdated: (updated: Entry) => void;
@@ -37,7 +39,7 @@ const SAVE_DEBOUNCE_MS = 1500;
 
 export function DocView({
   entry, entries, authorIndex, annotationIndex, wikiIndex, editable, editorTheme,
-  citationFormat,
+  citationFormat, hasTranslation,
   onNavigate, onThemeClick, onUpdated, onCreateAnnotation, onDelete,
 }: Props) {
   const [loadError, setLoadError] = useState(false);
@@ -330,7 +332,7 @@ export function DocView({
         </div>
 
         {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
-          <ActionsRow entry={entry} defaultFormat={citationFormat} />
+          <ActionsRow entry={entry} defaultFormat={citationFormat} hasTranslation={hasTranslation} />
         )}
 
         {editable && (saveStatus === 'conflict' ? (

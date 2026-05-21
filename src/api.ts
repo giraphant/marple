@@ -169,6 +169,33 @@ export async function openPdfExternal(slug: string): Promise<void> {
   }
 }
 
+/** Slugs that have a translated PDF under processing/translations/<slug>-zh.pdf.
+ *  Fetched once on boot; used to decide whether to show the 「打开译本」 button.
+ *  Read live by the backend, so it reflects newly-added translations on reload. */
+export async function fetchTranslationSlugs(): Promise<string[]> {
+  try {
+    const r = await fetch('/api/translations');
+    if (!r.ok) return [];
+    return await r.json() as string[];
+  } catch {
+    return [];
+  }
+}
+
+/** Ask the backend to open processing/translations/<slug>-zh.pdf in the host's
+ *  default PDF app (mirrors openPdfExternal). */
+export async function openTranslationExternal(slug: string): Promise<void> {
+  const r = await fetch('/api/open-translation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+  });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`open translation failed: ${r.status} ${msg}`);
+  }
+}
+
 export async function purgeTrash(name: string): Promise<void> {
   const r = await fetch(`/api/trash/${encodeURIComponent(name)}`, { method: 'DELETE' });
   if (!r.ok) {

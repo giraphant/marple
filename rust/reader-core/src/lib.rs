@@ -48,6 +48,8 @@ pub struct ReaderPaths {
     pub notes_dir: PathBuf,
     pub trash_dir: PathBuf,
     pub sources: PathBuf,
+    /// Translated PDFs, named `<slug>-zh.pdf` (produced by the quasi translate pass).
+    pub translations: PathBuf,
     pub index_db: PathBuf,
     /// Separate DB holding only the semantic vectors (entry_vectors). Kept apart
     /// from index_db so a fast metadata reindex never wipes the (expensive)
@@ -72,6 +74,7 @@ impl ReaderPaths {
             vectors_db: reader_root.join("data").join("vectors.sqlite"),
             trash_dir: notes_dir.join(".trash"),
             sources: workspace_root.join("sources"),
+            translations: workspace_root.join("processing").join("translations"),
             dist: reader_root.join("dist"),
             reader_root,
             workspace_root,
@@ -829,6 +832,61 @@ pub fn resolve_source_pdf(paths: &ReaderPaths, slug: &str) -> ReaderResult<PathB
         return Err(ReaderError::NotFound("pdf not found".to_string()));
     }
     Ok(path)
+}
+
+/// Resolve a slug to its translated PDF under `processing/translations/`, named
+/// `<slug>-zh.pdf`. Same untrusted-input discipline as `resolve_source_pdf`:
+/// safe-join, require it stays under the translations dir, end in `.pdf`, and be
+/// an existing file. Pure resolution, no side effects.
+pub fn resolve_translation_pdf(paths: &ReaderPaths, slug: &str) -> ReaderResult<PathBuf> {
+    let slug = slug.trim();
+    if slug.is_empty() {
+        return Err(ReaderError::BadRequest("empty translation slug".to_string()));
+    }
+    let path = safe_join(
+        &paths.workspace_root,
+        &format!("processing/translations/{slug}-zh.pdf"),
+    )?;
+    ensure_under(
+        &path,
+        &paths.translations,
+        "translation must live under processing/translations/",
+    )?;
+    if path.extension().and_then(|e| e.to_str()) != Some("pdf") {
+        return Err(ReaderError::Unsupported("only .pdf files allowed".to_string()));
+    }
+    if !path.is_file() {
+        return Err(ReaderError::NotFound("translation not found".to_string()));
+    }
+    Ok(path)
+}
+
+/// List slugs that have a translated PDF under `processing/translations/`
+/// (files named `<slug>-zh.pdf`); returns the bare `<slug>` for each. Read live
+/// so a newly-dropped translation appears without a reindex.
+pub fn list_translation_slugs(paths: &ReaderPaths) -> Vec<String> {
+    let mut slugs = Vec::new();
+    let Ok(entries) = fs::read_dir(&paths.translations) else {
+        return slugs;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_pdf = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("pdf"))
+            .unwrap_or(false);
+        if !is_pdf {
+            continue;
+        }
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            if let Some(slug) = stem.strip_suffix("-zh") {
+                slugs.push(slug.to_string());
+            }
+        }
+    }
+    slugs.sort();
+    slugs
 }
 
 /// Open an already-resolved file with the OS default application. macOS uses
