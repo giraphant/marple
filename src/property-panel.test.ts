@@ -53,12 +53,12 @@ describe('deriveBibliographicInfo', () => {
     expect(info.rows).toContainEqual({ label: '中文题名', value: '触觉的记忆' });
     expect(info.rows).toContainEqual({ label: '英文题名', value: 'The Memory of Touch' });
     expect(info.rows).toContainEqual({ label: '出版社', value: 'Duke University Press' });
-    expect(info.rows).toContainEqual({ label: 'ISBN', value: '9780822381372' });
+    expect(info.rows).toContainEqual({ label: '图书号', value: '9780822381372' });
     expect(info.rows).toContainEqual({ label: 'DOI', value: '10.1215/9780822381372' });
     expect(info.rows.some(row => row.label === '来源')).toBe(false);
   });
 
-  it('skips title and source duplicates', () => {
+  it('skips duplicate title aliases', () => {
     const overview = entry({
       title: 'Atlas of AI',
       title_en: 'Atlas of AI',
@@ -73,5 +73,21 @@ describe('deriveBibliographicInfo', () => {
     expect(info.rows).toContainEqual({ label: '中文题名', value: 'AI地图集' });
     expect(info.rows.some(row => row.label === '英文题名')).toBe(false);
     expect(info.rows.some(row => row.label === '来源')).toBe(false);
+  });
+
+  it('shows Chinese translation as a Douban link', () => {
+    const overview = entry({
+      title: 'Deschooling Society',
+      translation_title_cn: '非學校化社會',
+      translation_douban_url: 'https://book.douban.com/subject/1997483/',
+    });
+
+    const info = deriveBibliographicInfo(overview, [overview]);
+
+    expect(info.rows).toContainEqual({
+      label: '中文译本',
+      value: '非學校化社會',
+      href: 'https://book.douban.com/subject/1997483/',
+    });
   });
 });

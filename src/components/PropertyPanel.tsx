@@ -154,23 +154,19 @@ export function PropertyPanel({
                 <dd class="min-w-0 tabular-nums">{entry.chapters_analyzed}</dd>
               </div>
             )}
+            {biblio.book && (
+              <div class="grid grid-cols-[60px_1fr] gap-2 items-start">
+                <dt class="text-muted text-[11px] pt-0.5">所属图书</dt>
+                <dd class="min-w-0"><MiniRow entry={biblio.book} onClick={onOpen} /></dd>
+              </div>
+            )}
+            {biblio.rows.map(row => (
+              <ReadOnlyRow label={row.label} value={row.value} href={row.href} key={`${row.label}:${row.value}`} />
+            ))}
             </dl>
           </div>
         );
       })()}
-
-      {(biblio.book || biblio.rows.length > 0) && (
-        <Section title="书目信息">
-          {biblio.book && <MiniRow entry={biblio.book} onClick={onOpen} />}
-          {biblio.rows.length > 0 && (
-            <dl class="space-y-2 pt-1">
-              {biblio.rows.map(row => (
-                <ReadOnlyRow label={row.label} value={row.value} key={`${row.label}:${row.value}`} />
-              ))}
-            </dl>
-          )}
-        </Section>
-      )}
 
       <ThemesEditor themes={themes} onThemeClick={onThemeClick} save={save} disabled={saving} />
 
@@ -408,11 +404,17 @@ function Row({ label, children }: { label: string; children: ComponentChildren }
   );
 }
 
-function ReadOnlyRow({ label, value }: { label: string; value: string }) {
+function ReadOnlyRow({ label, value, href }: { label: string; value: string; href?: string }) {
   return (
     <div class="grid grid-cols-[60px_1fr] gap-2 items-start">
       <dt class="text-muted text-[11px] pt-0.5">{label}</dt>
-      <dd class="min-w-0 text-secondary break-words">{value}</dd>
+      <dd class="min-w-0 text-secondary break-words">
+        {href ? (
+          <a href={href} target="_blank" rel="noreferrer" class="text-accent-text hover:underline">
+            {value}
+          </a>
+        ) : value}
+      </dd>
     </div>
   );
 }

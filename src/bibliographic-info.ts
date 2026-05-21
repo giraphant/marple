@@ -1,6 +1,6 @@
 import type { Entry } from './types';
 
-type BibliographicRow = { label: string; value: string };
+type BibliographicRow = { label: string; value: string; href?: string };
 
 export interface BibliographicInfo {
   book: Entry | null;
@@ -15,13 +15,17 @@ export function deriveBibliographicInfo(entry: Entry, entries: Entry[]): Bibliog
   addBibliographicRow(rows, '中文题名', entry.title_cn, [entry.title]);
   addBibliographicRow(rows, '英文题名', entry.title_en, [entry.title]);
   addBibliographicRow(rows, '出版社', meta.publisher);
-  addBibliographicRow(rows, 'ISBN', meta.isbn);
+  addBibliographicRow(rows, '图书号', meta.isbn);
   addBibliographicRow(rows, 'DOI', meta.doi);
 
-  const source = cleanBibliographicText(meta.source);
-  const publisher = cleanBibliographicText(meta.publisher);
-  if (source && source !== 'book' && !sameBibliographicText(source, publisher)) {
-    rows.push({ label: '来源', value: source });
+  const translationTitle = cleanBibliographicText(meta.translation_title_cn ?? entry.translation_title_cn);
+  const translationHref = cleanBibliographicText(meta.translation_douban_url ?? entry.translation_douban_url);
+  if (translationTitle || translationHref) {
+    rows.push({
+      label: '中文译本',
+      value: translationTitle ?? '豆瓣条目',
+      ...(translationHref ? { href: translationHref } : {}),
+    });
   }
 
   return { book: entry.type === 'chapter-summary' ? book : null, rows };

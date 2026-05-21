@@ -23,6 +23,8 @@ export interface Entry {
   doi: string | null;
   publisher?: string | null;
   isbn?: string | null;
+  translation_title_cn?: string | null;
+  translation_douban_url?: string | null;
   chapters_analyzed: number | null;
   /** For notes: vault-relative path of the file this note annotates. */
   annotates: string | null;

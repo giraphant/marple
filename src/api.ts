@@ -426,6 +426,13 @@ export function applyFmToEntry(entry: Entry, fm: Record<string, unknown>): Entry
   if ('doi' in fm) next.doi = fm.doi as Entry['doi'];
   if ('publisher' in fm) next.publisher = textCell(fm.publisher);
   if ('isbn' in fm) next.isbn = textCell(fm.isbn);
+  if ('localisations' in fm) {
+    const zh = firstZhLocalisation(fm.localisations);
+    next.translation_title_cn = textCell(zh?.title);
+    next.translation_douban_url = doubanUrlCell(zh?.douban_url);
+  }
+  if ('douban_url' in fm && !next.translation_douban_url) next.translation_douban_url = doubanUrlCell(fm.douban_url);
+  if ('cndouban' in fm && !next.translation_douban_url) next.translation_douban_url = doubanUrlCell(fm.cndouban);
   if ('themes' in fm) next.themes = Array.isArray(fm.themes) ? fm.themes as string[] : null;
   if ('annotates' in fm) next.annotates = (fm.annotates as string | null) ?? null;
   if ('created' in fm) next.created = fm.created != null ? String(fm.created) : null;
@@ -455,4 +462,20 @@ function textCell(v: unknown): string | null {
   if (v == null) return null;
   const text = String(v).trim();
   return text === '' ? null : text;
+}
+
+function firstZhLocalisation(v: unknown): Record<string, unknown> | null {
+  if (!v || typeof v !== 'object') return null;
+  const zh = (v as Record<string, unknown>).zh;
+  const first = Array.isArray(zh) ? zh[0] : zh;
+  return first && typeof first === 'object' ? first as Record<string, unknown> : null;
+}
+
+function doubanUrlCell(v: unknown): string | null {
+  if (Array.isArray(v)) return v.map(doubanUrlCell).find(Boolean) ?? null;
+  const text = textCell(v);
+  if (!text) return null;
+  if (text.startsWith('http://') || text.startsWith('https://')) return text;
+  const id = text.replace(/\D/g, '');
+  return id ? `https://book.douban.com/subject/${id}/` : null;
 }

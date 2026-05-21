@@ -126,6 +126,8 @@ pub struct Entry {
     pub doi: Option<String>,
     pub publisher: Option<String>,
     pub isbn: Option<String>,
+    pub translation_title_cn: Option<String>,
+    pub translation_douban_url: Option<String>,
     pub chapters_analyzed: Option<i64>,
     pub annotates: Option<String>,
     pub created: Option<String>,
@@ -204,8 +206,9 @@ pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
         r#"
         SELECT
           path, type, book, title, title_en, title_cn, author, year_json, rating_json,
-          rating_score, themes_json, topic, source, doi, publisher, isbn, chapters_analyzed,
-          annotates, created, pdf_slug, has_pdf, mtime, preview, body_len, added
+          rating_score, themes_json, topic, source, doi, publisher, isbn, translation_title_cn,
+          translation_douban_url, chapters_analyzed, annotates, created, pdf_slug, has_pdf,
+          mtime, preview, body_len, added
         FROM entries
         ORDER BY
           type,
@@ -1165,6 +1168,8 @@ fn row_to_entry(row: &Row<'_>) -> rusqlite::Result<Entry> {
         doi: row.get("doi")?,
         publisher: row.get("publisher")?,
         isbn: row.get("isbn")?,
+        translation_title_cn: row.get("translation_title_cn")?,
+        translation_douban_url: row.get("translation_douban_url")?,
         chapters_analyzed: row.get("chapters_analyzed")?,
         annotates: row.get("annotates")?,
         created: row.get("created")?,

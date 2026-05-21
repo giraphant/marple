@@ -22,7 +22,14 @@ use crate::{ReaderError, ReaderPaths, ReaderResult};
 // so autosaves never block on a multi-minute reindex.
 static INDEX_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
-const REQUIRED_ENTRY_COLUMNS: &[&str] = &["title_en", "title_cn", "publisher", "isbn"];
+const REQUIRED_ENTRY_COLUMNS: &[&str] = &[
+    "title_en",
+    "title_cn",
+    "publisher",
+    "isbn",
+    "translation_title_cn",
+    "translation_douban_url",
+];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct IndexStats {
@@ -63,6 +70,8 @@ struct IndexedEntry {
     doi: Option<String>,
     publisher: Option<String>,
     isbn: Option<String>,
+    translation_title_cn: Option<String>,
+    translation_douban_url: Option<String>,
     chapters_analyzed: Option<i64>,
     annotates: Option<String>,
     created: Option<String>,
@@ -159,6 +168,8 @@ fn build_indexed_entry(
     let title_cn = title_cn_value(&frontmatter, &entry_type, body, title.as_deref());
     let publisher = truthy_field_text(&frontmatter, "publisher").map(|s| strip_wiki(&s));
     let isbn = truthy_field_text(&frontmatter, "isbn");
+    let translation_title_cn = translation_title_cn_value(&frontmatter);
+    let translation_douban_url = translation_douban_url_value(&frontmatter);
 
     let body_text = normalize_body_for_search(body);
     let body_len = body_text.chars().count() as i64;
@@ -171,6 +182,7 @@ fn build_indexed_entry(
         author.as_deref().unwrap_or_default(),
         publisher.as_deref().unwrap_or_default(),
         isbn.as_deref().unwrap_or_default(),
+        translation_title_cn.as_deref().unwrap_or_default(),
         body_text.as_str(),
     ]);
 
@@ -191,6 +203,8 @@ fn build_indexed_entry(
         doi: truthy_field_text(&frontmatter, "doi"),
         publisher,
         isbn,
+        translation_title_cn,
+        translation_douban_url,
         chapters_analyzed: field(&frontmatter, "chapters_analyzed").and_then(int_value),
         annotates: truthy_field_text(&frontmatter, "annotates"),
         created: field(&frontmatter, "created").and_then(text_value),
@@ -932,6 +946,13 @@ fn field<'a>(mapping: &'a Mapping, name: &str) -> Option<&'a YamlValue> {
     })
 }
 
+fn mapping_field<'a>(mapping: &'a Mapping, name: &str) -> Option<&'a Mapping> {
+    match field(mapping, name)? {
+        YamlValue::Mapping(m) => Some(m),
+        _ => None,
+    }
+}
+
 fn field_text(mapping: &Mapping, name: &str) -> Option<String> {
     field(mapping, name).and_then(text_value)
 }
@@ -964,6 +985,54 @@ fn title_cn_value(
                 None
             }
         })
+}
+
+fn translation_title_cn_value(mapping: &Mapping) -> Option<String> {
+    localisation_zh(mapping)
+        .and_then(|zh| truthy_field_text(zh, "title"))
+        .map(|s| strip_wiki(&s))
+}
+
+fn translation_douban_url_value(mapping: &Mapping) -> Option<String> {
+    localisation_zh(mapping)
+        .and_then(|zh| field(zh, "douban_url").and_then(douban_url_from_value))
+        .or_else(|| field(mapping, "douban_url").and_then(douban_url_from_value))
+        .or_else(|| field(mapping, "cndouban").and_then(douban_url_from_value))
+}
+
+fn localisation_zh(mapping: &Mapping) -> Option<&Mapping> {
+    let localisations = mapping_field(mapping, "localisations")?;
+    match field(localisations, "zh")? {
+        YamlValue::Mapping(m) => Some(m),
+        YamlValue::Sequence(items) => items.iter().find_map(|item| match item {
+            YamlValue::Mapping(m) => Some(m),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+fn douban_url_from_value(value: &YamlValue) -> Option<String> {
+    match value {
+        YamlValue::Sequence(items) => items.iter().find_map(douban_url_from_value),
+        _ => text_value(value).and_then(|s| normalise_douban_url(&s)),
+    }
+}
+
+fn normalise_douban_url(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return Some(trimmed.to_string());
+    }
+    let id: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
+    if id.is_empty() {
+        None
+    } else {
+        Some(format!("https://book.douban.com/subject/{id}/"))
+    }
 }
 
 fn field_json(mapping: &Mapping, name: &str) -> Option<JsonValue> {
@@ -1099,6 +1168,8 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           doi TEXT,
           publisher TEXT,
           isbn TEXT,
+          translation_title_cn TEXT,
+          translation_douban_url TEXT,
           chapters_analyzed INTEGER,
           annotates TEXT,
           created TEXT,
@@ -1190,9 +1261,10 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
         r#"
         INSERT INTO entries (
           path, type, book, title, title_en, title_cn, author, year_json, rating_json,
-          rating_score, themes_json, topic, source, doi, publisher, isbn, chapters_analyzed,
-          annotates, created, pdf_slug, has_pdf, mtime, preview, body_len, added
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          rating_score, themes_json, topic, source, doi, publisher, isbn, translation_title_cn,
+          translation_douban_url, chapters_analyzed, annotates, created, pdf_slug, has_pdf,
+          mtime, preview, body_len, added
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         params![
             entry.path,
@@ -1211,6 +1283,8 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
             entry.doi,
             entry.publisher,
             entry.isbn,
+            entry.translation_title_cn,
+            entry.translation_douban_url,
             entry.chapters_analyzed,
             entry.annotates,
             entry.created,
@@ -1243,6 +1317,7 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
         entry.title.as_deref().unwrap_or_default(),
         entry.title_en.as_deref().unwrap_or_default(),
         entry.title_cn.as_deref().unwrap_or_default(),
+        entry.translation_title_cn.as_deref().unwrap_or_default(),
     ]);
 
     conn.execute(
@@ -1296,6 +1371,8 @@ impl IndexedEntry {
             doi: self.doi,
             publisher: self.publisher,
             isbn: self.isbn,
+            translation_title_cn: self.translation_title_cn,
+            translation_douban_url: self.translation_douban_url,
             chapters_analyzed: self.chapters_analyzed,
             annotates: self.annotates,
             created: self.created,
@@ -1596,6 +1673,38 @@ chapter_title_cn: 第1章 展开事物
         assert_eq!(
             title_cn_value(&mapping, "book-overview", body, Some("Atlas of AI")).as_deref(),
             Some("AI地图集：人工智能的权力、政治与行星代价")
+        );
+    }
+
+    #[test]
+    fn parses_chinese_translation_metadata() {
+        let raw = r#"type: book
+title: Deschooling Society
+localisations:
+  zh:
+    - title: 非學校化社會
+      douban_url: https://book.douban.com/subject/1997483/
+"#;
+        let mapping = parse_frontmatter(raw).expect("frontmatter should parse");
+
+        assert_eq!(
+            translation_title_cn_value(&mapping).as_deref(),
+            Some("非學校化社會")
+        );
+        assert_eq!(
+            translation_douban_url_value(&mapping).as_deref(),
+            Some("https://book.douban.com/subject/1997483/")
+        );
+    }
+
+    #[test]
+    fn parses_legacy_cndouban_id() {
+        let raw = "type: book\ntitle: Machine Tools\ncndouban: [33409325]\n";
+        let mapping = parse_frontmatter(raw).expect("frontmatter should parse");
+
+        assert_eq!(
+            translation_douban_url_value(&mapping).as_deref(),
+            Some("https://book.douban.com/subject/33409325/")
         );
     }
 

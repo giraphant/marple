@@ -27,7 +27,7 @@ try {
   assert.ok(tables.has('entry_search'), 'entry_search FTS table missing');
 
   const entryColumns = new Set(db.prepare('PRAGMA table_info(entries)').all().map(row => row.name));
-  for (const column of ['title_en', 'title_cn', 'publisher', 'isbn']) {
+  for (const column of ['title_en', 'title_cn', 'publisher', 'isbn', 'translation_title_cn', 'translation_douban_url']) {
     assert.ok(entryColumns.has(column), `entries.${column} column missing`);
   }
 
@@ -64,6 +64,14 @@ try {
       AND (title_en IS NOT NULL OR title_cn IS NOT NULL)
   `).get().n;
   assert.ok(chapterTitleRows > 0, 'expected chapter title alias metadata');
+
+  const chineseTranslationRows = db.prepare(`
+    SELECT count(*) AS n
+    FROM entries
+    WHERE type = 'book-overview'
+      AND translation_douban_url IS NOT NULL
+  `).get().n;
+  assert.ok(chineseTranslationRows > 0, 'expected Chinese translation Douban metadata');
 
   const badThemeRows = db.prepare(`
     SELECT count(*) AS n
