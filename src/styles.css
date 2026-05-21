@@ -29,18 +29,18 @@
   /* Blush light: Blush 原 bg #f5f5f5 / fg #444444 + chrome 用 Blush
    * quote/code 砖红 hue 派生的暖灰 scale，让 header / cards 与 page
    * 自然分层，而不是几个近白色撞在一起没层次。 */
-  --bg-page:        247 244 241;
+  --bg-page:        250 247 242;
   --bg-surface:     255 255 255;
-  --bg-surface-2:   241 236 231;
-  --bg-hover:       235 228 221;
+  --bg-surface-2:   241 235 225;
+  --bg-hover:       236 228 216;
 
   --text-primary:    51  47  44;
   --text-secondary: 111 101  93;
   --text-muted:     155 144 136;
   --text-faint:     197 188 178;
 
-  --border-base:    231 224 217;
-  --border-strong:  216 207 197;
+  --border-base:    236 227 214;
+  --border-strong:  222 211 195;
 
   /* 链接保留旧 sky 蓝 — 此处是 chrome / wikilink 的旧轨道，
    * 阅读模式内文的 link 走 --reader-link。 */
@@ -132,18 +132,18 @@
  * elevation cues; text/bg pairs target WCAG AA (4.5:1+) on body text.
  */
 .dark {
-  --bg-page:         33  30  27;
-  --bg-surface:      42  38  35;
-  --bg-surface-2:    51  46  42;
-  --bg-hover:        61  55  51;
+  --bg-page:         30  27  24;
+  --bg-surface:      40  36  32;
+  --bg-surface-2:    48  43  38;
+  --bg-hover:        58  52  46;
 
   --text-primary:   236 229 223;
   --text-secondary: 184 173 163;
   --text-muted:     138 128 119;
   --text-faint:      90  82  75;
 
-  --border-base:     58  52  47;
-  --border-strong:   77  70  63;
+  --border-base:     54  48  42;
+  --border-strong:   72  64  56;
 
   --accent-link:    125 211 252;
   --accent-link-bg:  17  29  42;

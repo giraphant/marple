@@ -40,6 +40,13 @@ export default {
         'type-note-fg':    'rgb(var(--type-note-fg) / <alpha-value>)',
         'type-note-bg':    'rgb(var(--type-note-bg) / <alpha-value>)',
       },
+      // Cozy soft elevation — light page; in dark mode prefer `dark:shadow-none`
+      // or a weaker shadow on the consuming element.
+      boxShadow: {
+        soft:      '0 1px 2px rgb(60 45 30 / 0.04), 0 6px 16px rgb(60 45 30 / 0.05)',
+        'soft-sm': '0 1px 2px rgb(60 45 30 / 0.05)',
+        'soft-lg': '0 2px 4px rgb(60 45 30 / 0.04), 0 12px 32px rgb(60 45 30 / 0.08)',
+      },
     },
   },
   plugins: [],

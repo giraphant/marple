@@ -54,12 +54,12 @@ export function ListView({
   return (
     <div class="flex-1 flex flex-col min-h-0">
       <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
-        <div class="px-6 py-3 flex items-center gap-4 flex-wrap">
-          <div class="flex items-baseline gap-2 min-w-0">
-            <div class="text-[18px] font-semibold tracking-tight text-primary truncate">
+        <div class="px-8 py-4 flex items-center gap-4 flex-wrap">
+          <div class="flex items-baseline gap-2.5 min-w-0">
+            <div class="text-[22px] font-bold tracking-[-0.02em] text-primary truncate">
               {typeMeta?.label ?? type}
             </div>
-            <div class="text-[11px] text-muted tabular-nums">
+            <div class="text-[12px] text-muted tabular-nums">
               {filtered.length}{filtered.length !== typeEntries.length && <span> / {typeEntries.length}</span>}
             </div>
           </div>
@@ -167,7 +167,7 @@ export function ListView({
         )}
       </header>
 
-      <main class="flex-1 overflow-auto scrollbar-thin px-6 py-4">
+      <main class="flex-1 overflow-auto scrollbar-thin px-8 py-6">
         {!isFiltered && (
           <Dashboard
             type={type}
@@ -180,7 +180,7 @@ export function ListView({
           ? <div class="text-sm text-muted py-20 text-center">没有匹配的条目</div>
           : (
             <>
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {visible.map(e => (
                   <Card
                     entry={e}
@@ -193,7 +193,7 @@ export function ListView({
                 <div class="text-center mt-6">
                   <button
                     onClick={onLoadMore}
-                    class="px-4 py-2 bg-surface border border-strong rounded text-sm hover:bg-page"
+                    class="px-4 py-2 bg-surface border border-base rounded-xl text-sm shadow-soft-sm hover:shadow-soft hover:-translate-y-px transition"
                   >
                     再加载 500 ( 已显示 {limit} / {filtered.length} )
                   </button>
