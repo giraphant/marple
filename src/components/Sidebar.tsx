@@ -86,7 +86,7 @@ export function Sidebar({
   return (
     <aside class={`${widthCls} shrink-0 bg-page border-r border-base flex flex-col text-primary transition-[width] duration-150`}>
       {/* Header: app name + collapse chevron. */}
-      <div class={`border-b border-base flex items-center ${collapsed ? 'justify-center px-1 py-3' : 'justify-between px-4 py-3'}`}>
+      <div class={`border-b border-base flex items-center ${collapsed ? 'justify-center px-1 py-2.5' : 'justify-between px-4 py-2.5'}`}>
         {!collapsed && (
           <div class="min-w-0 flex items-center gap-2.5">
             <span class="shrink-0 w-7 h-7 rounded-[10px] bg-accent text-white flex items-center justify-center font-bold text-[14px]" aria-hidden="true">q</span>
