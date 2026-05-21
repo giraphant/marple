@@ -84,7 +84,7 @@ export function Sidebar({
   const widthCls = collapsed ? 'w-14' : 'w-60';
 
   return (
-    <aside class={`${widthCls} shrink-0 bg-page border-r border-base flex flex-col text-primary transition-[width] duration-150`}>
+    <aside class={`${widthCls} shrink-0 bg-page border-r border-base flex flex-col text-primary`}>
       {/* Header: app name + collapse chevron. */}
       <div class={`border-b border-base flex items-center ${collapsed ? 'justify-center px-1 py-2.5' : 'justify-between px-4 py-2.5'}`}>
         {!collapsed && (
