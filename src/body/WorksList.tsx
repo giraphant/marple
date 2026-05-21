@@ -94,7 +94,7 @@ function WorkCard({ item, wikiIndex, onClick }: {
   };
 
   return (
-    <li class="group rounded-md border border-base bg-surface px-4 py-3 hover:border-strong transition">
+    <li class="group rounded-xl border border-base bg-surface shadow-soft px-4 py-3.5 hover:shadow-soft-lg transition">
       <div class="flex items-baseline gap-2 flex-wrap">
         {item.entry
           ? (

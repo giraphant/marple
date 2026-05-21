@@ -107,7 +107,7 @@ export function ConceptTable({ content, wikiIndex, onWikiClick }: Props) {
 
   return (
     <div
-      class="my-3 overflow-hidden rounded-lg border border-base bg-surface"
+      class="my-4 overflow-hidden rounded-xl border border-base bg-surface shadow-soft"
       onClick={onClick as unknown as JSX.MouseEventHandler<HTMLDivElement>}
     >
       <div class="overflow-x-auto">

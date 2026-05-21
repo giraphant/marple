@@ -315,9 +315,9 @@ export function DocView({
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
-      <div class="bg-surface/95 backdrop-blur border-b border-base px-6 py-3 flex items-center gap-3 relative shrink-0">
-        <span class={`text-[11px] px-1.5 py-0.5 rounded border ${tMeta.accent}`}>{tMeta.label}</span>
-        <div class="text-[14px] font-medium text-primary flex-1 truncate">
+      <div class="bg-surface/95 backdrop-blur border-b border-base px-8 py-4 flex items-center gap-3 relative shrink-0">
+        <span class={`text-[11px] px-2 py-0.5 rounded-lg font-medium ${tMeta.accent}`}>{tMeta.label}</span>
+        <div class="text-[15px] font-semibold tracking-[-0.01em] text-primary flex-1 truncate">
           {displayTitle}
         </div>
 
@@ -342,7 +342,7 @@ export function DocView({
               title="更多"
             ><Icon name="dots-three" size={16} /></button>
             {menuOpen && (
-              <div class="absolute right-0 top-full mt-1 bg-surface border border-base rounded shadow-lg py-1 min-w-[160px] z-10">
+              <div class="absolute right-0 top-full mt-1 bg-surface border border-base rounded-xl shadow-soft-lg py-1 min-w-[160px] z-10">
                 <button
                   onClick={handleDelete}
                   class="w-full text-left px-3 py-1.5 text-[12px] text-danger hover:bg-danger-bg"

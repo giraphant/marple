@@ -127,7 +127,7 @@ function TheoryRow({ item, wikiIndex, onClick }: {
   };
 
   return (
-    <li class="px-3 py-2 rounded-md border border-base bg-surface hover:border-strong transition">
+    <li class="px-4 py-3 rounded-xl border border-base bg-surface shadow-soft hover:shadow-soft-lg transition">
       <div class="flex flex-wrap items-center gap-1.5">
         {item.entry
           ? (

@@ -92,7 +92,7 @@ export function ReadingList({ content, wikiIndex }: Props) {
   return (
     <ol class="!pl-0 list-none my-3 space-y-2 [&>li]:my-0">
       {items.map((it) => (
-        <li key={it.index} class="flex items-start gap-3 rounded-md border border-base bg-surface px-3 py-2 hover:border-strong transition">
+        <li key={it.index} class="flex items-start gap-3 rounded-xl border border-base bg-surface shadow-soft px-4 py-3 hover:shadow-soft-lg transition">
           <span
             class="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-accent-bg text-accent-text text-[12px] font-semibold tabular-nums mt-0.5"
             aria-hidden="true"
