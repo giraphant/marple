@@ -34,6 +34,8 @@ export interface Entry {
   /** Character count of the analysis body — drives the card's proportional
    *  preview length (longer analysis → more preview shown). */
   body_len?: number;
+  /** Epoch-ms of the file's first git commit (true ingestion date), 0 if unknown. */
+  added?: number;
 }
 
 export type EditableField =

@@ -8,34 +8,40 @@ interface Props {
   onOpen: (entry: Entry) => void;
 }
 
+function fmtDate(ms?: number | null): string {
+  if (!ms) return '';
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // The total count lives in the list header and a corpus-wide average rating
-// isn't actionable, so the dashboard keeps only the two navigational blocks —
-// frequent themes and top picks — packed into a compact two-column band.
+// isn't actionable, so the dashboard keeps two navigational blocks — frequent
+// themes and recently-ingested items — packed into a compact two-column band.
 export function Dashboard({ typeEntries, onThemeClick, onOpen }: Props) {
   const stats = useMemo(() => {
     const total = typeEntries.length;
-    const top = [...typeEntries]
-      .sort((a, b) => (b.rating_score || 0) - (a.rating_score || 0))
+    const recent = [...typeEntries]
+      .sort((a, b) => (b.added || 0) - (a.added || 0))
       .slice(0, 6);
     const counts = new Map<string, number>();
     for (const e of typeEntries) for (const th of (e.themes ?? [])) {
       counts.set(th, (counts.get(th) ?? 0) + 1);
     }
     const topThemes = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 18);
-    return { total, top, topThemes };
+    return { total, recent, topThemes };
   }, [typeEntries]);
 
   if (stats.total === 0) return null;
 
   const hasThemes = stats.topThemes.length > 0;
-  const hasTop = stats.top.length > 0 && stats.top[0].rating_score > 0;
-  if (!hasThemes && !hasTop) return null;
+  const hasRecent = stats.recent.length > 0 && !!stats.recent[0].added;
+  if (!hasThemes && !hasRecent) return null;
 
   return (
-    <section class={`mb-5 bg-surface border border-base rounded-2xl shadow-soft p-5 grid grid-cols-1 gap-5 ${hasThemes && hasTop ? 'lg:grid-cols-[1fr_360px]' : ''}`}>
+    <section class={`mb-5 bg-surface border border-base rounded-2xl shadow-soft p-5 grid grid-cols-1 gap-5 ${hasThemes && hasRecent ? 'lg:grid-cols-[1fr_360px]' : ''}`}>
       {hasThemes && (
         <div class="min-w-0">
-          <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">高频主题</div>
+          <div class="text-[11px] uppercase tracking-wider text-muted font-medium mb-2">高频主题</div>
           <div class="flex flex-wrap gap-1.5">
             {stats.topThemes.map(([th, n]) => (
               <button
@@ -50,18 +56,18 @@ export function Dashboard({ typeEntries, onThemeClick, onOpen }: Props) {
         </div>
       )}
 
-      {hasTop && (
+      {hasRecent && (
         <div class={`min-w-0 ${hasThemes ? 'border-t lg:border-t-0 lg:border-l border-base lg:pl-5 pt-3 lg:pt-0' : ''}`}>
-          <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">高分推荐</div>
+          <div class="text-[11px] uppercase tracking-wider text-muted font-medium mb-2">近期入库</div>
           <div class="grid grid-cols-2 gap-x-4 gap-y-0.5">
-            {stats.top.map(e => (
+            {stats.recent.map(e => (
               <button
                 key={e.path}
                 onClick={() => onOpen(e)}
-                class="text-left flex items-center gap-1.5 px-1.5 py-0.5 rounded hover:bg-surface-2 transition min-w-0"
+                class="text-left flex items-baseline gap-2 px-1.5 py-0.5 rounded hover:bg-surface-2 transition min-w-0"
               >
-                {e.rating && <span class="text-star text-[10px] shrink-0 tabular-nums">{e.rating}</span>}
-                <span class="text-primary text-[12px] line-clamp-1 min-w-0">{e.title}</span>
+                <span class="text-primary text-[12px] line-clamp-1 min-w-0 flex-1">{e.title}</span>
+                <span class="text-muted text-[10px] tabular-nums shrink-0">{fmtDate(e.added)}</span>
               </button>
             ))}
           </div>

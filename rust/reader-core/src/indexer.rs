@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -56,6 +56,10 @@ struct IndexedEntry {
     /// Character count of the normalized body — a content-depth signal the card
     /// grid uses to size the preview proportionally (longer analysis → taller card).
     body_len: i64,
+    /// Epoch-ms of the file's first git commit (its real ingestion date), 0 if
+    /// unknown. Drives the dashboard's "近期入库" recency, since file mtimes were
+    /// flattened by a bulk vault rewrite.
+    added: i64,
     body_text: String,
     search_text: String,
 }
@@ -162,6 +166,7 @@ fn build_indexed_entry(
         mtime: meta.and_then(|m| mtime_ms(&m).ok()),
         preview,
         body_len,
+        added: 0,
         body_text,
         search_text,
     })))
@@ -175,12 +180,16 @@ pub fn build_sqlite_index(paths: &ReaderPaths) -> ReaderResult<IndexStats> {
     files.sort();
 
     let source_slugs = load_source_slugs(&paths.sources)?;
+    let added_dates = git_added_dates(&paths.workspace_root);
     let mut entries = Vec::new();
     let mut skipped_frontmatter_without_type = 0usize;
 
     for file in &files {
         match build_indexed_entry(paths, file, &source_slugs)? {
-            BuildOutcome::Indexed(entry) => entries.push(*entry),
+            BuildOutcome::Indexed(mut entry) => {
+                entry.added = added_dates.get(&entry.path).copied().unwrap_or(0);
+                entries.push(*entry);
+            }
             BuildOutcome::SkippedNoType => skipped_frontmatter_without_type += 1,
             BuildOutcome::Skipped => {}
         }
@@ -479,6 +488,63 @@ fn first_paragraph(body: &str) -> String {
     out.chars().take(MAX_CHARS).collect()
 }
 
+/// Map every vault file to the epoch-ms of its first git commit (true ingestion
+/// date). One `git log` over the repo; first occurrence wins because `--reverse`
+/// walks oldest-first. Empty map on any git failure (the field just falls to 0).
+fn git_added_dates(workspace_root: &Path) -> HashMap<String, i64> {
+    let mut map = HashMap::new();
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(workspace_root)
+        .args([
+            "log",
+            "--diff-filter=A",
+            "--reverse",
+            "--format=%aI",
+            "--name-only",
+            "--",
+            "vault",
+        ])
+        .output();
+    let Ok(output) = output else { return map };
+    if !output.status.success() {
+        return map;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut current: i64 = 0;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(line) {
+            current = dt.timestamp_millis();
+        } else {
+            map.entry(line.to_string()).or_insert(current);
+        }
+    }
+    map
+}
+
+/// First-git-commit epoch-ms for a single vault path (incremental parse), 0 if
+/// unknown or uncommitted.
+fn git_added_date(workspace_root: &Path, rel_path: &str) -> i64 {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(workspace_root)
+        .args(["log", "--diff-filter=A", "--reverse", "--format=%aI", "--", rel_path])
+        .output();
+    let Ok(output) = output else { return 0 };
+    if !output.status.success() {
+        return 0;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|l| chrono::DateTime::parse_from_rfc3339(l.trim()).ok())
+        .map(|dt| dt.timestamp_millis())
+        .unwrap_or(0)
+}
+
 /// True for a bold "label：value" / "label: value" line — the shape of the
 /// metadata header that opens analysis docs.
 fn is_kv_label(line: &str) -> bool {
@@ -746,7 +812,8 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
           has_pdf INTEGER NOT NULL DEFAULT 0,
           mtime INTEGER,
           preview TEXT NOT NULL DEFAULT '',
-          body_len INTEGER NOT NULL DEFAULT 0
+          body_len INTEGER NOT NULL DEFAULT 0,
+          added INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE entry_text (
@@ -830,8 +897,8 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
         INSERT INTO entries (
           path, type, book, title, author, year_json, rating_json, rating_score,
           themes_json, topic, source, doi, chapters_analyzed, annotates, created,
-          pdf_slug, has_pdf, mtime, preview, body_len
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          pdf_slug, has_pdf, mtime, preview, body_len, added
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         params![
             entry.path,
@@ -854,6 +921,7 @@ fn insert_indexed_entry(conn: &Connection, entry: &IndexedEntry) -> rusqlite::Re
             entry.mtime,
             entry.preview,
             entry.body_len,
+            entry.added,
         ],
     )?;
 
@@ -928,6 +996,7 @@ impl IndexedEntry {
             mtime: self.mtime,
             preview: self.preview,
             body_len: self.body_len,
+            added: self.added,
         }
     }
 }
@@ -964,7 +1033,10 @@ pub fn parse_entry(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<Option<c
     }
     let source_slugs = load_source_slugs(&paths.sources)?;
     match build_indexed_entry(paths, &target, &source_slugs)? {
-        BuildOutcome::Indexed(entry) => Ok(Some(entry.into_public())),
+        BuildOutcome::Indexed(mut entry) => {
+            entry.added = git_added_date(&paths.workspace_root, &entry.path);
+            Ok(Some(entry.into_public()))
+        }
         _ => Ok(None),
     }
 }
