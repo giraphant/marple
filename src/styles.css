@@ -44,8 +44,8 @@
 
   /* 链接保留旧 sky 蓝 — 此处是 chrome / wikilink 的旧轨道，
    * 阅读模式内文的 link 走 --reader-link。 */
-  --accent-link:      3 105 161;
-  --accent-link-bg: 240 249 255;
+  --accent-link:    154  80  36;
+  --accent-link-bg: 247 230 217;
 
   --bg-inverse:      68  68  68;
   --text-inverse:   245 245 245;
@@ -145,8 +145,8 @@
   --border-base:     54  48  42;
   --border-strong:   72  64  56;
 
-  --accent-link:    125 211 252;
-  --accent-link-bg:  17  29  42;
+  --accent-link:    230 168 127;
+  --accent-link-bg:  70  51  40;
 
   --bg-inverse:     236 221 217;
   --text-inverse:    42  34  41;

@@ -85,7 +85,7 @@ export function RightPanel({
         <button
           onClick={() => setCollapsed(false)}
           title="展开面板"
-          class="p-1.5 rounded text-muted hover:text-primary hover:bg-surface-2"
+          class="p-1.5 rounded-lg text-muted hover:text-primary hover:bg-surface-2"
         ><Icon name="caret-left" size={14} /></button>
         <div class="w-5 border-t border-base my-1" />
         {TABS.map(t => (
@@ -93,7 +93,7 @@ export function RightPanel({
             key={t.id}
             onClick={() => selectTab(t.id)}
             title={t.label}
-            class="p-1.5 rounded text-muted hover:text-primary hover:bg-surface-2"
+            class="p-1.5 rounded-lg text-muted hover:text-primary hover:bg-surface-2"
           ><Icon name={t.icon} size={15} /></button>
         ))}
       </aside>
@@ -110,14 +110,14 @@ export function RightPanel({
         title="拖拽调整宽度"
         class="absolute left-0 top-0 bottom-0 w-1.5 -ml-0.5 cursor-col-resize hover:bg-accent/30 z-10"
       />
-      <div class="flex items-center gap-0.5 px-2 py-1.5 border-b border-base shrink-0">
+      <div class="flex items-center gap-1 px-2.5 py-2 border-b border-base shrink-0">
         {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => selectTab(t.id)}
             title={t.label}
             aria-label={t.label}
-            class={`p-1.5 rounded transition ${
+            class={`p-1.5 rounded-lg transition ${
               tab === t.id
                 ? 'bg-accent-bg text-accent-text'
                 : 'text-muted hover:text-primary hover:bg-surface-2'
@@ -128,7 +128,7 @@ export function RightPanel({
         <button
           onClick={() => setCollapsed(true)}
           title="折叠面板"
-          class="p-1.5 rounded text-muted hover:text-primary hover:bg-surface-2"
+          class="p-1.5 rounded-lg text-muted hover:text-primary hover:bg-surface-2"
         ><Icon name="caret-right" size={14} /></button>
       </div>
 
@@ -195,7 +195,7 @@ function TocTab({
               onClick={() => onHeadingClick(h.key)}
               title={h.text}
               style={{ paddingLeft: `${0.5 + Math.max(0, h.level - 1) * 0.75}rem` }}
-              class={`w-full text-left py-1 pr-2 rounded text-[12px] leading-snug truncate transition ${
+              class={`w-full text-left py-1.5 pr-2 rounded-lg text-[12px] leading-snug truncate transition ${
                 activeHeadingKey === h.key
                   ? 'bg-accent-bg text-accent-text font-medium'
                   : 'text-secondary hover:bg-surface-2 hover:text-primary'
@@ -246,7 +246,7 @@ function NavRow({ label, active, onClick }: {
     <button
       onClick={onClick}
       title={label}
-      class={`w-full text-left px-2 py-1.5 rounded text-[12px] leading-snug truncate transition ${
+      class={`w-full text-left px-2.5 py-2 rounded-lg text-[12px] leading-snug truncate transition ${
         active ? 'bg-accent-bg text-accent-text font-medium' : 'text-secondary hover:bg-surface-2 hover:text-primary'
       }`}
     >{label}</button>
