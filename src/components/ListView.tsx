@@ -88,57 +88,26 @@ export function ListView({
   return (
     <div class="flex-1 flex flex-col min-h-0">
       <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
-        <div class="px-8 pt-4 pb-2 flex items-center justify-between gap-4">
+        {/* One header row: type label on the left; search + count + filter /
+            sort / group icon menus on the right, sized a touch larger. */}
+        <div class="px-8 py-3 flex items-center justify-between gap-4">
           <div class="flex items-center gap-2.5 min-w-0">
-            <TypeIcon type={type} scale={1.4} />
+            <TypeIcon type={type} scale={1.5} />
             <div class="text-[20px] font-bold tracking-[-0.02em] text-primary truncate">
               {typeMeta?.label ?? type}
             </div>
           </div>
 
-          {query ? (
-            <div class="inline-flex items-center gap-1 shrink-0">
-              <button
-                onClick={onOpenSearch}
-                title="点击修改 (⌘K)"
-                class="inline-flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-lg bg-accent-bg text-accent-text border border-accent/30 transition"
-              >
-                <Icon name="magnifying-glass" size={12} />
-                <span class="truncate max-w-[200px]">{query}</span>
-              </button>
-              <button
-                onClick={onClearQuery}
-                title="清空"
-                class="text-muted hover:text-primary p-1 rounded-lg hover:bg-hover/60"
-              >
-                <Icon name="x" size={12} />
-              </button>
-            </div>
-          ) : (
+          <div class="shrink-0 flex items-center gap-1.5">
             <button
               onClick={onOpenSearch}
               title="搜索 (⌘K)"
               aria-label="搜索"
-              class="shrink-0 text-muted hover:text-primary p-1.5 rounded-lg hover:bg-hover/60"
+              class="p-2 rounded-md text-muted hover:text-primary hover:bg-surface-2 transition"
             >
-              <Icon name="magnifying-glass" size={16} />
+              <Icon name="magnifying-glass" size={17} />
             </button>
-          )}
-        </div>
-
-        {/* Toolbar: active-filter chips on the left, count + filter/sort/group
-            icon menus clustered on the right (Capacities-style arrangement). */}
-        <div class="px-8 pb-2 flex items-center gap-2 flex-wrap">
-          {minRating > 0 && <FilterChip label={`评分 ≥ ${minRating}`} onClear={() => onMinRatingChange(0)} />}
-          {themeFilter && <FilterChip label={themeFilter} onClear={onClearTheme} />}
-          {authorFilter.trim() && <FilterChip label={authorFilter} onClear={() => onAuthorFilterChange('')} />}
-          {hasPdfOnly && <FilterChip label="有 PDF" onClear={() => onToggleHasPdf(false)} />}
-
-          {searchLoading && <span class="text-[11px] text-muted">全文搜索中…</span>}
-          {searchError && <span class="text-[11px] text-danger" title={searchError}>全文搜索失败，已用本地匹配</span>}
-
-          <div class="ml-auto shrink-0 flex items-center gap-1">
-            <span class="text-[11px] text-muted tabular-nums mr-1.5">
+            <span class="text-[12px] text-muted tabular-nums px-1">
               # {filtered.length}{filtered.length !== typeEntries.length ? ` / ${typeEntries.length}` : ''}
             </span>
 
@@ -219,6 +188,18 @@ export function ListView({
             </Pop>
           </div>
         </div>
+
+        {(query || filterActive || themeFilter) && (
+          <div class="px-8 pb-2.5 flex items-center gap-2 flex-wrap">
+            {query && <FilterChip label={`搜索：${query}`} onClear={onClearQuery} />}
+            {minRating > 0 && <FilterChip label={`评分 ≥ ${minRating}`} onClear={() => onMinRatingChange(0)} />}
+            {themeFilter && <FilterChip label={themeFilter} onClear={onClearTheme} />}
+            {authorFilter.trim() && <FilterChip label={authorFilter} onClear={() => onAuthorFilterChange('')} />}
+            {hasPdfOnly && <FilterChip label="有 PDF" onClear={() => onToggleHasPdf(false)} />}
+            {searchLoading && <span class="text-[11px] text-muted">全文搜索中…</span>}
+            {searchError && <span class="text-[11px] text-danger" title={searchError}>全文搜索失败，已用本地匹配</span>}
+          </div>
+        )}
       </header>
 
       <main class="flex-1 overflow-auto scrollbar-thin px-8 py-6">
@@ -297,9 +278,9 @@ function Pop({ icon, active, title, width, children }: {
         onClick={() => setOpen(v => !v)}
         title={title}
         aria-label={title}
-        class={`p-1.5 rounded-md transition ${active ? 'bg-accent-bg text-accent-text' : 'text-muted hover:text-primary hover:bg-surface-2'}`}
+        class={`p-2 rounded-md transition ${active ? 'bg-accent-bg text-accent-text' : 'text-muted hover:text-primary hover:bg-surface-2'}`}
       >
-        <Icon name={icon} size={15} />
+        <Icon name={icon} size={17} />
       </button>
       {open && (
         <div class={`absolute right-0 top-full mt-1 z-20 bg-surface border border-base rounded-xl shadow-soft-lg p-2.5 ${width ?? 'w-[220px]'}`}>
