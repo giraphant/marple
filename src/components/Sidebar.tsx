@@ -227,11 +227,11 @@ export function Sidebar({
         </button>
         <button
           onClick={onOpenTrash}
-          title={collapsed ? '回收站' : '回收站'}
+          title={collapsed ? '回收站点' : '回收站点'}
           class={rowCls(trashActive)}
         >
           <span class="shrink-0 inline-flex items-center justify-center w-4 h-4"><Icon name="trash" size={collapsed ? 16 : 14} class={trashActive ? 'text-accent-text' : 'text-muted'} /></span>
-          {!collapsed && <span class="flex-1">回收站</span>}
+          {!collapsed && <span class="flex-1">回收站点</span>}
         </button>
         <button
           onClick={onOpenSettings}

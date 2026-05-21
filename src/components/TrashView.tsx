@@ -54,7 +54,7 @@ export function TrashView({ onRestored }: Props) {
       <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
         <div class="px-6 py-3 flex items-center gap-4">
           <div class="flex items-baseline gap-2 min-w-0">
-            <div class="text-[18px] font-semibold tracking-tight text-primary">回收站</div>
+            <div class="text-[18px] font-semibold tracking-tight text-primary">回收站点</div>
             <div class="text-[11px] text-muted tabular-nums">
               {items ? items.length : '…'}
             </div>
@@ -79,7 +79,7 @@ export function TrashView({ onRestored }: Props) {
         )}
 
         {items && items.length === 0 && (
-          <div class="text-sm text-muted py-10 text-center">回收站为空</div>
+          <div class="text-sm text-muted py-10 text-center">回收站点为空</div>
         )}
 
         {items && items.length > 0 && (

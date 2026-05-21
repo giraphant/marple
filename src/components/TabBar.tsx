@@ -46,7 +46,7 @@ function tabDisplay(tab: Tab, entryByPath: Map<string, Entry>): {
           <Icon name="trash" size={10} />
         </span>
       ),
-      title: '回收站',
+      title: '回收站点',
       type: null,
     };
   }
