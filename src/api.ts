@@ -118,17 +118,39 @@ export async function searchIndex({
   return json.items ?? [];
 }
 
+/** A vault file the indexer left out, with why (no `type` field, or a `type`
+ *  value that maps to no known entry kind). Surfaced after a reindex so a
+ *  dropped entry is never silent. */
+export interface SkippedFile {
+  path: string;
+  reason: string;
+}
+
 /** Trigger a full rebuild of data/index.sqlite on the server. Resolves once
  *  the new index database is written; caller should re-fetch /api/index
- *  afterwards. */
-export async function reindex(): Promise<{ tookMs: number }> {
+ *  afterwards. `skipped` lists files that had frontmatter but were left out. */
+export async function reindex(): Promise<{ tookMs: number; skipped: SkippedFile[] }> {
   const r = await fetch('/api/reindex', { method: 'POST' });
   if (!r.ok) {
     const msg = await r.text().catch(() => '');
     throw new Error(`reindex failed: ${r.status} ${msg}`);
   }
-  const json = await r.json().catch(() => ({} as { tookMs?: number }));
-  return { tookMs: json.tookMs ?? 0 };
+  const json = await r.json().catch(() => ({} as { tookMs?: number; skipped?: SkippedFile[] }));
+  return { tookMs: json.tookMs ?? 0, skipped: json.skipped ?? [] };
+}
+
+/** Cheap delta-sync: ask the server to bring the index into agreement with the
+ *  vault by diffing per-file mtimes (new/changed/deleted), instead of a full
+ *  rebuild. Called on window focus so quick search reflects external edits made
+ *  while away. */
+export async function reconcile(): Promise<{ upserted: number; removed: number; unchanged: number }> {
+  const r = await fetch('/api/reconcile', { method: 'POST' });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`reconcile failed: ${r.status} ${msg}`);
+  }
+  const json = await r.json().catch(() => ({} as { upserted?: number; removed?: number; unchanged?: number }));
+  return { upserted: json.upserted ?? 0, removed: json.removed ?? 0, unchanged: json.unchanged ?? 0 };
 }
 
 /** Advanced/opt-in: start a background semantic-vector build. Returns
