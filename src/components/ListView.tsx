@@ -87,7 +87,7 @@ export function ListView({
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
-      <header class="bg-surface/95 backdrop-blur border-b border-base sticky top-0 z-10">
+      <header class="bg-surface/95 backdrop-blur sticky top-0 z-10">
         {/* One header row: type label on the left; search + count + filter /
             sort / group icon menus on the right, sized a touch larger. */}
         <div class="px-8 py-3 flex items-center justify-between gap-4">
