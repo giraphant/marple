@@ -1,6 +1,5 @@
 import { useMemo } from 'preact/hooks';
 import type { Entry, EntryType } from '../types';
-import { MiniRow } from './MiniRow';
 
 interface Props {
   type: EntryType;
@@ -9,9 +8,9 @@ interface Props {
   onOpen: (entry: Entry) => void;
 }
 
-// The total count lives in the list header and the average rating across a whole
-// corpus isn't actionable, so the dashboard drops the vanity stat column and
-// keeps only the two navigational blocks: frequent themes and top picks.
+// The total count lives in the list header and a corpus-wide average rating
+// isn't actionable, so the dashboard keeps only the two navigational blocks —
+// frequent themes and top picks — packed into a compact two-column band.
 export function Dashboard({ typeEntries, onThemeClick, onOpen }: Props) {
   const stats = useMemo(() => {
     const total = typeEntries.length;
@@ -33,11 +32,7 @@ export function Dashboard({ typeEntries, onThemeClick, onOpen }: Props) {
   if (!hasThemes && !hasTop) return null;
 
   return (
-    <section
-      class={`mb-5 bg-surface border border-base rounded-2xl shadow-soft p-5 grid grid-cols-1 gap-5 ${
-        hasThemes && hasTop ? 'lg:grid-cols-[1fr_320px]' : ''
-      }`}
-    >
+    <section class={`mb-5 bg-surface border border-base rounded-2xl shadow-soft p-5 grid grid-cols-1 gap-5 ${hasThemes && hasTop ? 'lg:grid-cols-[1fr_360px]' : ''}`}>
       {hasThemes && (
         <div class="min-w-0">
           <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">高频主题</div>
@@ -46,7 +41,7 @@ export function Dashboard({ typeEntries, onThemeClick, onOpen }: Props) {
               <button
                 key={th}
                 onClick={() => onThemeClick(th)}
-                class="text-[11px] px-2 py-0.5 rounded border border-base bg-page text-primary hover:bg-accent-bg hover:border-accent hover:text-accent-text transition"
+                class="text-[10.5px] px-2 py-0.5 rounded border border-base bg-page text-primary hover:bg-accent-bg hover:border-accent hover:text-accent-text transition"
               >
                 {th} <span class="text-muted tabular-nums">{n}</span>
               </button>
@@ -58,8 +53,17 @@ export function Dashboard({ typeEntries, onThemeClick, onOpen }: Props) {
       {hasTop && (
         <div class={`min-w-0 ${hasThemes ? 'border-t lg:border-t-0 lg:border-l border-base lg:pl-5 pt-3 lg:pt-0' : ''}`}>
           <div class="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">高分推荐</div>
-          <div class="space-y-0.5">
-            {stats.top.map(e => <MiniRow entry={e} onClick={onOpen} key={e.path} />)}
+          <div class="grid grid-cols-2 gap-x-4 gap-y-0.5">
+            {stats.top.map(e => (
+              <button
+                key={e.path}
+                onClick={() => onOpen(e)}
+                class="text-left flex items-center gap-1.5 px-1.5 py-0.5 rounded hover:bg-surface-2 transition min-w-0"
+              >
+                {e.rating && <span class="text-star text-[10px] shrink-0 tabular-nums">{e.rating}</span>}
+                <span class="text-primary text-[12px] line-clamp-1 min-w-0">{e.title}</span>
+              </button>
+            ))}
           </div>
         </div>
       )}
