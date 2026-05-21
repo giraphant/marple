@@ -317,7 +317,7 @@ export function DocView({
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
-      <div class="bg-surface/95 backdrop-blur border-b border-base px-8 py-3.5 flex items-center gap-3 relative shrink-0">
+      <div class="bg-surface/95 backdrop-blur border-b border-base px-8 py-3.5 flex items-center gap-3 relative z-30 shrink-0">
         <span class={`text-[11px] px-2 py-0.5 rounded-lg font-medium shrink-0 ${tMeta.accent}`}>{tMeta.label}</span>
         <div class="flex items-baseline gap-2.5 min-w-0 flex-1">
           <span class="text-[15px] font-semibold tracking-[-0.01em] text-primary truncate">{displayTitle}</span>
