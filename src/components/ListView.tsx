@@ -40,7 +40,7 @@ interface Props {
 export function ListView({
   entries: _entries, type, typeEntries, filtered, query, minRating, themeFilter,
   sortKey, sortDir, authorFilter, hasPdfOnly, limit,
-  searchLoading, searchError, searchMode, onToggleSearchMode,
+  searchLoading, searchError,
   onOpenSearch, onClearQuery, onMinRatingChange, onClearTheme,
   onSortKeyChange, onToggleSortDir, onAuthorFilterChange, onToggleHasPdf, onClearExtraFilters,
   onLoadMore, onCardClick, onThemeClick,
@@ -94,33 +94,32 @@ export function ListView({
           )}
         </div>
 
-        <div class="px-8 pb-1.5 flex items-center gap-3 flex-wrap">
-          <div class="flex items-center gap-1 text-[11px] text-secondary">
-            <span>评分 ≥</span>
-            {[0, 1, 2, 3, 4].map(n => (
-              <button
-                key={n}
-                onClick={() => onMinRatingChange(n)}
-                class={`px-1.5 py-0.5 rounded-md ${minRating === n ? 'bg-accent-bg text-accent-text' : 'hover:bg-surface-2'}`}
-              >{n || '·'}</button>
-            ))}
-          </div>
+        {/* Active-filters + sort bar: filters are SET via the 筛选 menu or
+            contextual clicks (card chips / author names) and SHOWN here as
+            removable chips; sort sits on the right. */}
+        <div class="px-8 pb-2 flex items-center gap-2 flex-wrap">
+          <FilterControl
+            type={type}
+            minRating={minRating}
+            authorFilter={authorFilter}
+            hasPdfOnly={hasPdfOnly}
+            active={minRating > 0 || extraActive}
+            onMinRatingChange={onMinRatingChange}
+            onAuthorFilterChange={onAuthorFilterChange}
+            onToggleHasPdf={onToggleHasPdf}
+            onClear={() => { onMinRatingChange(0); onClearExtraFilters(); }}
+          />
 
-          <button
-            type="button"
-            class={`text-[11px] px-2 py-0.5 rounded-md ${
-              searchMode === 'hybrid'
-                ? 'bg-accent-bg text-accent-text'
-                : 'bg-surface-2 text-secondary'
-            }`}
-            title="切换搜索模式（Cmd+K 后 Tab）"
-            onClick={onToggleSearchMode}
-          >
-            {searchMode === 'hybrid' ? '深度' : '快速'}
-          </button>
+          {minRating > 0 && <FilterChip label={`评分 ≥ ${minRating}`} onClear={() => onMinRatingChange(0)} />}
+          {themeFilter && <FilterChip label={themeFilter} onClear={onClearTheme} />}
+          {authorFilter.trim() && <FilterChip label={authorFilter} onClear={() => onAuthorFilterChange('')} />}
+          {hasPdfOnly && <FilterChip label="有 PDF" onClear={() => onToggleHasPdf(false)} />}
 
-          <div class="flex items-center gap-1 text-[11px] text-secondary">
-            <span>排序</span>
+          {searchLoading && <span class="text-[11px] text-muted">全文搜索中…</span>}
+          {searchError && <span class="text-[11px] text-danger" title={searchError}>全文搜索失败，已用本地匹配</span>}
+
+          <div class="ml-auto shrink-0 flex items-center gap-1 text-[11px] text-secondary">
+            <span class="text-muted">排序</span>
             <select
               value={sortKey}
               onChange={(e) => onSortKeyChange((e.target as HTMLSelectElement).value as SortKey)}
@@ -136,52 +135,7 @@ export function ListView({
               >{sortDir === 'asc' ? '↑' : '↓'}</button>
             )}
           </div>
-
-          <FilterControl
-            type={type}
-            authorFilter={authorFilter}
-            hasPdfOnly={hasPdfOnly}
-            active={extraActive}
-            onAuthorFilterChange={onAuthorFilterChange}
-            onToggleHasPdf={onToggleHasPdf}
-            onClear={onClearExtraFilters}
-          />
-
-          {searchLoading && (
-            <div class="text-[11px] text-muted">全文搜索中…</div>
-          )}
-          {searchError && (
-            <div class="text-[11px] text-danger" title={searchError}>
-              全文搜索失败，已使用本地匹配
-            </div>
-          )}
         </div>
-        {(themeFilter || authorFilter.trim()) && (
-          <div class="px-8 pb-2 flex items-center gap-2 flex-wrap">
-            {themeFilter && (
-              <>
-                <span class="text-[11px] text-muted">主题筛选</span>
-                <button
-                  onClick={onClearTheme}
-                  class="text-[11px] px-2 py-0.5 rounded bg-accent-bg text-accent-text border border-accent/30 hover:bg-accent-bg transition"
-                >
-                  {themeFilter} <span class="text-accent-text ml-1">✕</span>
-                </button>
-              </>
-            )}
-            {authorFilter.trim() && (
-              <>
-                <span class="text-[11px] text-muted">作者筛选</span>
-                <button
-                  onClick={() => onAuthorFilterChange('')}
-                  class="text-[11px] px-2 py-0.5 rounded bg-accent-bg text-accent-text border border-accent/30 hover:bg-accent-bg transition"
-                >
-                  {authorFilter} <span class="text-accent-text ml-1">✕</span>
-                </button>
-              </>
-            )}
-          </div>
-        )}
       </header>
 
       <main class="flex-1 overflow-auto scrollbar-thin px-8 py-6">
@@ -227,16 +181,33 @@ export function ListView({
   );
 }
 
-/** QUA-59: author / has-PDF filters behind a small popover so the header stays
- *  tidy. "有 PDF" only applies to papers and books (the types build-index scans
- *  for a matching source PDF). */
+/** A removable active-filter chip shown in the toolbar; click to clear. */
+function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <button
+      onClick={onClear}
+      title="点击移除"
+      class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-accent-bg text-accent-text border border-accent/30 hover:bg-accent/15 transition"
+    >
+      <span class="truncate max-w-[160px]">{label}</span>
+      <span aria-hidden="true">✕</span>
+    </button>
+  );
+}
+
+/** All filters (rating / author / has-PDF) behind one popover, so the toolbar
+ *  itself stays an active-state bar. "有 PDF" only applies to papers and books
+ *  (the types build-index scans for a matching source PDF). */
 function FilterControl({
-  type, authorFilter, hasPdfOnly, active, onAuthorFilterChange, onToggleHasPdf, onClear,
+  type, minRating, authorFilter, hasPdfOnly, active,
+  onMinRatingChange, onAuthorFilterChange, onToggleHasPdf, onClear,
 }: {
   type: EntryType;
+  minRating: number;
   authorFilter: string;
   hasPdfOnly: boolean;
   active: boolean;
+  onMinRatingChange: (n: number) => void;
   onAuthorFilterChange: (v: string) => void;
   onToggleHasPdf: (v: boolean) => void;
   onClear: () => void;
@@ -258,18 +229,30 @@ function FilterControl({
     <div class="relative" ref={ref}>
       <button
         onClick={() => setOpen(v => !v)}
-        class={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border transition ${
+        class={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md border transition ${
           active
             ? 'border-accent bg-accent-bg text-accent-text'
             : 'border-base text-secondary hover:bg-surface-2'
         }`}
-        title="筛选（作者 / PDF）"
+        title="筛选（评分 / 作者 / PDF）"
       >
         <Icon name="funnel" size={12} />
         筛选{active && <span class="text-accent-text">•</span>}
       </button>
       {open && (
-        <div class="absolute left-0 top-full mt-1 z-20 bg-surface border border-base rounded shadow-lg p-3 w-[220px] space-y-2.5">
+        <div class="absolute left-0 top-full mt-1 z-20 bg-surface border border-base rounded-xl shadow-soft-lg p-3 w-[230px] space-y-3">
+          <div>
+            <div class="text-[11px] text-muted mb-1">评分 ≥</div>
+            <div class="flex items-center gap-1">
+              {[0, 1, 2, 3, 4].map(n => (
+                <button
+                  key={n}
+                  onClick={() => onMinRatingChange(n)}
+                  class={`px-2 py-0.5 rounded-md text-[11px] tabular-nums ${minRating === n ? 'bg-accent-bg text-accent-text' : 'text-secondary hover:bg-surface-2'}`}
+                >{n || '任意'}</button>
+              ))}
+            </div>
+          </div>
           <label class="block text-[11px] text-muted">
             作者
             <input
@@ -277,7 +260,7 @@ function FilterControl({
               value={authorFilter}
               placeholder="按作者筛选"
               onInput={(e) => onAuthorFilterChange((e.target as HTMLInputElement).value)}
-              class="mt-1 w-full px-2 py-1 border border-base rounded text-[12px] bg-page text-secondary focus:outline-none focus:border-accent"
+              class="mt-1 w-full px-2 py-1 border border-base rounded-md text-[12px] bg-page text-secondary focus:outline-none focus:border-accent"
             />
           </label>
           {showPdf && (
@@ -292,7 +275,7 @@ function FilterControl({
           )}
           {active && (
             <button onClick={onClear} class="text-[11px] text-muted hover:text-primary">
-              清空筛选
+              清空全部筛选
             </button>
           )}
         </div>
