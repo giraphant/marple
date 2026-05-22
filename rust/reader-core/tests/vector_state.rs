@@ -93,7 +93,7 @@ fn hybrid_on_legacy_index_falls_back_to_lex() {
             min_rating: None,
             theme: None,
             limit: 5,
-            mode: SearchMode::Hybrid,
+            mode: SearchMode::Deep,
         },
         Some(&model),
         rt.handle(),

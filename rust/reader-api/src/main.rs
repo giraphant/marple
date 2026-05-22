@@ -222,9 +222,20 @@ struct SearchParams {
     min_rating: Option<f64>,
     theme: Option<String>,
     limit: Option<usize>,
-    /// "lex" (default) or "hybrid".
+    /// "fast" | "balanced" (default) | "deep".
     #[serde(default)]
     mode: Option<String>,
+}
+
+/// Map the `mode` query param to a search mode. "fast"/"deep" select those
+/// modes; everything else — missing, unknown, or the retired "lex"/"hybrid"
+/// aliases — falls back to the balanced default.
+fn parse_search_mode(raw: Option<&str>) -> reader_core::SearchMode {
+    match raw {
+        Some("fast") => reader_core::SearchMode::Fast,
+        Some("deep") => reader_core::SearchMode::Deep,
+        _ => reader_core::SearchMode::Balanced,
+    }
 }
 
 async fn api_search(
@@ -233,10 +244,7 @@ async fn api_search(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let paths = state.paths.clone();
     let model = state.model.clone();
-    let mode = match params.mode.as_deref() {
-        Some("hybrid") => reader_core::SearchMode::Hybrid,
-        _ => reader_core::SearchMode::Lex,
-    };
+    let mode = parse_search_mode(params.mode.as_deref());
     let options = reader_core::SearchOptions {
         query: params.q,
         entry_type: params.entry_type,
@@ -640,10 +648,25 @@ mod tests {
             notes_dir: vault.join("notes"),
             trash_dir: vault.join("notes/.trash"),
             sources: root.join("sources"),
+            translations: root.join("processing/translations"),
             index_db: reader_root.join("data/index.sqlite"),
             vectors_db: reader_root.join("data/vectors.sqlite"),
             dist: reader_root.join("dist"),
         }
+    }
+
+    #[test]
+    fn search_mode_parsing() {
+        use reader_core::SearchMode;
+        assert_eq!(parse_search_mode(Some("fast")), SearchMode::Fast);
+        assert_eq!(parse_search_mode(Some("balanced")), SearchMode::Balanced);
+        assert_eq!(parse_search_mode(Some("deep")), SearchMode::Deep);
+        // Missing, unknown, and the retired lex/hybrid aliases all fall back to
+        // the balanced default.
+        assert_eq!(parse_search_mode(None), SearchMode::Balanced);
+        assert_eq!(parse_search_mode(Some("lex")), SearchMode::Balanced);
+        assert_eq!(parse_search_mode(Some("hybrid")), SearchMode::Balanced);
+        assert_eq!(parse_search_mode(Some("garbage")), SearchMode::Balanced);
     }
 
     #[test]

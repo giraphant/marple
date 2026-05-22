@@ -55,28 +55,28 @@ fn fixture_vault_round_trip() {
         mode: m,
     };
 
-    // Lex mode: English query only finds the English doc (no shared tokens).
+    // Balanced mode: English query only finds the English doc (no shared tokens).
     let lex_en = reader_core::search_entries(
         &paths,
-        opts("cyborg manifesto", SearchMode::Lex),
+        opts("cyborg manifesto", SearchMode::Balanced),
         None,
         rt.handle(),
     )
     .unwrap();
     assert!(
         lex_en.iter().any(|h| h.entry.path.contains("sample-en")),
-        "lex EN should surface English doc: {:?}",
+        "balanced EN should surface English doc: {:?}",
         lex_en.iter().map(|h| &h.entry.path).collect::<Vec<_>>()
     );
     assert!(
         !lex_en.iter().any(|h| h.entry.path.contains("sample-zh")),
-        "lex EN must NOT surface Chinese doc"
+        "balanced EN must NOT surface Chinese doc"
     );
 
-    // Hybrid mode: same query reaches the Chinese doc via vec recall.
+    // Deep mode: same query reaches the Chinese doc via vec recall.
     let hybrid_en = reader_core::search_entries(
         &paths,
-        opts("cyborg manifesto", SearchMode::Hybrid),
+        opts("cyborg manifesto", SearchMode::Deep),
         Some(&model),
         rt.handle(),
     )
