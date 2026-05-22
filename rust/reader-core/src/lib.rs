@@ -159,9 +159,16 @@ pub struct TrashItem {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum SearchMode {
+    /// Title + metadata only, somewhat fuzzy. Scopes the FTS match to the
+    /// metadata columns (no preview/body, no trigram) and adds a metadata-only
+    /// substring fallback so CJK / partial queries still resolve.
+    Fast,
+    /// Full lexical search (the former `Lex`): FTS over every column including
+    /// body, plus trigram fuzzy and substring fallback over the whole text.
     #[default]
-    Lex,
-    Hybrid,
+    Balanced,
+    /// Vector KNN recall fused (RRF) with the balanced lexical result.
+    Deep,
 }
 
 #[derive(Debug, Clone)]
@@ -230,13 +237,14 @@ pub fn search_entries(
     runtime: &tokio::runtime::Handle,
 ) -> ReaderResult<Vec<SearchHit>> {
     match options.mode {
-        SearchMode::Lex => search_entries_lex(paths, &options),
-        SearchMode::Hybrid => match model {
+        SearchMode::Fast => search_entries_fast(paths, &options),
+        SearchMode::Balanced => search_entries_lex(paths, &options),
+        SearchMode::Deep => match model {
             Some(model) => search_entries_hybrid(paths, &options, model, runtime),
             None => {
-                // Hybrid requested but no model available → fall back to lex
-                // with a marker on each hit so the API can surface the
-                // X-Search-Fallback header.
+                // Deep requested but no model available → fall back to the
+                // balanced lexical search with a marker on each hit so the API
+                // can surface the X-Search-Fallback header.
                 let mut hits = search_entries_lex(paths, &options)?;
                 for h in &mut hits {
                     h.source = format!("{} (lex-fallback)", h.source);
@@ -245,6 +253,70 @@ pub fn search_entries(
             }
         },
     }
+}
+
+/// Metadata columns of `entry_search` that the Fast mode scopes its FTS match
+/// to. Deliberately excludes `preview` and `body` (the content columns) so a
+/// fast query never matches on the long-form analysis text — only on the title
+/// and the catalogue metadata.
+const FAST_FTS_COLUMNS: &str = "{title author book themes topic source year doi}";
+
+/// Fast search: title + metadata only, somewhat fuzzy. Mirrors the FTS tiers of
+/// the balanced search but (a) scopes every match to the metadata columns via an
+/// FTS5 column filter, (b) skips the trigram pass (its index is whole-text,
+/// including body), and (c) replaces the whole-text substring fallback with a
+/// metadata-only one. The substring pass always runs because it is the main
+/// source of the "somewhat fuzzy" behaviour for CJK and partial queries, which
+/// the unicode61 FTS tokenizer cannot match (a CJK run is a single token).
+fn search_entries_fast(
+    paths: &ReaderPaths,
+    options: &SearchOptions,
+) -> ReaderResult<Vec<SearchHit>> {
+    if !paths.index_db.is_file() {
+        return Err(ReaderError::NotFound(
+            "index database missing; run npm run build:index in reader/".to_string(),
+        ));
+    }
+    ensure_index_schema(paths)?;
+
+    let query = options.query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let limit = options.limit.clamp(1, 500);
+    let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    let mut candidates: HashMap<String, SearchCandidate> = HashMap::new();
+    let tokens = query_terms(query);
+    let column_filter = Some(FAST_FTS_COLUMNS);
+
+    if query.chars().filter(|c| !c.is_whitespace()).count() >= 2 {
+        let phrase = quote_fts(query);
+        collect_fts_candidates(&conn, &phrase, column_filter, limit * 4, 4.0, "phrase", &mut candidates)?;
+    }
+
+    if !tokens.is_empty() {
+        let all_terms = tokens
+            .iter()
+            .map(|token| quote_fts(token))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        collect_fts_candidates(&conn, &all_terms, column_filter, limit * 5, 2.5, "fulltext", &mut candidates)?;
+
+        if tokens.len() > 1 {
+            let any_terms = tokens
+                .iter()
+                .map(|token| quote_fts(token))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            collect_fts_candidates(&conn, &any_terms, column_filter, limit * 6, 1.2, "expanded", &mut candidates)?;
+        }
+    }
+
+    collect_metadata_substring_candidates(&conn, query, limit * 2, 0.45, &mut candidates)?;
+
+    finalize_hits(paths, options, candidates, limit)
 }
 
 fn search_entries_lex(paths: &ReaderPaths, options: &SearchOptions) -> ReaderResult<Vec<SearchHit>> {
@@ -268,7 +340,7 @@ fn search_entries_lex(paths: &ReaderPaths, options: &SearchOptions) -> ReaderRes
 
     if query.chars().filter(|c| !c.is_whitespace()).count() >= 2 {
         let phrase = quote_fts(query);
-        collect_fts_candidates(&conn, &phrase, limit * 4, 4.0, "phrase", &mut candidates)?;
+        collect_fts_candidates(&conn, &phrase, None, limit * 4, 4.0, "phrase", &mut candidates)?;
     }
 
     if !tokens.is_empty() {
@@ -277,7 +349,7 @@ fn search_entries_lex(paths: &ReaderPaths, options: &SearchOptions) -> ReaderRes
             .map(|token| quote_fts(token))
             .collect::<Vec<_>>()
             .join(" AND ");
-        collect_fts_candidates(&conn, &all_terms, limit * 5, 2.5, "fulltext", &mut candidates)?;
+        collect_fts_candidates(&conn, &all_terms, None, limit * 5, 2.5, "fulltext", &mut candidates)?;
 
         if tokens.len() > 1 {
             let any_terms = tokens
@@ -285,7 +357,7 @@ fn search_entries_lex(paths: &ReaderPaths, options: &SearchOptions) -> ReaderRes
                 .map(|token| quote_fts(token))
                 .collect::<Vec<_>>()
                 .join(" OR ");
-            collect_fts_candidates(&conn, &any_terms, limit * 6, 1.2, "expanded", &mut candidates)?;
+            collect_fts_candidates(&conn, &any_terms, None, limit * 6, 1.2, "expanded", &mut candidates)?;
         }
     }
 
@@ -312,6 +384,20 @@ fn search_entries_lex(paths: &ReaderPaths, options: &SearchOptions) -> ReaderRes
         collect_substring_candidates(&conn, query, limit * 2, 0.45, &mut candidates)?;
     }
 
+    finalize_hits(paths, options, candidates, limit)
+}
+
+/// Turn the accumulated FTS/trigram/substring candidates into the final hit
+/// list: join to entry metadata, apply the type / min-rating / theme filters,
+/// fold in the rating bonus, prefer a fresh snippet, then sort and truncate.
+/// Shared by the fast and balanced lexical paths so the ranking tail lives in
+/// one place.
+fn finalize_hits(
+    paths: &ReaderPaths,
+    options: &SearchOptions,
+    candidates: HashMap<String, SearchCandidate>,
+    limit: usize,
+) -> ReaderResult<Vec<SearchHit>> {
     let entries = load_entries(paths)?;
     let entries_by_path = entries
         .into_iter()
@@ -595,14 +681,24 @@ fn merge_candidate(
     }
 }
 
+/// Run one FTS5 tier against `entry_search`. When `column_filter` is set (e.g.
+/// `{title author …}`) the match is scoped to those columns via FTS5 column-
+/// filter syntax `{cols} : (<query>)`, so the Fast mode never matches on the
+/// preview/body content columns. `None` matches every column (the balanced
+/// behaviour, byte-for-byte unchanged).
 fn collect_fts_candidates(
     conn: &Connection,
     fts_query: &str,
+    column_filter: Option<&str>,
     limit: usize,
     multiplier: f64,
     source: &str,
     candidates: &mut HashMap<String, SearchCandidate>,
 ) -> ReaderResult<()> {
+    let match_query = match column_filter {
+        Some(cols) => format!("{cols} : ({fts_query})"),
+        None => fts_query.to_string(),
+    };
     let mut stmt = conn.prepare(
         r#"
         SELECT
@@ -615,7 +711,7 @@ fn collect_fts_candidates(
         LIMIT ?
         "#,
     )?;
-    let rows = stmt.query_map((fts_query, limit as i64), |row| {
+    let rows = stmt.query_map((&match_query, limit as i64), |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, f64>(1)?,
@@ -693,6 +789,38 @@ fn collect_substring_candidates(
         let (path, text) = row?;
         let snippet = substring_snippet(&text, &needle);
         merge_candidate(candidates, path, multiplier, snippet, "substring");
+    }
+    Ok(())
+}
+
+/// The metadata columns of `entries` concatenated for the Fast-mode substring
+/// fallback. Mirrors `FAST_FTS_COLUMNS` (title + catalogue fields, no body) but
+/// also reaches the title aliases and the localised title, which FTS folds into
+/// the single `title` column. Used only inside a `lower(instr(...))` so a CJK or
+/// partial query still matches a metadata field that the unicode61 FTS
+/// tokenizer treats as one indivisible token.
+const FAST_META_CONCAT: &str = "coalesce(title,'')||' '||coalesce(title_en,'')||' '||coalesce(title_cn,'')||' '||coalesce(author,'')||' '||coalesce(book,'')||' '||coalesce(topic,'')||' '||coalesce(source,'')||' '||coalesce(doi,'')||' '||coalesce(publisher,'')||' '||coalesce(translation_title_cn,'')";
+
+/// Fast-mode substring fallback: case-insensitive `instr()` over the metadata
+/// columns only (never the body). The primary source of Fast's "somewhat fuzzy"
+/// behaviour for CJK and partial queries. Mirrors the guard of
+/// `collect_substring_candidates` (skip <2 significant chars).
+fn collect_metadata_substring_candidates(
+    conn: &Connection,
+    query: &str,
+    limit: usize,
+    multiplier: f64,
+    candidates: &mut HashMap<String, SearchCandidate>,
+) -> ReaderResult<()> {
+    let needle = query.trim().to_lowercase();
+    if needle.chars().filter(|c| !c.is_whitespace()).count() < 2 {
+        return Ok(());
+    }
+    let sql = format!("SELECT path FROM entries WHERE instr(lower({FAST_META_CONCAT}), ?) > 0 LIMIT ?");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map((&needle, limit as i64), |row| row.get::<_, String>(0))?;
+    for row in rows {
+        merge_candidate(candidates, row?, multiplier, None, "substring");
     }
     Ok(())
 }
@@ -1333,4 +1461,114 @@ fn relative_slash(root: &Path, path: &Path) -> String {
         .map(|c| c.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+#[cfg(test)]
+mod search_mode_tests {
+    use super::*;
+
+    /// Build a throwaway workspace (reader/data + vault) seeded with the given
+    /// `(rel_path, contents)` markdown files, then build the metadata index over
+    /// it. Returns the paths so a test can run searches against the real engine.
+    fn seed_index(files: &[(&str, &str)]) -> ReaderPaths {
+        // Unique per call: parallel tests must not share a temp index DB, and a
+        // bare nanos timestamp can collide under coarse clock resolution.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let nonce = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "reader-core-search-{}-{nonce}",
+            std::process::id()
+        ));
+        let reader_root = root.join("reader");
+        let vault = root.join("vault");
+        fs::create_dir_all(reader_root.join("data")).unwrap();
+        fs::create_dir_all(&vault).unwrap();
+        for (rel, body) in files {
+            let abs = vault.join(rel);
+            fs::create_dir_all(abs.parent().unwrap()).unwrap();
+            fs::write(&abs, body).unwrap();
+        }
+        let paths = ReaderPaths {
+            index_db: reader_root.join("data").join("index.sqlite"),
+            vectors_db: reader_root.join("data").join("vectors.sqlite"),
+            trash_dir: vault.join("notes").join(".trash"),
+            sources: root.join("sources"),
+            translations: root.join("processing").join("translations"),
+            dist: reader_root.join("dist"),
+            reader_root,
+            workspace_root: root,
+            notes_dir: vault.join("notes"),
+            vault,
+        };
+        build_sqlite_index(&paths).unwrap();
+        paths
+    }
+
+    fn opts(query: &str, mode: SearchMode) -> SearchOptions {
+        SearchOptions {
+            query: query.to_string(),
+            entry_type: None,
+            min_rating: None,
+            theme: None,
+            limit: 50,
+            mode,
+        }
+    }
+
+    fn hit_paths(hits: &[SearchHit]) -> Vec<String> {
+        hits.iter().map(|h| h.entry.path.clone()).collect()
+    }
+
+    const TITLE_ONLY: &str = "---\ntype: paper\ntitle: Zebrafish Studies\n---\n\nThis analysis discusses ordinary cells in detail.\n";
+    const BODY_ONLY: &str = "---\ntype: paper\ntitle: Ordinary Cells\n---\n\nThis analysis discusses zebrafish at considerable length.\n";
+    const CJK_TITLE: &str = "---\ntype: paper\ntitle: 生命权力研究\n---\n\nOrdinary english content with no overlap.\n";
+
+    #[test]
+    fn fast_matches_title_metadata_but_not_body() {
+        let paths = seed_index(&[
+            ("papers/title-only.md", TITLE_ONLY),
+            ("papers/body-only.md", BODY_ONLY),
+        ]);
+        let hits = search_entries_fast(&paths, &opts("zebrafish", SearchMode::Fast)).unwrap();
+        let paths_hit = hit_paths(&hits);
+        assert!(
+            paths_hit.iter().any(|p| p.ends_with("title-only.md")),
+            "fast must find the title-only match, got {paths_hit:?}"
+        );
+        assert!(
+            !paths_hit.iter().any(|p| p.ends_with("body-only.md")),
+            "fast must NOT find the body-only match, got {paths_hit:?}"
+        );
+    }
+
+    #[test]
+    fn balanced_matches_body_too() {
+        let paths = seed_index(&[
+            ("papers/title-only.md", TITLE_ONLY),
+            ("papers/body-only.md", BODY_ONLY),
+        ]);
+        let hits = search_entries_lex(&paths, &opts("zebrafish", SearchMode::Balanced)).unwrap();
+        let paths_hit = hit_paths(&hits);
+        assert!(
+            paths_hit.iter().any(|p| p.ends_with("title-only.md")),
+            "balanced must find the title match, got {paths_hit:?}"
+        );
+        assert!(
+            paths_hit.iter().any(|p| p.ends_with("body-only.md")),
+            "balanced must also find the body match, got {paths_hit:?}"
+        );
+    }
+
+    #[test]
+    fn fast_matches_cjk_title_substring() {
+        // FTS5 unicode61 makes "生命权力研究" one token, so a 2-char CJK substring
+        // query only resolves through the metadata substring fallback.
+        let paths = seed_index(&[("papers/cjk-title.md", CJK_TITLE)]);
+        let hits = search_entries_fast(&paths, &opts("权力", SearchMode::Fast)).unwrap();
+        let paths_hit = hit_paths(&hits);
+        assert!(
+            paths_hit.iter().any(|p| p.ends_with("cjk-title.md")),
+            "fast must find the CJK title via substring fallback, got {paths_hit:?}"
+        );
+    }
 }
