@@ -30,11 +30,12 @@ const MAX_HISTORY = 50;
 const DEFAULT_TYPE: EntryType = 'paper-analysis';
 
 /** Max concurrent /api/entry fetches during a vault sync. Browsers cap a host at
- *  ~6 HTTP/1.1 connections; firing hundreds of fetches at once both fails with
+ *  ~6 HTTP/1.1 connections; firing hundreds at once both fails with
  *  ERR_INSUFFICIENT_RESOURCES and starves user-initiated requests (a click on
- *  "open in editor" would queue behind the whole backlog). Capping below the
- *  limit keeps connections free for those clicks. */
-const SYNC_FETCH_CONCURRENCY = 5;
+ *  "open in editor" would queue behind the backlog). Kept well below 6 so that
+ *  even with the (multi-second) /api/index load also in flight, connections stay
+ *  free for user clicks. */
+const SYNC_FETCH_CONCURRENCY = 3;
 
 /** Push a new content to a tab's history at `cursor + 1`, truncating any
  *  forward history (browser-style). No-op if it's the same as current. */
