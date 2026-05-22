@@ -1,8 +1,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { Settings, FontFamily, Theme } from '../settings';
-import { FONT_SIZE_OPTIONS, LINE_HEIGHT_OPTIONS, fontStack } from '../settings';
-import { CITATION_FORMATS } from '../citation';
+import { FONT_SIZE_OPTIONS, LINE_HEIGHT_OPTIONS } from '../settings';
 import { triggerEmbeddings, embeddingStatus } from '../api';
 import { formatEmbedStatus, isEmbedRunning, type EmbedStatus } from '../embedding';
 import { Icon } from './Icon';
@@ -14,18 +13,15 @@ const THEME_OPTIONS: { id: Theme; label: string; hint: string }[] = [
 ];
 
 const FONT_PRESETS: { id: FontFamily; label: string; hint: string }[] = [
-  { id: 'sans',  label: '苹方 / 无衬线', hint: '屏幕显示最稳，默认' },
-  { id: 'serif', label: '宋体 / 衬线',   hint: '印刷感，长文阅读' },
-  { id: 'mono',  label: '等宽',          hint: '代码 / 草稿感' },
+  { id: 'sans',  label: '苹方', hint: '无衬线 · 屏幕显示最稳，默认' },
+  { id: 'serif', label: '宋体', hint: '衬线 · 印刷感，长文阅读' },
+  { id: 'mono',  label: '等宽', hint: '代码 / 草稿感' },
 ];
 
-const FONT_PREVIEW = 'The quick brown fox · 身体是被技术介导的对象';
-
-type TabId = 'appearance' | 'editing' | 'citation' | 'vectors';
+type TabId = 'appearance' | 'editing' | 'vectors';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'appearance', label: '外观' },
   { id: 'editing',    label: '编辑' },
-  { id: 'citation',   label: '引用' },
   { id: 'vectors',    label: '向量' },
 ];
 
@@ -43,7 +39,7 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
   return (
     <div class="fixed inset-0 bg-black/30 z-40" onClick={onClose}>
       <div
-        class="absolute top-12 right-4 w-[520px] max-h-[calc(100vh-80px)] flex flex-col bg-surface border border-base rounded-2xl shadow-soft-lg overflow-hidden"
+        class="absolute top-12 right-4 w-[520px] max-w-[calc(100vw_-_2rem)] max-h-[calc(100vh-80px)] flex flex-col bg-surface border border-base rounded-2xl shadow-soft-lg overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         {/* Single header bar — the tabs double as the title (the active tab says
@@ -86,17 +82,9 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
               <Group title="阅读排版">
                 <div class="space-y-4">
                   <Field label="字体">
-                    <RadioCards
-                      name="fontFamily"
+                    <Segmented
                       value={settings.fontFamily}
-                      items={FONT_PRESETS.map(p => ({
-                        value: p.id,
-                        label: p.label,
-                        hint: p.hint,
-                        preview: FONT_PREVIEW,
-                        labelStyle: { fontFamily: fontStack(p.id) },
-                        previewStyle: { fontFamily: fontStack(p.id) },
-                      }))}
+                      items={FONT_PRESETS.map(p => ({ value: p.id, label: p.label, title: p.hint }))}
                       onChange={v => set('fontFamily', v)}
                     />
                   </Field>
@@ -131,25 +119,6 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
                 </div>
                 <Toggle on={settings.allowEditLLMBody} onChange={v => set('allowEditLLMBody', v)} />
               </div>
-            </div>
-          )}
-
-          {tab === 'citation' && (
-            <div class="p-5">
-              <Field label="默认格式">
-                <RadioCards
-                  name="citationFormat"
-                  value={settings.citationFormat}
-                  items={CITATION_FORMATS.map(f => ({
-                    value: f.id,
-                    label: f.label,
-                    hint: f.hint,
-                    preview: f.example,
-                  }))}
-                  onChange={v => set('citationFormat', v)}
-                />
-                <div class="text-[11px] text-muted px-1 mt-2">在阅读时点按钮旁的 ▾ 可临时切换其他格式。</div>
-              </Field>
             </div>
           )}
 
@@ -306,59 +275,6 @@ function Segmented<T extends string | number>({
         );
       })}
     </div>
-  );
-}
-
-/** Stacked single-select cards for options that carry a preview/description
- *  (font / citation format). Selection shows as an accent border + tint plus
- *  a custom radio dot; the real radio input stays for keyboard + a11y. */
-function RadioCards<T extends string>({
-  name, value, items, onChange,
-}: {
-  name: string;
-  value: T;
-  items: { value: T; label: string; hint?: string; preview?: string; labelStyle?: JSX.CSSProperties; previewStyle?: JSX.CSSProperties }[];
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div class="space-y-1.5">
-      {items.map(it => {
-        const on = it.value === value;
-        return (
-          <label
-            key={it.value}
-            class={`flex items-start gap-2.5 px-3 py-2.5 rounded-[10px] border cursor-pointer transition ${
-              on ? 'border-accent bg-accent-bg' : 'border-base hover:border-strong'
-            }`}
-          >
-            <input type="radio" name={name} checked={on} onChange={() => onChange(it.value)} class="sr-only" />
-            <RadioDot on={on} />
-            <div class="flex-1 min-w-0">
-              <div class="text-[12px] text-primary" style={it.labelStyle}>
-                {it.label}
-                {it.hint && <span class="text-muted text-[11px] ml-1">{it.hint}</span>}
-              </div>
-              {it.preview && (
-                <div class="text-[12px] text-muted mt-0.5 truncate" style={it.previewStyle}>{it.preview}</div>
-              )}
-            </div>
-          </label>
-        );
-      })}
-    </div>
-  );
-}
-
-function RadioDot({ on }: { on: boolean }) {
-  return (
-    <span
-      class={`mt-0.5 shrink-0 w-3.5 h-3.5 rounded-full border-[1.5px] grid place-items-center ${
-        on ? 'border-accent' : 'border-strong'
-      }`}
-      aria-hidden="true"
-    >
-      {on && <span class="w-1.5 h-1.5 rounded-full bg-accent" />}
-    </span>
   );
 }
 
