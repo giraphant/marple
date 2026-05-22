@@ -21,11 +21,12 @@ const FONT_PRESETS: { id: FontFamily; label: string; hint: string }[] = [
 
 const FONT_PREVIEW = 'The quick brown fox · 身体是被技术介导的对象';
 
-type TabId = 'appearance' | 'editing' | 'index';
+type TabId = 'appearance' | 'editing' | 'citation' | 'vectors';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'appearance', label: '外观' },
-  { id: 'editing',    label: '编辑与引用' },
-  { id: 'index',      label: '索引与向量' },
+  { id: 'editing',    label: '编辑' },
+  { id: 'citation',   label: '引用' },
+  { id: 'vectors',    label: '向量' },
 ];
 
 interface Props {
@@ -45,31 +46,30 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
         class="absolute top-12 right-4 w-[520px] max-h-[calc(100vh-80px)] flex flex-col bg-surface border border-base rounded-2xl shadow-soft-lg overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        {/* Header — app-level title + close. Pinned; only the pane below scrolls. */}
-        <div class="shrink-0 flex items-center justify-between px-5 py-3 border-b border-base">
-          <div class="text-[13px] font-semibold text-primary">设置</div>
-          <button onClick={onClose} class="text-muted hover:text-secondary p-1 inline-flex items-center" title="关闭">
+        {/* Single header bar — the tabs double as the title (the active tab says
+            where you are; a separate "设置" row would just be a redundant second
+            chrome layer). Close button sits at the right. */}
+        <div class="shrink-0 flex items-center justify-between pl-2 pr-2 border-b border-base">
+          <div class="flex gap-0.5">
+            {TABS.map(t => {
+              const active = t.id === tab;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  class={`relative px-3 py-2.5 text-[12.5px] transition ${
+                    active ? 'text-accent-text font-semibold' : 'text-secondary hover:text-primary'
+                  }`}
+                >
+                  {t.label}
+                  {active && <span class="absolute left-2.5 right-2.5 -bottom-px h-0.5 rounded bg-accent" />}
+                </button>
+              );
+            })}
+          </div>
+          <button onClick={onClose} class="text-muted hover:text-secondary p-1.5 inline-flex items-center" title="关闭">
             <Icon name="x" size={13} />
           </button>
-        </div>
-
-        {/* Tab bar — terracotta underline marks the active group. */}
-        <div class="shrink-0 flex gap-0.5 px-3 border-b border-base">
-          {TABS.map(t => {
-            const active = t.id === tab;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                class={`relative px-3.5 py-2 text-[12.5px] transition ${
-                  active ? 'text-accent-text font-semibold' : 'text-secondary hover:text-primary'
-                }`}
-              >
-                {t.label}
-                {active && <span class="absolute left-2.5 right-2.5 -bottom-px h-0.5 rounded bg-accent" />}
-              </button>
-            );
-          })}
         </div>
 
         <div class="overflow-auto scrollbar-thin">
@@ -120,46 +120,44 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
           )}
 
           {tab === 'editing' && (
-            <div class="p-5 space-y-7">
-              <Group title="编辑">
-                <div class="flex items-start justify-between gap-3 px-3.5 py-3 rounded-xl border border-base">
-                  <div class="text-[12px] leading-snug min-w-0">
-                    <div class="text-primary font-medium">允许编辑 LLM 生成的正文</div>
-                    <div class="text-muted mt-0.5">
-                      paper / book / author / topic / chapter 的 body 也进入编辑器。
-                      默认关闭，避免误改 LLM 输出。下次 reprocess 仍会覆盖。
-                    </div>
+            <div class="p-5">
+              <div class="flex items-start justify-between gap-3 px-3.5 py-3 rounded-xl border border-base">
+                <div class="text-[12px] leading-snug min-w-0">
+                  <div class="text-primary font-medium">允许编辑 LLM 生成的正文</div>
+                  <div class="text-muted mt-0.5">
+                    paper / book / author / topic / chapter 的 body 也进入编辑器。
+                    默认关闭，避免误改 LLM 输出。下次 reprocess 仍会覆盖。
                   </div>
-                  <Toggle on={settings.allowEditLLMBody} onChange={v => set('allowEditLLMBody', v)} />
                 </div>
-              </Group>
-
-              <Group title="引用">
-                <Field label="默认格式">
-                  <RadioCards
-                    name="citationFormat"
-                    value={settings.citationFormat}
-                    items={CITATION_FORMATS.map(f => ({
-                      value: f.id,
-                      label: f.label,
-                      hint: f.hint,
-                      preview: f.example,
-                    }))}
-                    onChange={v => set('citationFormat', v)}
-                  />
-                  <div class="text-[11px] text-muted px-1 mt-2">在阅读时点按钮旁的 ▾ 可临时切换其他格式。</div>
-                </Field>
-              </Group>
+                <Toggle on={settings.allowEditLLMBody} onChange={v => set('allowEditLLMBody', v)} />
+              </div>
             </div>
           )}
 
-          {tab === 'index' && (
+          {tab === 'citation' && (
             <div class="p-5">
-              <Group title="索引与向量">
-                <div class="rounded-xl border border-base p-4">
-                  <EmbeddingsRebuild />
-                </div>
-              </Group>
+              <Field label="默认格式">
+                <RadioCards
+                  name="citationFormat"
+                  value={settings.citationFormat}
+                  items={CITATION_FORMATS.map(f => ({
+                    value: f.id,
+                    label: f.label,
+                    hint: f.hint,
+                    preview: f.example,
+                  }))}
+                  onChange={v => set('citationFormat', v)}
+                />
+                <div class="text-[11px] text-muted px-1 mt-2">在阅读时点按钮旁的 ▾ 可临时切换其他格式。</div>
+              </Field>
+            </div>
+          )}
+
+          {tab === 'vectors' && (
+            <div class="p-5">
+              <div class="rounded-xl border border-base p-4">
+                <EmbeddingsRebuild />
+              </div>
             </div>
           )}
         </div>
