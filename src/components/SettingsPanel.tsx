@@ -13,158 +13,156 @@ const THEME_OPTIONS: { id: Theme; label: string; hint: string }[] = [
   { id: 'system', label: '跟随系统', hint: 'prefers-color-scheme' },
 ];
 
-interface Props {
-  settings: Settings;
-  onChange: (next: Settings) => void;
-  onClose: () => void;
-}
-
 const FONT_PRESETS: { id: FontFamily; label: string; hint: string }[] = [
   { id: 'sans',  label: '苹方 / 无衬线', hint: '屏幕显示最稳，默认' },
   { id: 'serif', label: '宋体 / 衬线',   hint: '印刷感，长文阅读' },
   { id: 'mono',  label: '等宽',          hint: '代码 / 草稿感' },
 ];
 
+const FONT_PREVIEW = 'The quick brown fox · 身体是被技术介导的对象';
+
+type TabId = 'appearance' | 'editing' | 'index';
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'appearance', label: '外观' },
+  { id: 'editing',    label: '编辑与引用' },
+  { id: 'index',      label: '索引与向量' },
+];
+
+interface Props {
+  settings: Settings;
+  onChange: (next: Settings) => void;
+  onClose: () => void;
+}
+
 export function SettingsPanel({ settings, onChange, onClose }: Props) {
+  const [tab, setTab] = useState<TabId>('appearance');
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     onChange({ ...settings, [key]: value });
 
   return (
     <div class="fixed inset-0 bg-black/30 z-40" onClick={onClose}>
       <div
-        class="absolute top-12 right-4 w-[520px] max-h-[calc(100vh-80px)] overflow-auto scrollbar-thin bg-surface border border-base rounded-2xl shadow-soft-lg"
+        class="absolute top-12 right-4 w-[520px] max-h-[calc(100vh-80px)] flex flex-col bg-surface border border-base rounded-2xl shadow-soft-lg overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        <div class="flex items-center justify-between px-5 py-3 border-b border-base sticky top-0 bg-surface/95 backdrop-blur">
+        {/* Header — app-level title + close. Pinned; only the pane below scrolls. */}
+        <div class="shrink-0 flex items-center justify-between px-5 py-3 border-b border-base">
           <div class="text-[13px] font-semibold text-primary">设置</div>
           <button onClick={onClose} class="text-muted hover:text-secondary p-1 inline-flex items-center" title="关闭">
             <Icon name="x" size={13} />
           </button>
         </div>
 
-        <Section title="外观">
-          <Field label="主题">
-            <div class="flex flex-wrap gap-1">
-              {THEME_OPTIONS.map(t => {
-                const active = settings.theme === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => set('theme', t.id)}
-                    class={`text-[12px] px-2.5 py-1 rounded border transition ${
-                      active
-                        ? 'bg-accent-bg text-accent-text border-accent'
-                        : 'bg-surface text-secondary border-base hover:border-strong'
-                    }`}
-                    title={t.hint}
-                  >{t.label}</button>
-                );
-              })}
-            </div>
-          </Field>
+        {/* Tab bar — terracotta underline marks the active group. */}
+        <div class="shrink-0 flex gap-0.5 px-3 border-b border-base">
+          {TABS.map(t => {
+            const active = t.id === tab;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                class={`relative px-3.5 py-2 text-[12.5px] transition ${
+                  active ? 'text-accent-text font-semibold' : 'text-secondary hover:text-primary'
+                }`}
+              >
+                {t.label}
+                {active && <span class="absolute left-2.5 right-2.5 -bottom-px h-0.5 rounded bg-accent" />}
+              </button>
+            );
+          })}
+        </div>
 
-          <Field label="字体">
-            <div class="space-y-1.5">
-              {FONT_PRESETS.map(p => (
-                <label key={p.id} class="flex items-start gap-2 cursor-pointer px-2 py-1.5 -mx-2 rounded hover:bg-page">
-                  <input
-                    type="radio"
-                    name="fontFamily"
-                    checked={settings.fontFamily === p.id}
-                    onChange={() => set('fontFamily', p.id)}
-                    class="mt-1"
-                  />
-                  <div class="flex-1 min-w-0">
-                    <div class="text-[12px] text-primary" style={{ fontFamily: fontStack(p.id) }}>
-                      {p.label} <span class="text-muted text-[11px] ml-1">{p.hint}</span>
-                    </div>
-                    <div
-                      class="text-[12px] text-muted mt-0.5 truncate"
-                      style={{ fontFamily: fontStack(p.id) }}
-                      title="预览"
-                    >
-                      The quick brown fox · 身体是被技术介导的对象
+        <div class="overflow-auto scrollbar-thin">
+          {tab === 'appearance' && (
+            <div class="p-5 space-y-7">
+              <Group title="主题">
+                <Segmented
+                  value={settings.theme}
+                  items={THEME_OPTIONS.map(t => ({ value: t.id, label: t.label, title: t.hint || undefined }))}
+                  onChange={v => set('theme', v)}
+                />
+              </Group>
+
+              <Group title="阅读排版">
+                <div class="space-y-4">
+                  <Field label="字体">
+                    <RadioCards
+                      name="fontFamily"
+                      value={settings.fontFamily}
+                      items={FONT_PRESETS.map(p => ({
+                        value: p.id,
+                        label: p.label,
+                        hint: p.hint,
+                        preview: FONT_PREVIEW,
+                        labelStyle: { fontFamily: fontStack(p.id) },
+                        previewStyle: { fontFamily: fontStack(p.id) },
+                      }))}
+                      onChange={v => set('fontFamily', v)}
+                    />
+                  </Field>
+                  <Field label="字号">
+                    <Segmented
+                      value={settings.fontSize}
+                      items={FONT_SIZE_OPTIONS.map(o => ({ value: o as number, label: String(o) }))}
+                      onChange={v => set('fontSize', v)}
+                    />
+                  </Field>
+                  <Field label="行距">
+                    <Segmented
+                      value={settings.lineHeight}
+                      items={LINE_HEIGHT_OPTIONS.map(o => ({ value: o as number, label: o.toFixed(2) }))}
+                      onChange={v => set('lineHeight', v)}
+                    />
+                  </Field>
+                </div>
+              </Group>
+            </div>
+          )}
+
+          {tab === 'editing' && (
+            <div class="p-5 space-y-7">
+              <Group title="编辑">
+                <div class="flex items-start justify-between gap-3 px-3.5 py-3 rounded-xl border border-base">
+                  <div class="text-[12px] leading-snug min-w-0">
+                    <div class="text-primary font-medium">允许编辑 LLM 生成的正文</div>
+                    <div class="text-muted mt-0.5">
+                      paper / book / author / topic / chapter 的 body 也进入编辑器。
+                      默认关闭，避免误改 LLM 输出。下次 reprocess 仍会覆盖。
                     </div>
                   </div>
-                </label>
-              ))}
+                  <Toggle on={settings.allowEditLLMBody} onChange={v => set('allowEditLLMBody', v)} />
+                </div>
+              </Group>
+
+              <Group title="引用">
+                <Field label="默认格式">
+                  <RadioCards
+                    name="citationFormat"
+                    value={settings.citationFormat}
+                    items={CITATION_FORMATS.map(f => ({
+                      value: f.id,
+                      label: f.label,
+                      hint: f.hint,
+                      preview: f.example,
+                    }))}
+                    onChange={v => set('citationFormat', v)}
+                  />
+                  <div class="text-[11px] text-muted px-1 mt-2">在阅读时点按钮旁的 ▾ 可临时切换其他格式。</div>
+                </Field>
+              </Group>
             </div>
-          </Field>
+          )}
 
-          <Field label="字号">
-            <Slider
-              value={settings.fontSize}
-              options={FONT_SIZE_OPTIONS}
-              suffix="px"
-              onChange={v => set('fontSize', v)}
-            />
-          </Field>
-
-          <Field label="行距">
-            <Slider
-              value={settings.lineHeight}
-              options={LINE_HEIGHT_OPTIONS}
-              format={v => v.toFixed(2)}
-              onChange={v => set('lineHeight', v)}
-            />
-          </Field>
-        </Section>
-
-        <Section title="编辑">
-          <label class="flex items-start gap-2 cursor-pointer px-2 py-1.5 -mx-2 rounded hover:bg-page">
-            <input
-              type="checkbox"
-              checked={settings.allowEditLLMBody}
-              onChange={e => set('allowEditLLMBody', (e.target as HTMLInputElement).checked)}
-              class="mt-0.5"
-            />
-            <div class="text-[12px] leading-snug">
-              <div class="text-primary font-medium">允许编辑 LLM 生成的正文</div>
-              <div class="text-muted mt-0.5">
-                paper / book / author / topic / chapter 的 body 也进入编辑器。
-                默认关闭，避免误改 LLM 输出。下次 reprocess 仍会覆盖。
-              </div>
+          {tab === 'index' && (
+            <div class="p-5">
+              <Group title="索引与向量">
+                <div class="rounded-xl border border-base p-4">
+                  <EmbeddingsRebuild />
+                </div>
+              </Group>
             </div>
-          </label>
-        </Section>
-
-        <Section title="引用">
-          <Field label="默认格式">
-            <div class="space-y-1">
-              {CITATION_FORMATS.map(f => {
-                const active = settings.citationFormat === f.id;
-                return (
-                  <label
-                    key={f.id}
-                    class={`flex items-start gap-2 cursor-pointer px-2 py-1.5 -mx-2 rounded ${active ? 'bg-page' : 'hover:bg-page'}`}
-                  >
-                    <input
-                      type="radio"
-                      name="citationFormat"
-                      checked={active}
-                      onChange={() => set('citationFormat', f.id)}
-                      class="mt-1"
-                    />
-                    <div class="flex-1 min-w-0">
-                      <div class="text-[12px] text-primary">
-                        {f.label}
-                        <span class="text-muted text-[11px] ml-1">{f.hint}</span>
-                      </div>
-                      <div class="text-[11px] text-muted mt-0.5 truncate">
-                        {f.example}
-                      </div>
-                    </div>
-                  </label>
-                );
-              })}
-              <div class="text-[11px] text-muted px-2 mt-1">在阅读时点按钮旁的 ▾ 可临时切换其他格式。</div>
-            </div>
-          </Field>
-        </Section>
-
-        <Section title="高级">
-          <EmbeddingsRebuild />
-        </Section>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -242,10 +240,10 @@ function EmbeddingsRebuild() {
       <button
         onClick={run}
         disabled={running}
-        class={`text-[12px] px-2.5 py-1 rounded border transition ${
+        class={`text-[12px] px-3 py-1.5 rounded-lg border transition ${
           running
             ? 'bg-surface text-muted border-base cursor-not-allowed'
-            : 'bg-surface text-secondary border-base hover:border-strong'
+            : 'bg-surface text-secondary border-strong hover:border-accent'
         }`}
       >
         {running ? '构建中…（后台运行，可关闭）' : '重建语义向量'}
@@ -260,52 +258,126 @@ function EmbeddingsRebuild() {
   );
 }
 
-function Section({ title, children }: { title: string; children: JSX.Element | JSX.Element[] }) {
+/** A labelled settings group: small uppercase caption + content. */
+function Group({ title, children }: { title: string; children: JSX.Element | JSX.Element[] }) {
   return (
-    <section class="px-5 py-4 border-b border-base last:border-b-0">
+    <section>
       <div class="text-[10px] uppercase tracking-wider text-muted font-semibold mb-3">{title}</div>
-      <div class="space-y-4">{children}</div>
+      {children}
     </section>
   );
 }
 
+/** Two-column row: fixed-width label + control, so every setting's left edge lines up. */
 function Field({ label, children }: { label: string; children: JSX.Element | JSX.Element[] }) {
   return (
-    <div class="grid grid-cols-[72px_1fr] gap-3 items-start">
-      <div class="text-[12px] text-secondary pt-1">{label}</div>
+    <div class="grid grid-cols-[64px_1fr] gap-3 items-start">
+      <div class="text-[12px] text-secondary pt-1.5">{label}</div>
       <div class="min-w-0">{children}</div>
     </div>
   );
 }
 
-function Slider<T extends number>({
-  value, options, onChange, format, suffix,
+/** Segmented control for short enumerations (theme / size / line-height).
+ *  Active segment lifts onto a surface tile; in dark mode it brightens to the
+ *  hover token instead (surface would read as a pressed-in dent on the track). */
+function Segmented<T extends string | number>({
+  value, items, onChange,
 }: {
   value: T;
-  options: readonly T[];
+  items: { value: T; label: string; title?: string }[];
   onChange: (v: T) => void;
-  format?: (v: T) => string;
-  suffix?: string;
 }) {
   return (
-    <div class="flex flex-wrap gap-1">
-      {options.map(opt => {
-        const active = opt === value;
-        const display = format ? format(opt) : String(opt);
+    <div class="flex gap-1 bg-surface-2 p-[3px] rounded-[10px]">
+      {items.map(it => {
+        const on = it.value === value;
         return (
           <button
-            key={opt}
-            onClick={() => onChange(opt)}
-            class={`text-[12px] px-2.5 py-1 rounded border tabular-nums transition ${
-              active
-                ? 'bg-accent-bg text-accent-text border-accent'
-                : 'bg-surface text-secondary border-base hover:border-strong'
+            key={String(it.value)}
+            onClick={() => onChange(it.value)}
+            title={it.title}
+            class={`flex-1 rounded-lg py-1.5 text-[12px] tabular-nums transition ${
+              on
+                ? 'bg-surface dark:bg-hover text-primary font-medium shadow-soft-sm dark:shadow-none'
+                : 'text-secondary hover:text-primary'
             }`}
           >
-            {display}{suffix && <span class="opacity-70 ml-0.5">{suffix}</span>}
+            {it.label}
           </button>
         );
       })}
     </div>
+  );
+}
+
+/** Stacked single-select cards for options that carry a preview/description
+ *  (font / citation format). Selection shows as an accent border + tint plus
+ *  a custom radio dot; the real radio input stays for keyboard + a11y. */
+function RadioCards<T extends string>({
+  name, value, items, onChange,
+}: {
+  name: string;
+  value: T;
+  items: { value: T; label: string; hint?: string; preview?: string; labelStyle?: JSX.CSSProperties; previewStyle?: JSX.CSSProperties }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div class="space-y-1.5">
+      {items.map(it => {
+        const on = it.value === value;
+        return (
+          <label
+            key={it.value}
+            class={`flex items-start gap-2.5 px-3 py-2.5 rounded-[10px] border cursor-pointer transition ${
+              on ? 'border-accent bg-accent-bg' : 'border-base hover:border-strong'
+            }`}
+          >
+            <input type="radio" name={name} checked={on} onChange={() => onChange(it.value)} class="sr-only" />
+            <RadioDot on={on} />
+            <div class="flex-1 min-w-0">
+              <div class="text-[12px] text-primary" style={it.labelStyle}>
+                {it.label}
+                {it.hint && <span class="text-muted text-[11px] ml-1">{it.hint}</span>}
+              </div>
+              {it.preview && (
+                <div class="text-[12px] text-muted mt-0.5 truncate" style={it.previewStyle}>{it.preview}</div>
+              )}
+            </div>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function RadioDot({ on }: { on: boolean }) {
+  return (
+    <span
+      class={`mt-0.5 shrink-0 w-3.5 h-3.5 rounded-full border-[1.5px] grid place-items-center ${
+        on ? 'border-accent' : 'border-strong'
+      }`}
+      aria-hidden="true"
+    >
+      {on && <span class="w-1.5 h-1.5 rounded-full bg-accent" />}
+    </span>
+  );
+}
+
+/** Pill switch for booleans — replaces the bare checkbox. */
+function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      class={`relative shrink-0 w-9 h-[21px] rounded-full transition ${on ? 'bg-accent' : 'bg-strong'}`}
+    >
+      <span
+        class={`absolute top-0.5 left-0.5 w-[17px] h-[17px] rounded-full bg-white shadow-soft-sm transition-transform ${
+          on ? 'translate-x-[15px]' : ''
+        }`}
+      />
+    </button>
   );
 }
