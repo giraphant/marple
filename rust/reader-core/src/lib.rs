@@ -794,12 +794,15 @@ fn collect_substring_candidates(
 }
 
 /// The metadata columns of `entries` concatenated for the Fast-mode substring
-/// fallback. Mirrors `FAST_FTS_COLUMNS` (title + catalogue fields, no body) but
-/// also reaches the title aliases and the localised title, which FTS folds into
-/// the single `title` column. Used only inside a `lower(instr(...))` so a CJK or
-/// partial query still matches a metadata field that the unicode61 FTS
-/// tokenizer treats as one indivisible token.
-const FAST_META_CONCAT: &str = "coalesce(title,'')||' '||coalesce(title_en,'')||' '||coalesce(title_cn,'')||' '||coalesce(author,'')||' '||coalesce(book,'')||' '||coalesce(topic,'')||' '||coalesce(source,'')||' '||coalesce(doi,'')||' '||coalesce(publisher,'')||' '||coalesce(translation_title_cn,'')";
+/// fallback. Covers every column the `FAST_FTS_COLUMNS` filter scopes (title,
+/// author, book, themes, topic, source, year, doi) plus the title aliases,
+/// publisher and localised title that FTS folds into its `title` column. themes
+/// and year live as the JSON-encoded `themes_json` / `year_json`; substring-
+/// matching the JSON text is fine for "somewhat fuzzy" (the brackets/quotes are
+/// noise a query won't contain). Used only inside `lower(instr(...))` so a CJK
+/// or partial query still matches a metadata field the unicode61 FTS tokenizer
+/// treats as one indivisible token.
+const FAST_META_CONCAT: &str = "coalesce(title,'')||' '||coalesce(title_en,'')||' '||coalesce(title_cn,'')||' '||coalesce(author,'')||' '||coalesce(book,'')||' '||coalesce(themes_json,'')||' '||coalesce(topic,'')||' '||coalesce(source,'')||' '||coalesce(year_json,'')||' '||coalesce(doi,'')||' '||coalesce(publisher,'')||' '||coalesce(translation_title_cn,'')";
 
 /// Fast-mode substring fallback: case-insensitive `instr()` over the metadata
 /// columns only (never the body). The primary source of Fast's "somewhat fuzzy"
@@ -1522,6 +1525,7 @@ mod search_mode_tests {
     const TITLE_ONLY: &str = "---\ntype: paper\ntitle: Zebrafish Studies\n---\n\nThis analysis discusses ordinary cells in detail.\n";
     const BODY_ONLY: &str = "---\ntype: paper\ntitle: Ordinary Cells\n---\n\nThis analysis discusses zebrafish at considerable length.\n";
     const CJK_TITLE: &str = "---\ntype: paper\ntitle: 生命权力研究\n---\n\nOrdinary english content with no overlap.\n";
+    const CJK_THEME: &str = "---\ntype: paper\ntitle: Power Studies\nthemes:\n  - 生命权力研究\n---\n\nUnrelated english body.\n";
 
     #[test]
     fn fast_matches_title_metadata_but_not_body() {
@@ -1556,6 +1560,20 @@ mod search_mode_tests {
         assert!(
             paths_hit.iter().any(|p| p.ends_with("body-only.md")),
             "balanced must also find the body match, got {paths_hit:?}"
+        );
+    }
+
+    #[test]
+    fn fast_matches_cjk_theme_substring() {
+        // themes is a metadata column the Fast FTS filter scopes, so the
+        // substring fallback must also reach it — otherwise a CJK theme that the
+        // unicode61 tokenizer keeps as one token is unreachable in Fast mode.
+        let paths = seed_index(&[("papers/cjk-theme.md", CJK_THEME)]);
+        let hits = search_entries_fast(&paths, &opts("权力", SearchMode::Fast)).unwrap();
+        let paths_hit = hit_paths(&hits);
+        assert!(
+            paths_hit.iter().any(|p| p.ends_with("cjk-theme.md")),
+            "fast must find a CJK theme via metadata substring, got {paths_hit:?}"
         );
     }
 
