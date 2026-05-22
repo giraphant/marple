@@ -200,6 +200,11 @@ export function App() {
   // re-parse what actually changed.
   const entriesRef = useRef<Entry[] | null>(entries);
   entriesRef.current = entries;
+  // Latest tab state, for the cross-page convergence check on focus (QUA-68).
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const activeIndexRef = useRef(activeIndex);
+  activeIndexRef.current = activeIndex;
   const knownMtimesRef = useRef<Map<string, number | null>>(new Map());
   const lastSyncMtimeRef = useRef(0);
   const syncingRef = useRef(false);
@@ -295,6 +300,17 @@ export function App() {
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
       syncFromFiles();
+      // QUA-68: converge the tab set across pages. Tabs persist in shared
+      // localStorage, so another page may have changed them while this one was
+      // unfocused — adopt the authoritative state instead of drifting apart.
+      const incomingTabs = loadTabs();
+      if (JSON.stringify(incomingTabs) !== JSON.stringify(tabsRef.current)) {
+        setTabs(incomingTabs);
+        setActiveIndex(loadActiveIndex(incomingTabs.length));
+      } else {
+        const incomingActive = loadActiveIndex(incomingTabs.length);
+        if (incomingActive !== activeIndexRef.current) setActiveIndex(incomingActive);
+      }
       // Also delta-sync the server FTS so quick search reflects external edits
       // the instant you switch back — best-effort, throttled so rapid window
       // toggles don't hammer it (the background watcher covers steady state).

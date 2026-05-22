@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'preact/hooks';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'preact/hooks';
 import { EditorView } from '@codemirror/view';
 import type { Entry } from '../types';
 import { TYPE_BY_ID } from '../types';
@@ -11,6 +11,7 @@ import { NoteEditor, type EditorThemeConfig } from './NoteEditor';
 import { RightPanel, type PanelHeading } from './RightPanel';
 import { extractHeadings } from '../doc-outline';
 import { computeDocStats } from '../doc-stats';
+import { loadScroll, saveScroll } from '../scroll-store';
 import { Icon } from './Icon';
 import { BodyView } from '../body/BodyView';
 import type { CitationFormat } from '../citation';
@@ -64,6 +65,10 @@ export function DocView({
   // True only after the current doc's body has loaded from disk. Guards against
   // saving an empty body when a load failed or is still in progress.
   const loadedOkRef = useRef(false);
+  // Which doc's body is currently in `body` state. During an entry switch there
+  // is a transient render where `entry` is the new doc but `body` still holds
+  // the old doc's text; scroll restore must not act until these agree.
+  const bodyPathRef = useRef('');
   bodyRef.current = body;
   statusRef.current = saveStatus;
   currentPathRef.current = entry.path;
@@ -129,6 +134,7 @@ export function DocView({
         lastQueuedBodyRef.current = bodyOnly;
         loadedOkRef.current = true;
         bodyRef.current = bodyOnly;
+        bodyPathRef.current = path;
         setBody(bodyOnly);
       } catch {
         if (!cancelled) setLoadError(true);
@@ -241,6 +247,59 @@ export function DocView({
   // (edit mode) — so the 目录 tab can scroll to a heading in either mode.
   const bodyScrollRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
+
+  // --- QUA-68: per-doc read-mode scroll memory ---
+  // The scroll container is reused across docs (no per-doc remount), so without
+  // explicit save/restore the previous doc's pixel offset bleeds onto the next
+  // when switching tabs. Key by path: DocTabs dedupe by path, so per-path ==
+  // per-tab, and revisiting a doc restores where you left off.
+  const restoringScrollRef = useRef(false);
+  const scrollSaveTimerRef = useRef<number | null>(null);
+
+  const onBodyScroll = useCallback(() => {
+    if (restoringScrollRef.current) return;          // ignore the programmatic restore
+    if (scrollSaveTimerRef.current != null) return;  // throttle to one save per window
+    const path = currentPathRef.current;             // attribute to the doc scrolled now
+    scrollSaveTimerRef.current = window.setTimeout(() => {
+      scrollSaveTimerRef.current = null;
+      if (currentPathRef.current !== path) return;   // switched away; leave-save already persisted it
+      const el = bodyScrollRef.current;
+      if (el) saveScroll(path, el.scrollTop);
+    }, 150);
+  }, []);
+
+  // Persist the leaving doc's offset before its body is swapped out. The cleanup
+  // runs while the DOM still shows the old content (and on unmount), so it reads
+  // the right scroll for the doc we're leaving.
+  useEffect(() => {
+    const path = entry.path;
+    return () => {
+      if (scrollSaveTimerRef.current != null) {
+        clearTimeout(scrollSaveTimerRef.current);
+        scrollSaveTimerRef.current = null;
+      }
+      const el = bodyScrollRef.current;
+      if (el) saveScroll(path, el.scrollTop);
+    };
+  }, [entry.path]);
+
+  // Restore this doc's offset once its body has rendered (read mode only).
+  // BodyView renders synchronously from `body`, so by the time loading is false
+  // the container has its final height and the saved offset applies cleanly.
+  useLayoutEffect(() => {
+    if (editable || loading || loadError) return;
+    if (bodyPathRef.current !== entry.path) return; // body still belongs to the previous doc
+    const el = bodyScrollRef.current;
+    if (!el) return;
+    restoringScrollRef.current = true;
+    el.scrollTop = loadScroll(entry.path);
+    const raf = requestAnimationFrame(() => {
+      const el2 = bodyScrollRef.current;
+      if (el2) el2.scrollTop = loadScroll(entry.path); // re-assert after any reflow
+      restoringScrollRef.current = false;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [entry.path, body, loading, loadError, editable]);
 
   const docStats = useMemo(() => computeDocStats(body), [body]);
 
@@ -386,7 +445,7 @@ export function DocView({
                     onSaveShortcut={() => flushSave()}
                     onViewReady={(v) => { editorViewRef.current = v; }}
                   />
-                : <div ref={bodyScrollRef} class="flex-1 overflow-auto scrollbar-thin">
+                : <div ref={bodyScrollRef} onScroll={onBodyScroll} class="flex-1 overflow-auto scrollbar-thin">
                     <BodyView entry={entry} body={body} wikiIndex={wikiIndex} onWikiClick={onWikiClick} />
                   </div>
           }
