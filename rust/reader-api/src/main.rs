@@ -556,12 +556,10 @@ async fn put_vault_file(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rel = format!("vault/{path}");
     let mtime = reader_core::put_markdown(&state.paths, &rel, &body)?;
-    // Update the index immediately for this one file (best-effort: the watcher /
-    // boot reconcile would catch it anyway, but this makes the edit searchable
-    // without the debounce wait).
-    if let Err(e) = reader_core::upsert_entry(&state.paths, &rel) {
-        eprintln!("index upsert failed for {rel}: {e}");
-    }
+    // File-first: the write path never touches the DB. The vault watcher's
+    // debounced reconcile is the single (async) DB writer, so an edit can't
+    // contend with it on SQLite's single-writer lock. Search of the just-edited
+    // entry is briefly stale (~debounce); the UI updates optimistically.
     Ok(Json(json!({
         "ok": true,
         "bytes": body.len(),
@@ -576,9 +574,9 @@ async fn post_vault_note(
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     let (created_path, mtime) =
         reader_core::post_note(&state.paths, &format!("vault/{path}"), &body)?;
-    if let Err(e) = reader_core::upsert_entry(&state.paths, &created_path) {
-        eprintln!("index upsert failed for {created_path}: {e}");
-    }
+    // File-first: no synchronous DB write. The watcher reconciles the new note
+    // into the index asynchronously; the frontend shows it immediately via an
+    // optimistic insert.
     Ok((
         StatusCode::CREATED,
         Json(json!({
@@ -596,9 +594,8 @@ async fn delete_vault_note(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rel = format!("vault/{path}");
     let trash = reader_core::delete_note(&state.paths, &rel)?;
-    if let Err(e) = reader_core::remove_entry(&state.paths, &rel) {
-        eprintln!("index remove failed for {rel}: {e}");
-    }
+    // File-first: no synchronous DB write. The watcher reconciles the removal
+    // asynchronously; the frontend drops it immediately via an optimistic update.
     Ok(Json(json!({ "ok": true, "trash": trash })))
 }
 
