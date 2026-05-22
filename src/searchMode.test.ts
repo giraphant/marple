@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nextSearchMode, SEARCH_MODES, SEARCH_MODE_META } from './searchMode';
+import { nextSearchMode, SEARCH_MODES, SEARCH_MODE_META, sourceBadge } from './searchMode';
 
 describe('nextSearchMode', () => {
   it('cycles fast -> balanced -> deep -> fast', () => {
@@ -18,5 +18,23 @@ describe('nextSearchMode', () => {
       expect(SEARCH_MODE_META[mode].placeholder.length).toBeGreaterThan(0);
       expect(SEARCH_MODE_META[mode].loading.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('sourceBadge', () => {
+  it('badges the vector-distinctive sources', () => {
+    expect(sourceBadge('hybrid')).toEqual({ label: '混合' });
+    expect(sourceBadge('vec')).toEqual({ label: '向量' });
+  });
+
+  it('matches on the leading token so suffixed sources still badge', () => {
+    expect(sourceBadge('hybrid (lex-fallback)')).toEqual({ label: '混合' });
+  });
+
+  it('returns null for plain lexical sources and undefined', () => {
+    for (const s of ['phrase', 'fulltext', 'expanded', 'fuzzy', 'substring']) {
+      expect(sourceBadge(s)).toBeNull();
+    }
+    expect(sourceBadge(undefined)).toBeNull();
   });
 });
