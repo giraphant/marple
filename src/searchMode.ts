@@ -19,6 +19,20 @@ interface SearchModeMeta {
   loading: string;
 }
 
+/** A subtle relevance-source tag for a result row. Only the semantically
+ *  distinctive sources (vector recall / vector+lexical fusion) get a badge —
+ *  plain lexical matches (phrase/fulltext/expanded/fuzzy/substring) return null
+ *  so Fast/Balanced rows stay clean and Deep visibly reveals what vectors added. */
+export function sourceBadge(source: string | undefined): { label: string } | null {
+  if (!source) return null;
+  // Deep can suffix a marker (e.g. "fulltext (lex-fallback:no-vectors)"); match
+  // on the leading token.
+  const head = source.split(' ')[0];
+  if (head === 'hybrid') return { label: '混合' };
+  if (head === 'vec') return { label: '向量' };
+  return null;
+}
+
 export const SEARCH_MODE_META: Record<SearchMode, SearchModeMeta> = {
   fast: {
     label: '快速',

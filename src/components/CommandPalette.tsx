@@ -3,7 +3,7 @@ import type { Entry, EntryType, TypeMeta } from '../types';
 import type { SearchDocument } from '../search';
 import { searchDocuments } from '../search';
 import { searchIndex } from '../api';
-import { SEARCH_MODES, SEARCH_MODE_META, type SearchMode } from '../searchMode';
+import { SEARCH_MODES, SEARCH_MODE_META, sourceBadge, type SearchMode } from '../searchMode';
 import { TypeIcon } from './TypeIcon';
 import { Icon } from './Icon';
 
@@ -47,6 +47,8 @@ export function CommandPalette({
   const [serverSearch, setServerSearch] = useState<{
     query: string;
     entries: Entry[];
+    /** path → match source ("hybrid"/"vec"/"phrase"/…), for the relevance badge. */
+    sourceByPath: Record<string, string>;
     loading: boolean;
     error: string | null;
   } | null>(null);
@@ -72,15 +74,18 @@ export function CommandPalette({
     setServerSearch(prev => (
       prev?.query === q
         ? { ...prev, loading: true, error: null }
-        : { query: q, entries: [], loading: true, error: null }
+        : { query: q, entries: [], sourceByPath: {}, loading: true, error: null }
     ));
 
     const timer = window.setTimeout(() => {
       searchIndex({ q, limit: 300, mode: searchMode, signal: controller.signal })
         .then(items => {
+          const sourceByPath: Record<string, string> = {};
+          for (const item of items) sourceByPath[item.entry.path] = item.source;
           setServerSearch({
             query: q,
             entries: items.map(item => item.entry),
+            sourceByPath,
             loading: false,
             error: null,
           });
@@ -90,6 +95,7 @@ export function CommandPalette({
           setServerSearch({
             query: q,
             entries: [],
+            sourceByPath: {},
             loading: false,
             error: err instanceof Error ? err.message : String(err),
           });
@@ -154,6 +160,13 @@ export function CommandPalette({
   // across section boundaries. Section headers and "view all" links are
   // skipped by this index.
   const flatResults = useMemo(() => sections.flatMap(s => s.top), [sections]);
+
+  // Per-path match source, only when the displayed sections come from a settled
+  // server response (the local fallback has no source signal).
+  const serverSources =
+    serverSearch?.query === draftQuery.trim() && !serverSearch.loading && !serverSearch.error
+      ? serverSearch.sourceByPath
+      : null;
 
   if (!open) return null;
 
@@ -280,8 +293,18 @@ export function CommandPalette({
                           >
                             <TypeIcon type={e.type} scale={1.2} />
                             <div class="flex-1 min-w-0">
-                              <div class="truncate text-primary">
-                                {e.title || e.path.split('/').pop()!.replace(/\.md$/, '')}
+                              <div class="flex items-center gap-1.5">
+                                <span class="truncate text-primary">
+                                  {e.title || e.path.split('/').pop()!.replace(/\.md$/, '')}
+                                </span>
+                                {(() => {
+                                  const badge = serverSources && sourceBadge(serverSources[e.path]);
+                                  return badge ? (
+                                    <span class="shrink-0 text-[10px] px-1.5 py-px rounded-md bg-accent-bg text-accent-text font-medium">
+                                      {badge.label}
+                                    </span>
+                                  ) : null;
+                                })()}
                               </div>
                               <div class="truncate text-[11px] text-muted">
                                 {sec.meta.label}

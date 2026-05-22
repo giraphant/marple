@@ -196,6 +196,15 @@ fn ensure_index_schema(paths: &ReaderPaths) -> ReaderResult<()> {
     Ok(())
 }
 
+/// Column list shared by every `entries` read so `row_to_entry` (which reads by
+/// name) always sees the same set.
+const ENTRY_SELECT_COLUMNS: &str = r#"
+  path, type, book, title, title_en, title_cn, author, year_json, rating_json,
+  rating_score, themes_json, topic, source, doi, publisher, isbn, translation_title_cn,
+  translation_douban_url, chapters_analyzed, annotates, created, pdf_slug, has_pdf,
+  mtime, preview, body_len, added
+"#;
+
 pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
     if !paths.index_db.is_file() {
         return Err(ReaderError::NotFound(
@@ -209,13 +218,9 @@ pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
     // Wait briefly rather than erroring if an incremental write holds the lock.
     conn.busy_timeout(std::time::Duration::from_millis(5000))?;
 
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
         r#"
-        SELECT
-          path, type, book, title, title_en, title_cn, author, year_json, rating_json,
-          rating_score, themes_json, topic, source, doi, publisher, isbn, translation_title_cn,
-          translation_douban_url, chapters_analyzed, annotates, created, pdf_slug, has_pdf,
-          mtime, preview, body_len, added
+        SELECT {ENTRY_SELECT_COLUMNS}
         FROM entries
         ORDER BY
           type,
@@ -223,11 +228,41 @@ pub fn load_entries(paths: &ReaderPaths) -> ReaderResult<Vec<Entry>> {
           lower(coalesce(title, path)),
           coalesce(title, path)
         "#,
-    )?;
+    ))?;
     let entries = stmt
         .query_map([], row_to_entry)?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(entries)
+}
+
+/// Hydrate only the entries whose path is in `want`, keyed by path. The search
+/// hot path needs metadata for the handful of candidate paths it scored, not the
+/// whole ~14k-row table — loading every row (incl. preview text) on each query
+/// was the mode-independent floor that made all three modes feel equally slow.
+/// Uses SQLite's `json_each` so a large candidate set never hits the bound-
+/// parameter limit. Caller is expected to have already run `ensure_index_schema`.
+fn load_entries_by_paths(
+    paths: &ReaderPaths,
+    want: &[String],
+) -> ReaderResult<HashMap<String, Entry>> {
+    if want.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let conn = Connection::open_with_flags(&paths.index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
+    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    let want_json = serde_json::to_string(want).unwrap_or_else(|_| "[]".to_string());
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {ENTRY_SELECT_COLUMNS} FROM entries
+         WHERE path IN (SELECT value FROM json_each(?1))",
+    ))?;
+    let rows = stmt.query_map([want_json], row_to_entry)?;
+    let mut map = HashMap::with_capacity(want.len());
+    for row in rows {
+        let entry = row?;
+        map.insert(entry.path.clone(), entry);
+    }
+    Ok(map)
 }
 
 pub fn search_entries(
@@ -314,7 +349,14 @@ fn search_entries_fast(
         }
     }
 
-    collect_metadata_substring_candidates(&conn, query, limit * 2, 0.45, &mut candidates)?;
+    // Metadata substring is the Fast mode's CJK / partial-match path, but it is a
+    // full-table `instr()` scan — running it on every query made Fast slower than
+    // Balanced (which gates its own substring fallback). Gate it the same way:
+    // only when the FTS tiers under-filled the limit AND the query actually needs
+    // it (CJK / short tokens the unicode61 tokenizer can't split, or no FTS hits).
+    if candidates.len() < limit && should_run_substring_fallback(query, &tokens, candidates.is_empty()) {
+        collect_metadata_substring_candidates(&conn, query, limit * 2, 0.45, &mut candidates)?;
+    }
 
     finalize_hits(paths, options, candidates, limit)
 }
@@ -398,11 +440,8 @@ fn finalize_hits(
     candidates: HashMap<String, SearchCandidate>,
     limit: usize,
 ) -> ReaderResult<Vec<SearchHit>> {
-    let entries = load_entries(paths)?;
-    let entries_by_path = entries
-        .into_iter()
-        .map(|entry| (entry.path.clone(), entry))
-        .collect::<HashMap<_, _>>();
+    let cand_paths = candidates.keys().cloned().collect::<Vec<_>>();
+    let entries_by_path = load_entries_by_paths(paths, &cand_paths)?;
 
     let mut hits = candidates
         .into_values()
@@ -571,8 +610,12 @@ fn search_entries_hybrid(
         .block_on(model.embed_query(&options.query))
         .map_err(ReaderError::Other)?;
 
-    let vec_hits =
-        crate::vector::vec_search(&vec_conn, &qvec, 30, accept).map_err(ReaderError::Other)?;
+    // Recall width independent of the page size: a small `limit` (e.g. 30) starved
+    // the vector side so Deep barely differed from Balanced. Always pull a decent
+    // vec pool, then let RRF + the final truncation decide what surfaces.
+    let vec_k = options.limit.max(50);
+    let vec_hits = crate::vector::vec_search(&vec_conn, &qvec, vec_k, accept)
+        .map_err(ReaderError::Other)?;
 
     let lex_ranked: Vec<RankedItem> = lex_hits
         .iter()

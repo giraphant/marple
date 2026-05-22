@@ -240,7 +240,10 @@ impl Default for ModelHandle {
 
 use rusqlite::Connection;
 
-const COSINE_FLOOR: f64 = 0.45;
+// Real concept/cross-lingual matches sit at cosine 0.50-0.65; typos fall below
+// ~0.48 (spike-prod-stack.md). 0.40 keeps the typo filter while letting a bit
+// more genuine semantic/cross-lingual recall through (QUA-70: recall-biased Deep).
+const COSINE_FLOOR: f64 = 0.40;
 const VEC_OVERFETCH_STAGES: &[usize] = &[30, 60, 120, 240];
 
 #[derive(Debug, Clone)]
