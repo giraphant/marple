@@ -3569,7 +3569,6 @@ dependencies = [
 name = "reader-tauri"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "reader-core",
  "serde",
  "serde_json",

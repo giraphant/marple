@@ -11,7 +11,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 reader-core = { path = "../rust/reader-core" }
-anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tauri = { version = "2", features = [] }
