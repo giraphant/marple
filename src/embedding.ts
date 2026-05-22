@@ -45,6 +45,6 @@ export function formatEmbedStatus(s: EmbedStatus): EmbedDisplay {
       if (s.vectorsExist) {
         return { tone: 'done', label: `已构建 ${s.vectorsCount ?? 0} 条语义向量` };
       }
-      return { tone: 'idle', label: '未构建（语义 / hybrid 搜索暂不可用）' };
+      return { tone: 'idle', label: '未构建（深度搜索暂不可用）' };
   }
 }

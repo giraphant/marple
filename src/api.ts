@@ -1,6 +1,9 @@
 import type { Entry } from './types';
 import type { EmbedStatus } from './embedding';
+import type { SearchMode } from './searchMode';
 import { parseFile, serializeFile } from './frontmatter';
+
+export type { SearchMode };
 
 const NOTES_DIR = 'vault/notes/';
 
@@ -85,8 +88,6 @@ export interface SearchHit {
   snippet?: string | null;
   source: string;
 }
-
-export type SearchMode = 'lex' | 'hybrid';
 
 export interface SearchParams {
   q: string;

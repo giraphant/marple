@@ -19,6 +19,7 @@ import {
   newIdeaDraft, ideaEntryFromDraft, reindex, reconcile, fetchIndex, searchIndex as searchServerIndex,
   listFiles, fetchEntry, fetchTranslationSlugs,
 } from './api';
+import { nextSearchMode, type SearchMode } from './searchMode';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
 import { loadTabs, loadActiveIndex, saveTabs, saveActiveIndex, defaultTab } from './session';
 import { bumpVaultVersion, subscribeVaultChanges } from './sync';
@@ -69,9 +70,9 @@ export function App() {
   // Sidebar 🔍 leave this null → strict sidebar order.
   const [paletteSourceType, setPaletteSourceType] = useState<EntryType | null>(null);
   const [reindexing, setReindexing] = useState(false);
-  const [searchMode, setSearchMode] = useState<'lex' | 'hybrid'>('lex');
+  const [searchMode, setSearchMode] = useState<SearchMode>('balanced');
   const toggleSearchMode = useCallback(() => {
-    setSearchMode(prev => (prev === 'lex' ? 'hybrid' : 'lex'));
+    setSearchMode(prev => nextSearchMode(prev));
   }, []);
   const [listSearch, setListSearch] = useState<{
     key: string;
@@ -880,6 +881,7 @@ export function App() {
         query={query}
         searchMode={searchMode}
         onToggleSearchMode={toggleSearchMode}
+        onSetSearchMode={setSearchMode}
         onClose={() => setPaletteOpen(false)}
         onPick={openDoc}
         onViewAll={onViewAll}

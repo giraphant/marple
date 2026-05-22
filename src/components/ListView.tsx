@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { Entry, EntryType } from '../types';
 import { TYPE_BY_ID } from '../types';
+import type { SearchMode } from '../searchMode';
 import { SORT_FIELDS, defaultDirFor, type SortClause, type SortField } from '../list-sort';
 import {
   FILTER_FIELDS, FILTER_FIELD_BY_ID, makeClause, clauseReady, clauseLabel,
@@ -35,7 +36,7 @@ interface Props {
   limit: number;
   searchLoading: boolean;
   searchError: string | null;
-  searchMode: 'lex' | 'hybrid';
+  searchMode: SearchMode;
   onToggleSearchMode: () => void;
   onOpenSearch: () => void;
   onClearQuery: () => void;

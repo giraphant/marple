@@ -234,9 +234,9 @@ function EmbeddingsRebuild() {
 
   return (
     <div class="text-[12px] leading-snug">
-      <div class="text-primary font-medium">语义向量（hybrid 搜索）</div>
+      <div class="text-primary font-medium">语义向量（深度搜索）</div>
       <div class="text-muted mt-0.5 mb-2">
-        普通"重建索引"快且不含向量。语义/hybrid 搜索需要单独构建向量，会下载 ~2.3GB 模型、
+        普通"重建索引"快且不含向量。深度搜索需要单独构建向量，会下载 ~2.3GB 模型、
         可能数分钟；构建在后台进行，可关闭设置继续使用。与元数据索引分离，重建元数据不会清掉它。
       </div>
       <button

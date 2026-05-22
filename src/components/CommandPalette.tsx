@@ -3,6 +3,7 @@ import type { Entry, EntryType, TypeMeta } from '../types';
 import type { SearchDocument } from '../search';
 import { searchDocuments } from '../search';
 import { searchIndex } from '../api';
+import { SEARCH_MODES, SEARCH_MODE_META, type SearchMode } from '../searchMode';
 import { TypeIcon } from './TypeIcon';
 import { Icon } from './Icon';
 
@@ -18,9 +19,10 @@ interface Props {
   /** Initial query. The palette keeps keystrokes local and only commits
    *  through `onViewAll`, avoiding background ListView recomputation. */
   query: string;
-  /** "lex" (快速) or "hybrid" (深度). Tab toggles in-palette. */
-  searchMode: 'lex' | 'hybrid';
+  /** 快速 / 平衡 / 深度. Tab cycles in-palette; the segmented control sets directly. */
+  searchMode: SearchMode;
   onToggleSearchMode: () => void;
+  onSetSearchMode: (mode: SearchMode) => void;
   onClose: () => void;
   /** Pick a single result. modifiers.meta → open in a new tab. */
   onPick: (entry: Entry, modifiers: { meta: boolean }) => void;
@@ -37,7 +39,7 @@ interface Section {
 }
 
 export function CommandPalette({
-  open, documents, typeOrder, sourceType, query, searchMode, onToggleSearchMode,
+  open, documents, typeOrder, sourceType, query, searchMode, onToggleSearchMode, onSetSearchMode,
   onClose, onPick, onViewAll,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -198,23 +200,29 @@ export function CommandPalette({
       >
         <div class="flex items-center gap-2 px-3 border-b border-base">
           <Icon name="magnifying-glass" size={16} class="text-muted shrink-0" />
-          <span
-            class={`text-[11px] px-1.5 py-0.5 rounded shrink-0 cursor-pointer select-none ${
-              searchMode === 'hybrid'
-                ? 'bg-accent-bg text-accent-text'
-                : 'bg-surface-2 text-secondary'
-            }`}
+          <div
+            class="flex items-center gap-0.5 bg-surface-2 rounded-lg p-0.5 text-[11px] shrink-0 select-none"
             title="Tab 切换模式"
-            onClick={onToggleSearchMode}
           >
-            {searchMode === 'hybrid' ? '深度' : '快速'}
-          </span>
+            {SEARCH_MODES.map(mode => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => onSetSearchMode(mode)}
+                class={`px-2 py-0.5 rounded-md transition ${
+                  searchMode === mode
+                    ? 'bg-accent-bg text-accent-text font-medium shadow-soft-sm'
+                    : 'text-secondary hover:text-primary'
+                }`}
+              >
+                {SEARCH_MODE_META[mode].label}
+              </button>
+            ))}
+          </div>
           <input
             ref={inputRef}
             type="search"
-            placeholder={searchMode === 'lex'
-              ? '快速检索 标题/作者/主题/正文…  Tab 切深度 · ⏎ 打开 · Esc 关闭'
-              : '深度检索 跨语言 / 概念 / 自然语言…  Tab 切回快速 · ⏎ 打开 · Esc 关闭'}
+            placeholder={SEARCH_MODE_META[searchMode].placeholder}
             value={draftQuery}
             onInput={e => setDraftQuery((e.target as HTMLInputElement).value)}
             class="flex-1 py-3 bg-transparent text-[14px] focus:outline-none"
@@ -230,7 +238,7 @@ export function CommandPalette({
           )}
           {serverSearch?.query === draftQuery.trim() && serverSearch.loading && (
             <span class="text-[11px] text-muted shrink-0">
-              {searchMode === 'hybrid' ? '深度…（首次加载语义模型 ~2s）' : '全文…'}
+              {SEARCH_MODE_META[searchMode].loading}
             </span>
           )}
           {serverSearch?.query === draftQuery.trim() && serverSearch.error && (
