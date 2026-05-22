@@ -10,6 +10,7 @@ const cachePath = path.join(repoRoot, '.quasi/localise/cndouban.json');
 const reviewPath = path.join(repoRoot, '.quasi/localise/cn-review.json');
 const booksRoot = path.join(repoRoot, 'vault/books');
 const force = process.argv.includes('--force');
+const dryRun = process.argv.includes('--dry-run');
 
 async function main() {
   if (!await exists(cachePath)) {
@@ -70,7 +71,7 @@ async function main() {
         skippedExisting += 1;
         continue;
       }
-      await fs.writeFile(overview.path, nextText, 'utf8');
+      if (!dryRun) await fs.writeFile(overview.path, nextText, 'utf8');
       highAssociated += 1;
       continue;
     }
@@ -100,7 +101,7 @@ async function main() {
     }
   }
 
-  if (reviewQueue.length || unmatched.length) {
+  if (!dryRun && (reviewQueue.length || unmatched.length)) {
     reviewQueue.sort((a, b) => b.match.score - a.match.score);
     await fs.mkdir(path.dirname(reviewPath), { recursive: true });
     await fs.writeFile(reviewPath, `${JSON.stringify({
@@ -111,6 +112,7 @@ async function main() {
     }, null, 2)}\n`, 'utf8');
   }
 
+  if (dryRun) console.log('[dry-run] no files written.');
   console.log(`${highAssociated} high auto-associated, ${reviewQueued} queued for review (medium/low), ${skippedNone} skipped (none).`);
   if (skippedExisting) console.log(`${skippedExisting} high-confidence matches skipped because localisations.zh already exists; pass --force to replace zh[0].`);
   if (skippedUnmatched) console.log(`${skippedUnmatched} cache entries could not be matched to a book overview.`);
