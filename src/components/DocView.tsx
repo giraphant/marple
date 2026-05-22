@@ -22,7 +22,12 @@ interface Props {
   authorIndex: Map<string, Entry[]>;
   annotationIndex: Map<string, Entry[]>;
   wikiIndex: Map<string, Entry>;
+  /** When true the in-app CodeMirror editor is mounted. False in external-editor
+   * mode — the body renders read-only and editing happens via {@link onOpenInEditor}. */
   editable: boolean;
+  /** QUA-72: this entry is editable but the user chose to edit externally, so the
+   * header shows a 「在外部编辑器打开」 action instead of an inline editor. */
+  canEditExternally?: boolean;
   editorTheme: EditorThemeConfig;
   citationFormat: CitationFormat;
   /** Whether this entry has a translated PDF (gates the 「打开译本」 action). */
@@ -31,6 +36,7 @@ interface Props {
   onThemeClick: (theme: string, fromType?: Entry['type']) => void;
   onUpdated: (updated: Entry) => void;
   onCreateAnnotation: (target: Entry) => Promise<void>;
+  onOpenInEditor?: (entry: Entry) => void;
   onDelete: (entry: Entry) => Promise<void>;
 }
 
@@ -39,9 +45,9 @@ type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict';
 const SAVE_DEBOUNCE_MS = 1500;
 
 export function DocView({
-  entry, entries, authorIndex, annotationIndex, wikiIndex, editable, editorTheme,
+  entry, entries, authorIndex, annotationIndex, wikiIndex, editable, canEditExternally, editorTheme,
   citationFormat, hasTranslation,
-  onNavigate, onThemeClick, onUpdated, onCreateAnnotation, onDelete,
+  onNavigate, onThemeClick, onUpdated, onCreateAnnotation, onOpenInEditor, onDelete,
 }: Props) {
   const [loadError, setLoadError] = useState(false);
   const [body, setBody] = useState('');
@@ -392,6 +398,17 @@ export function DocView({
 
         {(entry.type === 'paper-analysis' || entry.type === 'book-overview') && (
           <ActionsRow entry={entry} defaultFormat={citationFormat} hasTranslation={hasTranslation} />
+        )}
+
+        {canEditExternally && onOpenInEditor && (
+          <button
+            onClick={() => onOpenInEditor(entry)}
+            class="shrink-0 inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
+            title="用外部编辑器打开这个文件（在设置里选择编辑器）"
+          >
+            <Icon name="pencil" size={13} />
+            在外部编辑器打开
+          </button>
         )}
 
         {editable && (saveStatus === 'conflict' ? (

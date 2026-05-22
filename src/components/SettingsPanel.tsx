@@ -1,4 +1,4 @@
-import type { JSX } from 'preact';
+import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { Settings, FontFamily, Theme } from '../settings';
 import { FONT_SIZE_OPTIONS, LINE_HEIGHT_OPTIONS, fontStack } from '../settings';
@@ -23,6 +23,17 @@ const FONT_PRESETS: { id: FontFamily; label: string; hint: string }[] = [
   { id: 'sans',  label: '苹方 / 无衬线', hint: '屏幕显示最稳，默认' },
   { id: 'serif', label: '宋体 / 衬线',   hint: '印刷感，长文阅读' },
   { id: 'mono',  label: '等宽',          hint: '代码 / 草稿感' },
+];
+
+// Common macOS editors. The value is the application name passed to `open -a`;
+// '' means the OS default `.md` handler. Free text below covers anything else.
+const EDITOR_PRESETS: { app: string; label: string }[] = [
+  { app: '',                    label: '系统默认' },
+  { app: 'Visual Studio Code',  label: 'VS Code' },
+  { app: 'Typora',              label: 'Typora' },
+  { app: 'Obsidian',            label: 'Obsidian' },
+  { app: 'Ulysses',             label: 'Ulysses' },
+  { app: 'iA Writer',           label: 'iA Writer' },
 ];
 
 export function SettingsPanel({ settings, onChange, onClose }: Props) {
@@ -114,6 +125,31 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
           <label class="flex items-start gap-2 cursor-pointer px-2 py-1.5 -mx-2 rounded hover:bg-page">
             <input
               type="checkbox"
+              checked={settings.useExternalEditor}
+              onChange={e => set('useExternalEditor', (e.target as HTMLInputElement).checked)}
+              class="mt-0.5"
+            />
+            <div class="text-[12px] leading-snug">
+              <div class="text-primary font-medium">使用外部编辑器</div>
+              <div class="text-muted mt-0.5">
+                开启后笔记不再用内置网页编辑器，而是只读渲染 + 「在外部编辑器打开」；
+                新建笔记会直接用下方编辑器打开文件。关掉则回到内置编辑器。
+              </div>
+            </div>
+          </label>
+
+          {settings.useExternalEditor && (
+            <Field label="编辑器">
+              <EditorPicker
+                value={settings.externalEditor}
+                onChange={v => set('externalEditor', v)}
+              />
+            </Field>
+          )}
+
+          <label class="flex items-start gap-2 cursor-pointer px-2 py-1.5 -mx-2 rounded hover:bg-page">
+            <input
+              type="checkbox"
               checked={settings.allowEditLLMBody}
               onChange={e => set('allowEditLLMBody', (e.target as HTMLInputElement).checked)}
               class="mt-0.5"
@@ -121,7 +157,7 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
             <div class="text-[12px] leading-snug">
               <div class="text-primary font-medium">允许编辑 LLM 生成的正文</div>
               <div class="text-muted mt-0.5">
-                paper / book / author / topic / chapter 的 body 也进入编辑器。
+                paper / book / author / topic / chapter 的 body 也可编辑（内置或外部编辑器）。
                 默认关闭，避免误改 LLM 输出。下次 reprocess 仍会覆盖。
               </div>
             </div>
@@ -260,7 +296,48 @@ function EmbeddingsRebuild() {
   );
 }
 
-function Section({ title, children }: { title: string; children: JSX.Element | JSX.Element[] }) {
+/** Pick the external editor: preset chips (incl. 系统默认) plus a free-text app
+ *  name for anything not listed. The chosen value is the macOS application name
+ *  passed to `open -a` ('' = OS default). The chip highlights when it matches the
+ *  current value; typing a custom name clears the highlight unless it matches. */
+function EditorPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const isPreset = EDITOR_PRESETS.some(p => p.app === value);
+  return (
+    <div class="space-y-2">
+      <div class="flex flex-wrap gap-1">
+        {EDITOR_PRESETS.map(p => {
+          const active = p.app === value;
+          return (
+            <button
+              key={p.app || 'default'}
+              onClick={() => onChange(p.app)}
+              class={`text-[12px] px-2.5 py-1 rounded border transition ${
+                active
+                  ? 'bg-accent-bg text-accent-text border-accent'
+                  : 'bg-surface text-secondary border-base hover:border-strong'
+              }`}
+            >{p.label}</button>
+          );
+        })}
+      </div>
+      <input
+        type="text"
+        value={value}
+        spellcheck={false}
+        placeholder="自定义应用名（如 Sublime Text、Zed、Cursor）"
+        onInput={e => onChange((e.currentTarget as HTMLInputElement).value)}
+        class={`w-full text-[12px] px-2 py-1.5 rounded border bg-surface text-primary outline-none transition ${
+          !isPreset && value ? 'border-accent' : 'border-base focus:border-strong'
+        }`}
+      />
+      <div class="text-[11px] text-muted">
+        macOS 用应用名（`open -a`）；留空用系统默认 `.md` 程序。改动立即生效，无需重启。
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: ComponentChildren }) {
   return (
     <section class="px-5 py-4 border-b border-base last:border-b-0">
       <div class="text-[10px] uppercase tracking-wider text-muted font-semibold mb-3">{title}</div>
@@ -269,7 +346,7 @@ function Section({ title, children }: { title: string; children: JSX.Element | J
   );
 }
 
-function Field({ label, children }: { label: string; children: JSX.Element | JSX.Element[] }) {
+function Field({ label, children }: { label: string; children: ComponentChildren }) {
   return (
     <div class="grid grid-cols-[72px_1fr] gap-3 items-start">
       <div class="text-[12px] text-secondary pt-1">{label}</div>

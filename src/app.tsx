@@ -17,7 +17,7 @@ import { TabBar } from './components/TabBar';
 import {
   postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
   newIdeaDraft, ideaEntryFromDraft, reindex, reconcile, fetchIndex, searchIndex as searchServerIndex,
-  listFiles, fetchEntry, fetchTranslationSlugs,
+  listFiles, fetchEntry, fetchTranslationSlugs, openInEditor,
 } from './api';
 import { nextSearchMode, type SearchMode } from './searchMode';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
@@ -722,6 +722,18 @@ export function App() {
     bumpVaultVersion();
   }, []);
 
+  // QUA-72: after creating the file, open it in the external editor when that
+  // mode is on — best-effort, so a launch failure still leaves the note created
+  // and opened in its (read-only) reader tab.
+  const maybeOpenExternally = useCallback(async (path: string) => {
+    if (!settings.useExternalEditor) return;
+    try {
+      await openInEditor(path, settings.externalEditor);
+    } catch (e) {
+      window.alert('在外部编辑器打开失败：' + (e instanceof Error ? e.message : String(e)));
+    }
+  }, [settings.useExternalEditor, settings.externalEditor]);
+
   const onCreateAnnotation = useCallback(async (target: Entry) => {
     const { path, body, title } = newAnnotationDraft(target);
     await postEntryText(path, body);
@@ -729,7 +741,8 @@ export function App() {
     setEntries(prev => prev ? [...prev, draftEntry] : prev);
     bumpVaultVersion();
     openInNewTab({ kind: 'doc', path });
-  }, [openInNewTab]);
+    void maybeOpenExternally(path);
+  }, [openInNewTab, maybeOpenExternally]);
 
   const onNewIdeaNote = useCallback(async () => {
     try {
@@ -739,10 +752,11 @@ export function App() {
       setEntries(prev => prev ? [...prev, draft] : prev);
       bumpVaultVersion();
       openInNewTab({ kind: 'doc', path });
+      void maybeOpenExternally(path);
     } catch (e) {
       window.alert('新建 note 失败：' + (e instanceof Error ? e.message : String(e)));
     }
-  }, [openInNewTab]);
+  }, [openInNewTab, maybeOpenExternally]);
 
   const onDelete = useCallback(async (target: Entry) => {
     await deleteEntry(target.path);
@@ -767,9 +781,24 @@ export function App() {
     });
   }, []);
 
+  // An entry is "editable" if it's a note, or any generated body when the user
+  // opted in. QUA-72 then splits that into two paths: in-app CodeMirror vs. the
+  // external editor. When useExternalEditor is on, the in-app editor is never
+  // mounted (read-only render + "open externally" instead).
   const editable = activeDocEntry
     ? (activeDocEntry.type === 'note' || settings.allowEditLLMBody)
     : false;
+  const editInApp = editable && !settings.useExternalEditor;
+  const canEditExternally = editable && settings.useExternalEditor;
+
+  const onOpenInEditor = useCallback(async (target: Entry) => {
+    try {
+      await openInEditor(target.path, settings.externalEditor);
+    } catch (e) {
+      window.alert('在外部编辑器打开失败：' + (e instanceof Error ? e.message : String(e)));
+    }
+  }, [settings.externalEditor]);
+
   // Editor's reactive surface is just dark/light — font face & size flow
   // in through CSS vars on <html>, so changing them doesn't rebuild the
   // editor (preserves caret / undo / scroll).
@@ -854,7 +883,8 @@ export function App() {
                 authorIndex={authorIndex}
                 annotationIndex={annotationIndex}
                 wikiIndex={wikiIndex}
-                editable={editable}
+                editable={editInApp}
+                canEditExternally={canEditExternally}
                 editorTheme={editorTheme}
                 citationFormat={settings.citationFormat}
                 hasTranslation={translationSlugs.has(activeDocEntry.pdf_slug ?? '')}
@@ -862,6 +892,7 @@ export function App() {
                 onThemeClick={applyThemeFilter}
                 onUpdated={onUpdated}
                 onCreateAnnotation={onCreateAnnotation}
+                onOpenInEditor={onOpenInEditor}
                 onDelete={onDelete}
               />
             )

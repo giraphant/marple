@@ -11,7 +11,7 @@ describe('openInEditor (QUA-72)', () => {
     await openInEditor('vault/notes/hello.md', 'Visual Studio Code');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('/api/open-in-editor');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toEqual({
