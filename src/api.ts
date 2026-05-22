@@ -78,6 +78,10 @@ export async function listFiles(since?: number): Promise<VaultFilesResult> {
 /** Live-parse one vault file's metadata straight from disk (no DB). Returns
  *  null when the file is missing or has no usable type (not a renderable entry). */
 export async function fetchEntry(path: string): Promise<Entry | null> {
+  if (isTauri()) {
+    const json = await invoke<{ entry?: Entry | null }>('entry', { path });
+    return json.entry ?? null;
+  }
   const r = await fetch('/api/entry?path=' + encodeURIComponent(path));
   if (!r.ok) {
     const msg = await r.text().catch(() => '');

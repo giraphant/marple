@@ -21,11 +21,17 @@ fn index(paths: tauri::State<ReaderPaths>) -> Result<serde_json::Value, String> 
     Ok(serde_json::json!({ "items": items }))
 }
 
+#[tauri::command]
+fn entry(paths: tauri::State<ReaderPaths>, path: String) -> Result<serde_json::Value, String> {
+    let entry = reader_core::parse_entry(&paths, &path).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "entry": entry }))
+}
+
 fn main() {
     let paths = ReaderPaths::from_reader_root(reader_root()).expect("init reader paths");
     tauri::Builder::default()
         .manage(paths)
-        .invoke_handler(tauri::generate_handler![index])
+        .invoke_handler(tauri::generate_handler![index, entry])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

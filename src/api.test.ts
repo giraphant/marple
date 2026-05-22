@@ -37,3 +37,21 @@ describe('fetchIndex', () => {
     expect(out).toEqual([{ path: 'b.md' }]);
   });
 });
+
+import { fetchEntry } from './api';
+
+describe('fetchEntry', () => {
+  it('uses invoke("entry", {path}) under Tauri', async () => {
+    (isTauri as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (invoke as ReturnType<typeof vi.fn>).mockResolvedValue({ entry: { path: 'x.md' } });
+    const out = await fetchEntry('x.md');
+    expect(invoke).toHaveBeenCalledWith('entry', { path: 'x.md' });
+    expect(out).toEqual({ path: 'x.md' });
+  });
+
+  it('returns null when invoke yields no entry', async () => {
+    (isTauri as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (invoke as ReturnType<typeof vi.fn>).mockResolvedValue({ entry: null });
+    expect(await fetchEntry('missing.md')).toBeNull();
+  });
+});
