@@ -23,10 +23,18 @@ import { nextSearchMode, type SearchMode } from './searchMode';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
 import { loadTabs, loadActiveIndex, saveTabs, saveActiveIndex, defaultTab } from './session';
 import { bumpVaultVersion, subscribeVaultChanges } from './sync';
+import { mapPool } from './map-pool';
 
 const MAX_TABS = 16;
 const MAX_HISTORY = 50;
 const DEFAULT_TYPE: EntryType = 'paper-analysis';
+
+/** Max concurrent /api/entry fetches during a vault sync. Browsers cap a host at
+ *  ~6 HTTP/1.1 connections; firing hundreds of fetches at once both fails with
+ *  ERR_INSUFFICIENT_RESOURCES and starves user-initiated requests (a click on
+ *  "open in editor" would queue behind the whole backlog). Capping below the
+ *  limit keeps connections free for those clicks. */
+const SYNC_FETCH_CONCURRENCY = 5;
 
 /** Push a new content to a tab's history at `cursor + 1`, truncating any
  *  forward history (browser-style). No-op if it's the same as current. */
@@ -233,10 +241,13 @@ export function App() {
         // null-parses (non-entries), and record the mtime we processed.
         const processFiles = async (files: { path: string; mtime: number | null }[]) => {
           const toParse = files.filter(f => !known.has(f.path) || known.get(f.path) !== f.mtime);
-          const parsed = await Promise.all(toParse.map(async f => {
+          // Bounded concurrency: a large sync (e.g. after a git pull or a stale
+          // index) can have thousands of changed files; firing them all at once
+          // saturates the browser connection pool and stalls user clicks.
+          const parsed = await mapPool(toParse, SYNC_FETCH_CONCURRENCY, async f => {
             try { return [f, await fetchEntry(f.path)] as const; }
             catch { return [f, undefined] as const; } // fetch failed → leave as-is
-          }));
+          });
           for (const [f, entry] of parsed) {
             if (entry === undefined) continue;
             known.set(f.path, f.mtime);
