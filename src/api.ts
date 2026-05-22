@@ -192,6 +192,22 @@ export async function openPdfExternal(slug: string): Promise<void> {
   }
 }
 
+/** Ask the backend to open a vault markdown file in the chosen external editor
+ *  (QUA-72). `app` is the editor app name (macOS `open -a`) / binary (Linux);
+ *  empty string opens with the OS default `.md` handler. The browser can't launch
+ *  native apps, so reader-api does it (no shell — no injection from `app`). */
+export async function openInEditor(path: string, app: string): Promise<void> {
+  const r = await fetch('/api/open-in-editor', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, app }),
+  });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`open in editor failed: ${r.status} ${msg}`);
+  }
+}
+
 /** Slugs that have a translated PDF under processing/translations/<slug>-zh.pdf.
  *  Fetched once on boot; used to decide whether to show the 「打开译本」 button.
  *  Read live by the backend, so it reflects newly-added translations on reload. */

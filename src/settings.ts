@@ -12,6 +12,18 @@ export interface Settings {
    * Default false — protects against accidental edits to generated material. */
   allowEditLLMBody: boolean;
 
+  /** QUA-72: externalize note authoring. When true, editable docs are NOT mounted
+   * in the in-app CodeMirror editor — they render read-only with an "open in
+   * external editor" action, and creating a note opens it in {@link externalEditor}.
+   * Default true: the web editor proved unreliable, so external is the primary
+   * path; toggle off to fall back to in-app editing during migration. */
+  useExternalEditor: boolean;
+
+  /** The external editor to open files with. On macOS this is an application name
+   * passed to `open -a` (e.g. "Visual Studio Code", "Typora", "Obsidian"); on
+   * Linux it's the editor binary. Empty string = the OS default `.md` handler. */
+  externalEditor: string;
+
   /** Editor font family preset. Backed by a fixed stack per choice. */
   fontFamily: FontFamily;
   /** Editor body font size in px. */
@@ -50,6 +62,8 @@ export interface Settings {
 
 const DEFAULTS: Settings = {
   allowEditLLMBody: false,
+  useExternalEditor: true,
+  externalEditor: '',
   fontFamily: 'sans',
   fontSize: 16,
   lineHeight: 1.78,
