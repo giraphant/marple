@@ -733,17 +733,24 @@ export function App() {
     bumpVaultVersion();
   }, []);
 
-  // QUA-72: after creating the file, open it in the external editor when that
-  // mode is on — best-effort, so a launch failure still leaves the note created
-  // and opened in its (read-only) reader tab.
-  const maybeOpenExternally = useCallback(async (path: string) => {
-    if (!settings.useExternalEditor) return;
-    try {
-      await openInEditor(path, settings.externalEditor);
-    } catch (e) {
-      window.alert('在外部编辑器打开失败：' + (e instanceof Error ? e.message : String(e)));
+  // QUA-72: where a freshly-created note "lands". In external-editor mode the
+  // built-in editor is fully out of the loop — we hand the file straight to the
+  // external editor and do NOT open an in-app tab (an empty read-only tab would
+  // be noise). The note still appears in the 笔记 list. Only if the launch fails
+  // do we fall back to an in-app tab so the new note isn't stranded. With
+  // external mode off, the note opens in the in-app CodeMirror editor as before.
+  const revealNewNote = useCallback(async (path: string) => {
+    if (settings.useExternalEditor) {
+      try {
+        await openInEditor(path, settings.externalEditor);
+        return;
+      } catch (e) {
+        window.alert('在外部编辑器打开失败：' + (e instanceof Error ? e.message : String(e)));
+        // fall through to an in-app tab so the created note isn't lost
+      }
     }
-  }, [settings.useExternalEditor, settings.externalEditor]);
+    openInNewTab({ kind: 'doc', path });
+  }, [settings.useExternalEditor, settings.externalEditor, openInNewTab]);
 
   const onCreateAnnotation = useCallback(async (target: Entry) => {
     const { path, body, title } = newAnnotationDraft(target);
@@ -751,9 +758,8 @@ export function App() {
     const draftEntry = entryFromDraft(path, target, title);
     setEntries(prev => prev ? [...prev, draftEntry] : prev);
     bumpVaultVersion();
-    openInNewTab({ kind: 'doc', path });
-    void maybeOpenExternally(path);
-  }, [openInNewTab, maybeOpenExternally]);
+    await revealNewNote(path);
+  }, [revealNewNote]);
 
   const onNewIdeaNote = useCallback(async () => {
     try {
@@ -762,12 +768,11 @@ export function App() {
       const draft = ideaEntryFromDraft(path, title);
       setEntries(prev => prev ? [...prev, draft] : prev);
       bumpVaultVersion();
-      openInNewTab({ kind: 'doc', path });
-      void maybeOpenExternally(path);
+      await revealNewNote(path);
     } catch (e) {
       window.alert('新建 note 失败：' + (e instanceof Error ? e.message : String(e)));
     }
-  }, [openInNewTab, maybeOpenExternally]);
+  }, [revealNewNote]);
 
   const onDelete = useCallback(async (target: Entry) => {
     await deleteEntry(target.path);
