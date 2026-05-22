@@ -1,12 +1,16 @@
 import type { EntryType, Tab, TabContent } from './types';
 
-// Per-window tab state lives in sessionStorage (each window/tab gets its own,
-// survives reload). A localStorage `:last` snapshot lets a brand-new window
-// reopen into the most recent session. Two windows therefore stop clobbering
-// each other's tab sets — the old shared-localStorage keys did exactly that.
+// QUA-68: tab state (the open set, each tab's history, and the active index)
+// persists in localStorage so it survives app launches AND is the same when the
+// reader is opened in another page. The previous QUA-53 design kept the live set
+// in per-window sessionStorage, which meant the active tab reset on every fresh
+// launch and two open pages drifted apart. We still read the old sessionStorage
+// / `:last` keys once as a migration fallback so an in-flight session upgrades
+// without losing its tabs.
 export const TABS_KEY = 'qua-reader-tabs-v3';
 export const ACTIVE_KEY = 'qua-reader-active-tab';
-export const LAST_SNAPSHOT_KEY = 'qua-reader-tabs-v3:last';
+/** Legacy localStorage snapshot written by the old sessionStorage-based design. */
+export const LEGACY_SNAPSHOT_KEY = 'qua-reader-tabs-v3:last';
 
 const DEFAULT_TYPE: EntryType = 'paper-analysis';
 
@@ -71,8 +75,9 @@ export function loadTabs(stores?: Stores): Tab[] {
   const s = resolveStores(stores);
   if (!s) return [defaultTab()];
   return (
-    sanitizeTabs(s.session.getItem(TABS_KEY)) ??
-    sanitizeTabs(s.local.getItem(LAST_SNAPSHOT_KEY)) ??
+    sanitizeTabs(s.local.getItem(TABS_KEY)) ??           // authoritative
+    sanitizeTabs(s.session.getItem(TABS_KEY)) ??         // migrate: old per-window live set
+    sanitizeTabs(s.local.getItem(LEGACY_SNAPSHOT_KEY)) ?? // migrate: old reopen snapshot
     [defaultTab()]
   );
 }
@@ -81,7 +86,7 @@ export function loadActiveIndex(tabCount: number, stores?: Stores): number {
   const s = resolveStores(stores);
   const upper = Math.max(0, tabCount - 1);
   if (!s) return 0;
-  const raw = s.session.getItem(ACTIVE_KEY);
+  const raw = s.local.getItem(ACTIVE_KEY) ?? s.session.getItem(ACTIVE_KEY); // migrate old session value
   const n = raw == null ? 0 : parseInt(raw, 10);
   if (!Number.isFinite(n)) return 0;
   return Math.min(Math.max(0, n), upper);
@@ -90,13 +95,11 @@ export function loadActiveIndex(tabCount: number, stores?: Stores): number {
 export function saveTabs(tabs: Tab[], stores?: Stores): void {
   const s = resolveStores(stores);
   if (!s) return;
-  const blob = JSON.stringify(tabs);
-  try { s.session.setItem(TABS_KEY, blob); } catch {}
-  try { s.local.setItem(LAST_SNAPSHOT_KEY, blob); } catch {}
+  try { s.local.setItem(TABS_KEY, JSON.stringify(tabs)); } catch {}
 }
 
 export function saveActiveIndex(activeIndex: number, stores?: Stores): void {
   const s = resolveStores(stores);
   if (!s) return;
-  try { s.session.setItem(ACTIVE_KEY, String(activeIndex)); } catch {}
+  try { s.local.setItem(ACTIVE_KEY, String(activeIndex)); } catch {}
 }
