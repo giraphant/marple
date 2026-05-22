@@ -19,6 +19,10 @@ export interface TrashItem {
 }
 
 export async function listTrash(): Promise<TrashItem[]> {
+  if (isTauri()) {
+    const json = await invoke<{ items?: TrashItem[] }>('trash_list');
+    return json.items ?? [];
+  }
   const r = await fetch('/api/trash');
   if (!r.ok) throw new Error(`list trash failed: ${r.status}`);
   const json = await r.json() as { items: TrashItem[] };

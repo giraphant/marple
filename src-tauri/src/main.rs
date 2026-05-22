@@ -44,11 +44,17 @@ fn files(paths: tauri::State<ReaderPaths>, since: Option<f64>) -> Result<serde_j
     Ok(serde_json::json!({ "items": items, "total": total }))
 }
 
+#[tauri::command]
+fn trash_list(paths: tauri::State<ReaderPaths>) -> Result<serde_json::Value, String> {
+    let items = reader_core::list_trash(&paths).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "items": items }))
+}
+
 fn main() {
     let paths = ReaderPaths::from_reader_root(reader_root()).expect("init reader paths");
     tauri::Builder::default()
         .manage(paths)
-        .invoke_handler(tauri::generate_handler![index, entry, entry_text, files])
+        .invoke_handler(tauri::generate_handler![index, entry, entry_text, files, trash_list])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

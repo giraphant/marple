@@ -86,3 +86,15 @@ describe('listFiles', () => {
     expect(invoke).toHaveBeenCalledWith('files', { since: undefined });
   });
 });
+
+import { listTrash } from './api';
+
+describe('listTrash', () => {
+  it('uses invoke("trash_list") under Tauri', async () => {
+    (isTauri as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (invoke as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [{ name: 'n.md' }] });
+    const out = await listTrash();
+    expect(invoke).toHaveBeenCalledWith('trash_list');
+    expect(out).toEqual([{ name: 'n.md' }]);
+  });
+});
