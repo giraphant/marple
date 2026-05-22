@@ -18,7 +18,7 @@ async function main() {
     return;
   }
 
-  const [{ scoreCandidate, routeByConfidence, resolveOwner, titleAffinity }, { applyZhLocalisation }] = await Promise.all([
+  const [{ scoreCandidate, resolveOwner, titleAffinity }, { applyZhLocalisation }] = await Promise.all([
     loadTsModule('reader/src/cn-matcher.ts'),
     loadTsModule('reader/src/cn-localise.ts'),
   ]);
@@ -28,12 +28,10 @@ async function main() {
     .map(o => ({ slug: o.slug, title: textOrUndefined(o.fm.title) }))
     .filter(b => b.slug && b.title);
   const workItems = cacheWorkItems(cache);
-  const reviewQueue = [];
   const unmatched = [];
   const misassociated = [];
 
-  let highAssociated = 0;
-  let reviewQueued = 0;
+  let associated = 0;
   let skippedNone = 0;
   let skippedMisassoc = 0;
   let skippedExisting = 0;
@@ -74,6 +72,10 @@ async function main() {
     const scored = [];
     for (const raw of candidates) {
       const candidate = matchCandidateFromRecord(raw);
+      // A real Chinese edition must have a Chinese (CJK) title. Some found
+      // entries carry candidates whose title failed to scrape (English or empty)
+      // — writing those produces a useless "中文版: The Parasite" row.
+      if (!hasCjk(candidate.title_cn)) continue;
       const selfAffinity = titleAffinity(candidate.original_title, original.title);
       // Cross-book guard: a Douban search for this book often returns the Chinese
       // edition of a *different* book by the same author. If the candidate's 原作名
@@ -91,66 +93,40 @@ async function main() {
       }
       scored.push({ raw, candidate, selfAffinity, result: scoreCandidate(candidate, original) });
     }
-    if (!scored.length) continue;
-    scored.sort((a, b) => b.result.score - a.result.score);
+    if (!scored.length) continue; // every candidate was mis-associated to another book
 
-    // Writeable when the matcher is highly confident, or when the candidate's
-    // 原作名 is this book's own title (selfAffinity high) — the strongest possible
-    // signal that the Chinese edition is the translation of exactly this book.
-    const high = scored.find(item => routeByConfidence(item.result.confidence) === 'write' || item.selfAffinity >= 0.6);
-    if (high) {
-      const localisation = localisationFromRecord(high.raw, high.candidate);
-      const nextText = applyZhLocalisation(YAML, overview.text, localisation, { force });
-      if (nextText == null) {
-        skippedExisting += 1;
-        continue;
-      }
-      if (!dryRun) await fs.writeFile(overview.path, nextText, 'utf8');
-      highAssociated += 1;
+    // Each work item is a status=found entry the agent vouched per original book,
+    // so the best non-conflicted candidate is the translation. Prefer the one whose
+    // 原作名 matches this book's title, then by matcher score, then Douban ratings.
+    scored.sort((a, b) =>
+      (b.selfAffinity - a.selfAffinity)
+      || (b.result.score - a.result.score)
+      || ((parseInteger(b.raw.ratings_count) ?? 0) - (parseInteger(a.raw.ratings_count) ?? 0)));
+    const best = scored[0];
+    const localisation = localisationFromRecord(best.raw, best.candidate);
+    const nextText = applyZhLocalisation(YAML, overview.text, localisation, { force });
+    if (nextText == null) {
+      skippedExisting += 1;
       continue;
     }
-
-    // The cache already holds candidates found by searching for *this* book, so
-    // a borderline match is more likely the right translation than noise. Surface
-    // both medium and low for human confirmation rather than dropping them —
-    // silent drops are the reason "很多关联不上". Only no-signal (none) is skipped.
-    for (const row of scored) {
-      if (routeByConfidence(row.result.confidence) === 'review') {
-        reviewQueued += 1;
-        reviewQueue.push({
-          book: {
-            slug: overview.slug,
-            path: overview.relPath,
-            title: original.title,
-            authors: original.authors ?? [],
-            year: original.year ?? null,
-            isbn13: original.isbn13 ?? null,
-          },
-          candidate: localisationFromRecord(row.raw, row.candidate),
-          match: row.result,
-        });
-      } else {
-        skippedNone += 1;
-      }
-    }
+    if (!dryRun) await fs.writeFile(overview.path, nextText, 'utf8');
+    associated += 1;
   }
 
-  if (!dryRun && (reviewQueue.length || unmatched.length || misassociated.length)) {
-    reviewQueue.sort((a, b) => b.match.score - a.match.score);
+  if (!dryRun && (unmatched.length || misassociated.length)) {
     await fs.mkdir(path.dirname(reviewPath), { recursive: true });
     await fs.writeFile(reviewPath, `${JSON.stringify({
       version: 1,
       generated_at: new Date().toISOString(),
-      review: reviewQueue,
       misassociated,
       unmatched,
     }, null, 2)}\n`, 'utf8');
   }
 
   if (dryRun) console.log('[dry-run] no files written.');
-  console.log(`${highAssociated} high auto-associated, ${reviewQueued} queued for review (medium/low), ${skippedNone} skipped (none).`);
-  if (skippedMisassoc) console.log(`${skippedMisassoc} skipped (mis-associated — 原作名 names a different vault book).`);
-  if (skippedExisting) console.log(`${skippedExisting} high-confidence matches skipped because localisations.zh already exists; pass --force to replace zh[0].`);
+  console.log(`${associated} associated, ${skippedExisting} already had localisations.zh (use --force to replace).`);
+  if (skippedMisassoc) console.log(`${skippedMisassoc} candidates skipped (mis-associated — 原作名 names a different vault book).`);
+  if (skippedNone) console.log(`${skippedNone} found entries had no usable candidate.`);
   if (skippedUnmatched) console.log(`${skippedUnmatched} cache entries could not be matched to a book overview.`);
 }
 
@@ -185,16 +161,24 @@ async function readJson(filePath) {
   return JSON.parse(await fs.readFile(filePath, 'utf8'));
 }
 
+// Only `status: "found"` entries are real associations. A `status: "none"`
+// entry means the agent decided this book has NO Chinese translation — its
+// cndouban_ids merely hold candidates that surfaced during the author search
+// (usually the author's *other*, translated books) and must not be written.
+function isFound(entry) {
+  return isRecord(entry) && entry.status === 'found';
+}
+
 function cacheWorkItems(cache) {
   const out = [];
   if (isRecord(cache?.by_isbn)) {
     for (const [key, entry] of Object.entries(cache.by_isbn)) {
-      if (isRecord(entry)) out.push({ key: `isbn:${key}`, isbn: normaliseIsbn(key), entry });
+      if (isFound(entry)) out.push({ key: `isbn:${key}`, isbn: normaliseIsbn(key), entry });
     }
   }
   if (isRecord(cache?.by_slug)) {
     for (const [slug, entry] of Object.entries(cache.by_slug)) {
-      if (isRecord(entry)) out.push({ key: `slug:${slug}`, slug, entry });
+      if (isFound(entry)) out.push({ key: `slug:${slug}`, slug, entry });
     }
   }
   return out;
@@ -433,6 +417,10 @@ function cleanObject(object) {
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function hasCjk(value) {
+  return /[一-鿿㐀-䶿]/.test(String(value ?? ''));
 }
 
 function isRecord(value) {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   resolveOwner,
-  routeByConfidence,
   scoreCandidate,
   titleAffinity,
   type CorpusBook,
@@ -200,14 +199,5 @@ describe('resolveOwner', () => {
   it('returns no strong owner for a foreign-language original not in the corpus', () => {
     const owner = resolveOwner("Nous n'avons jamais été modernes", corpus);
     expect(owner === null || owner.score < 0.6).toBe(true);
-  });
-});
-
-describe('routeByConfidence', () => {
-  it('auto-writes high, queues medium and low for review, and drops only none', () => {
-    expect(routeByConfidence('high')).toBe('write');
-    expect(routeByConfidence('medium')).toBe('review');
-    expect(routeByConfidence('low')).toBe('review');
-    expect(routeByConfidence('none')).toBe('skip');
   });
 });
