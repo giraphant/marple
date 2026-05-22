@@ -64,6 +64,11 @@ export interface VaultFilesResult {
  *  (epoch ms) only changed files come back (the delta); `total` is always the
  *  full count so the caller can detect deletions. */
 export async function listFiles(since?: number): Promise<VaultFilesResult> {
+  if (isTauri()) {
+    const json = await invoke<{ items?: VaultFile[]; total?: number }>('files', { since });
+    const items = json.items ?? [];
+    return { items, total: json.total ?? items.length };
+  }
   const url = since != null ? `/api/files?since=${since}` : '/api/files';
   const r = await fetch(url);
   if (!r.ok) {

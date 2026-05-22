@@ -33,11 +33,22 @@ fn entry_text(paths: tauri::State<ReaderPaths>, path: String) -> Result<String, 
     std::fs::read_to_string(&abs).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn files(paths: tauri::State<ReaderPaths>, since: Option<f64>) -> Result<serde_json::Value, String> {
+    let all = reader_core::list_vault_files(&paths).map_err(|e| e.to_string())?;
+    let total = all.len();
+    let items: Vec<_> = match since {
+        Some(s) => all.into_iter().filter(|f| f.mtime.map_or(true, |m| m as f64 > s)).collect(),
+        None => all,
+    };
+    Ok(serde_json::json!({ "items": items, "total": total }))
+}
+
 fn main() {
     let paths = ReaderPaths::from_reader_root(reader_root()).expect("init reader paths");
     tauri::Builder::default()
         .manage(paths)
-        .invoke_handler(tauri::generate_handler![index, entry, entry_text])
+        .invoke_handler(tauri::generate_handler![index, entry, entry_text, files])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -67,3 +67,22 @@ describe('fetchEntryText', () => {
     expect(out).toContain('body');
   });
 });
+
+import { listFiles } from './api';
+
+describe('listFiles', () => {
+  it('uses invoke("files", {since}) under Tauri', async () => {
+    (isTauri as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (invoke as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [{ path: 'a.md', mtime: 2 }], total: 5 });
+    const out = await listFiles(1);
+    expect(invoke).toHaveBeenCalledWith('files', { since: 1 });
+    expect(out).toEqual({ items: [{ path: 'a.md', mtime: 2 }], total: 5 });
+  });
+
+  it('passes since=undefined for a full listing', async () => {
+    (isTauri as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (invoke as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [], total: 0 });
+    await listFiles();
+    expect(invoke).toHaveBeenCalledWith('files', { since: undefined });
+  });
+});
