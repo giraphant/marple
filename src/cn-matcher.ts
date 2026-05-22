@@ -81,6 +81,52 @@ function normaliseTitle(value: string | undefined): string {
     .toLocaleLowerCase();
 }
 
+function titleTokens(value: string | undefined): Set<string> {
+  return new Set(normaliseTitle(value).split(' ').filter(w => w.length > 1));
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+/**
+ * 0..1 similarity between two book titles. 1 when one normalised title contains
+ * the other (handles subtitles); otherwise the larger of full-title and
+ * title-head (pre-colon) Jaccard token overlap.
+ */
+export function titleAffinity(a: string | undefined, b: string | undefined): number {
+  const na = normaliseTitle(a);
+  const nb = normaliseTitle(b);
+  if (!na || !nb) return 0;
+  if (na === nb || na.includes(nb) || nb.includes(na)) return 1;
+  const full = jaccard(titleTokens(a), titleTokens(b));
+  const head = jaccard(titleTokens(a?.split(/[:：]/)[0]), titleTokens(b?.split(/[:：]/)[0]));
+  return Math.max(full, head);
+}
+
+export type CorpusBook = { slug: string; title: string };
+
+/**
+ * Find the corpus book whose title best matches `originalTitle`. Used to detect
+ * cross-book mis-association: a Douban search for book X often returns the
+ * Chinese edition of a *different* book Y by the same author, whose `原作名`
+ * (originalTitle) then matches Y, not X. Returns the best owner or null.
+ */
+export function resolveOwner(
+  originalTitle: string | undefined,
+  corpus: CorpusBook[],
+): { slug: string; score: number } | null {
+  let best: { slug: string; score: number } | null = null;
+  for (const book of corpus) {
+    const score = titleAffinity(originalTitle, book.title);
+    if (!best || score > best.score) best = { slug: book.slug, score };
+  }
+  return best && best.score > 0 ? best : null;
+}
+
 function surnameSet(authors: string[] | undefined): Set<string> {
   const out = new Set<string>();
   for (const author of authors ?? []) {

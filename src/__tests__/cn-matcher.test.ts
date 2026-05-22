@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { routeByConfidence, scoreCandidate, type MatchCandidate, type OriginalBook } from '../cn-matcher';
+import {
+  resolveOwner,
+  routeByConfidence,
+  scoreCandidate,
+  titleAffinity,
+  type CorpusBook,
+  type MatchCandidate,
+  type OriginalBook,
+} from '../cn-matcher';
 
 describe('scoreCandidate', () => {
   it('returns high confidence for matching original_title and author surname', () => {
@@ -154,6 +162,37 @@ describe('scoreCandidate', () => {
       'year within 5 years +10',
       'Chinese publisher ISBN agency +15',
     ]);
+  });
+});
+
+describe('titleAffinity', () => {
+  it('is 1 for identical or subtitle-containing titles, lower for partial overlap', () => {
+    expect(titleAffinity('The Body and Society', 'The Body and Society')).toBe(1);
+    expect(titleAffinity('The Body and Society', 'The Body and Society: Explorations in Social Theory')).toBe(1);
+    expect(titleAffinity('Cognition in the Wild', 'Culture and Inference: A Trobriand Case Study')).toBeLessThan(0.34);
+    // A French original does not match the English translation's title.
+    expect(titleAffinity("Nous n'avons jamais été modernes", 'We Have Never Been Modern')).toBeLessThan(0.34);
+  });
+});
+
+describe('resolveOwner', () => {
+  const corpus: CorpusBook[] = [
+    { slug: 'turner-body-and-society-2008', title: 'The Body and Society: Explorations in Social Theory' },
+    { slug: 'hutchins-cognition-in-the-wild-1995', title: 'Cognition in the Wild' },
+    { slug: 'turner-regulating-bodies-1992', title: 'Regulating Bodies: Essays in Medical Sociology' },
+  ];
+
+  it('attributes a candidate to the book its original_title actually names', () => {
+    // Candidate scraped for "Regulating Bodies" but whose 原作名 is "The Body and Society"
+    // really belongs to turner-body-and-society, not the book it was cached under.
+    const owner = resolveOwner('The Body and Society', corpus);
+    expect(owner?.slug).toBe('turner-body-and-society-2008');
+    expect(owner?.score).toBe(1);
+  });
+
+  it('returns no strong owner for a foreign-language original not in the corpus', () => {
+    const owner = resolveOwner("Nous n'avons jamais été modernes", corpus);
+    expect(owner === null || owner.score < 0.6).toBe(true);
   });
 });
 

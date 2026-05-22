@@ -18,19 +18,24 @@ async function main() {
     return;
   }
 
-  const [{ scoreCandidate, routeByConfidence }, { applyZhLocalisation }] = await Promise.all([
+  const [{ scoreCandidate, routeByConfidence, resolveOwner, titleAffinity }, { applyZhLocalisation }] = await Promise.all([
     loadTsModule('reader/src/cn-matcher.ts'),
     loadTsModule('reader/src/cn-localise.ts'),
   ]);
   const cache = await readJson(cachePath);
   const overviews = await loadBookOverviews();
+  const corpus = overviews.all
+    .map(o => ({ slug: o.slug, title: textOrUndefined(o.fm.title) }))
+    .filter(b => b.slug && b.title);
   const workItems = cacheWorkItems(cache);
   const reviewQueue = [];
   const unmatched = [];
+  const misassociated = [];
 
   let highAssociated = 0;
   let reviewQueued = 0;
   let skippedNone = 0;
+  let skippedMisassoc = 0;
   let skippedExisting = 0;
   let skippedUnmatched = 0;
 
@@ -55,15 +60,33 @@ async function main() {
       continue;
     }
 
-    const scored = candidates
-      .map(raw => {
-        const candidate = matchCandidateFromRecord(raw);
-        const result = scoreCandidate(candidate, original);
-        return { raw, candidate, result };
-      })
-      .sort((a, b) => b.result.score - a.result.score);
+    const scored = [];
+    for (const raw of candidates) {
+      const candidate = matchCandidateFromRecord(raw);
+      const selfAffinity = titleAffinity(candidate.original_title, original.title);
+      // Cross-book guard: a Douban search for this book often returns the Chinese
+      // edition of a *different* book by the same author. If the candidate's 原作名
+      // names another vault book better than this one, attribute it there and skip.
+      const owner = resolveOwner(candidate.original_title, corpus);
+      if (owner && owner.slug !== overview.slug && owner.score >= 0.6 && owner.score > selfAffinity) {
+        skippedMisassoc += 1;
+        misassociated.push({
+          cached_under: overview.slug,
+          belongs_to: owner.slug,
+          original_title: candidate.original_title,
+          candidate: localisationFromRecord(raw, candidate),
+        });
+        continue;
+      }
+      scored.push({ raw, candidate, selfAffinity, result: scoreCandidate(candidate, original) });
+    }
+    if (!scored.length) continue;
+    scored.sort((a, b) => b.result.score - a.result.score);
 
-    const high = scored.find(item => routeByConfidence(item.result.confidence) === 'write');
+    // Writeable when the matcher is highly confident, or when the candidate's
+    // 原作名 is this book's own title (selfAffinity high) — the strongest possible
+    // signal that the Chinese edition is the translation of exactly this book.
+    const high = scored.find(item => routeByConfidence(item.result.confidence) === 'write' || item.selfAffinity >= 0.6);
     if (high) {
       const localisation = localisationFromRecord(high.raw, high.candidate);
       const nextText = applyZhLocalisation(YAML, overview.text, localisation, { force });
@@ -101,19 +124,21 @@ async function main() {
     }
   }
 
-  if (!dryRun && (reviewQueue.length || unmatched.length)) {
+  if (!dryRun && (reviewQueue.length || unmatched.length || misassociated.length)) {
     reviewQueue.sort((a, b) => b.match.score - a.match.score);
     await fs.mkdir(path.dirname(reviewPath), { recursive: true });
     await fs.writeFile(reviewPath, `${JSON.stringify({
       version: 1,
       generated_at: new Date().toISOString(),
       review: reviewQueue,
+      misassociated,
       unmatched,
     }, null, 2)}\n`, 'utf8');
   }
 
   if (dryRun) console.log('[dry-run] no files written.');
   console.log(`${highAssociated} high auto-associated, ${reviewQueued} queued for review (medium/low), ${skippedNone} skipped (none).`);
+  if (skippedMisassoc) console.log(`${skippedMisassoc} skipped (mis-associated — 原作名 names a different vault book).`);
   if (skippedExisting) console.log(`${skippedExisting} high-confidence matches skipped because localisations.zh already exists; pass --force to replace zh[0].`);
   if (skippedUnmatched) console.log(`${skippedUnmatched} cache entries could not be matched to a book overview.`);
 }
