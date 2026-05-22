@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('./tauri', () => ({
   isTauri: vi.fn(),
@@ -10,6 +10,10 @@ import { fetchIndex } from './api';
 
 beforeEach(() => {
   vi.resetAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('fetchIndex', () => {
@@ -31,6 +35,5 @@ describe('fetchIndex', () => {
     const out = await fetchIndex();
     expect(fetchMock).toHaveBeenCalledWith('/api/index');
     expect(out).toEqual([{ path: 'b.md' }]);
-    vi.unstubAllGlobals();
   });
 });
