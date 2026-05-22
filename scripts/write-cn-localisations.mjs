@@ -30,6 +30,13 @@ async function main() {
   const workItems = cacheWorkItems(cache);
   const unmatched = [];
   const misassociated = [];
+  // A given Chinese edition (douban subject) translates ONE work; never attach it
+  // to two book overviews (e.g. two kept English translations of the same book).
+  // Seed with editions already present so re-runs stay idempotent.
+  const seenDoubanIds = new Set();
+  for (const o of overviews.all) {
+    for (const id of zhDoubanIds(o.fm)) seenDoubanIds.add(id);
+  }
 
   let associated = 0;
   let skippedNone = 0;
@@ -102,7 +109,9 @@ async function main() {
       (b.selfAffinity - a.selfAffinity)
       || (b.result.score - a.result.score)
       || ((parseInteger(b.raw.ratings_count) ?? 0) - (parseInteger(a.raw.ratings_count) ?? 0)));
-    const best = scored[0];
+    // Skip any candidate edition already attached to another book (same work).
+    const best = scored.find(s => !seenDoubanIds.has(candidateDoubanId(s.raw)));
+    if (!best) { skippedExisting += 1; continue; }
     const localisation = localisationFromRecord(best.raw, best.candidate);
     const nextText = applyZhLocalisation(YAML, overview.text, localisation, { force });
     if (nextText == null) {
@@ -110,6 +119,8 @@ async function main() {
       continue;
     }
     if (!dryRun) await fs.writeFile(overview.path, nextText, 'utf8');
+    const did = candidateDoubanId(best.raw);
+    if (did) seenDoubanIds.add(did);
     associated += 1;
   }
 
@@ -421,6 +432,24 @@ function asArray(value) {
 
 function hasCjk(value) {
   return /[一-鿿㐀-䶿]/.test(String(value ?? ''));
+}
+
+function doubanIdFromUrl(value) {
+  const m = String(value ?? '').match(/subject\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+function candidateDoubanId(raw) {
+  const id = raw.douban_id ?? doubanIdFromUrl(raw.douban_url ?? raw.preview_link);
+  return id ? String(id) : null;
+}
+
+function zhDoubanIds(fm) {
+  const zh = isRecord(fm?.localisations) ? fm.localisations.zh : null;
+  const items = Array.isArray(zh) ? zh : [];
+  return items
+    .map(item => (isRecord(item) ? doubanIdFromUrl(item.douban_url) : null))
+    .filter(Boolean);
 }
 
 function isRecord(value) {
