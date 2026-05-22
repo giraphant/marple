@@ -166,12 +166,19 @@ describe('scoreCandidate', () => {
 });
 
 describe('titleAffinity', () => {
-  it('is 1 for identical or subtitle-containing titles, lower for partial overlap', () => {
+  it('is 1 for an exact match and ~0.95 for a distinctive subtitle containment', () => {
     expect(titleAffinity('The Body and Society', 'The Body and Society')).toBe(1);
-    expect(titleAffinity('The Body and Society', 'The Body and Society: Explorations in Social Theory')).toBe(1);
+    expect(titleAffinity('The Body and Society', 'The Body and Society: Explorations in Social Theory')).toBeGreaterThanOrEqual(0.9);
     expect(titleAffinity('Cognition in the Wild', 'Culture and Inference: A Trobriand Case Study')).toBeLessThan(0.34);
     // A French original does not match the English translation's title.
     expect(titleAffinity("Nous n'avons jamais été modernes", 'We Have Never Been Modern')).toBeLessThan(0.34);
+  });
+
+  it('does not let a one-word/head title spuriously match a longer different title', () => {
+    // "Gender" (Illich) must NOT match "Gender Trouble" (Butler) just by containment.
+    expect(titleAffinity('Gender', 'Gender Trouble: Feminism and the Subversion of Identity')).toBeLessThan(0.6);
+    // Two different "The Body: ..." books share only the head — must stay low.
+    expect(titleAffinity('The Body: A Very Short Introduction', 'The Body: A Guide for Occupants')).toBeLessThan(0.6);
   });
 });
 
@@ -187,7 +194,7 @@ describe('resolveOwner', () => {
     // really belongs to turner-body-and-society, not the book it was cached under.
     const owner = resolveOwner('The Body and Society', corpus);
     expect(owner?.slug).toBe('turner-body-and-society-2008');
-    expect(owner?.score).toBe(1);
+    expect(owner?.score).toBeGreaterThanOrEqual(0.9);
   });
 
   it('returns no strong owner for a foreign-language original not in the corpus', () => {

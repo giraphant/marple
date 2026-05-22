@@ -93,18 +93,26 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 }
 
 /**
- * 0..1 similarity between two book titles. 1 when one normalised title contains
- * the other (handles subtitles); otherwise the larger of full-title and
- * title-head (pre-colon) Jaccard token overlap.
+ * 0..1 similarity between two book titles. 1 for an exact normalised match;
+ * 0.95 when one title contains the other AND the shorter one is distinctive
+ * (>=2 tokens); otherwise full-title Jaccard token overlap.
+ *
+ * Containment is gated on the shorter title having >=2 tokens so that generic
+ * one-word titles ("Gender", "Making", "The Body") do not spuriously match a
+ * longer unrelated title that merely begins with the same word. Title-head
+ * matching is intentionally NOT used — it let "The Body: A Very Short
+ * Introduction" match "The Body: A Guide for Occupants" (a different book).
  */
 export function titleAffinity(a: string | undefined, b: string | undefined): number {
   const na = normaliseTitle(a);
   const nb = normaliseTitle(b);
   if (!na || !nb) return 0;
-  if (na === nb || na.includes(nb) || nb.includes(na)) return 1;
-  const full = jaccard(titleTokens(a), titleTokens(b));
-  const head = jaccard(titleTokens(a?.split(/[:：]/)[0]), titleTokens(b?.split(/[:：]/)[0]));
-  return Math.max(full, head);
+  if (na === nb) return 1;
+  const ta = titleTokens(a);
+  const tb = titleTokens(b);
+  const shorter = ta.size <= tb.size ? ta : tb;
+  if (shorter.size >= 2 && (na.includes(nb) || nb.includes(na))) return 0.95;
+  return jaccard(ta, tb);
 }
 
 export type CorpusBook = { slug: string; title: string };

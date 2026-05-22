@@ -40,7 +40,19 @@ async function main() {
   let skippedUnmatched = 0;
 
   for (const item of workItems) {
-    const overview = resolveOverview(item, overviews);
+    const candidates = candidateRecords(item.entry, cache);
+    let overview = resolveOverview(item, overviews);
+    // ISBN/slug/path fallback failed (often the cache key is a different edition's
+    // ISBN than the vault). Resolve by the candidate's 原作名 → owning book title.
+    if (!overview && candidates.length) {
+      for (const raw of candidates) {
+        const owner = resolveOwner(matchCandidateFromRecord(raw).original_title, corpus);
+        if (owner && owner.score >= 0.6) {
+          const byTitle = overviews.bySlug.get(owner.slug);
+          if (byTitle) { overview = byTitle; break; }
+        }
+      }
+    }
     if (!overview) {
       skippedUnmatched += 1;
       unmatched.push({ key: item.key, isbn: item.isbn, slug: item.slug ?? null });
@@ -54,7 +66,6 @@ async function main() {
       continue;
     }
 
-    const candidates = candidateRecords(item.entry, cache);
     if (!candidates.length) {
       skippedNone += 1;
       continue;
