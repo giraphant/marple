@@ -33,6 +33,8 @@ fn entry_text(paths: tauri::State<ReaderPaths>, path: String) -> Result<String, 
     std::fs::read_to_string(&abs).map_err(|e| e.to_string())
 }
 
+// `since` is f64 because JS numbers deserialize as f64; mtime is i64. Epoch-ms
+// values fit in f64 without precision loss, so the cast comparison is safe.
 #[tauri::command]
 fn files(paths: tauri::State<ReaderPaths>, since: Option<f64>) -> Result<serde_json::Value, String> {
     let all = reader_core::list_vault_files(&paths).map_err(|e| e.to_string())?;
