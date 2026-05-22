@@ -1284,24 +1284,58 @@ pub fn editor_command(app: &str, path: &Path) -> ReaderResult<(String, Vec<std::
     }
 }
 
+/// How long to wait for the launcher to exit before detaching. `open`/`xdg-open`
+/// normally hand off to the OS and exit in well under this; the cap only matters
+/// when the system is momentarily busy (e.g. a boot reconcile thrashing disk), so
+/// a click never blocks the HTTP response on a slow app launch.
+const LAUNCHER_GRACE: std::time::Duration = std::time::Duration::from_millis(800);
+
 /// Open a vault markdown file in the user's chosen external editor (QUA-72).
 /// Resolves the path under `vault/`, builds the launcher command, and runs it as
 /// separate arguments (never a shell, so no command-injection surface even though
-/// `app` is user-supplied). `.status()` waits for the launcher — which hands off
-/// to the OS and returns immediately — and reaps the child so no zombie remains.
+/// `app` is user-supplied).
+///
+/// The launcher is spawned, not run to completion: we wait up to {@link
+/// LAUNCHER_GRACE} so a *fast* failure (unknown app, bad args) is still reported
+/// to the caller, but if it's still running past the grace period we detach and
+/// reap it on a background thread and return Ok. This keeps the click responsive
+/// — the request never blocks on how long the editor takes to come up — while
+/// leaving no zombie behind.
 pub fn open_in_editor(paths: &ReaderPaths, url_path: &str, app: &str) -> ReaderResult<()> {
     let target = resolve_editable_md(paths, url_path)?;
     let (program, args) = editor_command(app, &target)?;
-    let status = std::process::Command::new(&program)
+    let mut child = std::process::Command::new(&program)
         .args(&args)
-        .status()
+        .spawn()
         .map_err(|e| ReaderError::Other(anyhow::anyhow!("failed to launch {program}: {e}")))?;
-    if !status.success() {
-        return Err(ReaderError::Other(anyhow::anyhow!(
-            "{program} exited with status {status}"
-        )));
+
+    let deadline = std::time::Instant::now() + LAUNCHER_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) => {
+                return Err(ReaderError::Other(anyhow::anyhow!(
+                    "{program} exited with status {status}"
+                )))
+            }
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    // Still launching — detach and reap in the background so the
+                    // request returns now and no zombie lingers.
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(e) => {
+                return Err(ReaderError::Other(anyhow::anyhow!(
+                    "failed to wait for {program}: {e}"
+                )))
+            }
+        }
     }
-    Ok(())
 }
 
 pub fn put_markdown(paths: &ReaderPaths, url_path: &str, body: &[u8]) -> ReaderResult<f64> {

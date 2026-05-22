@@ -36,7 +36,7 @@ interface Props {
   onThemeClick: (theme: string, fromType?: Entry['type']) => void;
   onUpdated: (updated: Entry) => void;
   onCreateAnnotation: (target: Entry) => Promise<void>;
-  onOpenInEditor?: (entry: Entry) => void;
+  onOpenInEditor?: (entry: Entry) => void | Promise<void>;
   onDelete: (entry: Entry) => Promise<void>;
 }
 
@@ -401,14 +401,7 @@ export function DocView({
         )}
 
         {canEditExternally && onOpenInEditor && (
-          <button
-            onClick={() => onOpenInEditor(entry)}
-            class="shrink-0 inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition"
-            title="用外部编辑器打开这个文件（在设置里选择编辑器）"
-          >
-            <Icon name="pencil" size={13} />
-            在外部编辑器打开
-          </button>
+          <ExternalOpenButton entry={entry} onOpen={onOpenInEditor} />
         )}
 
         {editable && (saveStatus === 'conflict' ? (
@@ -490,6 +483,29 @@ export function DocView({
         />
       </div>
     </div>
+  );
+}
+
+/** Header action to hand the current file to the external editor. Shows a brief
+ *  "正在打开…" while the launch request is in flight so the click always
+ *  registers, even if the OS is momentarily slow to bring the app up. */
+function ExternalOpenButton({ entry, onOpen }: { entry: Entry; onOpen: (entry: Entry) => void | Promise<void> }) {
+  const [opening, setOpening] = useState(false);
+  const click = async () => {
+    if (opening) return;
+    setOpening(true);
+    try { await onOpen(entry); } finally { setOpening(false); }
+  };
+  return (
+    <button
+      onClick={click}
+      disabled={opening}
+      class="shrink-0 inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition disabled:opacity-60"
+      title="用外部编辑器打开这个文件（在设置里选择编辑器）"
+    >
+      <Icon name="pencil" size={13} />
+      {opening ? '正在打开…' : '在外部编辑器打开'}
+    </button>
   );
 }
 
