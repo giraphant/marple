@@ -294,7 +294,7 @@ export function CommandPalette({
                             <TypeIcon type={e.type} scale={1.2} />
                             <div class="flex-1 min-w-0">
                               <div class="flex items-center gap-1.5">
-                                <span class="truncate text-primary">
+                                <span class="truncate text-primary min-w-0">
                                   {e.title || e.path.split('/').pop()!.replace(/\.md$/, '')}
                                 </span>
                                 {(() => {
