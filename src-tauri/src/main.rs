@@ -27,11 +27,17 @@ fn entry(paths: tauri::State<ReaderPaths>, path: String) -> Result<serde_json::V
     Ok(serde_json::json!({ "entry": entry }))
 }
 
+#[tauri::command]
+fn entry_text(paths: tauri::State<ReaderPaths>, path: String) -> Result<String, String> {
+    let abs = reader_core::resolve_get_path(&paths, &path).map_err(|e| e.to_string())?;
+    std::fs::read_to_string(&abs).map_err(|e| e.to_string())
+}
+
 fn main() {
     let paths = ReaderPaths::from_reader_root(reader_root()).expect("init reader paths");
     tauri::Builder::default()
         .manage(paths)
-        .invoke_handler(tauri::generate_handler![index, entry])
+        .invoke_handler(tauri::generate_handler![index, entry, entry_text])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

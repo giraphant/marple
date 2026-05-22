@@ -55,3 +55,15 @@ describe('fetchEntry', () => {
     expect(await fetchEntry('missing.md')).toBeNull();
   });
 });
+
+import { fetchEntryText } from './api';
+
+describe('fetchEntryText', () => {
+  it('uses invoke("entry_text", {path}) under Tauri', async () => {
+    (isTauri as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (invoke as ReturnType<typeof vi.fn>).mockResolvedValue('---\ntitle: x\n---\nbody');
+    const out = await fetchEntryText('vault/notes/x.md');
+    expect(invoke).toHaveBeenCalledWith('entry_text', { path: 'vault/notes/x.md' });
+    expect(out).toContain('body');
+  });
+});

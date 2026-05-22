@@ -268,6 +268,9 @@ export function trashRestoredPath(name: string): string {
 
 /** Fetch a vault md file as text. */
 export async function fetchEntryText(path: string): Promise<string> {
+  if (isTauri()) {
+    return invoke<string>('entry_text', { path });
+  }
   const r = await fetch('/' + path);
   if (!r.ok) throw new Error(`fetch ${path} failed: ${r.status}`);
   return r.text();
