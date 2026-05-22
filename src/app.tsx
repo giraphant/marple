@@ -808,13 +808,13 @@ export function App() {
   const editInApp = editable && !settings.useExternalEditor;
   const canEditExternally = editable && settings.useExternalEditor;
 
-  const onOpenInEditor = useCallback(async (target: Entry) => {
-    try {
-      await openInEditor(target.path, settings.externalEditor);
-    } catch (e) {
-      window.alert('在外部编辑器打开失败：' + (e instanceof Error ? e.message : String(e)));
-    }
-  }, [settings.externalEditor]);
+  // Throws on failure — the caller (ExternalOpenButton) surfaces it inline. We do
+  // NOT window.alert here: a blocking modal would freeze the button's "正在打开…"
+  // state until dismissed, which reads as a hang.
+  const onOpenInEditor = useCallback(
+    (target: Entry) => openInEditor(target.path, settings.externalEditor),
+    [settings.externalEditor],
+  );
 
   // Editor's reactive surface is just dark/light — font face & size flow
   // in through CSS vars on <html>, so changing them doesn't rebuild the

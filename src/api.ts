@@ -197,10 +197,16 @@ export async function openPdfExternal(slug: string): Promise<void> {
  *  empty string opens with the OS default `.md` handler. The browser can't launch
  *  native apps, so reader-api does it (no shell — no injection from `app`). */
 export async function openInEditor(path: string, app: string): Promise<void> {
+  // Bound the request: launching is fire-and-forget on the server (it returns as
+  // soon as the launcher is spawned), so a fetch that hasn't resolved in a few
+  // seconds is stuck in the browser connection queue, not doing useful work.
+  // Aborting frees the connection and lets the caller surface a transient error
+  // instead of hanging the "opening…" affordance forever.
   const r = await fetch('/api/open-in-editor', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, app }),
+    signal: AbortSignal.timeout(8000),
   });
   if (!r.ok) {
     const msg = await r.text().catch(() => '');

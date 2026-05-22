@@ -486,15 +486,31 @@ export function DocView({
   );
 }
 
-/** Header action to hand the current file to the external editor. Shows a brief
- *  "正在打开…" while the launch request is in flight so the click always
- *  registers, even if the OS is momentarily slow to bring the app up. */
+/** Header action to hand the current file to the external editor. Launching is
+ *  fire-and-forget on the server, so the "正在打开…" affordance is bounded — it
+ *  always clears within {@link OPENING_RESET_MS} even if the request is slow or
+ *  fails, so the button can never appear stuck. Errors show inline (not a
+ *  blocking modal, which would freeze the button until dismissed). */
+const OPENING_RESET_MS = 1500;
 function ExternalOpenButton({ entry, onOpen }: { entry: Entry; onOpen: (entry: Entry) => void | Promise<void> }) {
   const [opening, setOpening] = useState(false);
+  const [failed, setFailed] = useState(false);
   const click = async () => {
     if (opening) return;
+    setFailed(false);
     setOpening(true);
-    try { await onOpen(entry); } finally { setOpening(false); }
+    let settled = false;
+    const clear = () => { if (!settled) { settled = true; setOpening(false); } };
+    const guard = setTimeout(clear, OPENING_RESET_MS);
+    try {
+      await onOpen(entry);
+    } catch {
+      setFailed(true);
+      setTimeout(() => setFailed(false), 2500);
+    } finally {
+      clearTimeout(guard);
+      clear();
+    }
   };
   return (
     <button
@@ -504,7 +520,7 @@ function ExternalOpenButton({ entry, onOpen }: { entry: Entry; onOpen: (entry: E
       title="用外部编辑器打开这个文件（在设置里选择编辑器）"
     >
       <Icon name="pencil" size={13} />
-      {opening ? '正在打开…' : '在外部编辑器打开'}
+      {opening ? '正在打开…' : failed ? '打开失败，重试' : '在外部编辑器打开'}
     </button>
   );
 }
