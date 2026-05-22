@@ -185,7 +185,12 @@ async function loadBookOverviews() {
     };
     all.push(overview);
     byRelPath.set(relPath, overview);
-    if (slug) bySlug.set(slug, overview);
+    // A book can carry a stray nested duplicate (e.g. a re-processing artifact
+    // at <slug>/<sub>/00-overview.md) that maps to the same slug. Files are
+    // enumerated sorted, so the canonical top-level overview is seen first;
+    // first-wins keeps slug/ISBN resolution pointing at the file the reader
+    // actually reads (vault/books/<slug>/00-overview.md).
+    if (slug && !bySlug.has(slug)) bySlug.set(slug, overview);
     if (overview.isbn13 && !byIsbn.has(overview.isbn13)) byIsbn.set(overview.isbn13, overview);
   }
 
