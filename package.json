@@ -17,7 +17,10 @@
     "test:sql-index": "node scripts/test-sql-index.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",
@@ -26,6 +29,7 @@
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.42.1",
     "@lezer/highlight": "^1.2.3",
+    "@tauri-apps/api": "^2.11.0",
     "codemirror": "^6.0.2",
     "htm": "^3.1.1",
     "marked": "^12.0.2",
@@ -37,6 +41,7 @@
     "@preact/preset-vite": "^2.10.5",
     "@svgr/core": "^8.1.0",
     "@svgr/plugin-jsx": "^8.1.0",
+    "@tauri-apps/cli": "^2.11.2",
     "@types/node": "^20.12.7",
     "autoprefixer": "^10.4.19",
     "concurrently": "^8.2.2",
