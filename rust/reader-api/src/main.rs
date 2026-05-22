@@ -67,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/reindex", post(api_reindex))
         .route("/api/reconcile", post(api_reconcile))
         .route("/api/open-pdf", post(api_open_pdf))
+        .route("/api/open-in-editor", post(api_open_in_editor))
         .route("/api/translations", get(api_translations))
         .route("/api/open-translation", post(api_open_translation))
         .route("/api/embeddings", post(api_embeddings))
@@ -103,6 +104,7 @@ async fn main() -> anyhow::Result<()> {
     println!("POST   /api/reindex            -> rebuild data/index.sqlite with Rust");
     println!("POST   /api/reconcile          -> delta-sync index to the vault (cheap)");
     println!("POST   /api/open-pdf           -> open sources/<slug>.pdf in the system PDF app");
+    println!("POST   /api/open-in-editor     -> open a vault/*.md in the chosen external editor");
     println!("POST   /api/embeddings         -> start background semantic-vector build (202)");
     println!("GET    /api/embeddings/status  -> poll embedding job + on-disk vectors summary");
     println!("GET    /vault/**/*.md          -> read vault markdown");
@@ -320,6 +322,33 @@ async fn api_open_pdf(
     tokio::task::spawn_blocking(move || -> Result<(), ReaderError> {
         let path = reader_core::resolve_source_pdf(&paths, &params.slug)?;
         reader_core::open_in_system_app(&path)
+    })
+    .await
+    .map_err(|err| AppError(ReaderError::Other(err.into())))??;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenInEditorParams {
+    /// Vault-relative path of the markdown file, e.g. `vault/notes/foo.md`.
+    path: String,
+    /// Editor app to open with. Empty / absent → the OS default `.md` handler.
+    #[serde(default)]
+    app: String,
+}
+
+/// Open a vault markdown file in the user's chosen external editor (QUA-72). The
+/// browser can't launch native apps, so reader-api shells out — but never through
+/// a shell: the app name and file path are passed as separate `Command` args, so
+/// the user-supplied app string has no injection surface. Path is validated to
+/// live under `vault/` and be an existing `.md`. Runs on a blocking thread.
+async fn api_open_in_editor(
+    State(state): State<AppState>,
+    Json(params): Json<OpenInEditorParams>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let paths = state.paths.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), ReaderError> {
+        reader_core::open_in_editor(&paths, &params.path, &params.app)
     })
     .await
     .map_err(|err| AppError(ReaderError::Other(err.into())))??;

@@ -1237,6 +1237,73 @@ pub fn open_in_system_app(path: &Path) -> ReaderResult<()> {
     Ok(())
 }
 
+/// Resolve a vault-relative markdown URL path to an existing file, with the same
+/// untrusted-input discipline as the GET/PUT paths: safe-join under the
+/// workspace, require it stays under `vault/`, end in `.md`, and be a real file.
+/// Pure resolution, no side effects — the editor-open caller executes separately.
+pub fn resolve_editable_md(paths: &ReaderPaths, url_path: &str) -> ReaderResult<PathBuf> {
+    let target = safe_join(&paths.workspace_root, url_path.trim_start_matches('/'))?;
+    ensure_markdown(&target)?;
+    ensure_under(&target, &paths.vault, "editor open only allowed under /vault/")?;
+    if !target.is_file() {
+        return Err(ReaderError::NotFound(
+            "target file does not exist".to_string(),
+        ));
+    }
+    Ok(target)
+}
+
+/// Build the `(program, args)` to open `path` in the chosen editor `app`, WITHOUT
+/// executing — pure and deterministic so the no-shell, app-as-its-own-argument
+/// construction is unit-testable. An empty `app` means "the OS default handler
+/// for this file type" (`open <path>` / `xdg-open <path>`). On macOS a named app
+/// goes through `open -a <app> <path>`; on Linux the app name is taken as the
+/// editor binary and run directly with the path. Unsupported elsewhere (we don't
+/// ship an untested Windows launcher).
+pub fn editor_command(app: &str, path: &Path) -> ReaderResult<(String, Vec<std::ffi::OsString>)> {
+    use std::ffi::OsString;
+    let app = app.trim();
+    if cfg!(target_os = "macos") {
+        let mut args: Vec<OsString> = Vec::new();
+        if !app.is_empty() {
+            args.push(OsString::from("-a"));
+            args.push(OsString::from(app));
+        }
+        args.push(path.as_os_str().to_os_string());
+        Ok(("open".to_string(), args))
+    } else if cfg!(target_os = "linux") {
+        if app.is_empty() {
+            Ok(("xdg-open".to_string(), vec![path.as_os_str().to_os_string()]))
+        } else {
+            Ok((app.to_string(), vec![path.as_os_str().to_os_string()]))
+        }
+    } else {
+        Err(ReaderError::Unsupported(
+            "opening files in an external editor is only supported on macOS and Linux".to_string(),
+        ))
+    }
+}
+
+/// Open a vault markdown file in the user's chosen external editor (QUA-72).
+/// Resolves the path under `vault/`, builds the launcher command, and runs it as
+/// separate arguments (never a shell, so no command-injection surface even though
+/// `app` is user-supplied). `.status()` waits for the launcher — which hands off
+/// to the OS and returns immediately — and reaps the child so no zombie remains.
+pub fn open_in_editor(paths: &ReaderPaths, url_path: &str, app: &str) -> ReaderResult<()> {
+    let target = resolve_editable_md(paths, url_path)?;
+    let (program, args) = editor_command(app, &target)?;
+    let status = std::process::Command::new(&program)
+        .args(&args)
+        .status()
+        .map_err(|e| ReaderError::Other(anyhow::anyhow!("failed to launch {program}: {e}")))?;
+    if !status.success() {
+        return Err(ReaderError::Other(anyhow::anyhow!(
+            "{program} exited with status {status}"
+        )));
+    }
+    Ok(())
+}
+
 pub fn put_markdown(paths: &ReaderPaths, url_path: &str, body: &[u8]) -> ReaderResult<f64> {
     if body.len() > 5 * 1024 * 1024 {
         return Err(ReaderError::BadRequest("payload too large".to_string()));
@@ -1631,5 +1698,103 @@ mod search_mode_tests {
             paths_hit.iter().any(|p| p.ends_with("cjk-title.md")),
             "fast must find the CJK title via substring fallback, got {paths_hit:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod editor_open_tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    /// Build a throwaway workspace with a vault and one notes file, returning the
+    /// paths plus the vault-relative URL path of the seeded note.
+    fn seed_note() -> (ReaderPaths, String) {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let nonce = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "reader-core-editor-{}-{nonce}",
+            std::process::id()
+        ));
+        let reader_root = root.join("reader");
+        let vault = root.join("vault");
+        let notes_dir = vault.join("notes");
+        fs::create_dir_all(reader_root.join("data")).unwrap();
+        fs::create_dir_all(notes_dir.join(".trash")).unwrap();
+        fs::write(notes_dir.join("hello.md"), b"---\ntype: note\n---\n\n# Hi\n").unwrap();
+        let paths = ReaderPaths {
+            index_db: reader_root.join("data").join("index.sqlite"),
+            vectors_db: reader_root.join("data").join("vectors.sqlite"),
+            trash_dir: notes_dir.join(".trash"),
+            sources: root.join("sources"),
+            translations: root.join("processing").join("translations"),
+            dist: reader_root.join("dist"),
+            reader_root,
+            workspace_root: root,
+            notes_dir,
+            vault,
+        };
+        (paths, "vault/notes/hello.md".to_string())
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn editor_command_macos_uses_open_dash_a_for_named_app() {
+        let path = Path::new("/tmp/x.md");
+        // Empty app → bare `open <path>` (system default md handler).
+        let (prog, args) = editor_command("", path).unwrap();
+        assert_eq!(prog, "open");
+        assert_eq!(args, vec![OsString::from("/tmp/x.md")]);
+
+        // Named app → `open -a <app> <path>`; the app name is its own argument
+        // (no shell), so spaces in "Visual Studio Code" can't break tokenization.
+        let (prog, args) = editor_command("Visual Studio Code", path).unwrap();
+        assert_eq!(prog, "open");
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("-a"),
+                OsString::from("Visual Studio Code"),
+                OsString::from("/tmp/x.md"),
+            ]
+        );
+
+        // Surrounding whitespace in the configured app name is trimmed.
+        let (_, args) = editor_command("  Typora  ", path).unwrap();
+        assert_eq!(args[1], OsString::from("Typora"));
+    }
+
+    #[test]
+    fn resolve_editable_md_accepts_a_real_vault_note() {
+        let (paths, url) = seed_note();
+        let resolved = resolve_editable_md(&paths, &url).unwrap();
+        assert!(resolved.ends_with("notes/hello.md"));
+    }
+
+    #[test]
+    fn resolve_editable_md_rejects_non_markdown() {
+        let (paths, _) = seed_note();
+        fs::write(paths.notes_dir.join("x.txt"), b"nope").unwrap();
+        let err = resolve_editable_md(&paths, "vault/notes/x.txt").unwrap_err();
+        assert!(matches!(err, ReaderError::Unsupported(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn resolve_editable_md_rejects_missing_file() {
+        let (paths, _) = seed_note();
+        let err = resolve_editable_md(&paths, "vault/notes/ghost.md").unwrap_err();
+        assert!(matches!(err, ReaderError::NotFound(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn resolve_editable_md_rejects_paths_outside_the_vault() {
+        let (paths, _) = seed_note();
+        // A real file outside the vault must not be reachable, even though it
+        // exists and ends in .md.
+        fs::write(paths.workspace_root.join("outside.md"), b"x").unwrap();
+        let err = resolve_editable_md(&paths, "outside.md").unwrap_err();
+        assert!(matches!(err, ReaderError::Forbidden(_)), "got {err:?}");
+        // Traversal attempts resolve the same way.
+        let err = resolve_editable_md(&paths, "vault/../outside.md").unwrap_err();
+        assert!(matches!(err, ReaderError::Forbidden(_)), "got {err:?}");
     }
 }
