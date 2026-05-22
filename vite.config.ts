@@ -28,7 +28,7 @@ export default defineConfig({
     Icons({ compiler: 'jsx', jsx: 'preact' }),
   ],
   root: __dirname,
-  base: '/reader/',
+  base: process.env.TAURI ? '/' : '/reader/',
   build: {
     outDir: 'dist',
     emptyOutDir: true,
