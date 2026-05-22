@@ -131,3 +131,18 @@ function confidenceFor(score: number): MatchResult['confidence'] {
   if (score >= 10) return 'low';
   return 'none';
 }
+
+export type Routing = 'write' | 'review' | 'skip';
+
+/**
+ * Association policy. `high` is confident enough to write into frontmatter
+ * automatically; `medium` and `low` go to a human review queue (the cached
+ * candidates were already found by searching for this exact book, so a
+ * borderline match is more likely the right translation than noise); only a
+ * `none` (no-signal) match is dropped.
+ */
+export function routeByConfidence(confidence: MatchResult['confidence']): Routing {
+  if (confidence === 'high') return 'write';
+  if (confidence === 'medium' || confidence === 'low') return 'review';
+  return 'skip';
+}

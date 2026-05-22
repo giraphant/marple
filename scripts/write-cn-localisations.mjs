@@ -17,19 +17,19 @@ async function main() {
     return;
   }
 
-  const [{ scoreCandidate }, { applyZhLocalisation }] = await Promise.all([
+  const [{ scoreCandidate, routeByConfidence }, { applyZhLocalisation }] = await Promise.all([
     loadTsModule('reader/src/cn-matcher.ts'),
     loadTsModule('reader/src/cn-localise.ts'),
   ]);
   const cache = await readJson(cachePath);
   const overviews = await loadBookOverviews();
   const workItems = cacheWorkItems(cache);
-  const mediumReview = [];
+  const reviewQueue = [];
   const unmatched = [];
 
   let highAssociated = 0;
-  let mediumQueued = 0;
-  let skippedLowNone = 0;
+  let reviewQueued = 0;
+  let skippedNone = 0;
   let skippedExisting = 0;
   let skippedUnmatched = 0;
 
@@ -50,7 +50,7 @@ async function main() {
 
     const candidates = candidateRecords(item.entry, cache);
     if (!candidates.length) {
-      skippedLowNone += 1;
+      skippedNone += 1;
       continue;
     }
 
@@ -62,7 +62,7 @@ async function main() {
       })
       .sort((a, b) => b.result.score - a.result.score);
 
-    const high = scored.find(item => item.result.confidence === 'high');
+    const high = scored.find(item => routeByConfidence(item.result.confidence) === 'write');
     if (high) {
       const localisation = localisationFromRecord(high.raw, high.candidate);
       const nextText = applyZhLocalisation(YAML, overview.text, localisation, { force });
@@ -75,10 +75,14 @@ async function main() {
       continue;
     }
 
+    // The cache already holds candidates found by searching for *this* book, so
+    // a borderline match is more likely the right translation than noise. Surface
+    // both medium and low for human confirmation rather than dropping them —
+    // silent drops are the reason "很多关联不上". Only no-signal (none) is skipped.
     for (const row of scored) {
-      if (row.result.confidence === 'medium') {
-        mediumQueued += 1;
-        mediumReview.push({
+      if (routeByConfidence(row.result.confidence) === 'review') {
+        reviewQueued += 1;
+        reviewQueue.push({
           book: {
             slug: overview.slug,
             path: overview.relPath,
@@ -91,22 +95,23 @@ async function main() {
           match: row.result,
         });
       } else {
-        skippedLowNone += 1;
+        skippedNone += 1;
       }
     }
   }
 
-  if (mediumReview.length || unmatched.length) {
+  if (reviewQueue.length || unmatched.length) {
+    reviewQueue.sort((a, b) => b.match.score - a.match.score);
     await fs.mkdir(path.dirname(reviewPath), { recursive: true });
     await fs.writeFile(reviewPath, `${JSON.stringify({
       version: 1,
       generated_at: new Date().toISOString(),
-      medium: mediumReview,
+      review: reviewQueue,
       unmatched,
     }, null, 2)}\n`, 'utf8');
   }
 
-  console.log(`${highAssociated} high auto-associated, ${mediumQueued} medium queued for review, ${skippedLowNone} skipped (low/none).`);
+  console.log(`${highAssociated} high auto-associated, ${reviewQueued} queued for review (medium/low), ${skippedNone} skipped (none).`);
   if (skippedExisting) console.log(`${skippedExisting} high-confidence matches skipped because localisations.zh already exists; pass --force to replace zh[0].`);
   if (skippedUnmatched) console.log(`${skippedUnmatched} cache entries could not be matched to a book overview.`);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scoreCandidate, type MatchCandidate, type OriginalBook } from '../cn-matcher';
+import { routeByConfidence, scoreCandidate, type MatchCandidate, type OriginalBook } from '../cn-matcher';
 
 describe('scoreCandidate', () => {
   it('returns high confidence for matching original_title and author surname', () => {
@@ -154,5 +154,14 @@ describe('scoreCandidate', () => {
       'year within 5 years +10',
       'Chinese publisher ISBN agency +15',
     ]);
+  });
+});
+
+describe('routeByConfidence', () => {
+  it('auto-writes high, queues medium and low for review, and drops only none', () => {
+    expect(routeByConfidence('high')).toBe('write');
+    expect(routeByConfidence('medium')).toBe('review');
+    expect(routeByConfidence('low')).toBe('review');
+    expect(routeByConfidence('none')).toBe('skip');
   });
 });
