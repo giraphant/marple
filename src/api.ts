@@ -2,6 +2,7 @@ import type { Entry } from './types';
 import type { EmbedStatus } from './embedding';
 import type { SearchMode } from './searchMode';
 import { parseFile, serializeFile } from './frontmatter';
+import { isTauri, invoke } from './tauri';
 
 export type { SearchMode };
 
@@ -36,6 +37,10 @@ export async function restoreTrash(name: string): Promise<string> {
 
 /** Fetch the reader index (DB metadata cache snapshot) on boot. */
 export async function fetchIndex(): Promise<Entry[]> {
+  if (isTauri()) {
+    const json = await invoke<{ items?: Entry[] }>('index');
+    return json.items ?? [];
+  }
   const r = await fetch('/api/index');
   if (!r.ok) {
     const msg = await r.text().catch(() => '');
