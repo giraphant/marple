@@ -53,6 +53,19 @@ npm run test:sql-index  # validate SQLite schema, themes mirror, and FTS
 npm run typecheck       # tsc --noEmit
 ```
 
+## Native macOS reader (experimental, P1)
+
+A SwiftUI reader lives in `apple/` and reuses this repo's `reader-api` as a
+sidecar (no web changes). Requires a built index at the configured
+`workspaceRoot`. Because this machine has Command Line Tools (no Xcode), tests
+use swift-testing and need the framework search path flag:
+
+```sh
+cd apple && swift build       # build the library + app
+cd apple && swift test -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks
+cd apple && swift run Marple  # launch the reader (spawns reader-api)
+```
+
 ### Semantic vectors (hybrid search)
 
 The model-free index build above never touches embeddings. Semantic / hybrid
