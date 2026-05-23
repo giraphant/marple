@@ -10,8 +10,8 @@ struct DocView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
-                        ForEach(model.openBlocks.indices, id: \.self) { i in
-                            BlockView(block: model.openBlocks[i]) { target in
+                        ForEach(Array(model.openBlocks.enumerated()), id: \.offset) { _, block in
+                            BlockView(block: block) { target in
                                 Task { await model.follow(target) }
                             }
                         }

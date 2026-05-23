@@ -60,19 +60,19 @@ struct BlockView: View {
             InlineFlow(tokens: tokens, onFollow: onFollow)
         case .bulletList(let items):
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(items.indices, id: \.self) { i in
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .top, spacing: 6) {
                         Text("•")
-                        InlineFlow(tokens: items[i], onFollow: onFollow)
+                        InlineFlow(tokens: item, onFollow: onFollow)
                     }
                 }
             }
         case .orderedList(let items):
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(items.indices, id: \.self) { i in
+                ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
                     HStack(alignment: .top, spacing: 6) {
-                        Text("\(i + 1).")
-                        InlineFlow(tokens: items[i], onFollow: onFollow)
+                        Text("\(idx + 1).")
+                        InlineFlow(tokens: item, onFollow: onFollow)
                     }
                 }
             }
