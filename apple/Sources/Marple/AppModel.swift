@@ -5,17 +5,22 @@ import Observation
 @Observable @MainActor
 final class AppModel {
     let client: VaultClient
-    var entries: [Entry] = []
+    private(set) var entries: [Entry] = []
     var status: String = ""
 
-    // Browse state
-    var pane: Pane = .type(.paperAnalysis)
-    var sortClauses: [SortClause] = []
-    var filterClauses: [FilterClause] = []
-    var filterMatch: FilterMatch = .all
-    var searchText: String = ""
-    var searchHits: [SearchHit] = []
+    // Browse state (mutate via the intent methods below so derived caches refresh)
+    private(set) var pane: Pane = .type(.paperAnalysis)
+    private(set) var sortClauses: [SortClause] = []
+    private(set) var filterClauses: [FilterClause] = []
+    private(set) var filterMatch: FilterMatch = .all
+    private(set) var searchText: String = ""
+    private var searchHits: [SearchHit] = []
     private var searchTask: Task<Void, Never>?
+
+    // Derived caches — recomputed only when their inputs change, never in a view body.
+    private(set) var counts: [EntryType: Int] = [:]
+    private(set) var themeIndex: [ThemeCount] = []
+    private(set) var visibleEntries: [Entry] = []
 
     // Reading state
     var openPath: String?
@@ -23,25 +28,27 @@ final class AppModel {
 
     init(client: VaultClient) { self.client = client }
 
-    // MARK: derived
+    // MARK: derived recompute
 
-    var counts: [EntryType: Int] {
+    /// Rebuild the index-wide caches (counts + theme index). O(n) over all entries;
+    /// runs once per index load, not per render.
+    private func rebuildIndexDerived() {
         var c: [EntryType: Int] = [:]
         for e in entries { c[e.type, default: 0] += 1 }
-        return c
+        counts = c
+        themeIndex = themeCounts(entries)
     }
 
-    var themeIndex: [ThemeCount] { themeCounts(entries) }
-
-    /// The middle-column list: search results when searching, else the
-    /// pane subset run through filters then sort.
-    var visibleEntries: [Entry] {
+    /// Rebuild the middle-column list: search hits when searching, else the pane
+    /// subset run through filters then sort. Call after any browse-state change.
+    private func recomputeVisible() {
         if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-            return searchHits.map(\.entry)
+            visibleEntries = searchHits.map(\.entry)
+            return
         }
         let base = entriesForPane(pane, in: entries)
         let filtered = applyFilters(base, filterClauses, match: filterMatch)
-        return sortEntries(filtered, by: sortClauses)
+        visibleEntries = sortEntries(filtered, by: sortClauses)
     }
 
     // MARK: actions
@@ -50,6 +57,8 @@ final class AppModel {
         do {
             entries = try await client.index()
             status = "\(entries.count) entries"
+            rebuildIndexDerived()
+            recomputeVisible()
             print("[marple] index loaded: \(entries.count) entries")
         } catch {
             status = "index failed: \(error)"
@@ -60,14 +69,31 @@ final class AppModel {
     func select(pane newPane: Pane) {
         pane = newPane
         searchText = ""; searchHits = []
+        recomputeVisible()
         print("[marple] pane -> \(newPane)")
     }
 
+    func setSort(_ clauses: [SortClause]) {
+        sortClauses = clauses
+        recomputeVisible()
+    }
+
+    func setFilters(_ clauses: [FilterClause], match: FilterMatch = .all) {
+        filterClauses = clauses
+        filterMatch = match
+        recomputeVisible()
+    }
+
+    func setSearchText(_ text: String) {
+        searchText = text
+        runSearch()
+    }
+
     /// Debounced server search scoped to the current type pane (nil type → all).
-    func runSearch() {
+    private func runSearch() {
         searchTask?.cancel()
         let q = searchText.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { searchHits = []; return }
+        guard !q.isEmpty else { searchHits = []; recomputeVisible(); return }
         let type: EntryType? = { if case .type(let t) = pane { return t } else { return nil } }()
         searchTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 200_000_000)
@@ -76,6 +102,7 @@ final class AppModel {
                 let hits = try await self?.client.search(SearchQuery(q: q, type: type)) ?? []
                 if Task.isCancelled { return }
                 self?.searchHits = hits
+                self?.recomputeVisible()
                 print("[marple] search '\(q)' -> \(hits.count) hits")
             } catch {
                 self?.status = "search failed: \(error)"

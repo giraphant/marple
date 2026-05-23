@@ -32,11 +32,11 @@ struct EntryListView: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("检索 标题/作者/主题…", text: Binding(
                     get: { model.searchText },
-                    set: { model.searchText = $0; model.runSearch() }
+                    set: { model.setSearchText($0) }
                 ))
                 .textFieldStyle(.plain)
                 if !model.searchText.isEmpty {
-                    Button { model.searchText = ""; model.runSearch() } label: {
+                    Button { model.setSearchText("") } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }.buttonStyle(.plain)
                 }
@@ -56,12 +56,12 @@ struct EntryListView: View {
 
     private var sortMenu: some View {
         Menu {
-            Button("默认顺序") { model.sortClauses = [] }
+            Button("默认顺序") { model.setSort([]) }
             Divider()
             ForEach(SortField.allCases, id: \.self) { f in
                 Menu(f.label) {
-                    Button("升序 ↑") { model.sortClauses = [SortClause(field: f, dir: .asc)] }
-                    Button("降序 ↓") { model.sortClauses = [SortClause(field: f, dir: .desc)] }
+                    Button("升序 ↑") { model.setSort([SortClause(field: f, dir: .asc)]) }
+                    Button("降序 ↓") { model.setSort([SortClause(field: f, dir: .desc)]) }
                 }
             }
         } label: {
@@ -77,20 +77,19 @@ struct EntryListView: View {
 
     private var filterMenu: some View {
         Menu {
-            Button("清除筛选") { model.filterClauses = [] }
+            Button("清除筛选") { model.setFilters([]) }
             Divider()
             Menu("评分 ≥") {
                 ForEach([1, 2, 3, 4], id: \.self) { r in
-                    Button("★ \(r)+") {
-                        setSingle(.rating, .gte, String(r))
-                    }
+                    Button("★ \(r)+") { setSingle(.rating, .gte, String(r)) }
                 }
             }
             Toggle("仅含 PDF", isOn: Binding(
                 get: { model.filterClauses.contains { $0.field == .haspdf } },
                 set: { on in
-                    model.filterClauses.removeAll { $0.field == .haspdf }
-                    if on { model.filterClauses.append(FilterClause(field: .haspdf, op: .yes, value: "")) }
+                    var next = model.filterClauses.filter { $0.field != .haspdf }
+                    if on { next.append(FilterClause(field: .haspdf, op: .yes, value: "")) }
+                    model.setFilters(next)
                 }
             ))
         } label: {
@@ -101,7 +100,8 @@ struct EntryListView: View {
     }
 
     private func setSingle(_ field: FilterField, _ op: FilterOp, _ value: String) {
-        model.filterClauses.removeAll { $0.field == field }
-        model.filterClauses.append(FilterClause(field: field, op: op, value: value))
+        var next = model.filterClauses.filter { $0.field != field }
+        next.append(FilterClause(field: field, op: op, value: value))
+        model.setFilters(next)
     }
 }
