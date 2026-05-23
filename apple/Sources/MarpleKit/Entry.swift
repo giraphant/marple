@@ -1,12 +1,50 @@
 import Foundation
 
-public enum EntryType: String, Codable, Sendable {
-    case paperAnalysis = "paper-analysis"
-    case bookOverview = "book-overview"
-    case chapterSummary = "chapter-summary"
-    case authorProfile = "author-profile"
-    case topicSynthesis = "topic-synthesis"
-    case note = "note"
+public enum EntryType: RawRepresentable, Codable, Sendable, Equatable {
+    case paperAnalysis
+    case bookOverview
+    case chapterSummary
+    case authorProfile
+    case topicSynthesis
+    case note
+    /// Any entry type the reader doesn't model yet. The vault is produced by an
+    /// evolving pipeline (e.g. "topic-reading-list"); preserving the raw value
+    /// here means one unknown type never fails the whole index decode.
+    case other(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "paper-analysis": self = .paperAnalysis
+        case "book-overview": self = .bookOverview
+        case "chapter-summary": self = .chapterSummary
+        case "author-profile": self = .authorProfile
+        case "topic-synthesis": self = .topicSynthesis
+        case "note": self = .note
+        default: self = .other(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .paperAnalysis: return "paper-analysis"
+        case .bookOverview: return "book-overview"
+        case .chapterSummary: return "chapter-summary"
+        case .authorProfile: return "author-profile"
+        case .topicSynthesis: return "topic-synthesis"
+        case .note: return "note"
+        case .other(let raw): return raw
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self.init(rawValue: raw)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
 }
 
 public struct Entry: Codable, Sendable, Identifiable, Equatable {

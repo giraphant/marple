@@ -22,6 +22,19 @@ import Testing
         #expect(e.hasPDF)
     }
 
+    @Test func testUnknownTypeBecomesOtherAndDoesNotFailArray() throws {
+        // The real vault contains an entry with type "topic-reading-list", which
+        // the reader doesn't model. One unknown type must NOT fail the whole
+        // index decode — it should become .other and the array stays intact.
+        let entries = try decode("""
+        [{"path":"vault/t/r.md","type":"topic-reading-list","preview":"","rating_score":0},
+         {"path":"vault/p/a.md","type":"paper-analysis","preview":"","rating_score":0}]
+        """)
+        #expect(entries.count == 2)
+        #expect(entries[0].type == .other("topic-reading-list"))
+        #expect(entries[1].type == .paperAnalysis)
+    }
+
     @Test func testToleratesStringYearNullThemesMissingPdf() throws {
         let entries = try decode("""
         [{"path":"vault/n/b.md","type":"note","title":null,"author":null,
