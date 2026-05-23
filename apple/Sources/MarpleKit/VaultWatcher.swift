@@ -30,7 +30,7 @@ public final class Coalescer: @unchecked Sendable {
 
 /// FSEvents-backed directory watcher via a DispatchSource on the directory fd.
 /// Coarse by design: it only hints "something changed"; the handler decides what
-/// to refresh (and the reader-api server already diffs the vault by mtime).
+/// to refresh (the VaultIndexer reconciles by mtime diff on each signal).
 public final class VaultWatcher: @unchecked Sendable {
     private let url: URL
     private let coalescer: Coalescer

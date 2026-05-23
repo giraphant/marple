@@ -6,32 +6,43 @@ final class AppState: ObservableObject {
     @Published var model: AppModel?
     @Published var booting = false
     @Published var bootError: String?
-    private var sidecar: SidecarProcess?
+    private var indexer: VaultIndexer?
     private var watcher: VaultWatcher?
 
     @MainActor
     func boot(paths: VaultPaths) async {
         guard model == nil, !booting else { return }
         booting = true; bootError = nil
-        let sidecar = SidecarProcess(repoRoot: paths.repoRoot, workspaceRoot: paths.workspaceRoot)
-        self.sidecar = sidecar
+        let indexer = VaultIndexer(workspaceRoot: paths.workspaceRoot)
+        self.indexer = indexer
+        // Run reconcile on a background thread so the main actor is never blocked.
+        // On first run (no index) this performs a full build. Errors are logged but
+        // do NOT crash the app — the list opens with whatever index already exists.
         do {
-            _ = try await sidecar.start()
-            let index = IndexDatabase(indexDBPath: paths.workspaceRoot + "/.marple/index.sqlite")
-            let client = LocalVaultClient(workspaceRoot: paths.workspaceRoot, index: index)
-            let m = AppModel(client: client, stateStore: UserDefaultsStateStore())
-            await m.loadIndex()
-            self.model = m
-            self.booting = false
-            let watcher = VaultWatcher(vaultDirectory: URL(fileURLWithPath: paths.vaultDir)) { [weak m] in
-                await m?.reloadOpen()  // reloadOpen is @MainActor; await hops for us
-            }
-            watcher.start()
-            self.watcher = watcher
+            _ = try await Task.detached { try indexer.reconcile() }.value
         } catch {
-            self.bootError = "\(error)"
-            self.booting = false
+            print("[marple] boot reconcile failed (non-fatal): \(error)")
         }
+        let index = IndexDatabase(indexDBPath: paths.workspaceRoot + "/.marple/index.sqlite")
+        let client = LocalVaultClient(workspaceRoot: paths.workspaceRoot, index: index)
+        let m = AppModel(client: client, stateStore: UserDefaultsStateStore())
+        await m.loadIndex()
+        self.model = m
+        self.booting = false
+        // Wire the FSEvents watcher: on a debounced vault change, reconcile the
+        // index then reload the list + open doc so external edits surface promptly.
+        // Capture `indexer` directly (it is @unchecked Sendable) to avoid crossing
+        // an actor boundary through `self` inside a @Sendable closure.
+        let watcher = VaultWatcher(vaultDirectory: URL(fileURLWithPath: paths.vaultDir)) { [weak m, indexer] in
+            // Reconcile off the main actor (synchronous/blocking).
+            do { _ = try await Task.detached { try indexer.reconcile() }.value }
+            catch { print("[marple] watcher reconcile failed: \(error)") }
+            // Reload the list and the open document on the main actor.
+            await m?.loadIndex()
+            await m?.reloadOpen()
+        }
+        watcher.start()
+        self.watcher = watcher
     }
 }
 
@@ -52,11 +63,9 @@ struct MarpleApp: App {
         .commands { TabCommands() }
     }
 
-    /// Boot routing: no library picked → setup; library picked but the repo can't be
-    /// located (binary moved out of the repo) → explain; otherwise boot.
+    /// Boot routing: no library picked → setup; library picked → boot with VaultIndexer.
     private enum BootContext {
         case needsLibrary
-        case repoMissing(from: String)
         case ready(VaultPaths)
     }
 
@@ -65,19 +74,13 @@ struct MarpleApp: App {
               let ws = try? resolveWorkspace(pickedPath: workspaceRoot) else {
             return .needsLibrary
         }
-        guard let repo = findRepoRoot(startingFrom: Bundle.main.bundlePath) else {
-            return .repoMissing(from: Bundle.main.bundlePath)
-        }
-        return .ready(VaultPaths(repoRoot: repo, workspaceRoot: ws.workspaceRoot, vaultDir: ws.vaultDir))
+        return .ready(VaultPaths(workspaceRoot: ws.workspaceRoot, vaultDir: ws.vaultDir))
     }
 
     @ViewBuilder private var content: some View {
         switch bootContext {
         case .needsLibrary:
             SetupView { picked in workspaceRoot = picked }
-        case .repoMissing(let from):
-            ContentUnavailableView("找不到 marple 仓库", systemImage: "exclamationmark.triangle",
-                                   description: Text("无法从\n\(from)\n向上找到 rust/Cargo.toml,请从仓库内运行。"))
         case .ready(let paths):
             if let model = state.model {
                 RootView(model: model)
@@ -85,7 +88,7 @@ struct MarpleApp: App {
                 ContentUnavailableView("启动失败", systemImage: "exclamationmark.triangle",
                                        description: Text(err))
             } else {
-                ProgressView("启动 reader-api…")
+                ProgressView("建立索引…")
                     .padding()
                     .task { await state.boot(paths: paths) }
             }

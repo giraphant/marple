@@ -1,22 +1,18 @@
 import Foundation
 
-/// The paths the app needs to boot. `repoRoot` is auto-derived (it only drives the
-/// sidecar's `cargo run`); `workspaceRoot`/`vaultDir` come from the user-picked
-/// library folder and are passed to the sidecar via `VAULT_ROOT`.
+/// The paths the app needs to boot. `workspaceRoot`/`vaultDir` come from the
+/// user-picked library folder.
 public struct VaultPaths: Sendable, Equatable {
-    public let repoRoot: String
     public let workspaceRoot: String
     public let vaultDir: String
-    public init(repoRoot: String, workspaceRoot: String, vaultDir: String) {
-        self.repoRoot = repoRoot; self.workspaceRoot = workspaceRoot; self.vaultDir = vaultDir
+    public init(workspaceRoot: String, vaultDir: String) {
+        self.workspaceRoot = workspaceRoot; self.vaultDir = vaultDir
     }
 }
 
 public enum VaultPathsError: Error, Equatable {
     /// The picked folder is neither a workspace (no `vault/` inside) nor a `vault/`.
     case noVault(String)
-    /// Couldn't locate `rust/Cargo.toml` walking up from the start path.
-    case repoNotFound(String)
 }
 
 /// Walk up from `start` until a directory contains `rust/Cargo.toml`; that's the
