@@ -299,17 +299,24 @@ public final class VaultIndexer: @unchecked Sendable {
     /// workspace-relative path and crash the insert (UNIQUE constraint). Rust's
     /// `slash_relative` strips the literal prefix without resolving either side.
     private func slashRelative(root: String, path: String) -> String {
-        let resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
-        let prefix = resolvedRoot.hasSuffix("/") ? resolvedRoot : resolvedRoot + "/"
-        if path.hasPrefix(prefix) {
-            return String(path.dropFirst(prefix.count))
+        // macOS firmlinks: /var, /tmp, /etc are symlinks to /private/var etc.
+        // FileManager.enumerator returns the /private form while the workspace
+        // root may be in either form. Normalize a leading "/private" off BOTH
+        // sides so the prefix compares consistently — WITHOUT resolving symlinks
+        // inside the path (resolving would collapse a symlinked .md onto its
+        // target, producing a duplicate workspace-relative path and crashing the
+        // bulk insert). Rust's slash_relative strips a literal prefix; this is the
+        // same, made robust to the firmlink form difference.
+        func stripPrivate(_ p: String) -> String {
+            p.hasPrefix("/private/") ? String(p.dropFirst("/private".count)) : p
         }
-        // Fallback: try the unresolved root.
-        let fallbackPrefix = root.hasSuffix("/") ? root : root + "/"
-        if path.hasPrefix(fallbackPrefix) {
-            return String(path.dropFirst(fallbackPrefix.count))
+        let r = stripPrivate(root)
+        let p = stripPrivate(path)
+        let prefix = r.hasSuffix("/") ? r : r + "/"
+        if p.hasPrefix(prefix) {
+            return String(p.dropFirst(prefix.count))
         }
-        return path
+        return p
     }
 
     // MARK: mtimeMs
