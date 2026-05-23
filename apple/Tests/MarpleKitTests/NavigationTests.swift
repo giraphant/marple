@@ -164,21 +164,23 @@ import Testing
         #expect(w.tabs.first { $0.id == id }?.pinned == false)
     }
 
-    @Test func testMoveReorders() {
+    @Test func testReorderAppliesIdOrder() {
         var w = Workspace(initial: a)
         w.newTab(b); w.newTab(c)    // [a, b, c]
-        let cID = w.tabs[2].id
-        let aID = w.tabs[0].id
-        w.move(id: cID, before: aID) // -> [c, a, b]
+        let ids = [w.tabs[2].id, w.tabs[0].id, w.tabs[1].id]
+        w.reorder(ids)
         #expect(w.tabs.map(\.location) == [c, a, b])
     }
 
-    @Test func testMoveOntoSelfIsNoOp() {
+    @Test func testReorderKeepsActiveAndIgnoresBadInput() {
         var w = Workspace(initial: a)
-        w.newTab(b)                 // [a, b]
-        let aID = w.tabs[0].id
-        w.move(id: aID, before: aID)
+        w.newTab(b)                 // [a, b], active b
+        let activeBefore = w.activeID
+        w.reorder([w.tabs[1].id])   // incomplete -> no-op
         #expect(w.tabs.map(\.location) == [a, b])
+        w.reorder([w.tabs[1].id, w.tabs[0].id])
+        #expect(w.tabs.map(\.location) == [b, a])
+        #expect(w.activeID == activeBefore)
     }
 
     @Test func testTabLocationReflectsHistoryCurrent() {

@@ -121,13 +121,12 @@ public struct Workspace: Sendable {
         tabs[i].pinned.toggle()
     }
 
-    /// Reorder: pull the tab with `id` out and reinsert it at the current position
-    /// of `targetID`. Moving a tab onto itself is a no-op.
-    public mutating func move(id: NavTab.ID, before targetID: NavTab.ID) {
-        guard id != targetID,
-              let from = tabs.firstIndex(where: { $0.id == id }) else { return }
-        let t = tabs.remove(at: from)
-        let to = tabs.firstIndex(where: { $0.id == targetID }) ?? tabs.count
-        tabs.insert(t, at: to)
+    /// Reorder the tabs to match `ids` (the order produced by a drag). `ids` must be
+    /// a permutation of the current tab ids — anything else (incomplete / unknown /
+    /// duplicate) is a no-op. The active tab is unchanged.
+    public mutating func reorder(_ ids: [NavTab.ID]) {
+        guard ids.count == tabs.count, Set(ids) == Set(tabs.map(\.id)) else { return }
+        let map = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
+        tabs = ids.compactMap { map[$0] }
     }
 }

@@ -276,9 +276,7 @@ final class AppModel {
 
     func togglePin(_ id: NavTab.ID) { workspace.togglePin(id) }
 
-    func moveTab(id: NavTab.ID, before targetID: NavTab.ID) {
-        workspace.move(id: id, before: targetID)
-    }
+    func setTabOrder(_ ids: [NavTab.ID]) { workspace.reorder(ids) }
 
     // MARK: tab labels
 
