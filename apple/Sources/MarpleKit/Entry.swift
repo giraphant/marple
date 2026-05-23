@@ -1,6 +1,6 @@
 import Foundation
 
-public enum EntryType: RawRepresentable, Codable, Sendable, Equatable {
+public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable {
     case paperAnalysis
     case bookOverview
     case chapterSummary
@@ -47,6 +47,26 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable {
     }
 }
 
+public extension EntryType {
+    /// The six modeled types in the canonical sidebar order (mirrors web TYPES).
+    static let modeled: [EntryType] = [
+        .paperAnalysis, .bookOverview, .authorProfile,
+        .topicSynthesis, .chapterSummary, .note,
+    ]
+
+    var label: String {
+        switch self {
+        case .paperAnalysis:  return "论文"
+        case .bookOverview:   return "图书"
+        case .authorProfile:  return "作者"
+        case .topicSynthesis: return "主题"
+        case .chapterSummary: return "章节"
+        case .note:           return "笔记"
+        case .other(let raw): return raw
+        }
+    }
+}
+
 public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public var id: String { path }
     public let path: String
@@ -58,12 +78,19 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public let themes: [String]
     public let preview: String
     public let hasPDF: Bool
+    public let mtime: Double?
+    public let added: Double?
+    public let source: String?
+    public let book: String?
+    public let topic: String?
+    public let doi: String?
 
     enum CodingKeys: String, CodingKey {
         case path, type, title, author, year, preview
         case ratingScore = "rating_score"
         case themes
         case hasPDF = "has_pdf"
+        case mtime, added, source, book, topic, doi
     }
 
     public init(from decoder: Decoder) throws {
@@ -85,11 +112,19 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         } else {
             year = nil
         }
+        mtime = (try? c.decodeIfPresent(Double.self, forKey: .mtime)) ?? nil
+        added = (try? c.decodeIfPresent(Double.self, forKey: .added)) ?? nil
+        source = (try? c.decodeIfPresent(String.self, forKey: .source)) ?? nil
+        book = (try? c.decodeIfPresent(String.self, forKey: .book)) ?? nil
+        topic = (try? c.decodeIfPresent(String.self, forKey: .topic)) ?? nil
+        doi = (try? c.decodeIfPresent(String.self, forKey: .doi)) ?? nil
     }
 
     public init(path: String, type: EntryType, title: String?, author: String?,
                 year: String?, ratingScore: Double, themes: [String],
-                preview: String, hasPDF: Bool) {
+                preview: String, hasPDF: Bool,
+                mtime: Double? = nil, added: Double? = nil, source: String? = nil,
+                book: String? = nil, topic: String? = nil, doi: String? = nil) {
         self.path = path
         self.type = type
         self.title = title
@@ -99,5 +134,11 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         self.themes = themes
         self.preview = preview
         self.hasPDF = hasPDF
+        self.mtime = mtime
+        self.added = added
+        self.source = source
+        self.book = book
+        self.topic = topic
+        self.doi = doi
     }
 }

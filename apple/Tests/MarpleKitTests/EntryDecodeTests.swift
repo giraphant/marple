@@ -47,4 +47,37 @@ import Testing
         #expect(e.themes == [])
         #expect(!e.hasPDF)
     }
+
+    @Test func testDecodesBrowseFieldsForSortAndFilter() throws {
+        let entries = try decode("""
+        [{"path":"vault/p/a.md","type":"paper-analysis","title":"A","rating_score":0,
+          "preview":"","mtime":1700000000000,"added":1690000000000,
+          "source":"JSTOR","book":"Some Book","topic":"econ","doi":"10.1/x"}]
+        """)
+        let e = entries[0]
+        #expect(e.mtime == 1700000000000)
+        #expect(e.added == 1690000000000)
+        #expect(e.source == "JSTOR")
+        #expect(e.book == "Some Book")
+        #expect(e.topic == "econ")
+        #expect(e.doi == "10.1/x")
+    }
+
+    @Test func testBrowseFieldsTolerateAbsence() throws {
+        let entries = try decode("""
+        [{"path":"vault/n/b.md","type":"note","preview":"","rating_score":0}]
+        """)
+        let e = entries[0]
+        #expect(e.mtime == nil)
+        #expect(e.added == nil)
+        #expect(e.source == nil)
+    }
+
+    @Test func testModeledTypesOrderAndLabels() {
+        #expect(EntryType.modeled == [.paperAnalysis, .bookOverview, .authorProfile,
+                                      .topicSynthesis, .chapterSummary, .note])
+        #expect(EntryType.paperAnalysis.label == "论文")
+        #expect(EntryType.note.label == "笔记")
+        #expect(EntryType.other("topic-reading-list").label == "topic-reading-list")
+    }
 }
