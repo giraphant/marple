@@ -2,11 +2,17 @@ import Foundation
 import MarpleKit
 import Observation
 
+/// Middle-column display mode for the entry list.
+enum BrowseMode: String, CaseIterable, Sendable { case list, grid }
+
 @Observable @MainActor
 final class AppModel {
     let client: VaultClient
     private(set) var entries: [Entry] = []
     var status: String = ""
+
+    /// Card grid vs single-column list. Pure UI toggle; no derived cache depends on it.
+    var browseMode: BrowseMode = .grid
 
     // Tabs + per-tab back/forward history. `pane`/`openPath` are derived from the
     // active tab's current location; mutate via the navigation intents below.
