@@ -1,4 +1,4 @@
-# qua reader
+# marple
 
 > I like to pass unnoticed, which is why I hope that I am not deprived of old age. I aspire to Miss Marple’s persona: to be exactly as I am, decrepit nature yet supernature in one, equally alert on the damp ground and in the turbulent air. ——Gillian Rose
 
@@ -18,10 +18,13 @@ For internals / architecture / how to extend, see [`context.md`](./context.md).
 First time:
 
 ```sh
-cd reader
 npm install
 cargo fetch --manifest-path rust/Cargo.toml
 ```
+
+Then point marple at your vault: copy `marple.config.example.json` →
+`marple.config.json` and set `workspaceRoot` to your vault workspace (the
+directory that holds `vault/`). `VAULT_ROOT` env var overrides it.
 
 Day-to-day (`vite` + Rust `reader-api` concurrently):
 
@@ -43,8 +46,8 @@ npm run serve           # Rust API serves dist + vault writes in one process
 Useful one-offs:
 
 ```sh
-npm run build:index     # rebuild data/index.sqlite after vault changes
-npm run build:embeddings # build data/vectors.sqlite (downloads ~2.3 GB BGE-M3)
+npm run build:index     # rebuild <workspace>/.marple/index.sqlite after vault changes
+npm run build:embeddings # build <workspace>/.marple/vectors.sqlite (downloads ~2.3 GB BGE-M3)
 npm run api             # run only the Rust reader-api backend
 npm run test:sql-index  # validate SQLite schema, themes mirror, and FTS
 npm run typecheck       # tsc --noEmit
@@ -53,14 +56,15 @@ npm run typecheck       # tsc --noEmit
 ### Semantic vectors (hybrid search)
 
 The model-free index build above never touches embeddings. Semantic / hybrid
-search needs `data/vectors.sqlite`, built separately and **fully in the
-background** — it never blocks the API or UI from starting:
+search needs the vault's `.marple/vectors.sqlite`, built separately and **fully
+in the background** — it never blocks the API or UI from starting:
 
 - Trigger from ⚙ Settings → 重建语义向量, or `POST /api/embeddings` (returns
   `202` immediately; poll `GET /api/embeddings/status`).
 - On startup the API auto-builds vectors if they're missing **and** the model is
-  already cached (a `data/models/.model-ready` sentinel, written after the first
-  successful download). Set `READER_AUTO_EMBED=0` to disable boot auto-build.
+  already cached (a `.model-ready` sentinel under the global model cache
+  `~/.cache/marple/models`, written after the first successful download). Set
+  `MARPLE_AUTO_EMBED=0` to disable boot auto-build.
 - Until vectors exist, hybrid search transparently degrades to lexical.
 
 ## What it does
@@ -165,10 +169,10 @@ background** — it never blocks the API or UI from starting:
 | `src/list-sort.ts` | Per-type list sort + extra filters (pure) |
 | `src/doc-panel.ts` / `doc-outline.ts` / `doc-stats.ts` | Right-panel prefs / heading outline / doc stats (pure) |
 | `scripts/test-sql-index.mjs` | Validates SQLite schema, theme rows, and FTS smoke search |
-| `rust/reader-index` | CLI that walks `vault/` and emits `data/index.sqlite` |
+| `rust/reader-index` | CLI that walks `vault/` and emits `<workspace>/.marple/index.sqlite` |
 | `rust/reader-core` | Reusable Rust core: SQLite index build/read, path safety, vault/trash operations |
 | `rust/reader-api` | Axum HTTP adapter around `reader-core`; future Tauri commands can reuse core |
-| `data/index.sqlite` | Generated; read by `/api/index` on app boot |
+| `<workspace>/.marple/index.sqlite` | Generated; read by `/api/index` on app boot |
 
 ## Roadmap (not built)
 
@@ -177,7 +181,7 @@ background** — it never blocks the API or UI from starting:
 - `[[` autocomplete in the editor
 - Focus mode / typewriter scrolling toggles
 - Theme as first-class object (`vault/themes/<slug>.md` with description page)
-- Auto-rebuild `data/index.sqlite` on vault changes (file watcher)
+- Auto-rebuild `<workspace>/.marple/index.sqlite` on vault changes (file watcher)
 - Real list virtualization for 12k+ cards
 - Bibtex / CSL citation export formats
 - MCP server exposing vault to AI tools

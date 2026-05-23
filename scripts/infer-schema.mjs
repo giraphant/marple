@@ -6,12 +6,11 @@
 
 import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { workspaceRoot, marpleDataDir } from './workspace-root.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '../..');
+const ROOT = workspaceRoot();
 const VAULT = path.join(ROOT, 'vault');
-const OUT = path.resolve(__dirname, '../data');
+const OUT = marpleDataDir();
 const REPORT = path.join(OUT, 'schema-inference.md');
 
 // ---- parser (mirror of build-index.mjs) ----

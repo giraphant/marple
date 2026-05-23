@@ -2,10 +2,14 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import * as YAML from 'yaml';
+import { readerRoot, workspaceRoot } from './workspace-root.mjs';
 
-const repoRoot = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+// repoRoot = the content workspace (vault/books and .quasi/localise live there);
+// READER_ROOT = this marple repo (its src/*.ts matcher modules).
+const repoRoot = workspaceRoot();
+const READER_ROOT = readerRoot();
 const cachePath = path.join(repoRoot, '.quasi/localise/cndouban.json');
 const reviewPath = path.join(repoRoot, '.quasi/localise/cn-review.json');
 const booksRoot = path.join(repoRoot, 'vault/books');
@@ -19,8 +23,8 @@ async function main() {
   }
 
   const [{ scoreCandidate, resolveOwner, titleAffinity }, { applyZhLocalisation }] = await Promise.all([
-    loadTsModule('reader/src/cn-matcher.ts'),
-    loadTsModule('reader/src/cn-localise.ts'),
+    loadTsModule('src/cn-matcher.ts'),
+    loadTsModule('src/cn-localise.ts'),
   ]);
   const cache = await readJson(cachePath);
   const overviews = await loadBookOverviews();
@@ -145,7 +149,7 @@ async function main() {
 // URL. Works only for modules with no runtime imports (cn-matcher.ts has none;
 // cn-localise.ts uses a type-only yaml import that is erased by transpilation).
 async function loadTsModule(relPath) {
-  const absPath = path.join(repoRoot, relPath);
+  const absPath = path.join(READER_ROOT, relPath);
   const ts = await import('typescript');
   const source = await fs.readFile(absPath, 'utf8');
   const output = ts.transpileModule(source, {
@@ -475,7 +479,7 @@ const invokedAsCli = process.argv[1]
 
 if (invokedAsCli) {
   if (process.argv.includes('--help') || process.argv.includes('-h')) {
-    console.log('Usage: node reader/scripts/write-cn-localisations.mjs [--force]');
+    console.log('Usage: node scripts/write-cn-localisations.mjs [--force]');
     process.exit(0);
   }
   main().catch(error => {

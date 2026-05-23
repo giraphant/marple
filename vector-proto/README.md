@@ -49,7 +49,7 @@
 ## 跑起来
 
 ```sh
-cd reader/vector-proto
+cd vector-proto
 python3 -m venv .venv
 .venv/bin/pip install fastembed numpy
 
@@ -62,7 +62,7 @@ python3 -m venv .venv
 
 ## 文件
 
-* `embed_all.py` — 从 `reader/data/index.sqlite` 读 entries，embed，存 `vectors.npz`
+* `embed_all.py` — 从 `<workspace>/.marple/index.sqlite` 读 entries，embed，存 `vectors.npz`
 * `query.py` — Hybrid 查询脚本，并排打印 BM25 / vec / RRF 三种排序
 * `vectors.npz` — 向量数据（不进 git）
 

@@ -29,7 +29,7 @@ Hard guarantees the design rests on:
 [ vault/**/*.md (12 k files) ] ──┐
                                  │  reader-index / reader-core (one-shot)
                                  ▼
-                  data/index.sqlite (entries + themes + FTS)
+                  .marple/index.sqlite (entries + themes + FTS)
                                  │
                                  │ /api/index fetched once on app boot
                                  ▼
@@ -263,7 +263,7 @@ permanent recovery layer.
 | `src/wiki.ts` | `[[wikilink]]` index + author splitter |
 | `src/settings.ts` | Settings type + `loadSettings` / `saveSettings` (localStorage) |
 | `scripts/test-sql-index.mjs` | Validates SQLite schema, expanded themes, and FTS smoke search |
-| `rust/reader-index` | CLI that walks `vault/`, scans `sources/` for PDFs, emits `data/index.sqlite` |
+| `rust/reader-index` | CLI that walks `vault/`, scans `sources/` for PDFs, emits `.marple/index.sqlite` |
 | `rust/reader-core` | Reusable Rust core for SQLite index build/read, path safety, vault writes, trash |
 | `rust/reader-api` | Axum HTTP adapter around `reader-core`; migration path to Tauri commands |
 | `vite.config.ts` | Vite + preact preset + unplugin-icons + dev proxy |
@@ -342,7 +342,7 @@ is importable immediately. No vite config change needed.
     vars or QUA-58 regresses.
 
 - 2026-05-19: v0.10.0 — SQLite index + Rust backend migration + Vite 8.
-  - `data/index.json` replaced by generated `data/index.sqlite`
+  - `data/index.json` replaced by generated `.marple/index.sqlite`
     (`entries`, `entry_themes`, `entry_search` FTS5). The SPA fetches
     `/api/index` instead of importing a large JSON blob.
   - Node `serve.mjs` and `scripts/build-index.mjs` removed. `reader-core`
@@ -579,7 +579,7 @@ Dev (`devDependencies`):
   but cosmetic diff. Fixable by parsing through `yaml.Document` AST
   preserving per-node style.
 - **No file watcher.** Run `npm run build:index` after vault changes
-  to refresh `data/index.sqlite`.
+  to refresh `.marple/index.sqlite`.
 - **All 12 k+ cards render at once** in ListView — fine due to
   `content-visibility: auto`, but real virtualization (e.g. `@tanstack/virtual`)
   would scale better as the vault grows past 20 k.
@@ -601,7 +601,7 @@ Frontend npm scripts:
 - `npm run dev` → Rust `reader-index`, then vite + Rust reader-api concurrently
 - `npm run dev:vite` → vite only (if reader-api already running)
 - `npm run build` → Rust `reader-index` then production bundle to `dist/`
-- `npm run build:index` → regenerate `data/index.sqlite` with Rust release CLI
+- `npm run build:index` → regenerate `.marple/index.sqlite` with Rust release CLI
 - `npm run api` → run only the Rust reader-api backend
 - `npm run test:sql-index` → validate the generated SQLite index
 - `npm run serve` → start Rust static + write-back server on `PORT` (default 5174)
@@ -612,7 +612,7 @@ Backend HTTP endpoints (`rust/reader-api`):
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/reader/*`, `/vault/*.md`, `/sources/*.pdf`, `/reader/data/*` | static files |
-| GET | `/api/index` | read entries from `data/index.sqlite` |
+| GET | `/api/index` | read entries from `.marple/index.sqlite` |
 | POST | `/api/reindex` | rebuild SQLite in-process through Rust |
 | POST | `/api/open-pdf` | open `sources/<slug>.pdf` in the host's default PDF app (macOS `open` / Linux `xdg-open`) |
 | PUT | `/vault/**/*.md` | update existing md (frontmatter or body) |

@@ -5,7 +5,7 @@ Spec gate document (see `docs/superpowers/specs/2026-05-19-reader-deep-search-de
 Spike binaries:
 - `cargo run --release -p reader-spike --bin spike-infra` — sqlite-vec + BGE-M3 init sanity
 - `cargo run --release -p reader-spike --bin spike-vault` — 300-entry recall benchmark
-- Generated JSON metrics: `reader/vector-proto/spike-prod-stack.json`
+- Generated JSON metrics: `vector-proto/spike-prod-stack.json`
 
 ## Gate results
 

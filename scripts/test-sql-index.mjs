@@ -3,11 +3,10 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { marpleDataDir } from './workspace-root.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_FILE = path.resolve(__dirname, '../data/index.sqlite');
+const DB_FILE = path.join(marpleDataDir(), 'index.sqlite');
 
 assert.ok(existsSync(DB_FILE), `missing SQLite index: ${DB_FILE}`);
 

@@ -18,7 +18,8 @@ pub mod vector;
 
 pub use indexer::{
     build_embeddings, build_embeddings_with_progress, build_sqlite_index, list_vault_files,
-    model_cache_ready, model_ready_marker, parse_entry, reconcile_index, remove_entry,
+    model_cache_dir, model_cache_ready, model_ready_marker, parse_entry, reconcile_index,
+    remove_entry,
     upsert_entry, IndexStats, ReconcileStats,
 };
 
@@ -60,10 +61,12 @@ pub struct ReaderPaths {
 }
 
 impl ReaderPaths {
-    /// Build paths from an explicit reader root (this app's own assets:
-    /// `data/`, `dist/`, model cache) and an explicit workspace root (where the
-    /// content lives: `vault/`, `sources/`, `processing/`). The two are
-    /// independent — reader no longer assumes it sits beside the vault.
+    /// Build paths from an explicit reader root (the app's own `dist/` build and
+    /// `marple.config.json`) and an explicit workspace root (where the content
+    /// lives: `vault/`, `sources/`, `processing/`, plus the per-vault derived
+    /// `.marple/` index). The model cache is global (see `model_cache_dir`), so
+    /// neither root carries it. The two roots are independent — the app no
+    /// longer assumes it sits beside the vault.
     pub fn from_roots(
         reader_root: impl Into<PathBuf>,
         workspace_root: impl Into<PathBuf>,
@@ -73,8 +76,8 @@ impl ReaderPaths {
         let vault = workspace_root.join("vault");
         let notes_dir = vault.join("notes");
         Ok(Self {
-            index_db: reader_root.join("data").join("index.sqlite"),
-            vectors_db: reader_root.join("data").join("vectors.sqlite"),
+            index_db: workspace_root.join(".marple").join("index.sqlite"),
+            vectors_db: workspace_root.join(".marple").join("vectors.sqlite"),
             trash_dir: notes_dir.join(".trash"),
             sources: workspace_root.join("sources"),
             translations: workspace_root.join("processing").join("translations"),
@@ -89,7 +92,7 @@ impl ReaderPaths {
     /// Resolve the workspace root (content location) independently of where the
     /// reader binary lives. Precedence:
     ///   1. `VAULT_ROOT` env var (explicit override for CI/scripts/dev)
-    ///   2. `reader.config.json` next to `reader_root`, key `workspaceRoot`
+    ///   2. `marple.config.json` next to `reader_root`, key `workspaceRoot`
     ///      (relative paths resolve against `reader_root`)
     ///   3. error with a clear message
     pub fn resolve_workspace_root(reader_root: &Path) -> Result<PathBuf> {
@@ -99,7 +102,7 @@ impl ReaderPaths {
                 format!("VAULT_ROOT is set but does not exist: {p:?}")
             });
         }
-        let cfg = reader_root.join("reader.config.json");
+        let cfg = reader_root.join("marple.config.json");
         if cfg.is_file() {
             let text = fs::read_to_string(&cfg)
                 .with_context(|| format!("failed to read {}", cfg.display()))?;
@@ -124,7 +127,7 @@ impl ReaderPaths {
     /// no longer derived from `reader_root`'s parent.
     pub fn from_reader_root(reader_root: impl Into<PathBuf>) -> Result<Self> {
         let reader_root = reader_root.into().canonicalize().with_context(|| {
-            "failed to resolve reader root; run from the reader repo or set READER_ROOT"
+            "failed to resolve reader root; run from the marple repo or set MARPLE_ROOT"
         })?;
         let workspace_root = Self::resolve_workspace_root(&reader_root)?;
         Self::from_roots(reader_root, workspace_root)

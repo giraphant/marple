@@ -527,7 +527,7 @@ pub fn build_embeddings_with_progress(
             "#,
         )?;
         let tx = conn.transaction()?;
-        embed_entries_into_staging(&tx, paths, &entries, progress)?;
+        embed_entries_into_staging(&tx, &entries, progress)?;
         write_meta_keys(&tx)?;
         swap_staging_into_live(&tx)?; // creates entry_vectors from staging
         tx.commit()?;
@@ -543,19 +543,27 @@ pub fn build_embeddings_with_progress(
 /// Written only after a successful `TextEmbedding::try_new`, so a partial or
 /// corrupt download (which still leaves a non-empty cache dir) never trips the
 /// boot auto-embed gate.
-pub fn model_ready_marker(paths: &ReaderPaths) -> PathBuf {
-    paths
-        .reader_root
-        .join("data")
-        .join("models")
-        .join(".model-ready")
+pub fn model_ready_marker() -> PathBuf {
+    model_cache_dir().join(".model-ready")
+}
+
+/// Global, vault-independent cache for the embedding model (BGE-M3 ~2.3 GB).
+/// Lives outside any repo so multiple vaults and checkouts share one download:
+/// `$XDG_CACHE_HOME/marple/models`, else `$HOME/.cache/marple/models`.
+pub fn model_cache_dir() -> PathBuf {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("marple").join("models")
 }
 
 /// True once the embedding model is known-good in the local cache. Boot
 /// auto-embed only proceeds when this holds, so the server never kicks off a
 /// surprise ~2.3 GB download on its own.
-pub fn model_cache_ready(paths: &ReaderPaths) -> bool {
-    model_ready_marker(paths).is_file()
+pub fn model_cache_ready() -> bool {
+    model_ready_marker().is_file()
 }
 
 fn load_source_slugs(sources: &Path) -> Result<HashSet<String>> {
@@ -1433,7 +1441,6 @@ const EMBED_DIM: usize = 1024;
 
 fn embed_entries_into_staging(
     tx: &rusqlite::Transaction<'_>,
-    paths: &ReaderPaths,
     entries: &[IndexedEntry],
     progress: &dyn Fn(usize, usize),
 ) -> ReaderResult<()> {
@@ -1449,7 +1456,7 @@ fn embed_entries_into_staging(
 
     use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
-    let model_cache = paths.reader_root.join("data").join("models");
+    let model_cache = model_cache_dir();
     fs::create_dir_all(&model_cache)?;
     let mut model = TextEmbedding::try_new(
         InitOptions::new(EmbeddingModel::BGEM3)
@@ -1460,7 +1467,7 @@ fn embed_entries_into_staging(
 
     // Model is fully loaded → record the ready sentinel so boot auto-embed may
     // run unattended next time without risking a partial-download false positive.
-    if let Err(e) = fs::write(model_ready_marker(paths), b"ok") {
+    if let Err(e) = fs::write(model_ready_marker(), b"ok") {
         eprintln!("[reader-core] could not write model-ready marker: {e}");
     }
 

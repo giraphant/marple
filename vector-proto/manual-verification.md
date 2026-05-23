@@ -43,5 +43,5 @@ Verdicts:
   - fucault typo suppression:        PASS / FAIL
 ```
 
-If any line FAILs, do not delete `reader/rust/reader-spike/` and open
+If any line FAILs, do not delete `rust/reader-spike/` and open
 a follow-up before iterating.

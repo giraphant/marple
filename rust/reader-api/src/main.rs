@@ -34,7 +34,7 @@ struct AppState {
 async fn main() -> anyhow::Result<()> {
     reader_core::init_sqlite_vec();
 
-    let reader_root = env::var("READER_ROOT")
+    let reader_root = env::var("MARPLE_ROOT")
         .map(PathBuf::from)
         .unwrap_or(env::current_dir()?);
     let paths = Arc::new(ReaderPaths::from_reader_root(reader_root)?);
@@ -43,9 +43,7 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(5174);
 
-    let model = reader_core::vector::ModelHandle::with_cache_dir(
-        paths.reader_root.join("data").join("models"),
-    );
+    let model = reader_core::vector::ModelHandle::with_cache_dir(reader_core::model_cache_dir());
     let state = AppState {
         paths,
         model,
@@ -97,11 +95,11 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     println!("reader api at http://localhost:{port}");
-    println!("GET    /api/index              -> read entries from data/index.sqlite");
+    println!("GET    /api/index              -> read entries from <workspace>/.marple/index.sqlite");
     println!("GET    /api/files              -> list vault files (path + mtime)");
     println!("GET    /api/entry?path=...     -> live-parse one vault file's metadata");
     println!("GET    /api/search?q=...       -> search entries with SQLite FTS");
-    println!("POST   /api/reindex            -> rebuild data/index.sqlite with Rust");
+    println!("POST   /api/reindex            -> rebuild <workspace>/.marple/index.sqlite with Rust");
     println!("POST   /api/reconcile          -> delta-sync index to the vault (cheap)");
     println!("POST   /api/open-pdf           -> open sources/<slug>.pdf in the system PDF app");
     println!("POST   /api/open-in-editor     -> open a vault/*.md in the chosen external editor");
@@ -445,12 +443,12 @@ fn should_auto_embed(
 /// Detached, so it never blocks the server from coming up.
 fn maybe_auto_embed(state: &AppState) {
     let env_disabled = matches!(
-        env::var("READER_AUTO_EMBED").ok().as_deref(),
+        env::var("MARPLE_AUTO_EMBED").ok().as_deref(),
         Some("0") | Some("false") | Some("off")
     );
     let vectors_exist = state.paths.vectors_db.is_file();
     let index_exists = state.paths.index_db.is_file();
-    let model_ready = reader_core::model_cache_ready(&state.paths);
+    let model_ready = reader_core::model_cache_ready();
 
     if should_auto_embed(vectors_exist, index_exists, model_ready, env_disabled) {
         if state.embed_job.try_begin() {

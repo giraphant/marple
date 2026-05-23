@@ -7,16 +7,15 @@
 //   - top H2 headings by frequency
 //   - for each top H2: block-kind distribution
 //   - overall block-kind distribution
-// Writes reader/data/body-audit.md.
+// Writes <workspaceRoot>/.marple/body-audit.md.
 
 import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { workspaceRoot, marpleDataDir } from './workspace-root.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '../..');
+const ROOT = workspaceRoot();
 const VAULT = path.join(ROOT, 'vault');
-const OUT = path.resolve(__dirname, '../data');
+const OUT = marpleDataDir();
 const REPORT = path.join(OUT, 'body-audit.md');
 
 // ---- file walk ----

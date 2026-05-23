@@ -3,7 +3,7 @@ use std::{env, path::PathBuf};
 use reader_core::{build_embeddings, build_sqlite_index, ReaderPaths};
 
 fn main() -> anyhow::Result<()> {
-    let reader_root = env::var("READER_ROOT")
+    let reader_root = env::var("MARPLE_ROOT")
         .map(PathBuf::from)
         .unwrap_or(env::current_dir()?);
     let paths = ReaderPaths::from_reader_root(reader_root)?;

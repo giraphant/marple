@@ -2,11 +2,11 @@ use std::path::PathBuf;
 
 use reader_core::ReaderPaths;
 
-/// The reader root mirrors how `reader-api` resolves it: the `reader/` directory.
+/// The reader root mirrors how `reader-api` resolves it: the marple repo root.
 /// During `tauri dev` the binary's cwd is the crate dir, so derive from the
-/// compiled-in manifest path instead (CARGO_MANIFEST_DIR = reader/src-tauri).
+/// compiled-in manifest path instead (CARGO_MANIFEST_DIR = marple/src-tauri).
 fn reader_root() -> PathBuf {
-    if let Ok(p) = std::env::var("READER_ROOT") {
+    if let Ok(p) = std::env::var("MARPLE_ROOT") {
         return PathBuf::from(p);
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
