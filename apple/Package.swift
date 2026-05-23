@@ -15,7 +15,14 @@ let package = Package(
         .package(url: "https://github.com/ciaranrobrien/SwiftUILazyContainer.git", from: "2.0.0"),
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.0.0"),
-        .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.3.0"),
+        // Capped to 1.0.x to share a single resolution with mlx-swift-examples
+        // 2.29.1 (which pins swift-transformers 1.0.0..<1.1.0). The tokenizer API
+        // we use (AutoTokenizer.from(modelFolder:), encode(addSpecialTokens:)) is
+        // identical in 1.0.0, so no code changes — just a version cap.
+        .package(url: "https://github.com/huggingface/swift-transformers.git", .upToNextMinor(from: "1.0.0")),
+        // Pinned to a tag: `main` is mid-refactor and stopped vending MLXEmbedders
+        // as an SPM product. 2.29.1 ships Libraries/Embedders with native Qwen3.
+        .package(url: "https://github.com/ml-explore/mlx-swift-examples.git", from: "2.29.1"),
     ],
     targets: [
         .target(
@@ -27,10 +34,22 @@ let package = Package(
                 .product(name: "Tokenizers", package: "swift-transformers"),
             ]
         ),
+        // Concrete embedding runtime (MLX). Kept in its own target so the heavy
+        // MLX/Metal dependency stays out of core MarpleKit — the TextEmbedder
+        // protocol seam lets the app depend on this only at the assembly point.
+        .target(
+            name: "MarpleEmbeddings",
+            dependencies: [
+                "MarpleKit",
+                .product(name: "MLXEmbedders", package: "mlx-swift-examples"),
+                .product(name: "Tokenizers", package: "swift-transformers"),
+            ]
+        ),
         .executableTarget(
             name: "Marple",
             dependencies: [
                 "MarpleKit",
+                "MarpleEmbeddings",
                 .product(name: "SwiftUILazyContainer", package: "SwiftUILazyContainer"),
             ]
         ),
@@ -38,6 +57,7 @@ let package = Package(
             name: "MarpleKitTests",
             dependencies: [
                 "MarpleKit",
+                "MarpleEmbeddings",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
             // CLT-only workaround: Testing.framework lives outside the default
