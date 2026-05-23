@@ -3,35 +3,54 @@ import Foundation
 @testable import MarpleKit
 
 @Suite struct VaultConfigTests {
-    private func tempRepo(_ json: String?) throws -> String {
+    private func tempDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("marple-cfg-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if let json {
-            try json.write(to: dir.appendingPathComponent("marple.config.json"),
-                           atomically: true, encoding: .utf8)
-        }
-        return dir.path
+        return dir
     }
 
-    @Test func resolvesWorkspaceAndVault() throws {
-        let repo = try tempRepo(#"{"workspaceRoot": "/ws/root"}"#)
-        defer { try? FileManager.default.removeItem(atPath: repo) }
-        let paths = try resolveVaultPaths(repoRoot: repo)
-        #expect(paths.workspaceRoot == "/ws/root")
-        #expect(paths.vaultDir == "/ws/root/vault")
-        #expect(paths.repoRoot == repo)
+    @Test func findsRepoRootByWalkingUp() throws {
+        let repo = try tempDir()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try FileManager.default.createDirectory(
+            at: repo.appendingPathComponent("rust"), withIntermediateDirectories: true)
+        try "".write(to: repo.appendingPathComponent("rust/Cargo.toml"),
+                     atomically: true, encoding: .utf8)
+        let deep = repo.appendingPathComponent("apple/.build/debug")
+        try FileManager.default.createDirectory(at: deep, withIntermediateDirectories: true)
+        #expect(findRepoRoot(startingFrom: deep.path) == repo.standardizedFileURL.path)
     }
 
-    @Test func missingConfigThrows() throws {
-        let repo = try tempRepo(nil)
-        defer { try? FileManager.default.removeItem(atPath: repo) }
-        #expect(throws: VaultPathsError.self) { try resolveVaultPaths(repoRoot: repo) }
+    @Test func findRepoRootReturnsNilWhenAbsent() throws {
+        let lonely = try tempDir()
+        defer { try? FileManager.default.removeItem(at: lonely) }
+        #expect(findRepoRoot(startingFrom: lonely.path) == nil)
     }
 
-    @Test func badJSONThrows() throws {
-        let repo = try tempRepo("not json")
-        defer { try? FileManager.default.removeItem(atPath: repo) }
-        #expect(throws: VaultPathsError.self) { try resolveVaultPaths(repoRoot: repo) }
+    @Test func resolvesWorkspaceFromFolderContainingVault() throws {
+        let ws = try tempDir()
+        defer { try? FileManager.default.removeItem(at: ws) }
+        try FileManager.default.createDirectory(
+            at: ws.appendingPathComponent("vault"), withIntermediateDirectories: true)
+        let r = try resolveWorkspace(pickedPath: ws.path)
+        #expect(r.workspaceRoot == ws.standardizedFileURL.path)
+        #expect(r.vaultDir == ws.appendingPathComponent("vault").standardizedFileURL.path)
+    }
+
+    @Test func resolvesWorkspaceWhenVaultItselfPicked() throws {
+        let ws = try tempDir()
+        defer { try? FileManager.default.removeItem(at: ws) }
+        let vault = ws.appendingPathComponent("vault")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        let r = try resolveWorkspace(pickedPath: vault.path)
+        #expect(r.workspaceRoot == ws.standardizedFileURL.path)
+        #expect(r.vaultDir == vault.standardizedFileURL.path)
+    }
+
+    @Test func resolveWorkspaceThrowsWhenNoVault() throws {
+        let plain = try tempDir()
+        defer { try? FileManager.default.removeItem(at: plain) }
+        #expect(throws: VaultPathsError.self) { try resolveWorkspace(pickedPath: plain.path) }
     }
 }

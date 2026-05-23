@@ -31,8 +31,12 @@ public enum SidecarLaunch {
          "-p", "reader-api"]
     }
 
-    public static func environment(repoRoot: String, port: UInt16) -> [String: String] {
-        ["MARPLE_ROOT": repoRoot, "PORT": String(port)]
+    /// `MARPLE_ROOT` lets reader-api locate the repo; `VAULT_ROOT` overrides
+    /// marple.config.json so the sidecar reads the user-picked workspace (see
+    /// reader-core `resolve_workspace_root`).
+    public static func environment(repoRoot: String, workspaceRoot: String,
+                                   port: UInt16) -> [String: String] {
+        ["MARPLE_ROOT": repoRoot, "VAULT_ROOT": workspaceRoot, "PORT": String(port)]
     }
 
     public static func baseURL(port: UInt16) -> URL {
@@ -42,12 +46,14 @@ public enum SidecarLaunch {
 
 public final class SidecarProcess: @unchecked Sendable {
     private let repoRoot: String
+    private let workspaceRoot: String
     private let cargoPath: String
     private var process: Process?
     public private(set) var baseURL: URL?
 
-    public init(repoRoot: String, cargoPath: String = "/usr/bin/env") {
+    public init(repoRoot: String, workspaceRoot: String, cargoPath: String = "/usr/bin/env") {
         self.repoRoot = repoRoot
+        self.workspaceRoot = workspaceRoot
         self.cargoPath = cargoPath
     }
 
@@ -60,7 +66,8 @@ public final class SidecarProcess: @unchecked Sendable {
         // `/usr/bin/env cargo run …` resolves cargo from PATH.
         p.arguments = ["cargo"] + SidecarLaunch.arguments(repoRoot: repoRoot)
         var env = ProcessInfo.processInfo.environment
-        for (k, v) in SidecarLaunch.environment(repoRoot: repoRoot, port: port) { env[k] = v }
+        for (k, v) in SidecarLaunch.environment(repoRoot: repoRoot, workspaceRoot: workspaceRoot,
+                                                port: port) { env[k] = v }
         p.environment = env
         try p.run()
         self.process = p

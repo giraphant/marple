@@ -17,21 +17,38 @@ Picked from the [[native-study-backlog]] usability/correctness set. The user fla
 - **`Workspace` restore + prune** (`Navigation.swift`): `init?(restoring:activeIndex:)` (clamps active index, nil on empty), `pruneOpenPaths(validPaths:)` + `NavHistory.replaceCurrent`.
 - **AppModel wiring**: `init(client:stateStore:)` restores on launch; **persistence is automatic via `didSet { persist() }`** on the five state-bearing properties (`workspace`, `sortClauses`, `filterClauses`, `filterMatch`, `browseMode`) — no per-intent hooks, can't-miss. After `loadIndex`, stale open paths are pruned and the restored active doc is loaded. `browseMode` stays a plain `var` so `RootView`'s `$model.browseMode` binding is unchanged.
 
-### 2. First-run vault picker (no more hardcoded paths)
-- **MarpleKit `resolveVaultPaths(repoRoot:)`** (`VaultConfig.swift`): reads `repoRoot/marple.config.json` → `workspaceRoot` → derives `vaultDir = workspaceRoot/vault`; throws `VaultPathsError.missingConfig` / `.badConfig`.
-- **`SetupView`** (new): folder picker (`NSOpenPanel`, dirs only) that validates the choice and surfaces a friendly error for a wrong folder.
-- **`MarpleApp` rewired**: `@AppStorage("marple.repoRoot")`; when empty/unresolvable → `SetupView`, else boot from resolved paths. `SidecarProcess` is now constructed lazily inside `AppState.boot(paths:)` (was eager in init with the hardcoded `repoRoot`). The two hardcoded `static let repoRoot/vaultDir` are gone.
+### 2. First-run **library** picker (no more hardcoded paths)
+The picker asks for the **文库 (workspace) folder**, not the code repo — the repo is
+auto-derived (it only exists to `cargo run` the sidecar). This matches the "point it
+at my library" mental model and is migration-safe (post-migration UX stays "pick a
+vault"). Unlocked by `VAULT_ROOT`: the sidecar (`reader-core resolve_workspace_root`,
+`lib.rs:99`) honors a `VAULT_ROOT` env that **overrides** marple.config.json — so a
+picked library is used **without** editing the shared config / affecting the web app.
+- **MarpleKit `VaultConfig.swift`**: `findRepoRoot(startingFrom:)` walks up from the
+  running binary until it finds `rust/Cargo.toml`; `resolveWorkspace(pickedPath:)`
+  normalizes a picked folder into `(workspaceRoot, vaultDir)` — accepts either the
+  workspace folder (contains `vault/`) or the `vault/` folder itself; throws
+  `VaultPathsError.noVault`. `VaultPaths` is the boot bundle. (The old
+  `resolveVaultPaths`/`MarpleConfig` were removed.)
+- **`SidecarLaunch.environment(repoRoot:workspaceRoot:port:)`** now also sets
+  `VAULT_ROOT`; `SidecarProcess.init(repoRoot:workspaceRoot:)` carries it.
+- **`SetupView`** (new): library folder picker (`NSOpenPanel`, dirs only); friendly
+  error when the folder has no `vault/`.
+- **`MarpleApp` rewired**: `@AppStorage("marple.workspaceRoot")`; a `BootContext`
+  routes to setup (no library) / a "repo not found" explainer (binary moved out of
+  the repo) / boot. `SidecarProcess` is built lazily in `AppState.boot(paths:)`. The
+  hardcoded `static let repoRoot/vaultDir` are gone.
 
 ## New/changed files
 - New: `MarpleKit/PersistedState.swift`, `MarpleKit/VaultConfig.swift`, `Marple/SetupView.swift`
-- New tests: `MarpleKitTests/PersistedStateTests.swift` (Codable + Workspace restore + PersistedState/StateStore), `MarpleKitTests/VaultConfigTests.swift`
-- Modified: `MarpleKit/{Browse,ListSort,ListFilter,Navigation}.swift`, `Marple/{AppModel,MarpleApp}.swift`
+- New tests: `MarpleKitTests/PersistedStateTests.swift` (Codable + Workspace restore + PersistedState/StateStore), `MarpleKitTests/VaultConfigTests.swift` (findRepoRoot + resolveWorkspace)
+- Modified: `MarpleKit/{Browse,ListSort,ListFilter,Navigation,SidecarProcess}.swift`, `Marple/{AppModel,MarpleApp}.swift`, `MarpleKitTests/SidecarLaunchTests.swift`
 
 ## GUI test checklist (please run)
-1. **First run:** launch shows `SetupView` → pick the marple repo folder (`/Users/ramudai/Documents/Learn/marple`) → boots. Picking a non-repo folder shows the inline error.
+1. **First run:** launch shows `SetupView` ("选择文库") → pick your **library/workspace** folder (`/Users/ramudai/Documents/Learn/bts`, the one containing `vault/`; picking `bts/vault` works too) → boots. Picking a folder with no `vault/` shows the inline error.
 2. **Restore place:** open a doc, switch panes, set a sort + a filter, toggle list↔grid, open 2–3 tabs (pin one) → **quit and relaunch** → tabs, active tab, open doc, pane, sort/filter, grid/list all come back.
 3. **Stale path:** with a doc open in a tab, delete that file externally, relaunch → that tab opens with no doc (no "load failed" wall).
-4. **Reset:** `defaults delete Marple marple.repoRoot` (or wherever `@AppStorage` lands for the `swift run` binary) → relaunch → `SetupView` again.
+4. **Reset:** `defaults delete Marple marple.workspaceRoot` (or wherever `@AppStorage` lands for the `swift run` binary) → relaunch → `SetupView` again.
 
 Live-tail logs while testing: `cd apple && swift run Marple > /tmp/marple-app.log 2>&1`
 

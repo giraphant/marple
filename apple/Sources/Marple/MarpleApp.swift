@@ -13,7 +13,7 @@ final class AppState: ObservableObject {
     func boot(paths: VaultPaths) async {
         guard model == nil, !booting else { return }
         booting = true; bootError = nil
-        let sidecar = SidecarProcess(repoRoot: paths.repoRoot)
+        let sidecar = SidecarProcess(repoRoot: paths.repoRoot, workspaceRoot: paths.workspaceRoot)
         self.sidecar = sidecar
         do {
             let base = try await sidecar.start()
@@ -38,7 +38,7 @@ final class AppState: ObservableObject {
 struct MarpleApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var state = AppState()
-    @AppStorage("marple.repoRoot") private var repoRoot = ""
+    @AppStorage("marple.workspaceRoot") private var workspaceRoot = ""
 
     init() {
         setvbuf(stdout, nil, _IOLBF, 0)  // line-buffer so logs stream to the captured file
@@ -51,8 +51,33 @@ struct MarpleApp: App {
         .commands { TabCommands() }
     }
 
+    /// Boot routing: no library picked → setup; library picked but the repo can't be
+    /// located (binary moved out of the repo) → explain; otherwise boot.
+    private enum BootContext {
+        case needsLibrary
+        case repoMissing(from: String)
+        case ready(VaultPaths)
+    }
+
+    private var bootContext: BootContext {
+        guard !workspaceRoot.isEmpty,
+              let ws = try? resolveWorkspace(pickedPath: workspaceRoot) else {
+            return .needsLibrary
+        }
+        guard let repo = findRepoRoot(startingFrom: Bundle.main.bundlePath) else {
+            return .repoMissing(from: Bundle.main.bundlePath)
+        }
+        return .ready(VaultPaths(repoRoot: repo, workspaceRoot: ws.workspaceRoot, vaultDir: ws.vaultDir))
+    }
+
     @ViewBuilder private var content: some View {
-        if let paths = resolvedPaths {
+        switch bootContext {
+        case .needsLibrary:
+            SetupView { picked in workspaceRoot = picked }
+        case .repoMissing(let from):
+            ContentUnavailableView("找不到 marple 仓库", systemImage: "exclamationmark.triangle",
+                                   description: Text("无法从\n\(from)\n向上找到 rust/Cargo.toml,请从仓库内运行。"))
+        case .ready(let paths):
             if let model = state.model {
                 RootView(model: model)
             } else if let err = state.bootError {
@@ -63,14 +88,7 @@ struct MarpleApp: App {
                     .padding()
                     .task { await state.boot(paths: paths) }
             }
-        } else {
-            SetupView { picked in repoRoot = picked }
         }
-    }
-
-    private var resolvedPaths: VaultPaths? {
-        guard !repoRoot.isEmpty else { return nil }
-        return try? resolveVaultPaths(repoRoot: repoRoot)
     }
 }
 

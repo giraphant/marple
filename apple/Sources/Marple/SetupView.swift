@@ -2,20 +2,21 @@ import SwiftUI
 import AppKit
 import MarpleKit
 
-/// Shown when no valid repo root is configured. Picks a folder, validates it has a
-/// readable marple.config.json, and hands the path up to be persisted + booted.
+/// First-run: pick the library (workspace) folder. Validates it contains a `vault/`
+/// (or is one) and hands the path up to be persisted + booted. The code repo is
+/// auto-derived from the running binary, so it isn't asked for here.
 struct SetupView: View {
     var onPicked: (String) -> Void
     @State private var error: String?
 
     var body: some View {
         VStack(spacing: 16) {
-            Image(systemName: "folder.badge.gearshape").font(.system(size: 44))
+            Image(systemName: "books.vertical").font(.system(size: 44))
                 .foregroundStyle(.secondary)
-            Text("选择 marple 仓库目录").font(.title2.weight(.semibold))
-            Text("需要包含 marple.config.json 和 rust/ 的目录。")
+            Text("选择文库").font(.title2.weight(.semibold))
+            Text("选择包含 vault/ 的文库工作区目录。")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Button("选择目录…") { pick() }.controlSize(.large).keyboardShortcut(.defaultAction)
+            Button("选择文库目录…") { pick() }.controlSize(.large).keyboardShortcut(.defaultAction)
             if let error {
                 Text(error).foregroundStyle(.red).font(.callout).multilineTextAlignment(.center)
             }
@@ -32,16 +33,11 @@ struct SetupView: View {
         panel.prompt = "选择"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            _ = try resolveVaultPaths(repoRoot: url.path)
+            _ = try resolveWorkspace(pickedPath: url.path)
             error = nil
             onPicked(url.path)
-        } catch let e as VaultPathsError {
-            switch e {
-            case .missingConfig: error = "该目录缺少 marple.config.json,请选择 marple 仓库根目录。"
-            case .badConfig(let m): error = "无法读取配置:\(m)"
-            }
         } catch {
-            self.error = "\(error)"
+            self.error = "该目录里没有 vault/ 文件夹,请选择你的文库工作区目录。"
         }
     }
 }

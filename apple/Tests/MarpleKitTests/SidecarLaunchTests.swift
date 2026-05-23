@@ -14,9 +14,10 @@ import Testing
                          "-p", "reader-api"])
     }
 
-    @Test func testEnvironmentSetsMarpleRootAndPort() {
-        let env = SidecarLaunch.environment(repoRoot: "/repo", port: 5544)
+    @Test func testEnvironmentSetsRootsAndPort() {
+        let env = SidecarLaunch.environment(repoRoot: "/repo", workspaceRoot: "/ws", port: 5544)
         #expect(env["MARPLE_ROOT"] == "/repo")
+        #expect(env["VAULT_ROOT"] == "/ws")
         #expect(env["PORT"] == "5544")
     }
 
