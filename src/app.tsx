@@ -16,8 +16,8 @@ import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import {
   postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
-  newIdeaDraft, ideaEntryFromDraft, reindex, reconcile, fetchIndex, searchIndex as searchServerIndex,
-  listFiles, fetchEntry, fetchTranslationSlugs,
+  newIdeaDraft, ideaEntryFromDraft, reindex, fetchIndex, searchIndex as searchServerIndex,
+  fetchTranslationSlugs, openInEditor,
 } from './api';
 import { nextSearchMode, type SearchMode } from './searchMode';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
@@ -27,6 +27,7 @@ import { bumpVaultVersion, subscribeVaultChanges } from './sync';
 const MAX_TABS = 16;
 const MAX_HISTORY = 50;
 const DEFAULT_TYPE: EntryType = 'paper-analysis';
+
 
 /** Push a new content to a tab's history at `cursor + 1`, truncating any
  *  forward history (browser-style). No-op if it's the same as current. */
@@ -194,115 +195,34 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [onToggleSidebar]);
 
-  // File-browser data layer: the DB snapshot (/api/index) is just a metadata
-  // cache loaded once on boot; the file system is the source of truth. We track
-  // the mtime we last processed per file so cross-window / refocus syncs only
-  // re-parse what actually changed.
-  const entriesRef = useRef<Entry[] | null>(entries);
-  entriesRef.current = entries;
   // Latest tab state, for the cross-page convergence check on focus (QUA-68).
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
-  const knownMtimesRef = useRef<Map<string, number | null>>(new Map());
-  const lastSyncMtimeRef = useRef(0);
-  const syncingRef = useRef(false);
-  const syncTimerRef = useRef<number | null>(null);
-  const lastReconcileRef = useRef(0);
-
-  // Cross-window / external freshness, the file-browser way. Pull only the
-  // delta (files with mtime > lastSync) and live-parse just the ones whose
-  // mtime actually changed vs what we last saw. A full listing is fetched only
-  // when the server's total file count disagrees with ours — i.e. a deletion
-  // (or odd add) happened — so the common no-op / edit sync ships almost nothing.
-  const syncFromFiles = useCallback(() => {
-    if (syncTimerRef.current != null) clearTimeout(syncTimerRef.current);
-    syncTimerRef.current = window.setTimeout(async () => {
-      syncTimerRef.current = null;
-      if (syncingRef.current) return;
-      syncingRef.current = true;
-      try {
-        const known = knownMtimesRef.current;
-        const cur = entriesRef.current ?? [];
-        const byPath = new Map(cur.map(e => [e.path, e]));
-        let mutated = false;
-        let maxMtime = lastSyncMtimeRef.current;
-
-        // Parse only files new-or-changed vs `known`; upsert entries, drop
-        // null-parses (non-entries), and record the mtime we processed.
-        const processFiles = async (files: { path: string; mtime: number | null }[]) => {
-          const toParse = files.filter(f => !known.has(f.path) || known.get(f.path) !== f.mtime);
-          const parsed = await Promise.all(toParse.map(async f => {
-            try { return [f, await fetchEntry(f.path)] as const; }
-            catch { return [f, undefined] as const; } // fetch failed → leave as-is
-          }));
-          for (const [f, entry] of parsed) {
-            if (entry === undefined) continue;
-            known.set(f.path, f.mtime);
-            if (f.mtime != null && f.mtime > maxMtime) maxMtime = f.mtime;
-            if (entry === null) { if (byPath.delete(f.path)) mutated = true; }
-            else { byPath.set(f.path, entry); mutated = true; }
-          }
-        };
-
-        let delta;
-        try { delta = await listFiles(lastSyncMtimeRef.current || undefined); }
-        catch { return; } // keep current list on a transient failure
-        await processFiles(delta.items);
-
-        // Counts disagree → a deletion (or add with an older mtime) happened.
-        // One full listing reconciles: parse anything still unknown, drop files
-        // that no longer exist.
-        if (delta.total !== known.size) {
-          let full = null;
-          try { full = await listFiles(); } catch {}
-          if (full) {
-            const fileSet = new Set(full.items.map(f => f.path));
-            await processFiles(full.items);
-            for (const p of Array.from(byPath.keys())) {
-              if (!fileSet.has(p)) { byPath.delete(p); mutated = true; }
-            }
-            for (const p of Array.from(known.keys())) {
-              if (!fileSet.has(p)) known.delete(p);
-            }
-          }
-        }
-
-        lastSyncMtimeRef.current = maxMtime;
-        if (mutated) setEntries(Array.from(byPath.values()));
-      } finally {
-        syncingRef.current = false;
-      }
-    }, 250);
-  }, []);
-
   useEffect(() => {
+    // File-first: load the index once as the browse cache. We deliberately do
+    // NOT re-fetch changed files on boot/focus — that per-file storm saturated
+    // the browser's connection pool and starved the doc-body GET ("加载中…").
+    // Doc bodies read fresh from disk on open; reload (or reindex) refreshes
+    // the list; the vault watcher keeps server-side search fresh.
     fetchIndex().then(es => {
       setEntries(es);
-      for (const e of es) knownMtimesRef.current.set(e.path, e.mtime ?? null);
-      // Reconcile the cache against the live file system immediately — picks up
-      // files added/changed/deleted since the last reindex (or while this window
-      // was closed) without waiting for a focus/storage event.
-      syncFromFiles();
     }).catch(e => {
       window.alert('加载索引失败：' + (e instanceof Error ? e.message : String(e)));
       setEntries([]);
     });
     fetchTranslationSlugs().then(s => setTranslationSlugs(new Set(s)));
-  }, [syncFromFiles]);
+  }, []);
 
   useEffect(() => {
     const unsubscribe = subscribeVaultChanges({
-      onVaultChanged: syncFromFiles,
       onSettingsChanged: () => setSettings(loadSettings()),
     });
+    // On refocus, only converge the cross-page tab set (cheap, no network).
+    // No file re-sync / reconcile here — that storm starved doc-body loads.
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
-      syncFromFiles();
-      // QUA-68: converge the tab set across pages. Tabs persist in shared
-      // localStorage, so another page may have changed them while this one was
-      // unfocused — adopt the authoritative state instead of drifting apart.
       const incomingTabs = loadTabs();
       if (JSON.stringify(incomingTabs) !== JSON.stringify(tabsRef.current)) {
         setTabs(incomingTabs);
@@ -310,14 +230,6 @@ export function App() {
       } else {
         const incomingActive = loadActiveIndex(incomingTabs.length);
         if (incomingActive !== activeIndexRef.current) setActiveIndex(incomingActive);
-      }
-      // Also delta-sync the server FTS so quick search reflects external edits
-      // the instant you switch back — best-effort, throttled so rapid window
-      // toggles don't hammer it (the background watcher covers steady state).
-      const now = Date.now();
-      if (now - lastReconcileRef.current > 3000) {
-        lastReconcileRef.current = now;
-        reconcile().catch(() => {});
       }
     };
     window.addEventListener('focus', onVisible);
@@ -327,7 +239,7 @@ export function App() {
       window.removeEventListener('focus', onVisible);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [syncFromFiles]);
+  }, []);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -722,14 +634,33 @@ export function App() {
     bumpVaultVersion();
   }, []);
 
+  // QUA-72: where a freshly-created note "lands". In external-editor mode the
+  // built-in editor is fully out of the loop — we hand the file straight to the
+  // external editor and do NOT open an in-app tab (an empty read-only tab would
+  // be noise). The note still appears in the 笔记 list. Only if the launch fails
+  // do we fall back to an in-app tab so the new note isn't stranded. With
+  // external mode off, the note opens in the in-app CodeMirror editor as before.
+  const revealNewNote = useCallback(async (path: string) => {
+    if (settings.useExternalEditor) {
+      try {
+        await openInEditor(path, settings.externalEditor);
+        return;
+      } catch (e) {
+        window.alert('在外部编辑器打开失败：' + (e instanceof Error ? e.message : String(e)));
+        // fall through to an in-app tab so the created note isn't lost
+      }
+    }
+    openInNewTab({ kind: 'doc', path });
+  }, [settings.useExternalEditor, settings.externalEditor, openInNewTab]);
+
   const onCreateAnnotation = useCallback(async (target: Entry) => {
     const { path, body, title } = newAnnotationDraft(target);
     await postEntryText(path, body);
     const draftEntry = entryFromDraft(path, target, title);
     setEntries(prev => prev ? [...prev, draftEntry] : prev);
     bumpVaultVersion();
-    openInNewTab({ kind: 'doc', path });
-  }, [openInNewTab]);
+    await revealNewNote(path);
+  }, [revealNewNote]);
 
   const onNewIdeaNote = useCallback(async () => {
     try {
@@ -738,11 +669,11 @@ export function App() {
       const draft = ideaEntryFromDraft(path, title);
       setEntries(prev => prev ? [...prev, draft] : prev);
       bumpVaultVersion();
-      openInNewTab({ kind: 'doc', path });
+      await revealNewNote(path);
     } catch (e) {
       window.alert('新建 note 失败：' + (e instanceof Error ? e.message : String(e)));
     }
-  }, [openInNewTab]);
+  }, [revealNewNote]);
 
   const onDelete = useCallback(async (target: Entry) => {
     await deleteEntry(target.path);
@@ -767,9 +698,24 @@ export function App() {
     });
   }, []);
 
+  // An entry is "editable" if it's a note, or any generated body when the user
+  // opted in. QUA-72 then splits that into two paths: in-app CodeMirror vs. the
+  // external editor. When useExternalEditor is on, the in-app editor is never
+  // mounted (read-only render + "open externally" instead).
   const editable = activeDocEntry
     ? (activeDocEntry.type === 'note' || settings.allowEditLLMBody)
     : false;
+  const editInApp = editable && !settings.useExternalEditor;
+  const canEditExternally = editable && settings.useExternalEditor;
+
+  // Throws on failure — the caller (ExternalOpenButton) surfaces it inline. We do
+  // NOT window.alert here: a blocking modal would freeze the button's "正在打开…"
+  // state until dismissed, which reads as a hang.
+  const onOpenInEditor = useCallback(
+    (target: Entry) => openInEditor(target.path, settings.externalEditor),
+    [settings.externalEditor],
+  );
+
   // Editor's reactive surface is just dark/light — font face & size flow
   // in through CSS vars on <html>, so changing them doesn't rebuild the
   // editor (preserves caret / undo / scroll).
@@ -854,7 +800,8 @@ export function App() {
                 authorIndex={authorIndex}
                 annotationIndex={annotationIndex}
                 wikiIndex={wikiIndex}
-                editable={editable}
+                editable={editInApp}
+                canEditExternally={canEditExternally}
                 editorTheme={editorTheme}
                 citationFormat={settings.citationFormat}
                 hasTranslation={translationSlugs.has(activeDocEntry.pdf_slug ?? '')}
@@ -862,6 +809,7 @@ export function App() {
                 onThemeClick={applyThemeFilter}
                 onUpdated={onUpdated}
                 onCreateAnnotation={onCreateAnnotation}
+                onOpenInEditor={onOpenInEditor}
                 onDelete={onDelete}
               />
             )

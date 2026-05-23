@@ -31,6 +31,17 @@ interface Props {
   onClose: () => void;
 }
 
+// Common macOS editors. The value is the application name passed to `open -a`;
+// '' means the OS default `.md` handler. Free text below covers anything else.
+const EDITOR_PRESETS: { app: string; label: string }[] = [
+  { app: '',                    label: '系统默认' },
+  { app: 'Visual Studio Code',  label: 'VS Code' },
+  { app: 'Typora',              label: 'Typora' },
+  { app: 'Obsidian',            label: 'Obsidian' },
+  { app: 'Ulysses',             label: 'Ulysses' },
+  { app: 'iA Writer',           label: 'iA Writer' },
+];
+
 export function SettingsPanel({ settings, onChange, onClose }: Props) {
   const [tab, setTab] = useState<TabId>('appearance');
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
@@ -108,7 +119,25 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
           )}
 
           {tab === 'editing' && (
-            <div class="p-5">
+            <div class="p-5 space-y-4">
+              <div class="rounded-xl border border-base">
+                <div class="flex items-start justify-between gap-3 px-3.5 py-3">
+                  <div class="text-[12px] leading-snug min-w-0">
+                    <div class="text-primary font-medium">使用外部编辑器</div>
+                    <div class="text-muted mt-0.5">
+                      开启后笔记不再用内置网页编辑器，而是只读渲染 + 「在外部编辑器打开」；
+                      新建笔记会直接用下方编辑器打开文件。关掉则回到内置编辑器。
+                    </div>
+                  </div>
+                  <Toggle on={settings.useExternalEditor} onChange={v => set('useExternalEditor', v)} />
+                </div>
+                {settings.useExternalEditor && (
+                  <div class="px-3.5 pb-3">
+                    <EditorPicker value={settings.externalEditor} onChange={v => set('externalEditor', v)} />
+                  </div>
+                )}
+              </div>
+
               <div class="flex items-start justify-between gap-3 px-3.5 py-3 rounded-xl border border-base">
                 <div class="text-[12px] leading-snug min-w-0">
                   <div class="text-primary font-medium">允许编辑 LLM 生成的正文</div>
@@ -221,6 +250,47 @@ function EmbeddingsRebuild() {
       {err && (
         <div class="mt-1 text-[11px] text-danger">{err}</div>
       )}
+    </div>
+  );
+}
+
+/** Pick the external editor: preset chips (incl. 系统默认) plus a free-text app
+ *  name for anything not listed. The chosen value is the macOS application name
+ *  passed to `open -a` ('' = OS default). The chip highlights when it matches the
+ *  current value; typing a custom name clears the highlight unless it matches. */
+function EditorPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const isPreset = EDITOR_PRESETS.some(p => p.app === value);
+  return (
+    <div class="space-y-2">
+      <div class="flex flex-wrap gap-1">
+        {EDITOR_PRESETS.map(p => {
+          const active = p.app === value;
+          return (
+            <button
+              key={p.app || 'default'}
+              onClick={() => onChange(p.app)}
+              class={`text-[12px] px-2.5 py-1 rounded border transition ${
+                active
+                  ? 'bg-accent-bg text-accent-text border-accent'
+                  : 'bg-surface text-secondary border-base hover:border-strong'
+              }`}
+            >{p.label}</button>
+          );
+        })}
+      </div>
+      <input
+        type="text"
+        value={value}
+        spellcheck={false}
+        placeholder="自定义应用名（如 Sublime Text、Zed、Cursor）"
+        onInput={e => onChange((e.currentTarget as HTMLInputElement).value)}
+        class={`w-full text-[12px] px-2 py-1.5 rounded border bg-surface text-primary outline-none transition ${
+          !isPreset && value ? 'border-accent' : 'border-base focus:border-strong'
+        }`}
+      />
+      <div class="text-[11px] text-muted">
+        macOS 用应用名（`open -a`）；留空用系统默认 `.md` 程序。改动立即生效，无需重启。
+      </div>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import type { Entry } from './types';
 import type { EmbedStatus } from './embedding';
 import type { SearchMode } from './searchMode';
 import { parseFile, serializeFile } from './frontmatter';
+import { isTauri, invoke } from './tauri';
 
 export type { SearchMode };
 
@@ -18,6 +19,10 @@ export interface TrashItem {
 }
 
 export async function listTrash(): Promise<TrashItem[]> {
+  if (isTauri()) {
+    const json = await invoke<{ items?: TrashItem[] }>('trash_list');
+    return json.items ?? [];
+  }
   const r = await fetch('/api/trash');
   if (!r.ok) throw new Error(`list trash failed: ${r.status}`);
   const json = await r.json() as { items: TrashItem[] };
@@ -36,6 +41,10 @@ export async function restoreTrash(name: string): Promise<string> {
 
 /** Fetch the reader index (DB metadata cache snapshot) on boot. */
 export async function fetchIndex(): Promise<Entry[]> {
+  if (isTauri()) {
+    const json = await invoke<{ items?: Entry[] }>('index');
+    return json.items ?? [];
+  }
   const r = await fetch('/api/index');
   if (!r.ok) {
     const msg = await r.text().catch(() => '');
@@ -59,6 +68,11 @@ export interface VaultFilesResult {
  *  (epoch ms) only changed files come back (the delta); `total` is always the
  *  full count so the caller can detect deletions. */
 export async function listFiles(since?: number): Promise<VaultFilesResult> {
+  if (isTauri()) {
+    const json = await invoke<{ items?: VaultFile[]; total?: number }>('files', { since });
+    const items = json.items ?? [];
+    return { items, total: json.total ?? items.length };
+  }
   const url = since != null ? `/api/files?since=${since}` : '/api/files';
   const r = await fetch(url);
   if (!r.ok) {
@@ -73,6 +87,10 @@ export async function listFiles(since?: number): Promise<VaultFilesResult> {
 /** Live-parse one vault file's metadata straight from disk (no DB). Returns
  *  null when the file is missing or has no usable type (not a renderable entry). */
 export async function fetchEntry(path: string): Promise<Entry | null> {
+  if (isTauri()) {
+    const json = await invoke<{ entry?: Entry | null }>('entry', { path });
+    return json.entry ?? null;
+  }
   const r = await fetch('/api/entry?path=' + encodeURIComponent(path));
   if (!r.ok) {
     const msg = await r.text().catch(() => '');
@@ -192,6 +210,28 @@ export async function openPdfExternal(slug: string): Promise<void> {
   }
 }
 
+/** Ask the backend to open a vault markdown file in the chosen external editor
+ *  (QUA-72). `app` is the editor app name (macOS `open -a`) / binary (Linux);
+ *  empty string opens with the OS default `.md` handler. The browser can't launch
+ *  native apps, so reader-api does it (no shell — no injection from `app`). */
+export async function openInEditor(path: string, app: string): Promise<void> {
+  // Bound the request: launching is fire-and-forget on the server (it returns as
+  // soon as the launcher is spawned), so a fetch that hasn't resolved in a few
+  // seconds is stuck in the browser connection queue, not doing useful work.
+  // Aborting frees the connection and lets the caller surface a transient error
+  // instead of hanging the "opening…" affordance forever.
+  const r = await fetch('/api/open-in-editor', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, app }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => '');
+    throw new Error(`open in editor failed: ${r.status} ${msg}`);
+  }
+}
+
 /** Slugs that have a translated PDF under processing/translations/<slug>-zh.pdf.
  *  Fetched once on boot; used to decide whether to show the 「打开译本」 button.
  *  Read live by the backend, so it reflects newly-added translations on reload. */
@@ -237,6 +277,9 @@ export function trashRestoredPath(name: string): string {
 
 /** Fetch a vault md file as text. */
 export async function fetchEntryText(path: string): Promise<string> {
+  if (isTauri()) {
+    return invoke<string>('entry_text', { path });
+  }
   const r = await fetch('/' + path);
   if (!r.ok) throw new Error(`fetch ${path} failed: ${r.status}`);
   return r.text();

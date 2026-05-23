@@ -22,7 +22,12 @@ interface Props {
   authorIndex: Map<string, Entry[]>;
   annotationIndex: Map<string, Entry[]>;
   wikiIndex: Map<string, Entry>;
+  /** When true the in-app CodeMirror editor is mounted. False in external-editor
+   * mode — the body renders read-only and editing happens via {@link onOpenInEditor}. */
   editable: boolean;
+  /** QUA-72: this entry is editable but the user chose to edit externally, so the
+   * header shows a 「在外部编辑器打开」 action instead of an inline editor. */
+  canEditExternally?: boolean;
   editorTheme: EditorThemeConfig;
   citationFormat: CitationFormat;
   /** Whether this entry has a translated PDF (gates the 「打开译本」 action). */
@@ -31,6 +36,7 @@ interface Props {
   onThemeClick: (theme: string, fromType?: Entry['type']) => void;
   onUpdated: (updated: Entry) => void;
   onCreateAnnotation: (target: Entry) => Promise<void>;
+  onOpenInEditor?: (entry: Entry) => void | Promise<void>;
   onDelete: (entry: Entry) => Promise<void>;
 }
 
@@ -39,9 +45,9 @@ type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict';
 const SAVE_DEBOUNCE_MS = 1500;
 
 export function DocView({
-  entry, entries, authorIndex, annotationIndex, wikiIndex, editable, editorTheme,
+  entry, entries, authorIndex, annotationIndex, wikiIndex, editable, canEditExternally, editorTheme,
   citationFormat, hasTranslation,
-  onNavigate, onThemeClick, onUpdated, onCreateAnnotation, onDelete,
+  onNavigate, onThemeClick, onUpdated, onCreateAnnotation, onOpenInEditor, onDelete,
 }: Props) {
   const [loadError, setLoadError] = useState(false);
   const [body, setBody] = useState('');
@@ -394,6 +400,10 @@ export function DocView({
           <ActionsRow entry={entry} defaultFormat={citationFormat} hasTranslation={hasTranslation} />
         )}
 
+        {canEditExternally && onOpenInEditor && (
+          <ExternalOpenButton entry={entry} onOpen={onOpenInEditor} />
+        )}
+
         {editable && (saveStatus === 'conflict' ? (
           <span class="text-[11px] text-accent-text inline-flex items-center gap-1.5" title="磁盘上的文件在你编辑期间被其他窗口或外部改动；为避免覆盖，自动保存已暂停">
             文件已被其他窗口修改
@@ -473,6 +483,45 @@ export function DocView({
         />
       </div>
     </div>
+  );
+}
+
+/** Header action to hand the current file to the external editor. Launching is
+ *  fire-and-forget on the server, so the "正在打开…" affordance is bounded — it
+ *  always clears within {@link OPENING_RESET_MS} even if the request is slow or
+ *  fails, so the button can never appear stuck. Errors show inline (not a
+ *  blocking modal, which would freeze the button until dismissed). */
+const OPENING_RESET_MS = 1500;
+function ExternalOpenButton({ entry, onOpen }: { entry: Entry; onOpen: (entry: Entry) => void | Promise<void> }) {
+  const [opening, setOpening] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const click = async () => {
+    if (opening) return;
+    setFailed(false);
+    setOpening(true);
+    let settled = false;
+    const clear = () => { if (!settled) { settled = true; setOpening(false); } };
+    const guard = setTimeout(clear, OPENING_RESET_MS);
+    try {
+      await onOpen(entry);
+    } catch {
+      setFailed(true);
+      setTimeout(() => setFailed(false), 2500);
+    } finally {
+      clearTimeout(guard);
+      clear();
+    }
+  };
+  return (
+    <button
+      onClick={click}
+      disabled={opening}
+      class="shrink-0 inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border border-base bg-surface hover:border-strong text-secondary hover:text-primary transition disabled:opacity-60"
+      title="用外部编辑器打开这个文件（在设置里选择编辑器）"
+    >
+      <Icon name="pencil" size={13} />
+      {opening ? '正在打开…' : failed ? '打开失败，重试' : '在外部编辑器打开'}
+    </button>
   );
 }
 

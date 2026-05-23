@@ -67,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/reindex", post(api_reindex))
         .route("/api/reconcile", post(api_reconcile))
         .route("/api/open-pdf", post(api_open_pdf))
+        .route("/api/open-in-editor", post(api_open_in_editor))
         .route("/api/translations", get(api_translations))
         .route("/api/open-translation", post(api_open_translation))
         .route("/api/embeddings", post(api_embeddings))
@@ -103,6 +104,7 @@ async fn main() -> anyhow::Result<()> {
     println!("POST   /api/reindex            -> rebuild data/index.sqlite with Rust");
     println!("POST   /api/reconcile          -> delta-sync index to the vault (cheap)");
     println!("POST   /api/open-pdf           -> open sources/<slug>.pdf in the system PDF app");
+    println!("POST   /api/open-in-editor     -> open a vault/*.md in the chosen external editor");
     println!("POST   /api/embeddings         -> start background semantic-vector build (202)");
     println!("GET    /api/embeddings/status  -> poll embedding job + on-disk vectors summary");
     println!("GET    /vault/**/*.md          -> read vault markdown");
@@ -326,6 +328,33 @@ async fn api_open_pdf(
     Ok(Json(json!({ "ok": true })))
 }
 
+#[derive(Debug, Deserialize)]
+struct OpenInEditorParams {
+    /// Vault-relative path of the markdown file, e.g. `vault/notes/foo.md`.
+    path: String,
+    /// Editor app to open with. Empty / absent → the OS default `.md` handler.
+    #[serde(default)]
+    app: String,
+}
+
+/// Open a vault markdown file in the user's chosen external editor (QUA-72). The
+/// browser can't launch native apps, so reader-api shells out — but never through
+/// a shell: the app name and file path are passed as separate `Command` args, so
+/// the user-supplied app string has no injection surface. Path is validated to
+/// live under `vault/` and be an existing `.md`. Runs on a blocking thread.
+async fn api_open_in_editor(
+    State(state): State<AppState>,
+    Json(params): Json<OpenInEditorParams>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let paths = state.paths.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), ReaderError> {
+        reader_core::open_in_editor(&paths, &params.path, &params.app)
+    })
+    .await
+    .map_err(|err| AppError(ReaderError::Other(err.into())))??;
+    Ok(Json(json!({ "ok": true })))
+}
+
 /// List the slugs that have a translated PDF under `processing/translations/`.
 /// Read live (cheap dir scan) so newly-added translations need no reindex.
 async fn api_translations(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -527,12 +556,10 @@ async fn put_vault_file(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rel = format!("vault/{path}");
     let mtime = reader_core::put_markdown(&state.paths, &rel, &body)?;
-    // Update the index immediately for this one file (best-effort: the watcher /
-    // boot reconcile would catch it anyway, but this makes the edit searchable
-    // without the debounce wait).
-    if let Err(e) = reader_core::upsert_entry(&state.paths, &rel) {
-        eprintln!("index upsert failed for {rel}: {e}");
-    }
+    // File-first: the write path never touches the DB. The vault watcher's
+    // debounced reconcile is the single (async) DB writer, so an edit can't
+    // contend with it on SQLite's single-writer lock. Search of the just-edited
+    // entry is briefly stale (~debounce); the UI updates optimistically.
     Ok(Json(json!({
         "ok": true,
         "bytes": body.len(),
@@ -547,9 +574,9 @@ async fn post_vault_note(
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     let (created_path, mtime) =
         reader_core::post_note(&state.paths, &format!("vault/{path}"), &body)?;
-    if let Err(e) = reader_core::upsert_entry(&state.paths, &created_path) {
-        eprintln!("index upsert failed for {created_path}: {e}");
-    }
+    // File-first: no synchronous DB write. The watcher reconciles the new note
+    // into the index asynchronously; the frontend shows it immediately via an
+    // optimistic insert.
     Ok((
         StatusCode::CREATED,
         Json(json!({
@@ -567,9 +594,8 @@ async fn delete_vault_note(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let rel = format!("vault/{path}");
     let trash = reader_core::delete_note(&state.paths, &rel)?;
-    if let Err(e) = reader_core::remove_entry(&state.paths, &rel) {
-        eprintln!("index remove failed for {rel}: {e}");
-    }
+    // File-first: no synchronous DB write. The watcher reconciles the removal
+    // asynchronously; the frontend drops it immediately via an optimistic update.
     Ok(Json(json!({ "ok": true, "trash": trash })))
 }
 
