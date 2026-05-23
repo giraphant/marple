@@ -1,40 +1,57 @@
 import SwiftUI
 import MarpleKit
 
-/// Ulysses-style right inspector: one scrollable panel stacking 统计 / 信息 / 目录,
-/// with a top icon strip that jumps to a section.
+/// Ulysses-style right inspector: a tabbed panel with three independent sections
+/// — 信息 / 目录 / 统计 — picked via a top icon strip. Only the active section
+/// renders, instead of stacking all three in one scroll.
 struct InspectorView: View {
     @Bindable var model: AppModel
+    @State private var tab: Tab = .info
+
+    private enum Tab: Hashable { case info, outline, stats }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            VStack(spacing: 0) {
-                HStack(spacing: 22) {
-                    iconButton("chart.bar", "stats", proxy)
-                    iconButton("list.bullet.rectangle", "info", proxy)
-                    iconButton("list.number", "outline", proxy)
-                }
-                .padding(.vertical, 8)
-                Divider()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
-                        StatsSection(stats: model.openStats).id("stats")
-                        InfoSection(model: model).id("info")
-                        OutlineSection(model: model).id("outline")
+        VStack(spacing: 0) {
+            tabStrip
+            Divider()
+            ScrollView {
+                Group {
+                    switch tab {
+                    case .info:    InfoSection(model: model)
+                    case .outline: OutlineSection(model: model)
+                    case .stats:   StatsSection(stats: model.openStats)
                     }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
-    private func iconButton(_ symbol: String, _ anchor: String, _ proxy: ScrollViewProxy) -> some View {
-        Button { withAnimation { proxy.scrollTo(anchor, anchor: .top) } } label: {
+    private var tabStrip: some View {
+        HStack(spacing: Space.s4) {
+            tabButton(.info, "list.bullet.rectangle", "信息")
+            tabButton(.outline, "list.number", "目录")
+            tabButton(.stats, "chart.bar", "统计")
+        }
+        .padding(.vertical, Space.s4)
+    }
+
+    private func tabButton(_ t: Tab, _ symbol: String, _ label: String) -> some View {
+        Button { tab = t } label: {
             Image(systemName: symbol)
+                .font(.system(size: 13))
+                .frame(width: 30, height: 22)
+                .foregroundStyle(tab == t ? Color.accentColor : Color.secondary)
+                .background {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.accentColor.opacity(0.15))
+                        .opacity(tab == t ? 1 : 0)
+                }
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 
@@ -44,8 +61,9 @@ private struct SectionHeader: View {
     let title: String
     init(_ t: String) { title = t }
     var body: some View {
-        Text(title).font(.caption).fontWeight(.semibold)
-            .foregroundStyle(.secondary).textCase(.uppercase)
+        // No .uppercase: it does nothing for Chinese and only harms Latin labels (spec §6).
+        Text(title).font(Typo.caption).fontWeight(.semibold)
+            .foregroundStyle(.tertiary)
     }
 }
 
@@ -241,19 +259,13 @@ private struct ThemesEditor: View {
             if themes.isEmpty {
                 Text("—").foregroundStyle(.secondary).font(.callout)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 70), spacing: 6, alignment: .leading)],
-                          alignment: .leading, spacing: 6) {
+                FlowLayout(spacing: Space.s2, lineSpacing: Space.s2) {
                     ForEach(themes, id: \.self) { t in
-                        HStack(spacing: 3) {
-                            Button(t) { model.select(pane: .theme(t)) }.buttonStyle(.plain)
-                            Button { Task { await model.removeTheme(t) } } label: {
-                                Image(systemName: "xmark").font(.system(size: 8))
-                            }
-                            .buttonStyle(.plain).foregroundStyle(.secondary)
-                        }
-                        .font(.caption)
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(.quaternary, in: Capsule())
+                        ThemeChip(
+                            theme: t,
+                            onTap: { model.select(pane: .theme(t)) },
+                            onRemove: { Task { await model.removeTheme(t) } }
+                        )
                     }
                 }
             }
@@ -264,6 +276,29 @@ private struct ThemesEditor: View {
             }
         }
         .disabled(model.savingField != nil)
+    }
+}
+
+private struct ThemeChip: View {
+    let theme: String
+    let onTap: () -> Void
+    let onRemove: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: Space.s1) {
+            Button(theme) { onTap() }.buttonStyle(.plain)
+            if hovering {
+                Button { onRemove() } label: {
+                    Image(systemName: "xmark").font(.system(size: 8))
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+            }
+        }
+        .font(Typo.caption2)
+        .padding(.horizontal, Space.s3).padding(.vertical, Space.s1)
+        .background(.quaternary, in: Capsule())
+        .onHover { hovering = $0 }
     }
 }
 
@@ -282,16 +317,32 @@ private struct RelationsView: View {
 
     @ViewBuilder private func relGroup(_ title: String, _ list: [Entry]) -> some View {
         if !list.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Space.s1) {
                 SectionHeader("\(title) (\(list.count))")
                 ForEach(list.prefix(30)) { e in
-                    Button { Task { await model.open(e.path) } } label: {
-                        Text(e.title ?? e.path).font(.callout).lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
+                    RelationRow(title: e.title ?? e.path) { Task { await model.open(e.path) } }
                 }
             }
         }
+    }
+}
+
+/// A relation link that shows a hover background so it reads as clickable (spec §6).
+private struct RelationRow: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(Typo.callout).lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, Space.s1).padding(.horizontal, Space.s2)
+        }
+        .buttonStyle(.plain)
+        .background {
+            RoundedRectangle(cornerRadius: 6).fill(.quaternary).opacity(hovering ? 1 : 0)
+        }
+        .onHover { hovering = $0 }
     }
 }
