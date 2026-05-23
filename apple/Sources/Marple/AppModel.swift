@@ -21,10 +21,26 @@ final class AppModel {
     private(set) var counts: [EntryType: Int] = [:]
     private(set) var themeIndex: [ThemeCount] = []
     private(set) var visibleEntries: [Entry] = []
+    private(set) var authorIndex: [String: [Entry]] = [:]
+    private(set) var annotationIndex: [String: [Entry]] = [:]
 
     // Reading state
     var openPath: String?
     var openBlocks: [RenderBlock] = []
+
+    // Open-doc derived caches (recomputed on open / reload, not per render).
+    private(set) var openEntry: Entry?
+    private(set) var openBody: String = ""
+    private(set) var openOutline: [OutlineItem] = []
+    private(set) var openStats: DocStats?
+    private(set) var openRelations: Relations?
+
+    // Inspector → reader scroll channel; an outline tap sets this, DocView observes.
+    var scrollTarget: Int?
+
+    // Metadata write state.
+    private(set) var savingField: String?
+    var writeError: String?
 
     init(client: VaultClient) { self.client = client }
 
@@ -37,6 +53,22 @@ final class AppModel {
         for e in entries { c[e.type, default: 0] += 1 }
         counts = c
         themeIndex = themeCounts(entries)
+        authorIndex = buildAuthorIndex(entries)
+        annotationIndex = buildAnnotationIndex(entries)
+    }
+
+    /// Recompute the open document's outline / stats / entry / relations. O(n) over
+    /// the index for relations; runs on open / reload / metadata write, not per render.
+    private func recomputeOpenDerived() {
+        openEntry = entries.first { $0.path == openPath }
+        openOutline = outline(from: openBlocks)
+        openStats = openBody.isEmpty ? nil : computeDocStats(openBody)
+        if let e = openEntry {
+            openRelations = relations(for: e, in: entries,
+                                      authorIndex: authorIndex, annotationIndex: annotationIndex)
+        } else {
+            openRelations = nil
+        }
     }
 
     /// Rebuild the middle-column list: search hits when searching, else the pane
@@ -113,12 +145,17 @@ final class AppModel {
 
     func open(_ path: String) async {
         openPath = path
+        writeError = nil
         do {
             let raw = try await client.entryText(path: path)
-            openBlocks = MarkdownModel.blocks(from: Frontmatter.split(raw).body)
+            openBody = Frontmatter.split(raw).body
+            openBlocks = MarkdownModel.blocks(from: openBody)
+            recomputeOpenDerived()
             print("[marple] open \(path) -> \(openBlocks.count) blocks (\(raw.count) chars)")
         } catch {
             openBlocks = [.paragraph([.text("load failed: \(error)")])]
+            openBody = ""
+            recomputeOpenDerived()
             print("[marple] open FAILED \(path): \(error)")
         }
     }
@@ -146,5 +183,92 @@ final class AppModel {
             status = "open-in-editor failed: \(error)"
             print("[marple] openInEditor FAILED \(p): \(error)")
         }
+    }
+
+    // MARK: metadata write-back
+
+    /// Fetch fresh → patch → PUT → apply-on-success. Re-reading the file avoids
+    /// writing a stale cached copy; on failure nothing local changes.
+    private func applyPatch(field: String,
+                            _ patch: @escaping (String) -> String,
+                            local: @escaping (Entry) -> Entry) async {
+        guard let path = openPath else { return }
+        savingField = field; writeError = nil
+        defer { savingField = nil }
+        do {
+            let fresh = try await client.entryText(path: path)
+            let next = patch(fresh)
+            try await client.writeFile(path: path, text: next)
+            if let i = entries.firstIndex(where: { $0.path == path }) {
+                entries[i] = local(entries[i])
+            }
+            rebuildIndexDerived()   // themes/rating affect themeIndex/filters/counts
+            recomputeVisible()
+            recomputeOpenDerived()
+            print("[marple] wrote \(field) -> \(path)")
+        } catch {
+            writeError = "\(error)"
+            print("[marple] write FAILED \(field) \(path): \(error)")
+        }
+    }
+
+    func setRating(_ stars: Int?) async {
+        let n = stars ?? 0
+        let value = n > 0 ? String(repeating: "★", count: min(5, n)) : nil
+        await applyPatch(field: "rating",
+            { FrontmatterPatch.setScalar($0, key: "rating", value: value) },
+            local: { $0.with(ratingScore: Double(max(0, n))) })
+    }
+
+    func setYear(_ text: String?) async {
+        let val = normalize(text)
+        await applyPatch(field: "year",
+            { FrontmatterPatch.setScalar($0, key: "year", value: val, numeric: true) },
+            local: { $0.with(year: .some(val)) })
+    }
+
+    func setSource(_ text: String?) async {
+        let val = normalize(text)
+        await applyPatch(field: "source",
+            { FrontmatterPatch.setScalar($0, key: "source", value: val) },
+            local: { $0.with(source: .some(val)) })
+    }
+
+    func setTopic(_ text: String?) async {
+        let val = normalize(text)
+        await applyPatch(field: "topic",
+            { FrontmatterPatch.setScalar($0, key: "topic", value: val) },
+            local: { $0.with(topic: .some(val)) })
+    }
+
+    func setDoi(_ text: String?) async {
+        let val = normalize(text)
+        await applyPatch(field: "doi",
+            { FrontmatterPatch.setScalar($0, key: "doi", value: val) },
+            local: { $0.with(doi: .some(val)) })
+    }
+
+    func addThemes(_ raw: String) async {
+        let add = raw.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard !add.isEmpty, let cur = openEntry?.themes else { return }
+        var next = cur
+        for t in add where !next.contains(t) { next.append(t) }
+        await applyPatch(field: "themes",
+            { FrontmatterPatch.setThemes($0, next) },
+            local: { $0.with(themes: next) })
+    }
+
+    func removeTheme(_ theme: String) async {
+        guard let cur = openEntry?.themes else { return }
+        let next = cur.filter { $0 != theme }
+        await applyPatch(field: "themes",
+            { FrontmatterPatch.setThemes($0, next) },
+            local: { $0.with(themes: next) })
+    }
+
+    private func normalize(_ text: String?) -> String? {
+        let t = text?.trimmingCharacters(in: .whitespaces)
+        return (t?.isEmpty ?? true) ? nil : t
     }
 }
