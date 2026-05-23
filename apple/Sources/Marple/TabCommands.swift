@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import MarpleKit
 
 // Classic FocusedValueKey (the @Entry macro needs a newer SDK than these Command
@@ -18,12 +19,25 @@ struct TabCommands: Commands {
     @FocusedValue(\.appModel) private var model
 
     var body: some Commands {
+        // Replace the standard File close group so plain ⌘W closes a tab (not the
+        // window); window-close relocates to ⇧⌘W. (Pattern from CodeEdit.)
+        CommandGroup(replacing: .saveItem) {
+            Button("关闭标签") {
+                if let m = model, m.tabs.count > 1 {
+                    Task { await m.closeActiveTab() }
+                } else {
+                    NSApp.keyWindow?.performClose(nil)
+                }
+            }
+            .keyboardShortcut("w", modifiers: .command)
+
+            Button("关闭窗口") { NSApp.keyWindow?.performClose(nil) }
+                .keyboardShortcut("w", modifiers: [.shift, .command])
+        }
+
         CommandMenu("标签") {
             Button("新建标签") { run { await $0.newTab() } }
                 .keyboardShortcut("t", modifiers: .command)
-            Button("关闭标签") { run { await $0.closeActiveTab() } }
-                .keyboardShortcut("w", modifiers: .command)
-                .disabled((model?.tabs.count ?? 0) <= 1)
 
             Divider()
 
