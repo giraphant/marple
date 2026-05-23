@@ -5,3 +5,14 @@ dist
 
 # Embedding model cache (BGE-M3 ~2.3GB, downloaded on first spike/build)
 data/models/
+
+# Generated search index (was ignored by the bts root .gitignore before extraction)
+data/index.json
+data/*.sqlite
+data/*.sqlite.bak
+
+# Rust build output
+rust/target/
+
+# Local machine config (points at your vault checkout); use reader.config.example.json
+reader.config.json

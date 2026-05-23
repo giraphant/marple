@@ -60,14 +60,16 @@ pub struct ReaderPaths {
 }
 
 impl ReaderPaths {
-    pub fn from_reader_root(reader_root: impl Into<PathBuf>) -> Result<Self> {
-        let reader_root = reader_root.into().canonicalize().with_context(|| {
-            "failed to resolve reader root; run from reader/ or set READER_ROOT"
-        })?;
-        let workspace_root = reader_root
-            .parent()
-            .context("reader root has no parent workspace")?
-            .to_path_buf();
+    /// Build paths from an explicit reader root (this app's own assets:
+    /// `data/`, `dist/`, model cache) and an explicit workspace root (where the
+    /// content lives: `vault/`, `sources/`, `processing/`). The two are
+    /// independent — reader no longer assumes it sits beside the vault.
+    pub fn from_roots(
+        reader_root: impl Into<PathBuf>,
+        workspace_root: impl Into<PathBuf>,
+    ) -> Result<Self> {
+        let reader_root = reader_root.into();
+        let workspace_root = workspace_root.into();
         let vault = workspace_root.join("vault");
         let notes_dir = vault.join("notes");
         Ok(Self {
@@ -82,6 +84,50 @@ impl ReaderPaths {
             vault,
             notes_dir,
         })
+    }
+
+    /// Resolve the workspace root (content location) independently of where the
+    /// reader binary lives. Precedence:
+    ///   1. `VAULT_ROOT` env var (explicit override for CI/scripts/dev)
+    ///   2. `reader.config.json` next to `reader_root`, key `workspaceRoot`
+    ///      (relative paths resolve against `reader_root`)
+    ///   3. error with a clear message
+    pub fn resolve_workspace_root(reader_root: &Path) -> Result<PathBuf> {
+        if let Ok(p) = std::env::var("VAULT_ROOT") {
+            let p = PathBuf::from(&p);
+            return p.canonicalize().with_context(|| {
+                format!("VAULT_ROOT is set but does not exist: {p:?}")
+            });
+        }
+        let cfg = reader_root.join("reader.config.json");
+        if cfg.is_file() {
+            let text = fs::read_to_string(&cfg)
+                .with_context(|| format!("failed to read {}", cfg.display()))?;
+            let v: Value = serde_json::from_str(&text)
+                .with_context(|| format!("invalid JSON in {}", cfg.display()))?;
+            if let Some(ws) = v.get("workspaceRoot").and_then(|x| x.as_str()) {
+                let p = PathBuf::from(ws);
+                let p = if p.is_absolute() { p } else { reader_root.join(p) };
+                return p.canonicalize().with_context(|| {
+                    format!("workspaceRoot in {} does not exist: {p:?}", cfg.display())
+                });
+            }
+        }
+        anyhow::bail!(
+            "no vault configured: set VAULT_ROOT, or add {{\"workspaceRoot\": \"…\"}} to {}",
+            cfg.display()
+        )
+    }
+
+    /// Resolve the reader root, then resolve the workspace root separately and
+    /// assemble the paths. Kept for the binary entrypoints; `workspace_root` is
+    /// no longer derived from `reader_root`'s parent.
+    pub fn from_reader_root(reader_root: impl Into<PathBuf>) -> Result<Self> {
+        let reader_root = reader_root.into().canonicalize().with_context(|| {
+            "failed to resolve reader root; run from the reader repo or set READER_ROOT"
+        })?;
+        let workspace_root = Self::resolve_workspace_root(&reader_root)?;
+        Self::from_roots(reader_root, workspace_root)
     }
 }
 
