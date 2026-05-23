@@ -67,9 +67,8 @@ Boundary discipline held: UI depends only on `VaultClient` + DTOs; only
   counts per type (chapter-summary 11573, paper-analysis 2198, book-overview
   1047, author-profile 307, note 8, topic-synthesis 8, topic-reading-list 1),
   and `fast` search scoped to a type returns ranked hits.
-- **OPEN: GUI eyeball pass** — the SwiftUI rendering itself was not yet confirmed
-  by a human at the time of writing (controller can't see the window). Checklist
-  below.
+- **GUI eyeball pass — DONE.** User confirmed 2026-05-23: "看着没啥问题，基本功能都
+  出来了" (looks fine, basic functions all present). Checklist below for regressions.
 
 ### GUI checklist (run `swift run Marple`, drive, tail `/tmp/marple-app.log`)
 
