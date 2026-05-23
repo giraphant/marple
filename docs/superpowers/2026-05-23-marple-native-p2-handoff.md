@@ -69,6 +69,16 @@ Boundary discipline held: UI depends only on `VaultClient` + DTOs; only
   and `fast` search scoped to a type returns ranked hits.
 - **GUI eyeball pass — DONE.** User confirmed 2026-05-23: "看着没啥问题，基本功能都
   出来了" (looks fine, basic functions all present). Checklist below for regressions.
+- **Perf fix (commit `f70f484`).** Type switching hitched on the big lists
+  (章节 = 11,573 rows) because `counts`/`themeIndex`/`visibleEntries` were computed
+  in view bodies on every render pass (sidebar recomputed `counts` 6× + the whole
+  theme index; the list built `visibleEntries` twice). Moved them to **stored caches
+  on `AppModel`**, recomputed only when inputs change (`rebuildIndexDerived()` on
+  index load; `recomputeVisible()` on pane/sort/filter/search change). Browse-state
+  props are now `private(set)` and mutated via `setSort/setFilters/setSearchText`
+  intent methods. User re-validated: "much faster." Remaining cost is the inherent
+  `NSTableView` reload of an 11k-row dataset — acceptable; if it ever bites again the
+  next levers are per-pane cached arrays, `Table`, or a capped render tail.
 
 ### GUI checklist (run `swift run Marple`, drive, tail `/tmp/marple-app.log`)
 
