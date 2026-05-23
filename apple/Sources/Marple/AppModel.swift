@@ -18,8 +18,14 @@ final class AppModel {
     }
 
     func loadIndex() async {
-        do { entries = try await client.index(); status = "\(entries.count) entries" }
-        catch { status = "index failed: \(error)" }
+        do {
+            entries = try await client.index()
+            status = "\(entries.count) entries"
+            print("[marple] index loaded: \(entries.count) entries, \(papers.count) papers")
+        } catch {
+            status = "index failed: \(error)"
+            print("[marple] index FAILED: \(error)")
+        }
     }
 
     func open(_ path: String) async {
@@ -27,19 +33,35 @@ final class AppModel {
         do {
             let raw = try await client.entryText(path: path)
             openBlocks = MarkdownModel.blocks(from: Frontmatter.split(raw).body)
-        } catch { openBlocks = [.paragraph([.text("load failed: \(error)")])] }
+            print("[marple] open \(path) -> \(openBlocks.count) blocks (\(raw.count) chars)")
+        } catch {
+            openBlocks = [.paragraph([.text("load failed: \(error)")])]
+            print("[marple] open FAILED \(path): \(error)")
+        }
     }
 
-    func reloadOpen() async { if let p = openPath { await open(p) } }
+    func reloadOpen() async {
+        if let p = openPath { print("[marple] watcher reload \(p)"); await open(p) }
+    }
 
     func follow(_ target: String) async {
-        if let hit = WikiResolver.resolve(target, in: entries) { await open(hit.path) }
-        else { status = "unresolved [[\(target)]]" }
+        if let hit = WikiResolver.resolve(target, in: entries) {
+            print("[marple] follow [[\(target)]] -> \(hit.path)")
+            await open(hit.path)
+        } else {
+            status = "unresolved [[\(target)]]"
+            print("[marple] follow [[\(target)]] -> UNRESOLVED")
+        }
     }
 
     func openExternally() async {
         guard let p = openPath else { return }
-        do { try await client.openInEditor(path: p, app: "") }
-        catch { status = "open-in-editor failed: \(error)" }
+        do {
+            try await client.openInEditor(path: p, app: "")
+            print("[marple] openInEditor \(p)")
+        } catch {
+            status = "open-in-editor failed: \(error)"
+            print("[marple] openInEditor FAILED \(p): \(error)")
+        }
     }
 }

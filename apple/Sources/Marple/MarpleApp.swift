@@ -45,6 +45,7 @@ struct MarpleApp: App {
     static let vaultDir = URL(fileURLWithPath: "/Users/ramudai/Documents/Learn/bts/vault")
 
     init() {
+        setvbuf(stdout, nil, _IOLBF, 0)  // line-buffer so logs stream to the captured file
         _state = StateObject(wrappedValue: AppState(repoRoot: MarpleApp.repoRoot))
     }
 
