@@ -38,6 +38,9 @@ final class AppModel {
     private(set) var authorIndex: [String: [Entry]] = [:]
     private(set) var annotationIndex: [String: [Entry]] = [:]
 
+    // Trash list (loaded lazily; sidebar badge reads .count).
+    private(set) var trashItems: [TrashItem] = []
+
     // Reading state
     var openBlocks: [RenderBlock] = []
 
@@ -104,6 +107,7 @@ final class AppModel {
             status = "\(entries.count) entries"
             rebuildIndexDerived()
             recomputeVisible()
+            await loadTrash()
             print("[marple] index loaded: \(entries.count) entries")
         } catch {
             status = "index failed: \(error)"
@@ -302,6 +306,59 @@ final class AppModel {
         } catch {
             status = "open-in-editor failed: \(error)"
             print("[marple] openInEditor FAILED \(p): \(error)")
+        }
+    }
+
+    // MARK: trash
+
+    func loadTrash() async {
+        do { trashItems = try await client.listTrash() }
+        catch { print("[marple] listTrash FAILED: \(error)") }
+    }
+
+    /// Soft-delete `path`: backend moves it to .trash, then optimistically drop
+    /// it from the in-memory index. If the active tab shows it, clear the doc.
+    func moveToTrash(_ path: String) async {
+        writeError = nil
+        do {
+            _ = try await client.moveToTrash(path: path)
+            entries.removeAll { $0.path == path }
+            if openPath == path {
+                workspace.navigateActive(to: NavLocation(pane: pane, openPath: nil))
+                await loadDoc(nil)
+            }
+            rebuildIndexDerived(); recomputeVisible()
+            await loadTrash()
+            print("[marple] trashed \(path)")
+        } catch {
+            writeError = "\(error)"
+            print("[marple] trash FAILED \(path): \(error)")
+        }
+    }
+
+    /// Restore re-adds a file we can't cheaply describe → reload the whole index
+    /// (rare action; loadIndex also refreshes the trash list).
+    func restoreTrash(_ name: String) async {
+        writeError = nil
+        do {
+            _ = try await client.restoreTrash(name: name)
+            await loadIndex()
+            print("[marple] restored \(name)")
+        } catch {
+            writeError = "\(error)"
+            print("[marple] restore FAILED \(name): \(error)")
+        }
+    }
+
+    func purgeTrash(_ name: String) async {
+        writeError = nil
+        do {
+            try await client.purgeTrash(name: name)
+            trashItems.removeAll { $0.name == name }
+            print("[marple] purged \(name)")
+        } catch {
+            writeError = "\(error)"
+            print("[marple] purge FAILED \(name): \(error)")
         }
     }
 
