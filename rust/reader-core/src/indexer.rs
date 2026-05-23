@@ -20,7 +20,21 @@ pub(crate) fn open_index_rw(path: &std::path::Path) -> ReaderResult<Connection> 
     let conn = Connection::open(path)
         .with_context(|| format!("failed to open {}", path.display()))?;
     conn.busy_timeout(std::time::Duration::from_millis(5000))?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
+    // `PRAGMA journal_mode=WAL` reports the *resulting* mode as a row; SQLite can
+    // silently refuse WAL (e.g. an NFS/SMB-mounted vault) and stay in rollback
+    // mode. Inspect that row so a failed switch surfaces as an error instead of
+    // leaving the lock-contention bug in place under a falsely-green build.
+    conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| {
+        let mode: String = row.get(0)?;
+        if mode.eq_ignore_ascii_case("wal") {
+            Ok(())
+        } else {
+            Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+                Some(format!("expected WAL journal mode, got {mode}")),
+            ))
+        }
+    })?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     Ok(conn)
 }
@@ -1262,7 +1276,7 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
     // The tmp file was built with journal_mode=OFF for bulk-insert speed; after
     // the atomic rename the live file lands in the default "delete" mode. Flip it
     // to WAL now so every subsequent reader can run concurrently with the writer.
-    open_index_rw(&paths.index_db)?;
+    let _ = open_index_rw(&paths.index_db)?;
     Ok(())
 }
 
