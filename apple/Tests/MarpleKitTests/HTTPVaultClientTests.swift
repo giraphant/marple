@@ -16,6 +16,25 @@ final class StubURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+extension URLRequest {
+    /// URLProtocol receives the body as a stream; read whichever is present.
+    func bodyData() -> Data {
+        if let b = httpBody { return b }
+        guard let s = httpBodyStream else { return Data() }
+        s.open(); defer { s.close() }
+        var data = Data()
+        let bufSize = 4096
+        let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
+        defer { buf.deallocate() }
+        while s.hasBytesAvailable {
+            let n = s.read(buf, maxLength: bufSize)
+            if n <= 0 { break }
+            data.append(buf, count: n)
+        }
+        return data
+    }
+}
+
 @Suite(.serialized) struct HTTPVaultClientTests {
     func makeClient() -> HTTPVaultClient {
         let cfg = URLSessionConfiguration.ephemeral
@@ -70,6 +89,17 @@ final class StubURLProtocol: URLProtocol {
         #expect(hits.map { $0.entry.path } == ["vault/p/a.md"])
         #expect(hits.first?.score == 7.5)
         #expect(hits.first?.source == "fulltext")
+    }
+
+    @Test func testWriteFilePutsFullText() async throws {
+        StubURLProtocol.handler = { req in
+            #expect(req.httpMethod == "PUT")
+            #expect(req.url?.path == "/vault/notes/n.md")
+            #expect(String(decoding: req.bodyData(), as: UTF8.self) == "new text")
+            let resp = HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (resp, Data())
+        }
+        try await makeClient().writeFile(path: "vault/notes/n.md", text: "new text")
     }
 
     @Test func testNon200MapsToHTTPError() async {

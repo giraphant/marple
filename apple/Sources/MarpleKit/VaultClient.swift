@@ -36,12 +36,21 @@ public protocol VaultClient: Sendable {
     func entryText(path: String) async throws -> String
     func search(_ query: SearchQuery) async throws -> [SearchHit]
     func openInEditor(path: String, app: String) async throws
+    func writeFile(path: String, text: String) async throws
+}
+
+/// Records the last write so stub-backed tests can assert on it.
+public final class WriteLog: @unchecked Sendable {
+    public private(set) var last: (path: String, text: String)?
+    public init() {}
+    public func record(_ path: String, _ text: String) { last = (path, text) }
 }
 
 public struct StubVaultClient: VaultClient {
     public let entries: [Entry]
     public let texts: [String: String]
     public let hits: [SearchHit]
+    public let writeLog = WriteLog()
     public init(entries: [Entry], texts: [String: String], hits: [SearchHit] = []) {
         self.entries = entries; self.texts = texts; self.hits = hits
     }
@@ -52,4 +61,5 @@ public struct StubVaultClient: VaultClient {
     }
     public func search(_ query: SearchQuery) async throws -> [SearchHit] { hits }
     public func openInEditor(path: String, app: String) async throws {}
+    public func writeFile(path: String, text: String) async throws { writeLog.record(path, text) }
 }

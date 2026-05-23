@@ -55,6 +55,14 @@ public struct HTTPVaultClient: VaultClient {
         catch { throw VaultError.decode("\(error)") }
     }
 
+    public func writeFile(path: String, text: String) async throws {
+        var req = URLRequest(url: URL(string: baseURL.absoluteString + "/" + path)!)
+        req.httpMethod = "PUT"
+        req.setValue("text/markdown; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Data(text.utf8)
+        _ = try await run(req)
+    }
+
     public func openInEditor(path: String, app: String) async throws {
         var req = URLRequest(url: URL(string: baseURL.absoluteString + "/api/open-in-editor")!)
         req.httpMethod = "POST"
