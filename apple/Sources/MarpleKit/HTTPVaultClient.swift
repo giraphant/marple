@@ -40,6 +40,21 @@ public struct HTTPVaultClient: VaultClient {
         return String(decoding: data, as: UTF8.self)
     }
 
+    public func search(_ query: SearchQuery) async throws -> [SearchHit] {
+        var comps = URLComponents(string: baseURL.absoluteString + "/api/search")!
+        var items = [URLQueryItem(name: "q", value: query.q),
+                     URLQueryItem(name: "mode", value: "fast"),
+                     URLQueryItem(name: "limit", value: String(query.limit))]
+        if let t = query.type { items.append(URLQueryItem(name: "entry_type", value: t.rawValue)) }
+        if let r = query.minRating { items.append(URLQueryItem(name: "min_rating", value: String(r))) }
+        if let th = query.theme { items.append(URLQueryItem(name: "theme", value: th)) }
+        comps.queryItems = items
+        let data = try await run(URLRequest(url: comps.url!))
+        struct Wrapper: Decodable { let items: [SearchHit] }
+        do { return try JSONDecoder().decode(Wrapper.self, from: data).items }
+        catch { throw VaultError.decode("\(error)") }
+    }
+
     public func openInEditor(path: String, app: String) async throws {
         var req = URLRequest(url: URL(string: baseURL.absoluteString + "/api/open-in-editor")!)
         req.httpMethod = "POST"

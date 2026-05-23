@@ -55,6 +55,23 @@ final class StubURLProtocol: URLProtocol {
         try await makeClient().openInEditor(path: "vault/papers/x.md", app: "")
     }
 
+    @Test func testSearchBuildsQueryAndDecodesHits() async throws {
+        StubURLProtocol.handler = { req in
+            #expect(req.url?.path == "/api/search")
+            let qs = req.url?.query ?? ""
+            #expect(qs.contains("q=marx"))
+            #expect(qs.contains("mode=fast"))
+            #expect(qs.contains("entry_type=paper-analysis"))
+            let body = #"{"items":[{"entry":{"path":"vault/p/a.md","type":"paper-analysis","preview":"","rating_score":0},"score":7.5,"snippet":"hi","source":"fulltext"}]}"#
+            let resp = HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (resp, Data(body.utf8))
+        }
+        let hits = try await makeClient().search(SearchQuery(q: "marx", type: .paperAnalysis))
+        #expect(hits.map { $0.entry.path } == ["vault/p/a.md"])
+        #expect(hits.first?.score == 7.5)
+        #expect(hits.first?.source == "fulltext")
+    }
+
     @Test func testNon200MapsToHTTPError() async {
         StubURLProtocol.handler = { req in
             let resp = HTTPURLResponse(url: req.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!

@@ -24,4 +24,15 @@ import Testing
             Issue.record("wrong error \(error)")
         }
     }
+
+    @Test func testStubSearchReturnsConfiguredHits() async throws {
+        let hit = SearchHit(entry: Entry(path: "vault/p/a.md", type: .paperAnalysis,
+                              title: "A", author: nil, year: nil, ratingScore: 0,
+                              themes: [], preview: "", hasPDF: false),
+                            score: 9, snippet: "…A…", source: "fulltext")
+        let stub = StubVaultClient(entries: [], texts: [:], hits: [hit])
+        let out = try await stub.search(SearchQuery(q: "a"))
+        #expect(out.map { $0.entry.path } == ["vault/p/a.md"])
+        #expect(out.first?.snippet == "…A…")
+    }
 }
