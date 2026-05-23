@@ -12,6 +12,7 @@ let package = Package(
         // swift-markdown ships via branch, not tagged release. If `main` fails to
         // resolve against the local toolchain, pin to the matching `release/x.y`.
         .package(url: "https://github.com/swiftlang/swift-markdown.git", branch: "main"),
+        .package(url: "https://github.com/ciaranrobrien/SwiftUILazyContainer.git", from: "2.0.0"),
     ],
     targets: [
         .target(
@@ -20,7 +21,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "Marple",
-            dependencies: ["MarpleKit"]
+            dependencies: [
+                "MarpleKit",
+                .product(name: "SwiftUILazyContainer", package: "SwiftUILazyContainer"),
+            ]
         ),
         .testTarget(
             name: "MarpleKitTests",
