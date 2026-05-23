@@ -1,0 +1,24 @@
+{
+  "originHash" : "850919572c591f8e37763980bd7c240eb1e83360a2957ccc21f967942abb1a48",
+  "pins" : [
+    {
+      "identity" : "swift-cmark",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-cmark.git",
+      "state" : {
+        "branch" : "gfm",
+        "revision" : "924936d0427cb25a61169739a7660230bffa6ea6"
+      }
+    },
+    {
+      "identity" : "swift-markdown",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-markdown.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "ba1fbd1b242972b9aa79a3d1f213b5eed2e84921"
+      }
+    }
+  ],
+  "version" : 3
+}
