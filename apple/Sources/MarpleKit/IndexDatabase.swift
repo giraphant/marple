@@ -17,7 +17,10 @@ public struct IndexDatabase: Sendable {
     private func openQueue() throws -> DatabaseQueue? {
         guard FileManager.default.fileExists(atPath: indexDBPath) else { return nil }
         var config = Configuration()
-        config.readonly = true
+        // NOT read-only: the index is a WAL database written by the indexer, and a
+        // read-only connection cannot open the -shm wal-index (SQLITE_CANTOPEN,
+        // "unable to open database file"). A normal read-write connection attaches
+        // to the shm and reads concurrently; we only ever issue reads.
         config.busyMode = .timeout(5)
         return try DatabaseQueue(path: indexDBPath, configuration: config)
     }
