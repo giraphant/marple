@@ -41,11 +41,17 @@ private func runGitCapture(_ args: [String], workspaceRoot: String) -> String? {
     } catch {
         return nil
     }
+
+    // Drain stdout to EOF BEFORE waiting for exit. `git log --name-only` over a
+    // large vault emits megabytes; the OS pipe buffer is ~64 KB. If we waited for
+    // exit first, git would block writing into a full pipe while we block on exit
+    // — a deadlock. readDataToEndOfFile() drains as the child writes, so the pipe
+    // never stays full; EOF arrives when git closes stdout (i.e. it has finished).
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
 
     guard process.terminationStatus == 0 else { return nil }
 
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
     return String(data: data, encoding: .utf8)
 }
 
