@@ -37,6 +37,11 @@ public protocol VaultClient: Sendable {
     func search(_ query: SearchQuery) async throws -> [SearchHit]
     func openInEditor(path: String, app: String) async throws
     func writeFile(path: String, text: String) async throws
+    func createNote(path: String, text: String) async throws
+    func moveToTrash(path: String) async throws -> String
+    func listTrash() async throws -> [TrashItem]
+    func restoreTrash(name: String) async throws -> String
+    func purgeTrash(name: String) async throws
 }
 
 /// Records the last write so stub-backed tests can assert on it.
@@ -46,13 +51,36 @@ public final class WriteLog: @unchecked Sendable {
     public func record(_ path: String, _ text: String) { last = (path, text) }
 }
 
+/// Records created notes so stub-backed tests can assert on them.
+public final class CreateLog: @unchecked Sendable {
+    public private(set) var created: [(path: String, text: String)] = []
+    public init() {}
+    public func record(_ path: String, _ text: String) { created.append((path, text)) }
+}
+
+/// In-memory trash for the stub: seeded items + a log of operations.
+public final class TrashStore: @unchecked Sendable {
+    public private(set) var items: [TrashItem]
+    public private(set) var moved: [String] = []
+    public private(set) var restored: [String] = []
+    public private(set) var purged: [String] = []
+    public init(_ items: [TrashItem] = []) { self.items = items }
+    public func move(_ path: String) { moved.append(path) }
+    public func restore(_ name: String) { restored.append(name); items.removeAll { $0.name == name } }
+    public func purge(_ name: String) { purged.append(name); items.removeAll { $0.name == name } }
+}
+
 public struct StubVaultClient: VaultClient {
     public let entries: [Entry]
     public let texts: [String: String]
     public let hits: [SearchHit]
     public let writeLog = WriteLog()
-    public init(entries: [Entry], texts: [String: String], hits: [SearchHit] = []) {
+    public let createLog = CreateLog()
+    public let trash: TrashStore
+    public init(entries: [Entry], texts: [String: String], hits: [SearchHit] = [],
+                trashItems: [TrashItem] = []) {
         self.entries = entries; self.texts = texts; self.hits = hits
+        self.trash = TrashStore(trashItems)
     }
     public func index() async throws -> [Entry] { entries }
     public func entryText(path: String) async throws -> String {
@@ -62,4 +90,13 @@ public struct StubVaultClient: VaultClient {
     public func search(_ query: SearchQuery) async throws -> [SearchHit] { hits }
     public func openInEditor(path: String, app: String) async throws {}
     public func writeFile(path: String, text: String) async throws { writeLog.record(path, text) }
+    public func createNote(path: String, text: String) async throws { createLog.record(path, text) }
+    public func moveToTrash(path: String) async throws -> String {
+        trash.move(path); return "vault/notes/.trash/stub.md"
+    }
+    public func listTrash() async throws -> [TrashItem] { trash.items }
+    public func restoreTrash(name: String) async throws -> String {
+        trash.restore(name); return "vault/notes/\(name)"
+    }
+    public func purgeTrash(name: String) async throws { trash.purge(name) }
 }

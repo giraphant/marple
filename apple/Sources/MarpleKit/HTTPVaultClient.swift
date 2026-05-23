@@ -70,4 +70,21 @@ public struct HTTPVaultClient: VaultClient {
         req.httpBody = try JSONSerialization.data(withJSONObject: ["path": path, "app": app])
         _ = try await run(req)
     }
+
+    // Implemented under TDD in Task 4.
+    public func createNote(path: String, text: String) async throws {
+        throw VaultError.backendUnavailable
+    }
+    public func moveToTrash(path: String) async throws -> String {
+        throw VaultError.backendUnavailable
+    }
+    public func listTrash() async throws -> [TrashItem] {
+        throw VaultError.backendUnavailable
+    }
+    public func restoreTrash(name: String) async throws -> String {
+        throw VaultError.backendUnavailable
+    }
+    public func purgeTrash(name: String) async throws {
+        throw VaultError.backendUnavailable
+    }
 }
