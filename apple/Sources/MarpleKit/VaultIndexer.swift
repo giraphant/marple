@@ -75,8 +75,16 @@ public final class VaultIndexer: @unchecked Sendable {
         let addedDates  = gitAddedDates(workspaceRoot: workspaceRoot)
 
         var entries: [IndexedEntry] = []
+        var seen = Set<String>()
         for file in files {
             let rel = slashRelative(root: workspaceRoot, path: file)
+            // Defensive: never insert the same path twice (entries.path is the PK).
+            // Should not happen now that slashRelative no longer collapses symlinks,
+            // but a stray duplicate must not abort the whole build.
+            if !seen.insert(rel).inserted {
+                print("[indexer] skipping duplicate path: \(rel)")
+                continue
+            }
             guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { continue }
             let fileStem = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
             let mtimeMs  = Self.mtimeMs(atPath: file)
@@ -284,24 +292,24 @@ public final class VaultIndexer: @unchecked Sendable {
     /// Strip `root + "/"` from `path` and return the remainder.
     /// Mirrors `slash_relative` in indexer.rs (:1151-1158).
     ///
-    /// On macOS, `FileManager.enumerator` resolves symlinks (returning
-    /// `/private/var/...`) while the workspaceRoot may be the unresolved form
-    /// (`/var/...`). We resolve both sides via `URL.resolvingSymlinksInPath()`
-    /// before stripping the prefix so paths always match.
+    /// Resolve symlinks on the ROOT only — e.g. `/var` → `/private/var`, the form
+    /// `FileManager.enumerator` returns — then strip that prefix from the literal
+    /// file path. We must NOT resolve symlinks on the file path: a symlinked `.md`
+    /// would collapse onto its target so two walked files would yield the same
+    /// workspace-relative path and crash the insert (UNIQUE constraint). Rust's
+    /// `slash_relative` strips the literal prefix without resolving either side.
     private func slashRelative(root: String, path: String) -> String {
         let resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
-        let resolvedPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-
         let prefix = resolvedRoot.hasSuffix("/") ? resolvedRoot : resolvedRoot + "/"
-        if resolvedPath.hasPrefix(prefix) {
-            return String(resolvedPath.dropFirst(prefix.count))
+        if path.hasPrefix(prefix) {
+            return String(path.dropFirst(prefix.count))
         }
         // Fallback: try the unresolved root.
         let fallbackPrefix = root.hasSuffix("/") ? root : root + "/"
         if path.hasPrefix(fallbackPrefix) {
             return String(path.dropFirst(fallbackPrefix.count))
         }
-        return resolvedPath
+        return path
     }
 
     // MARK: mtimeMs
