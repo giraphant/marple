@@ -52,9 +52,9 @@ touched** (carried initiative constraint).
 | New tab content | Inherits the **current pane**, no open doc (a clean browse of the current category). Appended at the end, activated. |
 | Open-in-new-tab | `openInNewTab(path)` appends a tab at the current pane + that doc, activates it. Wired to a list-row context menu ("在新标签页打开"). |
 | Tab switch + doc load | On switch/back/forward, if the active location's `openPath` differs from the currently-loaded doc, re-fetch+render it (low-ms at this vault scale); guarded by a `loadedDocPath` so unchanged docs don't reload. |
-| Keyboard mechanism | `Commands` `CommandMenu("标签")` + `@FocusedValue(\.appModel)` (discoverable menu items + real shortcuts), not hidden buttons. |
+| Keyboard mechanism | `@FocusedValue(\.appModel)` + `Commands`. **⌘W close-tab** lives in `CommandGroup(replacing: .saveItem)` (removes the system File-close so plain ⌘W hits a tab; 关闭窗口 → ⇧⌘W) — CodeEdit's pattern. The rest live in `CommandMenu("标签")`. |
 | Tab strip placement | A full-width horizontal strip **above** the `NavigationSplitView` (browser-like); back/forward + "+" live in the strip. |
-| Reorder mechanism | `.draggable(tab.id)` + `.dropDestination`; reorder math (`move(id:before:)`) is pure in `Workspace`. |
+| Reorder mechanism | A custom **`DragGesture` "lift and make room"** (CodeEdit-style): the dragged tab follows the cursor via a non-animated offset; only the *other* tabs animate to open a gap; order commits via `Workspace.reorder(_:)` (pure, tested) on release. (A first `.draggable`/`.dropDestination` pass felt poor — no live feedback, raw-UUID drag image — so it was replaced.) |
 | Nav type naming | Tab type is `NavTab` (avoid clash with SwiftUI's `Tab`). |
 
 ## 3. Architecture
@@ -124,7 +124,7 @@ public struct Workspace: Sendable {
     public mutating func selectIndex(_ idx: Int)     // clamp/ignore out of range
     public mutating func selectRelative(_ delta: Int) // wraps for ⌃⇥ / ⌃⇧⇥
     public mutating func togglePin(_ id: NavTab.ID)
-    public mutating func move(id: NavTab.ID, before targetID: NavTab.ID)  // reorder
+    public mutating func reorder(_ ids: [NavTab.ID])  // drag result; no-op unless ids is a permutation
 }
 ```
 
@@ -189,11 +189,10 @@ writes the stored property, which `@Observable AppModel` tracks.
   ```
 - **`TabStripView.swift`** — horizontal strip:
   - Left: `◀` back (`model.goBack`, disabled `!canGoBack`), `▶` forward.
-  - Middle: `ForEach(model.tabs)` → `TabChip` (title + small doc/list icon, pin
-    icon if pinned, `×` close). Active chip highlighted. `.onTapGesture` →
-    `selectTab(id)`. `.contextMenu` → 固定/取消固定, 在右侧新建标签, 关闭, 关闭其他.
-    `.draggable(tab.id.uuidString)` + `.dropDestination(for: String.self)` →
-    `moveTab(id:before:)`.
+  - Middle: fixed-width `TabChip`s (title + small doc/list icon, pin icon if pinned,
+    `×` close; pinned = compact). Active chip highlighted. A select Button →
+    `selectTab(id)`. `.contextMenu` → 固定/取消固定, 关闭, 关闭其他. Reorder via a
+    `DragGesture` (lift-and-make-room) committing `setTabOrder(ids)` on release.
   - Right: `+` new tab.
   - Pinned chips render compact (icon only, no title, no `×`).
 - **`TabCommands.swift`** — `FocusedValues.appModel` key + a `Commands` struct with
@@ -224,7 +223,8 @@ writes the stored property, which `@Observable AppModel` tracks.
 - **Workspace** — single initial active tab; `navigateActive` isolated to active
   tab; `newTab` appends+activates and leaves others' history intact; `closeTab`
   active→correct neighbor, inactive→active preserved; `select`/`selectIndex`
-  (in/out of range)/`selectRelative` wrap; `togglePin`; `move` reorder + self no-op.
+  (in/out of range)/`selectRelative` wrap; `togglePin`; `reorder` permutation +
+  no-op on incomplete/unknown input.
 - **NavTab** — `location` reflects `history.current` after pushes/back.
 - **Regression** — the existing 84 MarpleKit tests stay green (Browse `Pane` reused
   unchanged).
@@ -243,10 +243,12 @@ writes the stored property, which `@Observable AppModel` tracks.
 - **`@FocusedValue` timing** — the value is set on `RootView` (only present once
   booted), so `标签` menu items are correctly disabled pre-boot. If a shortcut
   proves dead, fall back to strip buttons with `.keyboardShortcut`.
-- **`⌘W` vs window-close** — the `标签` menu item claims `⌘W` while the scene is
-  focused. If it collides with the standard Close, verify in GUI; fallback is
-  `⌘⇧W` for close-tab. (Flagged in the GUI checklist.)
-- **Horizontal `.dropDestination` reorder** — per-chip drop computing target index;
-  if flaky, fall back to context-menu 左移/右移. Reorder math is already pure+tested.
+- **`⌘W` vs window-close** — RESOLVED: the standard File-close group is replaced
+  (`CommandGroup(replacing: .saveItem)`) so plain ⌘W reaches our 关闭标签; 关闭窗口
+  moved to ⇧⌘W. GUI-validated.
+- **Drag-reorder feel** — RESOLVED: the `.draggable`/`.dropDestination` pass felt
+  poor (no live feedback, raw-UUID drag image); replaced with the CodeEdit-style
+  `DragGesture` lift-and-make-room (dragged tab glued to cursor, others animate a
+  gap). GUI-validated.
 - **Doc reload on every switch** — acceptable at this vault scale; `loadedDocPath`
   guard avoids redundant reloads. Per-tab block caching is a later perf item.

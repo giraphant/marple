@@ -59,14 +59,23 @@ active tab; `◀`/`▶` retrace it (forward truncated on a new push, browser-sty
   write-back + `reloadOpen` (now `loadDoc`) still work against computed `openPath`.
 - `RootView.swift` — `VStack { TabStripView; Divider; NavigationSplitView{…} }` +
   `.focusedSceneValue(\.appModel, model)`. (Moved the split view out of `MarpleApp`.)
-- `TabStripView.swift` — `◀`/`▶` (disabled at ends), a horizontal scroll of chips,
-  `+`. Each chip: a select Button (icon + title; pinned = icon-only compact) + `×`
-  (disabled when last), active highlight, `.help`, `.draggable(id.uuidString)` +
-  `.dropDestination(for: String.self)` → `moveTab`, and a context menu (固定/取消固定,
-  关闭标签, 关闭其他标签).
+- `TabStripView.swift` — `◀`/`▶` (disabled at ends), a horizontal scroll of fixed-
+  width chips (150 / 34 pinned), `+`. Each chip: a select Button (icon + title;
+  pinned = icon-only compact) + `×` (disabled when last), active highlight, `.help`,
+  context menu (固定/取消固定, 关闭标签, 关闭其他标签). **Reorder = a custom
+  `DragGesture` "lift and make room"** (modeled on CodeEdit, after a first
+  `.draggable`/`.dropDestination` pass felt poor): the dragged tab follows the
+  cursor exactly via a non-animated `.offset` (= raw translation → no wobble); only
+  the *other* tabs animate (`gapIndex`, eased 0.2s) to open a gap at the insertion
+  index; the new order commits via `model.setTabOrder` on release. (The earlier
+  swap-based attempt wobbled because the dragged tab's slot-change animated while its
+  offset compensation didn't — they have to move together or not at all.)
 - `TabCommands.swift` — classic `FocusedValueKey` (the `@Entry` macro needs a newer
-  SDK than these Command Line Tools) + `CommandMenu("标签")`: 新建标签 ⌘T, 关闭标签
-  ⌘W, 后退 ⌘[, 前进 ⌘], 下一个/上一个标签 ⌃⇥ / ⌃⇧⇥, 选择标签 1–9 ⌘1…⌘9.
+  SDK than these Command Line Tools). **`CommandGroup(replacing: .saveItem)`**
+  removes the system File-close so plain **⌘W = 关闭标签** (CodeEdit's fix); 关闭窗口
+  relocates to **⇧⌘W** (and ⌘W closes the window when only one tab remains, Safari-
+  style; pinned tabs resist ⌘W). `CommandMenu("标签")`: 新建标签 ⌘T, 后退 ⌘[, 前进
+  ⌘], 下一个/上一个标签 ⌃⇥ / ⌃⇧⇥, 选择标签 1–9 ⌘1…⌘9.
 - `MarpleApp.swift` — booted branch shows `RootView(model:)`; scene `.commands {
   TabCommands() }`.
 - `EntryListView.swift` — list-row context menu "在新标签页打开" → `openInNewTab`.
@@ -112,12 +121,12 @@ Boundary discipline held: pure nav logic in MarpleKit; UI depends only on
   no longer closes it; ×/context-menu 关闭标签 still does.
 - **Close:** `×` and 关闭标签 close; can't close the **last** tab (no-op). 关闭其他标签
   keeps the clicked tab + pinned ones.
-- **Drag-reorder:** drag a chip left/right; order persists for the session.
+- **Drag-reorder:** drag a chip left/right — the dragged tab tracks the cursor,
+  others slide to open a gap; order persists for the session. **(GUI-validated by
+  user 2026-05-23 — "帅".)**
 - **Open-in-new-tab:** right-click a list row → 在新标签页打开 opens + activates a new tab.
-- **⚠ Verify specifically:** `⌘W` closes a *tab* (not the window) while a tab
-  remains — if it closes the window instead, the `标签` menu item lost to the
-  standard Close (fallback: rebind close-tab to `⌘⇧W`). Also sanity-check the
-  horizontal drag-reorder feel inside the scrollable strip.
+- **⌘W / ⇧⌘W:** `⌘W` closes the active tab (window when it's the last tab); ⇧⌘W
+  always closes the window. **(GUI-validated by user 2026-05-23.)**
 - **Regression:** wikilinks navigate; inspector (统计/信息/目录) + metadata writes
   (★/主题/年份…) still work; 用外部编辑器打开 works; type switching still fast (P1/P2);
   external save (FSEvents) still refreshes the open doc.
