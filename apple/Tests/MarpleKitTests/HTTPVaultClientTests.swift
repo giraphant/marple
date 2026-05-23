@@ -102,6 +102,60 @@ extension URLRequest {
         try await makeClient().writeFile(path: "vault/notes/n.md", text: "new text")
     }
 
+    @Test func testCreateNotePostsText() async throws {
+        StubURLProtocol.handler = { req in
+            #expect(req.httpMethod == "POST")
+            #expect(req.url?.path == "/vault/notes/new.md")
+            #expect(String(decoding: req.bodyData(), as: UTF8.self) == "hello")
+            let resp = HTTPURLResponse(url: req.url!, statusCode: 201, httpVersion: nil, headerFields: nil)!
+            return (resp, Data(#"{"ok":true,"path":"vault/notes/new.md"}"#.utf8))
+        }
+        try await makeClient().createNote(path: "vault/notes/new.md", text: "hello")
+    }
+
+    @Test func testMoveToTrashDeletesAndReturnsTrashPath() async throws {
+        StubURLProtocol.handler = { req in
+            #expect(req.httpMethod == "DELETE")
+            #expect(req.url?.path == "/vault/notes/old.md")
+            let resp = HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (resp, Data(#"{"ok":true,"trash":"vault/notes/.trash/old.2026.md"}"#.utf8))
+        }
+        let p = try await makeClient().moveToTrash(path: "vault/notes/old.md")
+        #expect(p == "vault/notes/.trash/old.2026.md")
+    }
+
+    @Test func testListTrashParsesItems() async throws {
+        StubURLProtocol.handler = { req in
+            #expect(req.url?.path == "/api/trash")
+            let body = #"{"items":[{"name":"old.2026.md","originalBase":"old","ts":"2026","mtime":1.0,"size":5}]}"#
+            let resp = HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (resp, Data(body.utf8))
+        }
+        let items = try await makeClient().listTrash()
+        #expect(items.map(\.name) == ["old.2026.md"])
+    }
+
+    @Test func testRestoreTrashPostsAndReturnsRestored() async throws {
+        StubURLProtocol.handler = { req in
+            #expect(req.httpMethod == "POST")
+            #expect(req.url?.path == "/api/trash/old.2026.md/restore")
+            let resp = HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (resp, Data(#"{"ok":true,"restored":"vault/notes/old.md"}"#.utf8))
+        }
+        let r = try await makeClient().restoreTrash(name: "old.2026.md")
+        #expect(r == "vault/notes/old.md")
+    }
+
+    @Test func testPurgeTrashDeletes() async throws {
+        StubURLProtocol.handler = { req in
+            #expect(req.httpMethod == "DELETE")
+            #expect(req.url?.path == "/api/trash/old.2026.md")
+            let resp = HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (resp, Data(#"{"ok":true}"#.utf8))
+        }
+        try await makeClient().purgeTrash(name: "old.2026.md")
+    }
+
     @Test func testNon200MapsToHTTPError() async {
         StubURLProtocol.handler = { req in
             let resp = HTTPURLResponse(url: req.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!

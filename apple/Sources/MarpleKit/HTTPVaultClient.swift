@@ -71,20 +71,42 @@ public struct HTTPVaultClient: VaultClient {
         _ = try await run(req)
     }
 
-    // Implemented under TDD in Task 4.
     public func createNote(path: String, text: String) async throws {
-        throw VaultError.backendUnavailable
+        var req = URLRequest(url: URL(string: baseURL.absoluteString + "/" + path)!)
+        req.httpMethod = "POST"
+        req.setValue("text/markdown; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Data(text.utf8)
+        _ = try await run(req)
     }
+
     public func moveToTrash(path: String) async throws -> String {
-        throw VaultError.backendUnavailable
+        var req = URLRequest(url: URL(string: baseURL.absoluteString + "/" + path)!)
+        req.httpMethod = "DELETE"
+        let data = try await run(req)
+        struct Resp: Decodable { let trash: String? }
+        return (try? JSONDecoder().decode(Resp.self, from: data))?.trash ?? ""
     }
+
     public func listTrash() async throws -> [TrashItem] {
-        throw VaultError.backendUnavailable
+        let data = try await get("api/trash")
+        struct Wrapper: Decodable { let items: [TrashItem] }
+        do { return try JSONDecoder().decode(Wrapper.self, from: data).items }
+        catch { throw VaultError.decode("\(error)") }
     }
+
     public func restoreTrash(name: String) async throws -> String {
-        throw VaultError.backendUnavailable
+        let enc = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        var req = URLRequest(url: URL(string: baseURL.absoluteString + "/api/trash/" + enc + "/restore")!)
+        req.httpMethod = "POST"
+        let data = try await run(req)
+        struct Resp: Decodable { let restored: String? }
+        return (try? JSONDecoder().decode(Resp.self, from: data))?.restored ?? ""
     }
+
     public func purgeTrash(name: String) async throws {
-        throw VaultError.backendUnavailable
+        let enc = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        var req = URLRequest(url: URL(string: baseURL.absoluteString + "/api/trash/" + enc)!)
+        req.httpMethod = "DELETE"
+        _ = try await run(req)
     }
 }
