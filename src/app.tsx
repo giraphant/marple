@@ -16,26 +16,18 @@ import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import {
   postEntryText, newAnnotationDraft, entryFromDraft, deleteEntry,
-  newIdeaDraft, ideaEntryFromDraft, reindex, reconcile, fetchIndex, searchIndex as searchServerIndex,
-  listFiles, fetchEntry, fetchTranslationSlugs, openInEditor,
+  newIdeaDraft, ideaEntryFromDraft, reindex, fetchIndex, searchIndex as searchServerIndex,
+  fetchTranslationSlugs, openInEditor,
 } from './api';
 import { nextSearchMode, type SearchMode } from './searchMode';
 import { loadSettings, saveSettings, orderedTypes, fontStack, type Settings } from './settings';
 import { loadTabs, loadActiveIndex, saveTabs, saveActiveIndex, defaultTab } from './session';
 import { bumpVaultVersion, subscribeVaultChanges } from './sync';
-import { mapPool } from './map-pool';
 
 const MAX_TABS = 16;
 const MAX_HISTORY = 50;
 const DEFAULT_TYPE: EntryType = 'paper-analysis';
 
-/** Max concurrent /api/entry fetches during a vault sync. Browsers cap a host at
- *  ~6 HTTP/1.1 connections; firing hundreds at once both fails with
- *  ERR_INSUFFICIENT_RESOURCES and starves user-initiated requests (a click on
- *  "open in editor" would queue behind the backlog). Kept well below 6 so that
- *  even with the (multi-second) /api/index load also in flight, connections stay
- *  free for user clicks. */
-const SYNC_FETCH_CONCURRENCY = 3;
 
 /** Push a new content to a tab's history at `cursor + 1`, truncating any
  *  forward history (browser-style). No-op if it's the same as current. */
@@ -203,118 +195,34 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [onToggleSidebar]);
 
-  // File-browser data layer: the DB snapshot (/api/index) is just a metadata
-  // cache loaded once on boot; the file system is the source of truth. We track
-  // the mtime we last processed per file so cross-window / refocus syncs only
-  // re-parse what actually changed.
-  const entriesRef = useRef<Entry[] | null>(entries);
-  entriesRef.current = entries;
   // Latest tab state, for the cross-page convergence check on focus (QUA-68).
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
-  const knownMtimesRef = useRef<Map<string, number | null>>(new Map());
-  const lastSyncMtimeRef = useRef(0);
-  const syncingRef = useRef(false);
-  const syncTimerRef = useRef<number | null>(null);
-  const lastReconcileRef = useRef(0);
-
-  // Cross-window / external freshness, the file-browser way. Pull only the
-  // delta (files with mtime > lastSync) and live-parse just the ones whose
-  // mtime actually changed vs what we last saw. A full listing is fetched only
-  // when the server's total file count disagrees with ours — i.e. a deletion
-  // (or odd add) happened — so the common no-op / edit sync ships almost nothing.
-  const syncFromFiles = useCallback(() => {
-    if (syncTimerRef.current != null) clearTimeout(syncTimerRef.current);
-    syncTimerRef.current = window.setTimeout(async () => {
-      syncTimerRef.current = null;
-      if (syncingRef.current) return;
-      syncingRef.current = true;
-      try {
-        const known = knownMtimesRef.current;
-        const cur = entriesRef.current ?? [];
-        const byPath = new Map(cur.map(e => [e.path, e]));
-        let mutated = false;
-        let maxMtime = lastSyncMtimeRef.current;
-
-        // Parse only files new-or-changed vs `known`; upsert entries, drop
-        // null-parses (non-entries), and record the mtime we processed.
-        const processFiles = async (files: { path: string; mtime: number | null }[]) => {
-          const toParse = files.filter(f => !known.has(f.path) || known.get(f.path) !== f.mtime);
-          // Bounded concurrency: a large sync (e.g. after a git pull or a stale
-          // index) can have thousands of changed files; firing them all at once
-          // saturates the browser connection pool and stalls user clicks.
-          const parsed = await mapPool(toParse, SYNC_FETCH_CONCURRENCY, async f => {
-            try { return [f, await fetchEntry(f.path)] as const; }
-            catch { return [f, undefined] as const; } // fetch failed → leave as-is
-          });
-          for (const [f, entry] of parsed) {
-            if (entry === undefined) continue;
-            known.set(f.path, f.mtime);
-            if (f.mtime != null && f.mtime > maxMtime) maxMtime = f.mtime;
-            if (entry === null) { if (byPath.delete(f.path)) mutated = true; }
-            else { byPath.set(f.path, entry); mutated = true; }
-          }
-        };
-
-        let delta;
-        try { delta = await listFiles(lastSyncMtimeRef.current || undefined); }
-        catch { return; } // keep current list on a transient failure
-        await processFiles(delta.items);
-
-        // Counts disagree → a deletion (or add with an older mtime) happened.
-        // One full listing reconciles: parse anything still unknown, drop files
-        // that no longer exist.
-        if (delta.total !== known.size) {
-          let full = null;
-          try { full = await listFiles(); } catch {}
-          if (full) {
-            const fileSet = new Set(full.items.map(f => f.path));
-            await processFiles(full.items);
-            for (const p of Array.from(byPath.keys())) {
-              if (!fileSet.has(p)) { byPath.delete(p); mutated = true; }
-            }
-            for (const p of Array.from(known.keys())) {
-              if (!fileSet.has(p)) known.delete(p);
-            }
-          }
-        }
-
-        lastSyncMtimeRef.current = maxMtime;
-        if (mutated) setEntries(Array.from(byPath.values()));
-      } finally {
-        syncingRef.current = false;
-      }
-    }, 250);
-  }, []);
-
   useEffect(() => {
+    // File-first: load the index once as the browse cache. We deliberately do
+    // NOT re-fetch changed files on boot/focus — that per-file storm saturated
+    // the browser's connection pool and starved the doc-body GET ("加载中…").
+    // Doc bodies read fresh from disk on open; reload (or reindex) refreshes
+    // the list; the vault watcher keeps server-side search fresh.
     fetchIndex().then(es => {
       setEntries(es);
-      for (const e of es) knownMtimesRef.current.set(e.path, e.mtime ?? null);
-      // Reconcile the cache against the live file system immediately — picks up
-      // files added/changed/deleted since the last reindex (or while this window
-      // was closed) without waiting for a focus/storage event.
-      syncFromFiles();
     }).catch(e => {
       window.alert('加载索引失败：' + (e instanceof Error ? e.message : String(e)));
       setEntries([]);
     });
     fetchTranslationSlugs().then(s => setTranslationSlugs(new Set(s)));
-  }, [syncFromFiles]);
+  }, []);
 
   useEffect(() => {
     const unsubscribe = subscribeVaultChanges({
-      onVaultChanged: syncFromFiles,
       onSettingsChanged: () => setSettings(loadSettings()),
     });
+    // On refocus, only converge the cross-page tab set (cheap, no network).
+    // No file re-sync / reconcile here — that storm starved doc-body loads.
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
-      syncFromFiles();
-      // QUA-68: converge the tab set across pages. Tabs persist in shared
-      // localStorage, so another page may have changed them while this one was
-      // unfocused — adopt the authoritative state instead of drifting apart.
       const incomingTabs = loadTabs();
       if (JSON.stringify(incomingTabs) !== JSON.stringify(tabsRef.current)) {
         setTabs(incomingTabs);
@@ -322,14 +230,6 @@ export function App() {
       } else {
         const incomingActive = loadActiveIndex(incomingTabs.length);
         if (incomingActive !== activeIndexRef.current) setActiveIndex(incomingActive);
-      }
-      // Also delta-sync the server FTS so quick search reflects external edits
-      // the instant you switch back — best-effort, throttled so rapid window
-      // toggles don't hammer it (the background watcher covers steady state).
-      const now = Date.now();
-      if (now - lastReconcileRef.current > 3000) {
-        lastReconcileRef.current = now;
-        reconcile().catch(() => {});
       }
     };
     window.addEventListener('focus', onVisible);
@@ -339,7 +239,7 @@ export function App() {
       window.removeEventListener('focus', onVisible);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [syncFromFiles]);
+  }, []);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
