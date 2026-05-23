@@ -12,11 +12,13 @@ final class AppModel {
     var status: String = ""
 
     /// Card grid vs single-column list. Pure UI toggle; no derived cache depends on it.
-    var browseMode: BrowseMode = .grid
+    var browseMode: BrowseMode = .grid { didSet { persist() } }
 
     // Tabs + per-tab back/forward history. `pane`/`openPath` are derived from the
     // active tab's current location; mutate via the navigation intents below.
-    private(set) var workspace = Workspace(initial: NavLocation(pane: .type(.paperAnalysis)))
+    private(set) var workspace = Workspace(initial: NavLocation(pane: .type(.paperAnalysis))) {
+        didSet { persist() }
+    }
 
     var pane: Pane { workspace.activeTab.location.pane }
     var openPath: String? { workspace.activeTab.location.openPath }
@@ -30,9 +32,9 @@ final class AppModel {
     private var loadedDocPath: String?
 
     // Browse state (mutate via the intent methods below so derived caches refresh)
-    private(set) var sortClauses: [SortClause] = []
-    private(set) var filterClauses: [FilterClause] = []
-    private(set) var filterMatch: FilterMatch = .all
+    private(set) var sortClauses: [SortClause] = [] { didSet { persist() } }
+    private(set) var filterClauses: [FilterClause] = [] { didSet { persist() } }
+    private(set) var filterMatch: FilterMatch = .all { didSet { persist() } }
     private(set) var searchText: String = ""
     private var searchHits: [SearchHit] = []
     private var searchTask: Task<Void, Never>?
@@ -65,7 +67,34 @@ final class AppModel {
     private(set) var savingField: String?
     var writeError: String?
 
-    init(client: VaultClient) { self.client = client }
+    private let stateStore: StateStore?
+
+    init(client: VaultClient, stateStore: StateStore? = nil) {
+        self.client = client
+        self.stateStore = stateStore
+        if let s = stateStore?.load(), let ws = s.makeWorkspace() {
+            workspace = ws
+            sortClauses = s.sortClauses
+            filterClauses = s.filterClauses
+            filterMatch = s.filterMatch
+            browseMode = BrowseMode(rawValue: s.browseMode) ?? .grid
+        }
+    }
+
+    /// Save the current place (tabs + browse controls). Cheap — a small JSON blob to
+    /// UserDefaults; invoked from the state properties' didSet, so every mutation
+    /// auto-saves without per-intent hooks.
+    private func persist() {
+        guard let stateStore else { return }
+        let idx = workspace.tabs.firstIndex { $0.id == workspace.activeID } ?? 0
+        stateStore.save(PersistedState(
+            tabs: workspace.tabs.map { PersistedTab(location: $0.location, pinned: $0.pinned) },
+            activeIndex: idx,
+            sortClauses: sortClauses,
+            filterClauses: filterClauses,
+            filterMatch: filterMatch,
+            browseMode: browseMode.rawValue))
+    }
 
     // MARK: derived recompute
 
@@ -129,6 +158,9 @@ final class AppModel {
             status = "\(entries.count) entries"
             rebuildIndexDerived()
             recomputeVisible()
+            let valid = Set(entries.map(\.path))
+            workspace.pruneOpenPaths(validPaths: valid)
+            if openPath != loadedDocPath { await loadDoc(openPath) }
             await loadTrash()
             print("[marple] index loaded: \(entries.count) entries")
         } catch {
