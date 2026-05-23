@@ -16,8 +16,9 @@ final class AppState: ObservableObject {
         let sidecar = SidecarProcess(repoRoot: paths.repoRoot, workspaceRoot: paths.workspaceRoot)
         self.sidecar = sidecar
         do {
-            let base = try await sidecar.start()
-            let client = HTTPVaultClient(baseURL: base)
+            _ = try await sidecar.start()
+            let index = IndexDatabase(indexDBPath: paths.workspaceRoot + "/.marple/index.sqlite")
+            let client = LocalVaultClient(workspaceRoot: paths.workspaceRoot, index: index)
             let m = AppModel(client: client, stateStore: UserDefaultsStateStore())
             await m.loadIndex()
             self.model = m
