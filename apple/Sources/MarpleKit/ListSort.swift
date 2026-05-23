@@ -1,6 +1,6 @@
 import Foundation
 
-public enum SortField: String, Sendable, CaseIterable, Hashable {
+public enum SortField: String, Sendable, CaseIterable, Hashable, Codable {
     case rating, year, added, updated, title, author
 
     public var label: String {
@@ -18,9 +18,9 @@ public enum SortField: String, Sendable, CaseIterable, Hashable {
     public var defaultDir: SortDir { (self == .title || self == .author) ? .asc : .desc }
 }
 
-public enum SortDir: String, Sendable, Hashable { case asc, desc }
+public enum SortDir: String, Sendable, Hashable, Codable { case asc, desc }
 
-public struct SortClause: Sendable, Equatable, Hashable {
+public struct SortClause: Sendable, Equatable, Hashable, Codable {
     public var field: SortField
     public var dir: SortDir
     public init(field: SortField, dir: SortDir) { self.field = field; self.dir = dir }

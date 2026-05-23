@@ -1,6 +1,6 @@
 import Foundation
 
-public enum Pane: Hashable, Sendable {
+public enum Pane: Hashable, Sendable, Codable {
     case type(EntryType)
     case themesIndex
     case theme(String)

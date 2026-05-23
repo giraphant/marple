@@ -3,7 +3,7 @@ import Foundation
 /// A restorable place in the app: which list/themes pane is shown plus which doc
 /// (if any) is open. Both columns restore together when a tab/history entry is
 /// activated.
-public struct NavLocation: Hashable, Sendable {
+public struct NavLocation: Hashable, Sendable, Codable {
     public var pane: Pane
     public var openPath: String?
     public init(pane: Pane, openPath: String? = nil) {

@@ -1,6 +1,6 @@
 import Foundation
 
-public enum FilterField: String, Sendable, CaseIterable, Hashable {
+public enum FilterField: String, Sendable, CaseIterable, Hashable, Codable {
     case rating, year, author, theme, source, haspdf, added
 
     public var label: String {
@@ -26,10 +26,10 @@ public enum FilterField: String, Sendable, CaseIterable, Hashable {
 }
 
 public enum FilterInput: Sendable { case number, text, none }
-public enum FilterOp: String, Sendable, Hashable { case gte, lte, eq, contains, is_ = "is", yes, within }
-public enum FilterMatch: String, Sendable, Hashable { case all, any }
+public enum FilterOp: String, Sendable, Hashable, Codable { case gte, lte, eq, contains, is_ = "is", yes, within }
+public enum FilterMatch: String, Sendable, Hashable, Codable { case all, any }
 
-public struct FilterClause: Sendable, Equatable, Hashable, Identifiable {
+public struct FilterClause: Sendable, Equatable, Hashable, Identifiable, Codable {
     public let id: String
     public var field: FilterField
     public var op: FilterOp
