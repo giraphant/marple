@@ -32,7 +32,10 @@ let package = Package(
         ),
         .testTarget(
             name: "MarpleKitTests",
-            dependencies: ["MarpleKit"],
+            dependencies: [
+                "MarpleKit",
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
             // CLT-only workaround: Testing.framework lives outside the default
             // SDK search paths; these flags point the linker at it so the
             // test bundle can load at runtime.
