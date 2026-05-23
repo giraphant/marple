@@ -36,6 +36,7 @@ final class AppModel {
     private(set) var searchText: String = ""
     private var searchHits: [SearchHit] = []
     private var searchTask: Task<Void, Never>?
+    private var recomputeTask: Task<Void, Never>?
 
     // Derived caches — recomputed only when their inputs change, never in a view body.
     private(set) var counts: [EntryType: Int] = [:]
@@ -93,16 +94,31 @@ final class AppModel {
         }
     }
 
-    /// Rebuild the middle-column list: search hits when searching, else the pane
-    /// subset run through filters then sort. Call after any browse-state change.
+    /// Rebuild the middle-column list. Search hits are a cheap direct swap; the pane
+    /// subset (filter→sort over ~15k entries) is computed OFF the main thread and
+    /// applied back on main, with stale rebuilds dropped via task cancellation. This
+    /// keeps clearing search / switching panes off the keystroke so text input never
+    /// blocks — mirrors NetNewsWire/FSNotes/CodeEdit list-search discipline (don't
+    /// re-filter synchronously in the input handler).
     private func recomputeVisible() {
+        recomputeTask?.cancel()
         if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
             visibleEntries = searchHits.map(\.entry)
             return
         }
-        let base = entriesForPane(pane, in: entries)
-        let filtered = applyFilters(base, filterClauses, match: filterMatch)
-        visibleEntries = sortEntries(filtered, by: sortClauses)
+        let snapshot = entries
+        let pane = self.pane
+        let filters = filterClauses
+        let match = filterMatch
+        let sorts = sortClauses
+        recomputeTask = Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                sortEntries(applyFilters(entriesForPane(pane, in: snapshot), filters, match: match),
+                            by: sorts)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.visibleEntries = result
+        }
     }
 
     // MARK: actions

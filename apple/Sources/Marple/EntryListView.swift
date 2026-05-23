@@ -22,6 +22,7 @@ struct EntryListView: View {
                         }
                     }
             }
+            .listStyle(.inset)
         }
         .navigationTitle(title)
     }
@@ -37,22 +38,7 @@ struct EntryListView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 4) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("检索 标题/作者/主题…", text: Binding(
-                    get: { model.searchText },
-                    set: { model.setSearchText($0) }
-                ))
-                .textFieldStyle(.plain)
-                if !model.searchText.isEmpty {
-                    Button { model.setSearchText("") } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }.buttonStyle(.plain)
-                }
-            }
-            .padding(6)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-
+            SearchField(model: model)
             sortMenu
             filterMenu
         }
@@ -112,5 +98,30 @@ struct EntryListView: View {
         var next = model.filterClauses.filter { $0.field != field }
         next.append(FilterClause(field: field, op: op, value: value))
         model.setFilters(next)
+    }
+}
+
+/// Isolated search field: reading `searchText` here means typing only invalidates
+/// this small view, not the entry `List` — so keystrokes never re-render the
+/// (potentially ~11k row) results list (mirrors CodeEdit's query/results split).
+private struct SearchField: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("检索 标题/作者/主题…", text: Binding(
+                get: { model.searchText },
+                set: { model.setSearchText($0) }
+            ))
+            .textFieldStyle(.plain)
+            if !model.searchText.isEmpty {
+                Button { model.setSearchText("") } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 }
