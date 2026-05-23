@@ -68,3 +68,17 @@ public enum Wikilink {
         return restore(p, refs)
     }
 }
+
+public enum WikiResolver {
+    public static func resolve(_ target: String, in entries: [Entry]) -> Entry? {
+        let needle = target.lowercased()
+        if let byTitle = entries.first(where: { ($0.title ?? "").lowercased() == needle }) {
+            return byTitle
+        }
+        return entries.first { entry in
+            let stem = (entry.path as NSString).lastPathComponent
+                .replacingOccurrences(of: ".md", with: "").lowercased()
+            return stem == needle
+        }
+    }
+}
