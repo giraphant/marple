@@ -32,6 +32,16 @@ struct SidebarView: View {
                     }
                 } icon: { Image(systemName: "tag") }
                 .tag(Pane.themesIndex)
+
+                Label {
+                    HStack {
+                        Text("回收站")
+                        Spacer()
+                        Text("\(model.trashItems.count)")
+                            .foregroundStyle(.secondary).monospacedDigit()
+                    }
+                } icon: { Image(systemName: "trash") }
+                .tag(Pane.trash)
             }
         }
         .navigationTitle("Marple")

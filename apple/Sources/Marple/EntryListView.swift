@@ -15,6 +15,10 @@ struct EntryListView: View {
                 EntryRow(entry: entry)
                     .contextMenu {
                         Button("在新标签页打开") { Task { await model.openInNewTab(entry.path) } }
+                        Divider()
+                        Button("移到回收站", role: .destructive) {
+                            Task { await model.moveToTrash(entry.path) }
+                        }
                     }
             }
         }
@@ -26,6 +30,7 @@ struct EntryListView: View {
         case .type(let t):   return "\(t.label) (\(model.visibleEntries.count))"
         case .theme(let n):  return "主题: \(n) (\(model.visibleEntries.count))"
         case .themesIndex:   return "主题"
+        case .trash:         return "回收站"
         }
     }
 

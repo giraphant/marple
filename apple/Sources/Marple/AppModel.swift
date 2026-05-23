@@ -119,6 +119,7 @@ final class AppModel {
         workspace.navigateActive(to: NavLocation(pane: newPane, openPath: openPath))
         searchText = ""; searchHits = []
         recomputeVisible()
+        if case .trash = newPane { Task { await loadTrash() } }
         print("[marple] pane -> \(newPane)")
     }
 
@@ -293,6 +294,7 @@ final class AppModel {
         case .type(let t):     return t.label
         case .theme(let name): return "#\(name)"
         case .themesIndex:     return "主题"
+        case .trash:           return "回收站"
         }
     }
 

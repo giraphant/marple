@@ -14,10 +14,10 @@ struct RootView: View {
                 SidebarView(model: model).frame(minWidth: 220)
             } content: {
                 Group {
-                    if case .themesIndex = model.pane {
-                        ThemesView(model: model)
-                    } else {
-                        EntryListView(model: model)
+                    switch model.pane {
+                    case .themesIndex: ThemesView(model: model)
+                    case .trash:       TrashView(model: model)
+                    default:           EntryListView(model: model)
                     }
                 }
                 .frame(minWidth: 320)

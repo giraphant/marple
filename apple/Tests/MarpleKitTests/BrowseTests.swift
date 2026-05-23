@@ -22,4 +22,8 @@ import Testing
     @Test func testThemesIndexPaneHasNoList() {
         #expect(entriesForPane(.themesIndex, in: [e("a", .note)]).isEmpty)
     }
+
+    @Test func testTrashPaneHasNoEntries() {
+        #expect(entriesForPane(.trash, in: [e("a", .note)]).isEmpty)
+    }
 }
