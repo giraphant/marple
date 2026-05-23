@@ -53,6 +53,12 @@ let package = Package(
                 .product(name: "SwiftUILazyContainer", package: "SwiftUILazyContainer"),
             ]
         ),
+        // Standalone semantic-search CLI (build/query the vector index without the
+        // GUI). Run from the package root so MLX finds default.metallib.
+        .executableTarget(
+            name: "semantic-tool",
+            dependencies: ["MarpleKit", "MarpleEmbeddings"]
+        ),
         .testTarget(
             name: "MarpleKitTests",
             dependencies: [

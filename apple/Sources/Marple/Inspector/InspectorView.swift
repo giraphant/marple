@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import MarpleKit
 
 /// Ulysses-style right inspector: a tabbed panel with three independent sections
@@ -100,8 +101,82 @@ private struct StatRow: View {
 private struct OutlineSection: View {
     @Bindable var model: AppModel
     var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let book = model.openBook {
+                BookNavGroup(model: model, book: book)
+            }
+            PageOutlineGroup(model: model, labeled: model.openBook != nil)
+        }
+    }
+}
+
+/// EPUB-style "本书" navigation: the book's overview + its chapters, with the
+/// currently-open doc highlighted. Tapping a row navigates the active tab in
+/// place (pushes history, so ◀ returns), matching chapter-to-chapter reading.
+private struct BookNavGroup: View {
+    @Bindable var model: AppModel
+    let book: BookContext
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s1) {
+            SectionHeader("本书")
+            if let ov = book.overview {
+                BookNavRow(label: "概述",
+                           active: model.openPath == ov.path) { navigate(to: ov.path) }
+            }
+            ForEach(book.chapters) { ch in
+                BookNavRow(label: chapterLabel(ch),
+                           active: model.openPath == ch.path) { navigate(to: ch.path) }
+            }
+        }
+    }
+
+    private func navigate(to path: String) {
+        guard path != model.openPath else { return }
+        Task { await model.open(path) }
+    }
+
+    private func chapterLabel(_ e: Entry) -> String {
+        if let t = e.title, !t.isEmpty { return t }
+        return (e.path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+    }
+}
+
+/// One book-navigation row: accent fill when it's the open doc, a quaternary
+/// hover fill otherwise — same affordance as RelationRow (spec §6).
+private struct BookNavRow: View {
+    let label: String
+    let active: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(label).font(Typo.callout).lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, Space.s1).padding(.horizontal, Space.s2)
+                .foregroundStyle(active ? Color.accentColor : Color.primary)
+        }
+        .buttonStyle(.plain)
+        .background {
+            RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15))
+                .opacity(active ? 1 : 0)
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 6).fill(.quaternary)
+                .opacity(!active && hovering ? 1 : 0)
+        }
+        .onHover { hovering = $0 }
+    }
+}
+
+/// The open document's own heading outline. Labelled "本页" when a book is in
+/// context (to pair with "本书"), else "目录" — the standalone case.
+private struct PageOutlineGroup: View {
+    @Bindable var model: AppModel
+    let labeled: Bool
+    var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            SectionHeader("目录")
+            SectionHeader(labeled ? "本页" : "目录")
             if model.openOutline.isEmpty {
                 Text("无标题").foregroundStyle(.secondary).font(.callout)
             } else {
@@ -163,6 +238,7 @@ private struct InfoSection: View {
                 .disabled(model.savingField != nil)
                 ThemesEditor(model: model, themes: e.themes)
                 RelationsView(model: model)
+                CitationControl(entry: e).id(e.path)
             } else {
                 Text("—").foregroundStyle(.secondary).font(.callout)
             }
@@ -344,5 +420,66 @@ private struct RelationRow: View {
             RoundedRectangle(cornerRadius: 6).fill(.quaternary).opacity(hovering ? 1 : 0)
         }
         .onHover { hovering = $0 }
+    }
+}
+
+// MARK: - 引用
+
+/// One-tap citation copy mirroring the web ActionsRow: a format menu (seeded from
+/// the default in Settings, overridable per use), a live preview, and a copy
+/// button. Reset per document via `.id(entry.path)` at the call site.
+private struct CitationControl: View {
+    let entry: Entry
+    @AppStorage(SettingsKeys.citationFormat) private var defaultFormat = CitationFormat.inlineEN
+    @State private var override: CitationFormat?
+    @State private var copied = false
+
+    private var format: CitationFormat { override ?? defaultFormat }
+
+    var body: some View {
+        let preview = buildCitation(entry, format: format)
+        VStack(alignment: .leading, spacing: Space.s3) {
+            HStack {
+                SectionHeader("引用")
+                Spacer()
+                Menu {
+                    ForEach(CitationFormat.allCases, id: \.self) { f in
+                        Button {
+                            override = f; copied = false
+                        } label: {
+                            if f == format { Label(f.label, systemImage: "checkmark") }
+                            else { Text(f.label) }
+                        }
+                    }
+                } label: {
+                    Text(format.label)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .font(.caption)
+            }
+
+            if preview.isEmpty {
+                Text("缺少作者 / 年份等信息").font(.callout).foregroundStyle(.secondary)
+            } else {
+                Text(preview)
+                    .font(.callout).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(preview, forType: .string)
+                copied = true
+                Task { try? await Task.sleep(nanoseconds: 1_500_000_000); copied = false }
+            } label: {
+                Label(copied ? "✓ 已复制" : "复制引用",
+                      systemImage: copied ? "checkmark" : "doc.on.doc")
+                    .font(.callout)
+            }
+            .buttonStyle(.bordered)
+            .disabled(preview.isEmpty)
+        }
     }
 }

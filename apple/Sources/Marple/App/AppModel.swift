@@ -14,18 +14,31 @@ final class AppModel {
     /// Card grid vs single-column list. Pure UI toggle; no derived cache depends on it.
     var browseMode: BrowseMode = .grid { didSet { persist() } }
 
-    // Tabs + per-tab back/forward history. `pane`/`openPath` are derived from the
-    // active tab's current location; mutate via the navigation intents below.
-    private(set) var workspace = Workspace(initial: NavLocation(pane: .type(.paperAnalysis))) {
-        didSet { persist() }
-    }
+    // Browse axis: which category list the sidebar shows. Separate from tabs —
+    // selecting a category never touches the open document tabs.
+    private(set) var browsePane: Pane = .type(.paperAnalysis) { didSet { persist() } }
 
-    var pane: Pane { workspace.activeTab.location.pane }
-    var openPath: String? { workspace.activeTab.location.openPath }
-    var tabs: [NavTab] { workspace.tabs }
-    var activeTabID: NavTab.ID { workspace.activeID }
-    var canGoBack: Bool { workspace.activeTab.history.canGoBack }
-    var canGoForward: Bool { workspace.activeTab.history.canGoForward }
+    // Browsing the category list (true) vs reading an open document tab (false).
+    private(set) var isBrowsing: Bool = true { didSet { persist() } }
+
+    // Open DOCUMENT tabs (browser-style), nil until the first doc is opened and back
+    // to nil when the last closes. Each tab carries its own back/forward history
+    // (e.g. following wikilinks). Categories are NOT tabs.
+    private(set) var workspace: Workspace? { didSet { persist() } }
+
+    var pane: Pane { browsePane }
+    var openPath: String? { isBrowsing ? nil : workspace?.activeTab.location.openPath }
+    var tabs: [NavTab] { workspace?.tabs ?? [] }
+    var activeTabID: NavTab.ID? { isBrowsing ? nil : workspace?.activeID }
+    var canGoBack: Bool { !isBrowsing && (workspace?.activeTab.history.canGoBack ?? false) }
+    var canGoForward: Bool { !isBrowsing && (workspace?.activeTab.history.canGoForward ?? false) }
+
+    /// Mutate the optional doc-tab workspace in place (struct value semantics).
+    private func mutateWorkspace(_ f: (inout Workspace) -> Void) {
+        guard var ws = workspace else { return }
+        f(&ws)
+        workspace = ws
+    }
 
     // The doc whose body/blocks/derived caches are currently loaded — lets tab and
     // history switches skip a re-fetch when the doc hasn't actually changed.
@@ -59,6 +72,7 @@ final class AppModel {
     private(set) var openOutline: [OutlineItem] = []
     private(set) var openStats: DocStats?
     private(set) var openRelations: Relations?
+    private(set) var openBook: BookContext?
 
     // Inspector → reader scroll channel; an outline tap sets this, DocView observes.
     var scrollTarget: Int?
@@ -72,8 +86,10 @@ final class AppModel {
     init(client: VaultClient, stateStore: StateStore? = nil) {
         self.client = client
         self.stateStore = stateStore
-        if let s = stateStore?.load(), let ws = s.makeWorkspace() {
-            workspace = ws
+        if let s = stateStore?.load() {
+            browsePane = s.browsePane
+            workspace = s.makeWorkspace()
+            isBrowsing = workspace == nil ? true : s.isBrowsing
             sortClauses = s.sortClauses
             filterClauses = s.filterClauses
             filterMatch = s.filterMatch
@@ -81,14 +97,18 @@ final class AppModel {
         }
     }
 
-    /// Save the current place (tabs + browse controls). Cheap — a small JSON blob to
-    /// UserDefaults; invoked from the state properties' didSet, so every mutation
-    /// auto-saves without per-intent hooks.
+    /// Save the current place (browse category + doc tabs + controls). Cheap — a small
+    /// JSON blob to UserDefaults; invoked from the state properties' didSet, so every
+    /// mutation auto-saves without per-intent hooks.
     private func persist() {
         guard let stateStore else { return }
-        let idx = workspace.tabs.firstIndex { $0.id == workspace.activeID } ?? 0
+        let ws = workspace
+        let savedTabs = ws?.tabs.map { PersistedTab(location: $0.location, pinned: $0.pinned) } ?? []
+        let idx = ws.flatMap { w in w.tabs.firstIndex { $0.id == w.activeID } } ?? 0
         stateStore.save(PersistedState(
-            tabs: workspace.tabs.map { PersistedTab(location: $0.location, pinned: $0.pinned) },
+            browsePane: browsePane,
+            isBrowsing: isBrowsing,
+            tabs: savedTabs,
             activeIndex: idx,
             sortClauses: sortClauses,
             filterClauses: filterClauses,
@@ -118,8 +138,10 @@ final class AppModel {
         if let e = openEntry {
             openRelations = relations(for: e, in: entries,
                                       authorIndex: authorIndex, annotationIndex: annotationIndex)
+            openBook = bookContext(for: e, in: entries)
         } else {
             openRelations = nil
+            openBook = nil
         }
     }
 
@@ -158,8 +180,6 @@ final class AppModel {
             status = "\(entries.count) entries"
             rebuildIndexDerived()
             recomputeVisible()
-            let valid = Set(entries.map(\.path))
-            workspace.pruneOpenPaths(validPaths: valid)
             if openPath != loadedDocPath { await loadDoc(openPath) }
             await loadTrash()
             print("[marple] index loaded: \(entries.count) entries")
@@ -170,11 +190,14 @@ final class AppModel {
     }
 
     func select(pane newPane: Pane) {
-        workspace.navigateActive(to: NavLocation(pane: newPane, openPath: openPath))
+        // Selecting a category switches the browse list ONLY — it never touches the
+        // open document tabs (browser-style: the top is navigation, tabs are pages).
+        browsePane = newPane
+        isBrowsing = true
         searchText = ""; searchHits = []
         recomputeVisible()
         if case .trash = newPane { Task { await loadTrash() } }
-        print("[marple] pane -> \(newPane)")
+        print("[marple] browse -> \(newPane)")
     }
 
     func setSort(_ clauses: [SortClause]) {
@@ -215,9 +238,28 @@ final class AppModel {
         }
     }
 
-    /// Navigate the active tab to `path` (pushes history) and load it.
+    /// Open `path`. Context-dependent (browser-style): from the browse list (browsing)
+    /// it spawns a NEW document tab; while reading it switches the current tab IN-PLACE
+    /// (pushes history, so ◀ returns) instead of piling up tabs. Explicit "open in new
+    /// tab" always spawns one.
     func open(_ path: String) async {
-        workspace.navigateActive(to: NavLocation(pane: pane, openPath: path))
+        if isBrowsing || workspace == nil {
+            await openNewTab(path)
+        } else {
+            mutateWorkspace { $0.navigateActive(to: NavLocation(pane: browsePane, openPath: path)) }
+            isBrowsing = false
+            await loadDoc(path)
+        }
+    }
+
+    private func openNewTab(_ path: String) async {
+        let loc = NavLocation(pane: browsePane, openPath: path)
+        if workspace == nil {
+            workspace = Workspace(initial: loc)
+        } else {
+            mutateWorkspace { $0.newTab(loc) }
+        }
+        isBrowsing = false
         await loadDoc(path)
     }
 
@@ -259,12 +301,19 @@ final class AppModel {
     }
 
     func follow(_ target: String) async {
-        if let hit = WikiResolver.resolve(target, in: entries) {
-            print("[marple] follow [[\(target)]] -> \(hit.path)")
-            await open(hit.path)
-        } else {
+        guard let hit = WikiResolver.resolve(target, in: entries) else {
             status = "unresolved [[\(target)]]"
             print("[marple] follow [[\(target)]] -> UNRESOLVED")
+            return
+        }
+        print("[marple] follow [[\(target)]] -> \(hit.path)")
+        // Wikilink follow stays WITHIN the current tab (per-tab history); if we're
+        // browsing (no active tab), open it as a new tab instead.
+        if !isBrowsing, workspace != nil {
+            mutateWorkspace { $0.navigateActive(to: NavLocation(pane: browsePane, openPath: hit.path)) }
+            await loadDoc(hit.path)
+        } else {
+            await open(hit.path)
         }
     }
 
@@ -272,70 +321,72 @@ final class AppModel {
 
     func goBack() async {
         guard canGoBack else { return }
-        workspace.backActive()
-        print("[marple] back -> \(openPath ?? "\(pane)")")
+        mutateWorkspace { $0.backActive() }
+        print("[marple] back -> \(openPath ?? "browse")")
         await syncToActiveLocation()
     }
 
     func goForward() async {
         guard canGoForward else { return }
-        workspace.forwardActive()
-        print("[marple] forward -> \(openPath ?? "\(pane)")")
+        mutateWorkspace { $0.forwardActive() }
+        print("[marple] forward -> \(openPath ?? "browse")")
         await syncToActiveLocation()
     }
 
-    /// New tab browsing the current pane, no open doc.
-    func newTab() async {
-        workspace.newTab(NavLocation(pane: pane, openPath: nil))
-        print("[marple] new tab (\(tabs.count) total)")
-        await syncToActiveLocation()
-    }
+    /// "New tab" in a documents-only tab model = a fresh note (a new page).
+    func newTab() async { await newIdeaNote() }
 
-    /// Open `path` in a new tab (current pane) and activate it.
-    func openInNewTab(_ path: String) async {
-        workspace.newTab(NavLocation(pane: pane, openPath: path))
-        print("[marple] open in new tab \(path)")
-        await syncToActiveLocation()
-    }
+    /// Always open `path` in a new tab (right-click / ⌘-click).
+    func openInNewTab(_ path: String) async { await openNewTab(path) }
 
     func selectTab(_ id: NavTab.ID) async {
-        workspace.select(id)
+        mutateWorkspace { $0.select(id) }
+        isBrowsing = false
         await syncToActiveLocation()
     }
 
     func selectTab(index: Int) async {
-        workspace.selectIndex(index)
+        mutateWorkspace { $0.selectIndex(index) }
+        isBrowsing = false
         await syncToActiveLocation()
     }
 
-    func selectNextTab() async { workspace.selectRelative(1); await syncToActiveLocation() }
-    func selectPrevTab() async { workspace.selectRelative(-1); await syncToActiveLocation() }
+    func selectNextTab() async { mutateWorkspace { $0.selectRelative(1) }; isBrowsing = false; await syncToActiveLocation() }
+    func selectPrevTab() async { mutateWorkspace { $0.selectRelative(-1) }; isBrowsing = false; await syncToActiveLocation() }
 
-    /// Close a specific tab (× / context menu). Won't close the last remaining tab.
+    /// Close a document tab. Closing the last one drops back to the browse list.
     func closeTab(_ id: NavTab.ID) async {
-        guard tabs.count > 1 else { return }
-        workspace.closeTab(id)
+        guard var ws = workspace else { return }
+        ws.closeTab(id)
+        if ws.tabs.isEmpty {
+            workspace = nil
+            isBrowsing = true
+        } else {
+            workspace = ws
+        }
         await syncToActiveLocation()
     }
 
-    /// Close the active tab (⌘W). Skips a pinned tab and won't close the last one.
+    /// Close the active tab (⌘W). Skips a pinned tab.
     func closeActiveTab() async {
-        guard tabs.count > 1, !workspace.activeTab.pinned else { return }
-        await closeTab(activeTabID)
+        guard !isBrowsing, let ws = workspace, !ws.activeTab.pinned, let id = activeTabID else { return }
+        await closeTab(id)
     }
 
     /// Close every tab except `keep` and any pinned tabs.
     func closeOtherTabs(_ keep: NavTab.ID) async {
-        let toClose = tabs.filter { $0.id != keep && !$0.pinned }.map(\.id)
+        guard var ws = workspace else { return }
+        let toClose = ws.tabs.filter { $0.id != keep && !$0.pinned }.map(\.id)
         guard !toClose.isEmpty else { return }
-        for id in toClose { workspace.closeTab(id) }
-        workspace.select(keep)
+        for id in toClose { ws.closeTab(id) }
+        ws.select(keep)
+        workspace = ws
         await syncToActiveLocation()
     }
 
-    func togglePin(_ id: NavTab.ID) { workspace.togglePin(id) }
+    func togglePin(_ id: NavTab.ID) { mutateWorkspace { $0.togglePin(id) } }
 
-    func setTabOrder(_ ids: [NavTab.ID]) { workspace.reorder(ids) }
+    func setTabOrder(_ ids: [NavTab.ID]) { mutateWorkspace { $0.reorder(ids) } }
 
     // MARK: tab labels
 
@@ -356,9 +407,10 @@ final class AppModel {
 
     func openExternally() async {
         guard let p = openPath else { return }
+        let app = UserDefaults.standard.string(forKey: SettingsKeys.externalEditor) ?? ""
         do {
-            try await client.openInEditor(path: p, app: "")
-            print("[marple] openInEditor \(p)")
+            try await client.openInEditor(path: p, app: app)
+            print("[marple] openInEditor \(p) app='\(app)'")
         } catch {
             status = "open-in-editor failed: \(error)"
             print("[marple] openInEditor FAILED \(p): \(error)")
@@ -422,12 +474,14 @@ final class AppModel {
         writeError = nil
         do {
             _ = try await client.moveToTrash(path: path)
+            let wasOpen = (openPath == path)
             entries.removeAll { $0.path == path }
-            if openPath == path {
-                workspace.navigateActive(to: NavLocation(pane: pane, openPath: nil))
-                await loadDoc(nil)
+            rebuildIndexDerived()
+            if wasOpen, let id = activeTabID {
+                await closeTab(id)   // closeTab re-syncs the list + reader
+            } else {
+                recomputeVisible()
             }
-            rebuildIndexDerived(); recomputeVisible()
             await loadTrash()
             print("[marple] trashed \(path)")
         } catch {

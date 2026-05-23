@@ -10,10 +10,13 @@ public struct PersistedTab: Codable, Sendable, Equatable {
     }
 }
 
-/// A launch-to-launch snapshot of the user's place: open tabs + the active one,
-/// plus the global browse controls. `browseMode` is a raw string so MarpleKit
-/// stays agnostic of the app target's `BrowseMode` enum.
+/// A launch-to-launch snapshot of the user's place: the browse category + whether
+/// we're browsing vs reading, the open document tabs + the active one, plus the
+/// global browse controls. `browseMode` is a raw string so MarpleKit stays agnostic
+/// of the app target's `BrowseMode` enum.
 public struct PersistedState: Codable, Sendable, Equatable {
+    public var browsePane: Pane
+    public var isBrowsing: Bool
     public var tabs: [PersistedTab]
     public var activeIndex: Int
     public var sortClauses: [SortClause]
@@ -21,8 +24,10 @@ public struct PersistedState: Codable, Sendable, Equatable {
     public var filterMatch: FilterMatch
     public var browseMode: String
 
-    public init(tabs: [PersistedTab], activeIndex: Int, sortClauses: [SortClause],
-                filterClauses: [FilterClause], filterMatch: FilterMatch, browseMode: String) {
+    public init(browsePane: Pane, isBrowsing: Bool, tabs: [PersistedTab], activeIndex: Int,
+                sortClauses: [SortClause], filterClauses: [FilterClause],
+                filterMatch: FilterMatch, browseMode: String) {
+        self.browsePane = browsePane; self.isBrowsing = isBrowsing
         self.tabs = tabs; self.activeIndex = activeIndex
         self.sortClauses = sortClauses; self.filterClauses = filterClauses
         self.filterMatch = filterMatch; self.browseMode = browseMode

@@ -73,7 +73,9 @@ import Foundation
 @Suite struct PersistedStateTests {
     private func sample() -> PersistedState {
         PersistedState(
-            tabs: [PersistedTab(location: NavLocation(pane: .type(.paperAnalysis)), pinned: false),
+            browsePane: .type(.paperAnalysis),
+            isBrowsing: false,
+            tabs: [PersistedTab(location: NavLocation(pane: .type(.paperAnalysis), openPath: "v/x.md"), pinned: false),
                    PersistedTab(location: NavLocation(pane: .theme("X"), openPath: "v/a.md"), pinned: true)],
             activeIndex: 1,
             sortClauses: [SortClause(field: .rating, dir: .desc)],

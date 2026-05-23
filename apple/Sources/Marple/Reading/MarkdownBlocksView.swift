@@ -37,6 +37,8 @@ func attributedInline(_ tokens: [InlineToken]) -> AttributedString {
 
 struct BlockView: View {
     let block: RenderBlock
+    @Environment(\.readingFont) private var readingFont
+
     var body: some View {
         switch block {
         case .heading(let level, let tokens):
@@ -45,8 +47,8 @@ struct BlockView: View {
                 .fixedSize(horizontal: false, vertical: true)
         case .paragraph(let tokens):
             Text(attributedInline(tokens))
-                .font(Typo.readingBody)
-                .lineSpacing(Reading.lineSpacing)
+                .font(readingFont.bodyFont)
+                .lineSpacing(readingFont.lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
         case .bulletList(let items):
             VStack(alignment: .leading, spacing: Space.s2) {
@@ -54,28 +56,28 @@ struct BlockView: View {
                     HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
                         Text("•")
                         Text(attributedInline(item))
-                            .lineSpacing(Reading.lineSpacing)
+                            .lineSpacing(readingFont.lineSpacing)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
-            .font(Typo.readingBody)
+            .font(readingFont.bodyFont)
         case .orderedList(let items):
             VStack(alignment: .leading, spacing: Space.s2) {
                 ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
                     HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
                         Text("\(idx + 1).")
                         Text(attributedInline(item))
-                            .lineSpacing(Reading.lineSpacing)
+                            .lineSpacing(readingFont.lineSpacing)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
-            .font(Typo.readingBody)
+            .font(readingFont.bodyFont)
         case .quote(let tokens):
             Text(attributedInline(tokens))
-                .font(Typo.readingBody)
-                .lineSpacing(Reading.lineSpacing)
+                .font(readingFont.bodyFont)
+                .lineSpacing(readingFont.lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.secondary)
                 .padding(.leading, Space.s5)

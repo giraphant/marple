@@ -15,21 +15,27 @@ import Tokenizers
 public actor MLXTextEmbedder: TextEmbedder {
     public nonisolated let dimension: Int
     private let container: ModelContainer
+    private let maxTokens: Int
 
     public init(
         modelId: String = "mlx-community/Qwen3-Embedding-0.6B-8bit",
-        dimension: Int = 1024
+        dimension: Int = 1024,
+        maxTokens: Int = 512
     ) async throws {
         self.dimension = dimension
+        self.maxTokens = maxTokens
         self.container = try await MLXEmbedders.loadModelContainer(
             configuration: ModelConfiguration.configuration(id: modelId))
     }
 
     public func embed(_ texts: [String]) async throws -> [[Float]] {
-        await container.perform { (model, tokenizer, _) in
+        let cap = maxTokens
+        return await container.perform { (model, tokenizer, _) in
             let pooling = Pooling(strategy: .last)
             return texts.map { text in
-                let ids = tokenizer.encode(text: text, addSpecialTokens: true)
+                // Truncate to cap (matches the reference max_length); .last then
+                // pools the final kept token, so a long doc embeds its lead.
+                let ids = Array(tokenizer.encode(text: text, addSpecialTokens: true).prefix(cap))
                 let input = MLXArray(ids).reshaped([1, ids.count])
                 let output = model(
                     input, positionIds: nil, tokenTypeIds: nil, attentionMask: nil)

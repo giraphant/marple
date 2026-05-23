@@ -1,47 +1,78 @@
 import SwiftUI
 import MarpleKit
 
-/// The booted app shell (Ulysses/CodeEdit layout): BOTH side rails are full-height,
-/// first-class columns — left sidebar + right inspector — with the tab strip +
-/// back/forward in a bar over the content+reader area between them. content|reader
-/// split via HSplitView. The titlebar holds icon actions, organized left/right.
+/// The booted app shell (Arc-style): a first-class sidebar that holds categories
+/// AND the open tabs (vertical) — so there is no horizontal tab strip / double
+/// header. The main area shows ONE full-width view per active tab: full-width
+/// browse (grid spreads out / list) when no doc is open, or the reader when a doc
+/// is open. The inspector is a right rail that appears only while reading.
 struct RootView: View {
     @Bindable var model: AppModel
     @State private var inspectorShown = true
+
+    @AppStorage(SettingsKeys.theme) private var theme = ThemePreference.system
+    @AppStorage(SettingsKeys.readingFontFamily) private var fontFamily = ReadingFontFamily.sans
+    @AppStorage(SettingsKeys.readingFontSize) private var fontSize = ReadingDefaults.fontSize
+    @AppStorage(SettingsKeys.readingLineHeight) private var lineHeight = ReadingDefaults.lineHeight
+
+    private var readingFont: ReadingFontConfig {
+        ReadingFontConfig(size: fontSize, design: fontFamily.design, lineHeight: lineHeight)
+    }
 
     var body: some View {
         NavigationSplitView {
             SidebarView(model: model)
                 .frame(minWidth: 220)
+        } content: {
+            browseColumn
+                .frame(minWidth: 320)
+                .toolbar { toolbarContent }
         } detail: {
-            VStack(spacing: 0) {
-                TabStripView(model: model)
-                Divider()
-                HSplitView {
-                    contentColumn
-                        .frame(minWidth: 300, idealWidth: 380, maxWidth: 560)
-                    DocView(model: model)
-                        .frame(minWidth: 380)
+            DocView(model: model)
+                .inspector(isPresented: Binding(
+                    get: { inspectorShown && model.openPath != nil },
+                    set: { inspectorShown = $0 }
+                )) {
+                    InspectorView(model: model)
+                        .inspectorColumnWidth(min: 240, ideal: 300, max: 420)
                 }
-            }
-            .inspector(isPresented: $inspectorShown) {
-                InspectorView(model: model)
-                    .inspectorColumnWidth(min: 240, ideal: 300, max: 420)
-            }
-            .toolbar { toolbarContent }
         }
         .focusedSceneValue(\.appModel, model)
+        .preferredColorScheme(theme.colorScheme)
+        .environment(\.readingFont, readingFont)
     }
 
-    /// Titlebar actions, organized by side: new-content on the left (near the
-    /// sidebar), view/document/inspector controls on the right (near the reader +
-    /// inspector). All icons; meaning rides on .help tooltips.
-    @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            Button { Task { await model.newIdeaNote() } } label: {
-                Image(systemName: "square.and.pencil")
+    /// The middle column: the browse list/grid for the selected category (or the
+    /// themes / trash views). Native 3-column `NavigationSplitView` keeps the reader
+    /// in its own detail column — no HSplitView (which clips inside a split detail).
+    @ViewBuilder private var browseColumn: some View {
+        switch model.pane {
+        case .themesIndex: ThemesView(model: model)
+        case .trash:       TrashView(model: model)
+        default:
+            if model.browseMode == .grid {
+                EntryGridView(model: model)
+            } else {
+                EntryListView(model: model)
             }
-            .help("新建笔记")
+        }
+    }
+
+    /// Titlebar actions: back/forward on the left; browse view-mode while browsing,
+    /// document + inspector actions while reading, on the right. All icons.
+    @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
+            Button { Task { await model.goBack() } } label: {
+                Image(systemName: "chevron.left")
+            }
+            .help("后退")
+            .disabled(!model.canGoBack)
+
+            Button { Task { await model.goForward() } } label: {
+                Image(systemName: "chevron.right")
+            }
+            .help("前进")
+            .disabled(!model.canGoForward)
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Picker("视图", selection: $model.browseMode) {
@@ -51,34 +82,22 @@ struct RootView: View {
             .pickerStyle(.segmented)
             .help("列表 / 卡片")
 
-            Button { Task { await model.newAnnotationForOpenDoc() } } label: {
-                Image(systemName: "note.text.badge.plus")
-            }
-            .help("新建批注")
-            .disabled(model.openEntry == nil)
+            if model.openPath != nil {
+                Button { Task { await model.newAnnotationForOpenDoc() } } label: {
+                    Image(systemName: "note.text.badge.plus")
+                }
+                .help("新建批注")
+                .disabled(model.openEntry == nil)
 
-            Button { Task { await model.openExternally() } } label: {
-                Image(systemName: "arrow.up.forward.square")
-            }
-            .help("用外部编辑器打开")
-            .disabled(model.openPath == nil)
+                Button { Task { await model.openExternally() } } label: {
+                    Image(systemName: "arrow.up.forward.square")
+                }
+                .help("用外部编辑器打开")
 
-            Button { inspectorShown.toggle() } label: {
-                Image(systemName: "sidebar.trailing")
-            }
-            .help("检查器")
-        }
-    }
-
-    @ViewBuilder private var contentColumn: some View {
-        switch model.pane {
-        case .themesIndex: ThemesView(model: model)
-        case .trash:       TrashView(model: model)
-        default:
-            if model.browseMode == .grid {
-                EntryGridView(model: model)
-            } else {
-                EntryListView(model: model)
+                Button { inspectorShown.toggle() } label: {
+                    Image(systemName: "sidebar.trailing")
+                }
+                .help("检查器")
             }
         }
     }

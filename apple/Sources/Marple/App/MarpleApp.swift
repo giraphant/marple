@@ -61,6 +61,8 @@ struct MarpleApp: App {
             content.frame(minWidth: 900, minHeight: 600)
         }
         .commands { TabCommands() }
+
+        Settings { SettingsView() }
     }
 
     /// Boot routing: no library picked → setup; library picked → boot with VaultIndexer.
