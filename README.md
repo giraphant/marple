@@ -1,5 +1,7 @@
 # qua reader
 
+> I like to pass unnoticed, which is why I hope that I am not deprived of old age. I aspire to Miss Marple’s persona: to be exactly as I am, decrepit nature yet supernature in one, equally alert on the damp ground and in the turbulent air. ——Gillian Rose
+
 Card-style typed-object browser + Markdown editor over the qua vault.
 Browses 12k+ vault entries (papers / books / chapters / authors / topics /
 notes), edits frontmatter and note bodies, manages annotations and trash.
