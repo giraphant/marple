@@ -14,6 +14,17 @@ use serde_yaml::{Mapping, Value as YamlValue};
 
 use crate::{ReaderError, ReaderPaths, ReaderResult};
 
+/// Open the live index DB read-write with the pragmas every writer needs: WAL
+/// (readers never block the single writer), a 5 s busy timeout, and NORMAL sync.
+pub(crate) fn open_index_rw(path: &std::path::Path) -> ReaderResult<Connection> {
+    let conn = Connection::open(path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    Ok(conn)
+}
+
 // Serializes the moment the live index DB is mutated: every incremental
 // upsert/remove transaction AND the full-reindex tmp→live rename take this
 // lock, so no incremental writer is mid-transaction while the file is being
@@ -355,9 +366,7 @@ pub fn reconcile_index(paths: &ReaderPaths) -> ReaderResult<ReconcileStats> {
     }
 
     let _lock = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let conn = Connection::open(&paths.index_db)
-        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
-    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    let conn = open_index_rw(&paths.index_db)?;
 
     // Indexed fingerprints.
     let indexed: HashMap<String, Option<i64>> = {
@@ -419,9 +428,7 @@ pub fn upsert_entry(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<bool> {
     let source_slugs = load_source_slugs(&paths.sources)?;
     let abs = paths.workspace_root.join(rel_path);
     let _lock = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let conn = Connection::open(&paths.index_db)
-        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
-    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    let conn = open_index_rw(&paths.index_db)?;
     upsert_path_in_conn(&conn, paths, &source_slugs, &abs, rel_path)
 }
 
@@ -432,9 +439,7 @@ pub fn remove_entry(paths: &ReaderPaths, rel_path: &str) -> ReaderResult<bool> {
         return Ok(false);
     }
     let _lock = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let conn = Connection::open(&paths.index_db)
-        .with_context(|| format!("failed to open {}", paths.index_db.display()))?;
-    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    let conn = open_index_rw(&paths.index_db)?;
     delete_path_rows(&conn, rel_path)
 }
 
@@ -1254,6 +1259,10 @@ fn write_sqlite_index(paths: &ReaderPaths, entries: &[IndexedEntry]) -> ReaderRe
         let _swap = INDEX_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         fs::rename(&tmp, &paths.index_db)?;
     }
+    // The tmp file was built with journal_mode=OFF for bulk-insert speed; after
+    // the atomic rename the live file lands in the default "delete" mode. Flip it
+    // to WAL now so every subsequent reader can run concurrently with the writer.
+    open_index_rw(&paths.index_db)?;
     Ok(())
 }
 

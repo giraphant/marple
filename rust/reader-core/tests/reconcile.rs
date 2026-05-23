@@ -175,3 +175,26 @@ fn remove_entry_drops_single_file() {
 
     let _ = std::fs::remove_dir_all(&paths.workspace_root);
 }
+
+/// The live index DB must be in WAL mode so readers never block the writer.
+#[test]
+fn index_db_is_wal_after_build() {
+    let paths = temp_paths();
+    write_file(
+        &paths,
+        "vault/papers/a.md",
+        "---\ntype: paper-analysis\ntitle: A\n---\nbody",
+    );
+    reconcile_index(&paths).unwrap();
+    let conn = rusqlite::Connection::open_with_flags(
+        &paths.index_db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(mode.to_lowercase(), "wal");
+
+    let _ = std::fs::remove_dir_all(&paths.workspace_root);
+}
