@@ -2,3 +2,7 @@
 *.xcodeproj
 .swiftpm/
 DerivedData/
+# MLX Metal lib: build artifact from `xcodebuild build -scheme Marple` (SwiftPM
+# won't compile .metal). Drop at package root so `swift test` finds it via MLX's
+# CWD fallback. Regenerate, never commit (version-tied to mlx-swift).
+*.metallib
