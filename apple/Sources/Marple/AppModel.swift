@@ -311,6 +311,50 @@ final class AppModel {
         }
     }
 
+    // MARK: note creation
+
+    func newIdeaNote() async {
+        let draft = NoteBuilder.ideaNote()
+        await createAndReveal(draft, entry: ideaEntry(from: draft))
+    }
+
+    func newAnnotation(for entry: Entry) async {
+        let draft = NoteBuilder.annotation(target: entry)
+        await createAndReveal(draft, entry: annotationEntry(from: draft, target: entry))
+    }
+
+    func newAnnotationForOpenDoc() async {
+        guard let e = openEntry else { return }
+        await newAnnotation(for: e)
+    }
+
+    /// POST the draft, optimistically add its Entry, reveal it, then open it in
+    /// the external editor (this is a reader — the empty note is edited outside).
+    private func createAndReveal(_ draft: NoteDraft, entry: Entry) async {
+        writeError = nil
+        do {
+            try await client.createNote(path: draft.path, text: draft.text)
+            entries.append(entry)
+            rebuildIndexDerived(); recomputeVisible()
+            await open(draft.path)
+            await openExternally()
+            print("[marple] created \(draft.path)")
+        } catch {
+            writeError = "\(error)"
+            print("[marple] create FAILED \(draft.path): \(error)")
+        }
+    }
+
+    private func ideaEntry(from draft: NoteDraft) -> Entry {
+        Entry(path: draft.path, type: .note, title: draft.title, author: nil, year: nil,
+              ratingScore: 0, themes: [], preview: "", hasPDF: false)
+    }
+
+    private func annotationEntry(from draft: NoteDraft, target: Entry) -> Entry {
+        Entry(path: draft.path, type: .note, title: draft.title, author: nil, year: nil,
+              ratingScore: 0, themes: [], preview: "", hasPDF: false, annotates: target.path)
+    }
+
     // MARK: trash
 
     func loadTrash() async {
