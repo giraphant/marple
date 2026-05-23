@@ -69,3 +69,39 @@ import Foundation
         #expect(h.current.openPath == nil)
     }
 }
+
+@Suite struct PersistedStateTests {
+    private func sample() -> PersistedState {
+        PersistedState(
+            tabs: [PersistedTab(location: NavLocation(pane: .type(.paperAnalysis)), pinned: false),
+                   PersistedTab(location: NavLocation(pane: .theme("X"), openPath: "v/a.md"), pinned: true)],
+            activeIndex: 1,
+            sortClauses: [SortClause(field: .rating, dir: .desc)],
+            filterClauses: [FilterClause(id: "a", field: .year, op: .gte, value: "2000")],
+            filterMatch: .any,
+            browseMode: "list")
+    }
+
+    @Test func roundTripsThroughJSON() throws {
+        let s = sample()
+        let data = try JSONEncoder().encode(s)
+        #expect(try JSONDecoder().decode(PersistedState.self, from: data) == s)
+    }
+
+    @Test func makeWorkspaceRebuildsActiveAndPinned() throws {
+        let ws = try #require(sample().makeWorkspace())
+        #expect(ws.tabs.count == 2)
+        #expect(ws.activeTab.location.openPath == "v/a.md")
+        #expect(ws.tabs[1].pinned)
+    }
+
+    @Test func userDefaultsStoreRoundTrips() throws {
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        #expect(store.load() == nil)
+        store.save(sample())
+        #expect(store.load() == sample())
+    }
+}
