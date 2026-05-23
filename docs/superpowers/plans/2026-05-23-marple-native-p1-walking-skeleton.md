@@ -16,6 +16,40 @@
 
 ---
 
+## Environment Addendum (CLT-only — discovered during Task 1 execution)
+
+This machine has **Apple Command Line Tools, not full Xcode**. Consequence:
+**`XCTest` is unavailable**; only swift-testing (`Testing.framework`) ships. All
+test snippets below are written in XCTest for familiarity — **translate each to
+swift-testing** when implementing:
+
+| XCTest | swift-testing |
+|---|---|
+| `import XCTest` | `import Testing` |
+| `final class FooTests: XCTestCase {` | `@Suite struct FooTests {` |
+| `func testX() { … }` | `@Test func testX() { … }` |
+| `func testX() async throws` | `@Test func testX() async throws` (same body) |
+| `XCTAssertEqual(a, b)` | `#expect(a == b)` |
+| `XCTAssertTrue(x)` / `XCTAssertFalse(x)` | `#expect(x)` / `#expect(!x)` |
+| `XCTAssertNil(x)` / `XCTAssertNotNil(x)` | `#expect(x == nil)` / `#expect(x != nil)` |
+| `XCTAssertGreaterThan(a, b)` | `#expect(a > b)` |
+| `XCTFail("msg")` | `Issue.record("msg")` |
+| `@testable import MarpleKit` | same |
+
+For exact-error assertions (e.g. matching `VaultError.notFound("x")`), use a
+do/catch with `Issue.record(...)` on the wrong branches, or
+`#expect(throws: VaultError.self)` when only the error type matters.
+
+**Canonical test command (use everywhere instead of bare `swift test`):**
+```
+swift test -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks
+```
+Bare `swift test` fails with `no such module 'Testing'` because SPM does not add
+the CLT framework search path. `swift build` (non-test) is unaffected. If full
+Xcode is later installed and selected, bare `swift test` + XCTest works again.
+
+---
+
 ## File Structure
 
 All new files live under `apple/`. Nothing outside `apple/` and `docs/` is created or modified.
