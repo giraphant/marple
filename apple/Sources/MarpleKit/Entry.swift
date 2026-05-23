@@ -84,13 +84,14 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public let book: String?
     public let topic: String?
     public let doi: String?
+    public let annotates: String?
 
     enum CodingKeys: String, CodingKey {
         case path, type, title, author, year, preview
         case ratingScore = "rating_score"
         case themes
         case hasPDF = "has_pdf"
-        case mtime, added, source, book, topic, doi
+        case mtime, added, source, book, topic, doi, annotates
     }
 
     public init(from decoder: Decoder) throws {
@@ -118,13 +119,15 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         book = (try? c.decodeIfPresent(String.self, forKey: .book)) ?? nil
         topic = (try? c.decodeIfPresent(String.self, forKey: .topic)) ?? nil
         doi = (try? c.decodeIfPresent(String.self, forKey: .doi)) ?? nil
+        annotates = (try? c.decodeIfPresent(String.self, forKey: .annotates)) ?? nil
     }
 
     public init(path: String, type: EntryType, title: String?, author: String?,
                 year: String?, ratingScore: Double, themes: [String],
                 preview: String, hasPDF: Bool,
                 mtime: Double? = nil, added: Double? = nil, source: String? = nil,
-                book: String? = nil, topic: String? = nil, doi: String? = nil) {
+                book: String? = nil, topic: String? = nil, doi: String? = nil,
+                annotates: String? = nil) {
         self.path = path
         self.type = type
         self.title = title
@@ -140,5 +143,20 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         self.book = book
         self.topic = topic
         self.doi = doi
+        self.annotates = annotates
+    }
+}
+
+public extension Entry {
+    /// Copy with selected metadata fields replaced. Double-optional params let a
+    /// caller clear a field (`.some(nil)`) vs leave it unchanged (omit).
+    func with(ratingScore: Double? = nil, year: String?? = nil, source: String?? = nil,
+              topic: String?? = nil, doi: String?? = nil, themes: [String]? = nil) -> Entry {
+        Entry(path: path, type: type, title: title, author: author,
+              year: year ?? self.year, ratingScore: ratingScore ?? self.ratingScore,
+              themes: themes ?? self.themes, preview: preview, hasPDF: hasPDF,
+              mtime: mtime, added: added, source: source ?? self.source,
+              book: book, topic: topic ?? self.topic, doi: doi ?? self.doi,
+              annotates: annotates)
     }
 }

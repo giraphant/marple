@@ -73,6 +73,21 @@ import Testing
         #expect(e.source == nil)
     }
 
+    @Test func testDecodesAnnotates() throws {
+        let entries = try decode("""
+        [{"path":"vault/notes/n.md","type":"note","themes":[],"preview":"","rating_score":0,
+          "annotates":"vault/papers/p.md"}]
+        """)
+        #expect(entries[0].annotates == "vault/papers/p.md")
+    }
+
+    @Test func testAnnotatesAbsentIsNil() throws {
+        let entries = try decode("""
+        [{"path":"vault/papers/p.md","type":"paper-analysis","preview":"","rating_score":0}]
+        """)
+        #expect(entries[0].annotates == nil)
+    }
+
     @Test func testModeledTypesOrderAndLabels() {
         #expect(EntryType.modeled == [.paperAnalysis, .bookOverview, .authorProfile,
                                       .topicSynthesis, .chapterSummary, .note])
