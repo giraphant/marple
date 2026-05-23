@@ -45,6 +45,14 @@ struct SidebarView: View {
             }
         }
         .navigationTitle("Marple")
+        .safeAreaInset(edge: .bottom) {
+            Button { Task { await model.newIdeaNote() } } label: {
+                Label("新建笔记", systemImage: "square.and.pencil")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderless)
+            .padding(8)
+        }
     }
 
     private func icon(for t: EntryType) -> String {

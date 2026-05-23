@@ -42,6 +42,16 @@ struct DocView: View {
                 .inspectorColumnWidth(min: 240, ideal: 300, max: 420)
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button { Task { await model.newIdeaNote() } } label: {
+                    Image(systemName: "plus")
+                }
+                .help("新建笔记")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button("新建批注") { Task { await model.newAnnotationForOpenDoc() } }
+                    .disabled(model.openEntry == nil)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button("用外部编辑器打开") { Task { await model.openExternally() } }
                     .disabled(model.openPath == nil)

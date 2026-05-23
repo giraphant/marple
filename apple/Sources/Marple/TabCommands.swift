@@ -19,6 +19,11 @@ struct TabCommands: Commands {
     @FocusedValue(\.appModel) private var model
 
     var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("新建笔记") { run { await $0.newIdeaNote() } }
+                .keyboardShortcut("n", modifiers: .command)
+        }
+
         // Replace the standard File close group so plain ⌘W closes a tab (not the
         // window); window-close relocates to ⇧⌘W. (Pattern from CodeEdit.)
         CommandGroup(replacing: .saveItem) {
