@@ -1,91 +1,82 @@
 import SwiftUI
 import MarpleKit
 
-/// Wrapping layout for inline runs (text + tappable wikilinks).
-struct FlowLayout: Layout {
-    var spacing: CGFloat = 4
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let maxWidth = proposal.width ?? .infinity
-        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
-        for v in subviews {
-            let size = v.sizeThatFits(.unspecified)
-            if x + size.width > maxWidth { x = 0; y += rowHeight + spacing; rowHeight = 0 }
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
-        let width = (maxWidth == .infinity) ? x : maxWidth
-        return CGSize(width: width, height: y + rowHeight)
+/// Custom URL scheme that lets wikilinks live as tappable `.link` runs inside a
+/// wrapping `Text(AttributedString)` and be intercepted via `OpenURLAction`.
+enum WikiURL {
+    static let scheme = "marple"
+    static func make(_ target: String) -> URL? {
+        let enc = target.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? target
+        return URL(string: "\(scheme)://wiki/\(enc)")
     }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
-        for v in subviews {
-            let size = v.sizeThatFits(.unspecified)
-            if x + size.width > bounds.maxX { x = bounds.minX; y += rowHeight + spacing; rowHeight = 0 }
-            v.place(at: CGPoint(x: x, y: y), proposal: .unspecified)
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
+    static func target(from url: URL) -> String? {
+        guard url.scheme == scheme else { return nil }
+        let p = url.path
+        return p.hasPrefix("/") ? String(p.dropFirst()) : p
     }
 }
 
-/// Renders inline tokens: plain-text runs + tappable wikilink buttons.
-struct InlineFlow: View {
-    let tokens: [InlineToken]
-    let onFollow: (String) -> Void
-    var body: some View {
-        FlowLayout {
-            ForEach(Array(tokens.enumerated()), id: \.offset) { _, token in
-                switch token {
-                case .text(let s):
-                    Text(s)
-                case .wikilink(let target, let label):
-                    Button(label) { onFollow(target) }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
+/// Flatten inline tokens into one AttributedString so the text wraps naturally;
+/// wikilinks become accent-colored `.link` runs (tapped via the openURL action).
+func attributedInline(_ tokens: [InlineToken]) -> AttributedString {
+    var out = AttributedString()
+    for token in tokens {
+        switch token {
+        case .text(let s):
+            out += AttributedString(s)
+        case .wikilink(let target, let label):
+            var run = AttributedString(label)
+            run.foregroundColor = .accentColor
+            run.underlineStyle = .single
+            if let url = WikiURL.make(target) { run.link = url }
+            out += run
         }
     }
+    return out
 }
 
 struct BlockView: View {
     let block: RenderBlock
-    let onFollow: (String) -> Void
     var body: some View {
         switch block {
         case .heading(let level, let tokens):
-            InlineFlow(tokens: tokens, onFollow: onFollow)
-                .font(headingFont(level)).bold().padding(.top, 8)
+            Text(attributedInline(tokens))
+                .font(headingFont(level)).bold()
+                .padding(.top, 8)
+                .fixedSize(horizontal: false, vertical: true)
         case .paragraph(let tokens):
-            InlineFlow(tokens: tokens, onFollow: onFollow)
+            Text(attributedInline(tokens))
+                .fixedSize(horizontal: false, vertical: true)
         case .bulletList(let items):
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .top, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("•")
-                        InlineFlow(tokens: item, onFollow: onFollow)
+                        Text(attributedInline(item)).fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
         case .orderedList(let items):
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
-                    HStack(alignment: .top, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("\(idx + 1).")
-                        InlineFlow(tokens: item, onFollow: onFollow)
+                        Text(attributedInline(item)).fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
         case .quote(let tokens):
-            InlineFlow(tokens: tokens, onFollow: onFollow)
+            Text(attributedInline(tokens))
+                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(.secondary)
                 .padding(.leading, 12)
                 .overlay(alignment: .leading) {
                     Rectangle().frame(width: 3).foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.secondary)
         case .codeBlock(_, let code):
             Text(code)
                 .font(.system(.body, design: .monospaced))
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary)

@@ -11,15 +11,20 @@ struct DocView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(Array(model.openBlocks.enumerated()), id: \.offset) { _, block in
-                            BlockView(block: block) { target in
-                                Task { await model.follow(target) }
-                            }
+                            BlockView(block: block)
                         }
                     }
                     .frame(maxWidth: 720, alignment: .leading)
                     .padding(24)
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
+                .environment(\.openURL, OpenURLAction { url in
+                    if let target = WikiURL.target(from: url) {
+                        Task { await model.follow(target) }
+                        return .handled
+                    }
+                    return .systemAction
+                })
             }
         }
         .toolbar {
