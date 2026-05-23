@@ -36,6 +36,8 @@ public struct NavHistory: Hashable, Sendable {
 
     public mutating func back() { if canGoBack { index -= 1 } }
     public mutating func forward() { if canGoForward { index += 1 } }
+
+    public mutating func replaceCurrent(with loc: NavLocation) { entries[index] = loc }
 }
 
 /// One tab: an identity, its own history, and a pinned flag.
@@ -63,6 +65,16 @@ public struct Workspace: Sendable {
         let t = NavTab(location: initial)
         tabs = [t]
         activeID = t.id
+    }
+
+    /// Rebuild a workspace from persisted tab snapshots. Each tab starts with a
+    /// fresh single-entry history at its saved location. Returns nil if empty.
+    public init?(restoring tabs: [(location: NavLocation, pinned: Bool)], activeIndex: Int) {
+        guard !tabs.isEmpty else { return nil }
+        let built = tabs.map { NavTab(location: $0.location, pinned: $0.pinned) }
+        self.tabs = built
+        let idx = built.indices.contains(activeIndex) ? activeIndex : 0
+        self.activeID = built[idx].id
     }
 
     public var activeTab: NavTab { tabs.first { $0.id == activeID } ?? tabs[0] }
@@ -128,5 +140,16 @@ public struct Workspace: Sendable {
         guard ids.count == tabs.count, Set(ids) == Set(tabs.map(\.id)) else { return }
         let map = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
         tabs = ids.compactMap { map[$0] }
+    }
+
+    /// Null out the current open path of any tab whose open file is no longer in
+    /// the index (e.g. deleted/moved between launches). Pane is preserved.
+    public mutating func pruneOpenPaths(validPaths: Set<String>) {
+        for i in tabs.indices {
+            let loc = tabs[i].history.current
+            if let p = loc.openPath, !validPaths.contains(p) {
+                tabs[i].history.replaceCurrent(with: NavLocation(pane: loc.pane, openPath: nil))
+            }
+        }
     }
 }
