@@ -10,6 +10,10 @@ public struct IndexDatabase: Sendable {
     public let indexDBPath: String
     public init(indexDBPath: String) { self.indexDBPath = indexDBPath }
 
+    /// Shared decoder for row mapping. `loadEntries` maps up to ~15k rows, so reuse
+    /// one instance instead of allocating a `JSONDecoder` per row/field.
+    private static let decoder = JSONDecoder()
+
     private func openQueue() throws -> DatabaseQueue? {
         guard FileManager.default.fileExists(atPath: indexDBPath) else { return nil }
         var config = Configuration()
@@ -87,7 +91,13 @@ public struct IndexDatabase: Sendable {
     private static func searchViaLike(db: Database, trimmed: String, type: EntryType?,
                                       minRating: Double?, theme: String?,
                                       limit: Int) throws -> [SearchHit] {
-        let pattern = "%" + trimmed + "%"
+        // SQL LIKE treats `_`/`%` as wildcards. Escape them (and the escape char
+        // itself) so a 1–2 char query matches the literal substring, not everything.
+        let escaped = trimmed
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%",  with: "\\%")
+            .replacingOccurrences(of: "_",  with: "\\_")
+        let pattern = "%" + escaped + "%"
         var sql = """
             SELECT e.path AS path, e.type AS type, e.book AS book, e.title AS title,
                    e.author AS author, e.year_json AS year_json, e.rating_score AS rating_score,
@@ -98,7 +108,7 @@ public struct IndexDatabase: Sendable {
                    NULL AS snip
             FROM entry_trigram t
             JOIN entries e ON e.path = t.path
-            WHERE t.text LIKE ?
+            WHERE t.text LIKE ? ESCAPE '\\'
             """
         var args: [(any DatabaseValueConvertible)?] = [pattern]
         if let type { sql += "\n  AND e.type = ?"; args.append(type.rawValue) }
@@ -122,7 +132,7 @@ public struct IndexDatabase: Sendable {
         let themesJSON: String? = row["themes_json"]
         let themes: [String] = themesJSON
             .flatMap { $0.data(using: .utf8) }
-            .flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
+            .flatMap { try? decoder.decode([String].self, from: $0) } ?? []
         let yearJSON: String? = row["year_json"]
         let year: String? = decodeYear(yearJSON)
         let mtimeRaw: Int64? = row["mtime"]
@@ -165,9 +175,9 @@ public struct IndexDatabase: Sendable {
     /// HTTP path: stringify a scalar, drop anything else.
     static func decodeYear(_ json: String?) -> String? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
-        if let s = try? JSONDecoder().decode(String.self, from: data) { return s }
-        if let i = try? JSONDecoder().decode(Int.self, from: data) { return String(i) }
-        if let d = try? JSONDecoder().decode(Double.self, from: data) { return String(Int(d)) }
+        if let s = try? decoder.decode(String.self, from: data) { return s }
+        if let i = try? decoder.decode(Int.self, from: data) { return String(i) }
+        if let d = try? decoder.decode(Double.self, from: data) { return String(Int(d)) }
         let raw = json.trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
         return raw.isEmpty || raw == "null" ? nil : raw
     }
