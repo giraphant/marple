@@ -3,26 +3,26 @@ import AppKit
 import MarpleKit
 
 final class AppState: ObservableObject {
-    let sidecar: SidecarProcess
     @Published var model: AppModel?
-    @Published var booting = true
+    @Published var booting = false
     @Published var bootError: String?
+    private var sidecar: SidecarProcess?
     private var watcher: VaultWatcher?
 
-    init(repoRoot: String) {
-        self.sidecar = SidecarProcess(repoRoot: repoRoot)
-    }
-
     @MainActor
-    func boot(repoRoot: String, vaultDir: URL) async {
+    func boot(paths: VaultPaths) async {
+        guard model == nil, !booting else { return }
+        booting = true; bootError = nil
+        let sidecar = SidecarProcess(repoRoot: paths.repoRoot)
+        self.sidecar = sidecar
         do {
             let base = try await sidecar.start()
             let client = HTTPVaultClient(baseURL: base)
-            let m = AppModel(client: client)
+            let m = AppModel(client: client, stateStore: UserDefaultsStateStore())
             await m.loadIndex()
             self.model = m
             self.booting = false
-            let watcher = VaultWatcher(vaultDirectory: vaultDir) { [weak m] in
+            let watcher = VaultWatcher(vaultDirectory: URL(fileURLWithPath: paths.vaultDir)) { [weak m] in
                 await m?.reloadOpen()  // reloadOpen is @MainActor; await hops for us
             }
             watcher.start()
@@ -37,36 +37,40 @@ final class AppState: ObservableObject {
 @main
 struct MarpleApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var state: AppState
-
-    // P1 dev config: this repo holds rust/ and marple.config.json; the vault is
-    // resolved by reader-api from marple.config.json's workspaceRoot.
-    static let repoRoot = "/Users/ramudai/Documents/Learn/marple"
-    static let vaultDir = URL(fileURLWithPath: "/Users/ramudai/Documents/Learn/bts/vault")
+    @StateObject private var state = AppState()
+    @AppStorage("marple.repoRoot") private var repoRoot = ""
 
     init() {
         setvbuf(stdout, nil, _IOLBF, 0)  // line-buffer so logs stream to the captured file
-        _state = StateObject(wrappedValue: AppState(repoRoot: MarpleApp.repoRoot))
     }
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if let model = state.model {
-                    RootView(model: model)
-                } else if state.booting {
-                    ProgressView("启动 reader-api…").padding()
-                } else {
-                    ContentUnavailableView("启动失败", systemImage: "exclamationmark.triangle",
-                                           description: Text(state.bootError ?? "unknown"))
-                }
-            }
-            .task {
-                await state.boot(repoRoot: MarpleApp.repoRoot, vaultDir: MarpleApp.vaultDir)
-            }
-            .frame(minWidth: 900, minHeight: 600)
+            content.frame(minWidth: 900, minHeight: 600)
         }
         .commands { TabCommands() }
+    }
+
+    @ViewBuilder private var content: some View {
+        if let paths = resolvedPaths {
+            if let model = state.model {
+                RootView(model: model)
+            } else if let err = state.bootError {
+                ContentUnavailableView("启动失败", systemImage: "exclamationmark.triangle",
+                                       description: Text(err))
+            } else {
+                ProgressView("启动 reader-api…")
+                    .padding()
+                    .task { await state.boot(paths: paths) }
+            }
+        } else {
+            SetupView { picked in repoRoot = picked }
+        }
+    }
+
+    private var resolvedPaths: VaultPaths? {
+        guard !repoRoot.isEmpty else { return nil }
+        return try? resolveVaultPaths(repoRoot: repoRoot)
     }
 }
 
