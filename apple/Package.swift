@@ -13,11 +13,15 @@ let package = Package(
         // resolve against the local toolchain, pin to the matching `release/x.y`.
         .package(url: "https://github.com/swiftlang/swift-markdown.git", branch: "main"),
         .package(url: "https://github.com/ciaranrobrien/SwiftUILazyContainer.git", from: "2.0.0"),
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
     ],
     targets: [
         .target(
             name: "MarpleKit",
-            dependencies: [.product(name: "Markdown", package: "swift-markdown")]
+            dependencies: [
+                .product(name: "Markdown", package: "swift-markdown"),
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ]
         ),
         .executableTarget(
             name: "Marple",
