@@ -9,7 +9,10 @@ public struct DocStats: Equatable, Sendable {
 }
 
 // CJK ideograph ranges mirrored from src/doc-stats.ts CJK_RE.
-private func isCJK(_ s: Unicode.Scalar) -> Bool {
+// Renamed isWordCJK to avoid collision with the public isCJK in IndexTitles.swift,
+// which intentionally excludes Hiragana/Katakana (matches indexer.rs).
+// This local variant additionally includes Hiragana + Katakana for word-count purposes.
+private func isWordCJK(_ s: Unicode.Scalar) -> Bool {
     switch s.value {
     case 0x3400...0x4DBF,   // CJK Ext A
          0x4E00...0x9FFF,   // CJK Unified
@@ -37,7 +40,7 @@ public func countWords(_ body: String) -> Int {
     var latinRuns = 0
     var inRun = false
     for ch in body.unicodeScalars {
-        if isCJK(ch) { cjk += 1; inRun = false; continue }
+        if isWordCJK(ch) { cjk += 1; inRun = false; continue }
         if isLatinRun(ch) {
             if !inRun { latinRuns += 1; inRun = true }
         } else {
