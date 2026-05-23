@@ -15,6 +15,7 @@ let package = Package(
         .package(url: "https://github.com/ciaranrobrien/SwiftUILazyContainer.git", from: "2.0.0"),
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.0.0"),
+        .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.3.0"),
     ],
     targets: [
         .target(
@@ -23,6 +24,7 @@ let package = Package(
                 .product(name: "Markdown", package: "swift-markdown"),
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Yams", package: "Yams"),
+                .product(name: "Tokenizers", package: "swift-transformers"),
             ]
         ),
         .executableTarget(
