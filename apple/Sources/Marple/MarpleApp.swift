@@ -23,8 +23,7 @@ final class AppState: ObservableObject {
             self.model = m
             self.booting = false
             let watcher = VaultWatcher(vaultDirectory: vaultDir) { [weak m] in
-                await MainActor.run { _ = m }  // hop to main actor
-                await m?.reloadOpen()
+                await m?.reloadOpen()  // reloadOpen is @MainActor; await hops for us
             }
             watcher.start()
             self.watcher = watcher
