@@ -13,6 +13,9 @@ struct EntryListView: View {
                 set: { if let p = $0 { Task { await model.open(p) } } }
             )) { entry in
                 EntryRow(entry: entry)
+                    .contextMenu {
+                        Button("在新标签页打开") { Task { await model.openInNewTab(entry.path) } }
+                    }
             }
         }
         .navigationTitle(title)

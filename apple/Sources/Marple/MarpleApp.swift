@@ -53,20 +53,7 @@ struct MarpleApp: App {
         WindowGroup {
             Group {
                 if let model = state.model {
-                    NavigationSplitView {
-                        SidebarView(model: model).frame(minWidth: 220)
-                    } content: {
-                        Group {
-                            if case .themesIndex = model.pane {
-                                ThemesView(model: model)
-                            } else {
-                                EntryListView(model: model)
-                            }
-                        }
-                        .frame(minWidth: 320)
-                    } detail: {
-                        DocView(model: model)
-                    }
+                    RootView(model: model)
                 } else if state.booting {
                     ProgressView("启动 reader-api…").padding()
                 } else {
@@ -79,6 +66,7 @@ struct MarpleApp: App {
             }
             .frame(minWidth: 900, minHeight: 600)
         }
+        .commands { TabCommands() }
     }
 }
 

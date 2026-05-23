@@ -8,8 +8,22 @@ final class AppModel {
     private(set) var entries: [Entry] = []
     var status: String = ""
 
+    // Tabs + per-tab back/forward history. `pane`/`openPath` are derived from the
+    // active tab's current location; mutate via the navigation intents below.
+    private(set) var workspace = Workspace(initial: NavLocation(pane: .type(.paperAnalysis)))
+
+    var pane: Pane { workspace.activeTab.location.pane }
+    var openPath: String? { workspace.activeTab.location.openPath }
+    var tabs: [NavTab] { workspace.tabs }
+    var activeTabID: NavTab.ID { workspace.activeID }
+    var canGoBack: Bool { workspace.activeTab.history.canGoBack }
+    var canGoForward: Bool { workspace.activeTab.history.canGoForward }
+
+    // The doc whose body/blocks/derived caches are currently loaded — lets tab and
+    // history switches skip a re-fetch when the doc hasn't actually changed.
+    private var loadedDocPath: String?
+
     // Browse state (mutate via the intent methods below so derived caches refresh)
-    private(set) var pane: Pane = .type(.paperAnalysis)
     private(set) var sortClauses: [SortClause] = []
     private(set) var filterClauses: [FilterClause] = []
     private(set) var filterMatch: FilterMatch = .all
@@ -25,7 +39,6 @@ final class AppModel {
     private(set) var annotationIndex: [String: [Entry]] = [:]
 
     // Reading state
-    var openPath: String?
     var openBlocks: [RenderBlock] = []
 
     // Open-doc derived caches (recomputed on open / reload, not per render).
@@ -99,7 +112,7 @@ final class AppModel {
     }
 
     func select(pane newPane: Pane) {
-        pane = newPane
+        workspace.navigateActive(to: NavLocation(pane: newPane, openPath: openPath))
         searchText = ""; searchHits = []
         recomputeVisible()
         print("[marple] pane -> \(newPane)")
@@ -143,25 +156,47 @@ final class AppModel {
         }
     }
 
+    /// Navigate the active tab to `path` (pushes history) and load it.
     func open(_ path: String) async {
-        openPath = path
+        workspace.navigateActive(to: NavLocation(pane: pane, openPath: path))
+        await loadDoc(path)
+    }
+
+    /// Fetch + render the doc at `path` into the open-doc caches. `nil` clears them.
+    /// Always loads (no `loadedDocPath` guard) so it doubles as the FSEvents refresh.
+    private func loadDoc(_ path: String?) async {
         writeError = nil
+        guard let path else {
+            openBlocks = []; openBody = ""; loadedDocPath = nil
+            recomputeOpenDerived()
+            return
+        }
         do {
             let raw = try await client.entryText(path: path)
             openBody = Frontmatter.split(raw).body
             openBlocks = MarkdownModel.blocks(from: openBody)
+            loadedDocPath = path
             recomputeOpenDerived()
             print("[marple] open \(path) -> \(openBlocks.count) blocks (\(raw.count) chars)")
         } catch {
             openBlocks = [.paragraph([.text("load failed: \(error)")])]
-            openBody = ""
+            openBody = ""; loadedDocPath = path
             recomputeOpenDerived()
             print("[marple] open FAILED \(path): \(error)")
         }
     }
 
+    /// Bring the visible list + open doc in line with the active tab's location.
+    /// Used after history nav, tab switch, new/close tab. Reloads the doc only when
+    /// it differs from what's already loaded.
+    private func syncToActiveLocation() async {
+        searchText = ""; searchHits = []
+        recomputeVisible()
+        if openPath != loadedDocPath { await loadDoc(openPath) }
+    }
+
     func reloadOpen() async {
-        if let p = openPath { print("[marple] watcher reload \(p)"); await open(p) }
+        if let p = openPath { print("[marple] watcher reload \(p)"); await loadDoc(p) }
     }
 
     func follow(_ target: String) async {
@@ -173,6 +208,93 @@ final class AppModel {
             print("[marple] follow [[\(target)]] -> UNRESOLVED")
         }
     }
+
+    // MARK: history + tabs
+
+    func goBack() async {
+        guard canGoBack else { return }
+        workspace.backActive()
+        print("[marple] back -> \(openPath ?? "\(pane)")")
+        await syncToActiveLocation()
+    }
+
+    func goForward() async {
+        guard canGoForward else { return }
+        workspace.forwardActive()
+        print("[marple] forward -> \(openPath ?? "\(pane)")")
+        await syncToActiveLocation()
+    }
+
+    /// New tab browsing the current pane, no open doc.
+    func newTab() async {
+        workspace.newTab(NavLocation(pane: pane, openPath: nil))
+        print("[marple] new tab (\(tabs.count) total)")
+        await syncToActiveLocation()
+    }
+
+    /// Open `path` in a new tab (current pane) and activate it.
+    func openInNewTab(_ path: String) async {
+        workspace.newTab(NavLocation(pane: pane, openPath: path))
+        print("[marple] open in new tab \(path)")
+        await syncToActiveLocation()
+    }
+
+    func selectTab(_ id: NavTab.ID) async {
+        workspace.select(id)
+        await syncToActiveLocation()
+    }
+
+    func selectTab(index: Int) async {
+        workspace.selectIndex(index)
+        await syncToActiveLocation()
+    }
+
+    func selectNextTab() async { workspace.selectRelative(1); await syncToActiveLocation() }
+    func selectPrevTab() async { workspace.selectRelative(-1); await syncToActiveLocation() }
+
+    /// Close a specific tab (× / context menu). Won't close the last remaining tab.
+    func closeTab(_ id: NavTab.ID) async {
+        guard tabs.count > 1 else { return }
+        workspace.closeTab(id)
+        await syncToActiveLocation()
+    }
+
+    /// Close the active tab (⌘W). Skips a pinned tab and won't close the last one.
+    func closeActiveTab() async {
+        guard tabs.count > 1, !workspace.activeTab.pinned else { return }
+        await closeTab(activeTabID)
+    }
+
+    /// Close every tab except `keep` and any pinned tabs.
+    func closeOtherTabs(_ keep: NavTab.ID) async {
+        let toClose = tabs.filter { $0.id != keep && !$0.pinned }.map(\.id)
+        guard !toClose.isEmpty else { return }
+        for id in toClose { workspace.closeTab(id) }
+        workspace.select(keep)
+        await syncToActiveLocation()
+    }
+
+    func togglePin(_ id: NavTab.ID) { workspace.togglePin(id) }
+
+    func moveTab(id: NavTab.ID, before targetID: NavTab.ID) {
+        workspace.move(id: id, before: targetID)
+    }
+
+    // MARK: tab labels
+
+    func tabTitle(_ tab: NavTab) -> String {
+        let loc = tab.location
+        if let p = loc.openPath {
+            return entries.first { $0.path == p }?.title ?? (p as NSString).lastPathComponent
+        }
+        switch loc.pane {
+        case .type(let t):     return t.label
+        case .theme(let name): return "#\(name)"
+        case .themesIndex:     return "主题"
+        }
+    }
+
+    func tabIsDoc(_ tab: NavTab) -> Bool { tab.location.openPath != nil }
 
     func openExternally() async {
         guard let p = openPath else { return }
