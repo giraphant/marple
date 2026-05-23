@@ -7,8 +7,8 @@ import AppKit
 /// delegates metadata/search to `IndexDatabase`. No HTTP, no sidecar on the hot
 /// path. All `path` arguments are workspace-relative (e.g. "vault/papers/x.md").
 public struct LocalVaultClient: VaultClient {
-    let workspaceRoot: String
-    let indexDB: IndexDatabase
+    private let workspaceRoot: String
+    private let indexDB: IndexDatabase
 
     public init(workspaceRoot: String, index: IndexDatabase) {
         self.workspaceRoot = workspaceRoot
@@ -48,9 +48,18 @@ public struct LocalVaultClient: VaultClient {
     }
 
     public func openInEditor(path: String, app: String) async throws {
-        #if canImport(AppKit)
         let url = absURL(path)
-        await MainActor.run { NSWorkspace.shared.open(url) }
+        #if canImport(AppKit)
+        let appName = app.trimmingCharacters(in: .whitespaces)
+        if appName.isEmpty {
+            _ = await MainActor.run { NSWorkspace.shared.open(url) }
+            return
+        }
+        // Honor a specific editor the way the sidecar does: `open -a <app> <path>`.
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        proc.arguments = ["-a", appName, url.path]
+        try proc.run()
         #endif
     }
 
