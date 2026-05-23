@@ -41,35 +41,44 @@ struct BlockView: View {
         switch block {
         case .heading(let level, let tokens):
             Text(attributedInline(tokens))
-                .font(headingFont(level)).bold()
-                .padding(.top, 8)
+                .font(headingFont(level))
                 .fixedSize(horizontal: false, vertical: true)
         case .paragraph(let tokens):
             Text(attributedInline(tokens))
+                .font(Typo.readingBody)
+                .lineSpacing(Reading.lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
         case .bulletList(let items):
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Space.s2) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
                         Text("•")
-                        Text(attributedInline(item)).fixedSize(horizontal: false, vertical: true)
+                        Text(attributedInline(item))
+                            .lineSpacing(Reading.lineSpacing)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
+            .font(Typo.readingBody)
         case .orderedList(let items):
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Space.s2) {
                 ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
                         Text("\(idx + 1).")
-                        Text(attributedInline(item)).fixedSize(horizontal: false, vertical: true)
+                        Text(attributedInline(item))
+                            .lineSpacing(Reading.lineSpacing)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
+            .font(Typo.readingBody)
         case .quote(let tokens):
             Text(attributedInline(tokens))
+                .font(Typo.readingBody)
+                .lineSpacing(Reading.lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.secondary)
-                .padding(.leading, 12)
+                .padding(.leading, Space.s5)
                 .overlay(alignment: .leading) {
                     Rectangle().frame(width: 3).foregroundStyle(.secondary)
                 }
@@ -77,20 +86,20 @@ struct BlockView: View {
             Text(code)
                 .font(.system(.body, design: .monospaced))
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(8)
+                .padding(Space.s4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
         case .thematicBreak:
-            Divider().padding(.vertical, 8)
+            Divider().padding(.vertical, Space.s4)
         }
     }
     func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: return .title
-        case 2: return .title2
-        case 3: return .title3
-        default: return .headline
+        case 1: return Typo.display
+        case 2: return Typo.title
+        case 3: return Typo.title3
+        default: return Typo.headline
         }
     }
 }
