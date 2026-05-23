@@ -6,25 +6,81 @@ import Observation
 final class AppModel {
     let client: VaultClient
     var entries: [Entry] = []
+    var status: String = ""
+
+    // Browse state
+    var pane: Pane = .type(.paperAnalysis)
+    var sortClauses: [SortClause] = []
+    var filterClauses: [FilterClause] = []
+    var filterMatch: FilterMatch = .all
+    var searchText: String = ""
+    var searchHits: [SearchHit] = []
+    private var searchTask: Task<Void, Never>?
+
+    // Reading state
     var openPath: String?
     var openBlocks: [RenderBlock] = []
-    var status: String = ""
 
     init(client: VaultClient) { self.client = client }
 
-    var papers: [Entry] {
-        entries.filter { $0.type == .paperAnalysis }
-            .sorted { ($0.title ?? "") < ($1.title ?? "") }
+    // MARK: derived
+
+    var counts: [EntryType: Int] {
+        var c: [EntryType: Int] = [:]
+        for e in entries { c[e.type, default: 0] += 1 }
+        return c
     }
+
+    var themeIndex: [ThemeCount] { themeCounts(entries) }
+
+    /// The middle-column list: search results when searching, else the
+    /// pane subset run through filters then sort.
+    var visibleEntries: [Entry] {
+        if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+            return searchHits.map(\.entry)
+        }
+        let base = entriesForPane(pane, in: entries)
+        let filtered = applyFilters(base, filterClauses, match: filterMatch)
+        return sortEntries(filtered, by: sortClauses)
+    }
+
+    // MARK: actions
 
     func loadIndex() async {
         do {
             entries = try await client.index()
             status = "\(entries.count) entries"
-            print("[marple] index loaded: \(entries.count) entries, \(papers.count) papers")
+            print("[marple] index loaded: \(entries.count) entries")
         } catch {
             status = "index failed: \(error)"
             print("[marple] index FAILED: \(error)")
+        }
+    }
+
+    func select(pane newPane: Pane) {
+        pane = newPane
+        searchText = ""; searchHits = []
+        print("[marple] pane -> \(newPane)")
+    }
+
+    /// Debounced server search scoped to the current type pane (nil type → all).
+    func runSearch() {
+        searchTask?.cancel()
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { searchHits = []; return }
+        let type: EntryType? = { if case .type(let t) = pane { return t } else { return nil } }()
+        searchTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            if Task.isCancelled { return }
+            do {
+                let hits = try await self?.client.search(SearchQuery(q: q, type: type)) ?? []
+                if Task.isCancelled { return }
+                self?.searchHits = hits
+                print("[marple] search '\(q)' -> \(hits.count) hits")
+            } catch {
+                self?.status = "search failed: \(error)"
+                print("[marple] search FAILED '\(q)': \(error)")
+            }
         }
     }
 

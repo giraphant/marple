@@ -3,17 +3,49 @@ import MarpleKit
 
 struct SidebarView: View {
     @Bindable var model: AppModel
+
     var body: some View {
-        List(model.papers, selection: Binding(
-            get: { model.openPath },
-            set: { if let p = $0 { Task { await model.open(p) } } }
-        )) { entry in
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.title ?? "(untitled)").font(.headline).lineLimit(2)
-                if let a = entry.author { Text(a).font(.caption).foregroundStyle(.secondary) }
+        List(selection: Binding<Pane?>(
+            get: { model.pane },
+            set: { if let p = $0 { model.select(pane: p) } }
+        )) {
+            Section("物件") {
+                ForEach(EntryType.modeled, id: \.self) { t in
+                    Label {
+                        HStack {
+                            Text(t.label)
+                            Spacer()
+                            Text("\(model.counts[t] ?? 0)")
+                                .foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    } icon: { Image(systemName: icon(for: t)) }
+                    .tag(Pane.type(t))
+                }
             }
-            .tag(entry.path)
+            Section("视图") {
+                Label {
+                    HStack {
+                        Text("主题")
+                        Spacer()
+                        Text("\(model.themeIndex.count)")
+                            .foregroundStyle(.secondary).monospacedDigit()
+                    }
+                } icon: { Image(systemName: "tag") }
+                .tag(Pane.themesIndex)
+            }
         }
-        .navigationTitle("论文 (\(model.papers.count))")
+        .navigationTitle("Marple")
+    }
+
+    private func icon(for t: EntryType) -> String {
+        switch t {
+        case .paperAnalysis:  return "doc.text"
+        case .bookOverview:   return "book"
+        case .authorProfile:  return "person"
+        case .topicSynthesis: return "square.stack.3d.up"
+        case .chapterSummary: return "list.bullet.rectangle"
+        case .note:           return "note.text"
+        case .other:          return "questionmark.square.dashed"
+        }
     }
 }

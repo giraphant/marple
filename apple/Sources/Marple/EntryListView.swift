@@ -1,0 +1,107 @@
+import SwiftUI
+import MarpleKit
+
+struct EntryListView: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            List(model.visibleEntries, selection: Binding(
+                get: { model.openPath },
+                set: { if let p = $0 { Task { await model.open(p) } } }
+            )) { entry in
+                EntryRow(entry: entry)
+            }
+        }
+        .navigationTitle(title)
+    }
+
+    private var title: String {
+        switch model.pane {
+        case .type(let t):   return "\(t.label) (\(model.visibleEntries.count))"
+        case .theme(let n):  return "主题: \(n) (\(model.visibleEntries.count))"
+        case .themesIndex:   return "主题"
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("检索 标题/作者/主题…", text: Binding(
+                    get: { model.searchText },
+                    set: { model.searchText = $0; model.runSearch() }
+                ))
+                .textFieldStyle(.plain)
+                if !model.searchText.isEmpty {
+                    Button { model.searchText = ""; model.runSearch() } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(6)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+
+            sortMenu
+            filterMenu
+        }
+        .padding(8)
+        .disabled(isThemesIndex)   // header is meaningless on the themes index pane
+        .opacity(isThemesIndex ? 0.4 : 1)
+    }
+
+    private var isThemesIndex: Bool { if case .themesIndex = model.pane { return true } else { return false } }
+
+    private var sortMenu: some View {
+        Menu {
+            Button("默认顺序") { model.sortClauses = [] }
+            Divider()
+            ForEach(SortField.allCases, id: \.self) { f in
+                Menu(f.label) {
+                    Button("升序 ↑") { model.sortClauses = [SortClause(field: f, dir: .asc)] }
+                    Button("降序 ↓") { model.sortClauses = [SortClause(field: f, dir: .desc)] }
+                }
+            }
+        } label: {
+            Label(sortLabel, systemImage: "arrow.up.arrow.down")
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+    }
+
+    private var sortLabel: String {
+        guard let c = model.sortClauses.first else { return "排序" }
+        return "\(c.field.label)\(c.dir == .asc ? "↑" : "↓")"
+    }
+
+    private var filterMenu: some View {
+        Menu {
+            Button("清除筛选") { model.filterClauses = [] }
+            Divider()
+            Menu("评分 ≥") {
+                ForEach([1, 2, 3, 4], id: \.self) { r in
+                    Button("★ \(r)+") {
+                        setSingle(.rating, .gte, String(r))
+                    }
+                }
+            }
+            Toggle("仅含 PDF", isOn: Binding(
+                get: { model.filterClauses.contains { $0.field == .haspdf } },
+                set: { on in
+                    model.filterClauses.removeAll { $0.field == .haspdf }
+                    if on { model.filterClauses.append(FilterClause(field: .haspdf, op: .yes, value: "")) }
+                }
+            ))
+        } label: {
+            Label(model.filterClauses.isEmpty ? "筛选" : "筛选(\(model.filterClauses.count))",
+                  systemImage: "line.3.horizontal.decrease.circle")
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+    }
+
+    private func setSingle(_ field: FilterField, _ op: FilterOp, _ value: String) {
+        model.filterClauses.removeAll { $0.field == field }
+        model.filterClauses.append(FilterClause(field: field, op: op, value: value))
+    }
+}
