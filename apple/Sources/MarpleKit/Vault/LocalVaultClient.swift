@@ -55,7 +55,7 @@ public struct LocalVaultClient: VaultClient {
             _ = await MainActor.run { NSWorkspace.shared.open(url) }
             return
         }
-        // Honor a specific editor the way the sidecar does: `open -a <app> <path>`.
+        // Honor a specific editor via `open -a <app> <path>`.
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         proc.arguments = ["-a", appName, url.path]

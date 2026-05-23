@@ -1,8 +1,6 @@
 import Foundation
 
 public enum VaultError: Error, Equatable {
-    case backendUnavailable
-    case http(status: Int, body: String)
     case notFound(String)
     case decode(String)
 }

@@ -174,8 +174,8 @@ public struct IndexDatabase: Sendable {
         )
     }
 
-    /// `year_json` holds a JSON scalar ("2014", 2014, 2014.0) or null. Mirror the
-    /// HTTP path: stringify a scalar, drop anything else.
+    /// `year_json` holds a JSON scalar ("2014", 2014, 2014.0) or null:
+    /// stringify a scalar, drop anything else.
     static func decodeYear(_ json: String?) -> String? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         if let s = try? decoder.decode(String.self, from: data) { return s }

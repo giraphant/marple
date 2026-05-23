@@ -44,6 +44,7 @@ struct SidebarView: View {
                 .tag(Pane.trash)
             }
         }
+        .listStyle(.sidebar)
         .navigationTitle("Marple")
         .safeAreaInset(edge: .bottom) {
             Button { Task { await model.newIdeaNote() } } label: {
