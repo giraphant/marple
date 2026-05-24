@@ -105,7 +105,7 @@ private struct OutlineSection: View {
             if let book = model.openBook {
                 BookNavGroup(model: model, book: book)
             }
-            PageOutlineGroup(model: model, labeled: model.openBook != nil)
+            PageOutlineGroup(model: model)
         }
     }
 }
@@ -169,14 +169,12 @@ private struct BookNavRow: View {
     }
 }
 
-/// The open document's own heading outline. Labelled "本页" when a book is in
-/// context (to pair with "本书"), else "目录" — the standalone case.
+/// The open document's own heading outline. Shown directly without a section
+/// header — the tab strip already identifies this as the outline view.
 private struct PageOutlineGroup: View {
     @Bindable var model: AppModel
-    let labeled: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            SectionHeader(labeled ? "本页" : "目录")
             if model.openOutline.isEmpty {
                 Text("无标题").foregroundStyle(.secondary).font(.callout)
             } else {
@@ -238,7 +236,9 @@ private struct InfoSection: View {
                 .disabled(model.savingField != nil)
                 ThemesEditor(model: model, themes: e.themes)
                 RelationsView(model: model)
-                CitationControl(entry: e).id(e.path)
+                if e.type == .paperAnalysis || e.type == .bookOverview {
+                    CitationControl(entry: e).id(e.path)
+                }
             } else {
                 Text("—").foregroundStyle(.secondary).font(.callout)
             }
@@ -383,7 +383,12 @@ private struct RelationsView: View {
     var body: some View {
         if let r = model.openRelations {
             VStack(alignment: .leading, spacing: 14) {
-                relGroup("作者作品", r.works)
+                if !r.works.isEmpty {
+                    let books = r.works.filter { $0.type == .bookOverview }
+                    let papers = r.works.filter { $0.type == .paperAnalysis }
+                    relGroup("图书", books)
+                    relGroup("论文", papers)
+                }
                 relGroup("同作者", r.siblings)
                 relGroup("同主题相似", r.similar)
                 relGroup("我的批注", r.annotations)

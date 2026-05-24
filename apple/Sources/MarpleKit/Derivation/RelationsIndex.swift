@@ -20,6 +20,7 @@ public func splitAuthors(_ s: String?) -> [String] {
 public func buildAuthorIndex(_ entries: [Entry]) -> [String: [Entry]] {
     var idx: [String: [Entry]] = [:]
     for e in entries {
+        guard e.type == .paperAnalysis || e.type == .bookOverview else { continue }
         for name in splitAuthors(e.author) {
             idx[name.lowercased(), default: []].append(e)
         }
