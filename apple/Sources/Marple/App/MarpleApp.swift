@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import MarpleKit
+import MarpleEmbeddings
 
 final class AppState: ObservableObject {
     @Published var model: AppModel?
@@ -25,7 +26,13 @@ final class AppState: ObservableObject {
         }
         let index = IndexDatabase(indexDBPath: paths.workspaceRoot + "/.marple/index.sqlite")
         let client = LocalVaultClient(workspaceRoot: paths.workspaceRoot, index: index)
-        let m = AppModel(client: client, stateStore: UserDefaultsStateStore())
+        // 深度 (semantic) mode: wire the MLX backend only when a vector index exists
+        // (built via `semantic-tool build`). Absent → AppModel keeps 深度 disabled.
+        let marpleDir = URL(fileURLWithPath: paths.workspaceRoot).appendingPathComponent(".marple")
+        let semantic: (any SemanticBackend)? =
+            FileManager.default.fileExists(atPath: marpleDir.appendingPathComponent("vectors.json").path)
+            ? MLXSemanticBackend(dir: marpleDir) : nil
+        let m = AppModel(client: client, stateStore: UserDefaultsStateStore(), semantic: semantic)
         await m.loadIndex()
         self.model = m
         self.booting = false
