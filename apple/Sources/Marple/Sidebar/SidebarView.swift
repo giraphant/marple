@@ -97,15 +97,5 @@ struct SidebarView: View {
         }
     }
 
-    private func icon(for t: EntryType) -> String {
-        switch t {
-        case .paperAnalysis:  return "doc.text"
-        case .bookOverview:   return "book"
-        case .authorProfile:  return "person"
-        case .topicSynthesis: return "square.stack.3d.up"
-        case .chapterSummary: return "list.bullet.rectangle"
-        case .note:           return "note.text"
-        case .other:          return "questionmark.square.dashed"
-        }
-    }
+    private func icon(for t: EntryType) -> String { t.symbolName }
 }

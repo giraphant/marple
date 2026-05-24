@@ -41,7 +41,7 @@ struct TabCommands: Commands {
         }
 
         CommandMenu("标签") {
-            Button("新建标签") { run { await $0.newTab() } }
+            Button("搜索…") { if let model { CommandPalettePresenter.toggle(model: model) } }
                 .keyboardShortcut("t", modifiers: .command)
 
             Divider()

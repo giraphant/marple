@@ -59,6 +59,9 @@ final class AppModel {
     private(set) var visibleEntries: [Entry] = []
     private(set) var authorIndex: [String: [Entry]] = [:]
     private(set) var annotationIndex: [String: [Entry]] = [:]
+    /// Prebuilt field-weighted index for the command palette's 快速 mode (rebuilt
+    /// whenever `entries` changes, like the other derived caches).
+    private(set) var searchDocs: [SearchDocument] = []
 
     // Trash list (loaded lazily; sidebar badge reads .count).
     private(set) var trashItems: [TrashItem] = []
@@ -82,10 +85,15 @@ final class AppModel {
     var writeError: String?
 
     private let stateStore: StateStore?
+    private let semantic: (any SemanticBackend)?
 
-    init(client: VaultClient, stateStore: StateStore? = nil) {
+    /// True when a vector index exists, so 深度 (semantic) mode can run.
+    var semanticAvailable: Bool { semantic != nil }
+
+    init(client: VaultClient, stateStore: StateStore? = nil, semantic: (any SemanticBackend)? = nil) {
         self.client = client
         self.stateStore = stateStore
+        self.semantic = semantic
         if let s = stateStore?.load() {
             browsePane = s.browsePane
             workspace = s.makeWorkspace()
@@ -127,6 +135,7 @@ final class AppModel {
         themeIndex = themeCounts(entries)
         authorIndex = buildAuthorIndex(entries)
         annotationIndex = buildAnnotationIndex(entries)
+        searchDocs = buildSearchIndex(entries)
     }
 
     /// Recompute the open document's outline / stats / entry / relations. O(n) over
@@ -338,6 +347,61 @@ final class AppModel {
 
     /// Always open `path` in a new tab (right-click / ⌘-click).
     func openInNewTab(_ path: String) async { await openNewTab(path) }
+
+    // MARK: - Command palette (⌘T)
+
+    /// Run a cross-type palette search. 快速 = in-memory field-weighted ranker;
+    /// 平衡 = native FTS full-text (server order preserved via a descending synthetic
+    /// score); 深度 = semantic vectors, returned empty until the vector index exists.
+    func commandSearch(_ query: String, mode: SearchMode) async -> [PaletteResult] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        switch mode {
+        case .fast:
+            // Rank ~15k docs OFF the main actor so typing never hitches.
+            let docs = searchDocs
+            let ranked = await Task.detached(priority: .userInitiated) {
+                searchDocuments(docs, q)
+            }.value
+            return ranked.map { PaletteResult(entry: $0.entry, score: $0.score, source: nil) }
+        case .balanced:
+            do {
+                let hits = try await client.search(SearchQuery(q: q, type: nil, limit: 300))
+                return hits.enumerated().map {
+                    PaletteResult(entry: $0.element.entry,
+                                  score: Double(hits.count - $0.offset),
+                                  source: $0.element.source)
+                }
+            } catch {
+                print("[marple] palette balanced search FAILED '\(q)': \(error)")
+                return []
+            }
+        case .deep:
+            guard let semantic else { return [] }
+            do {
+                let hits = try await semantic.search(q, topK: 80)
+                let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
+                return hits.compactMap { hit in
+                    byPath[hit.path].map { PaletteResult(entry: $0, score: hit.score, source: "vec") }
+                }
+            } catch {
+                print("[marple] palette deep search FAILED '\(q)': \(error)")
+                return []
+            }
+        }
+    }
+
+    /// Pick a result: open in-place (browser-style) or in a new tab when ⌘ was held.
+    /// (The panel closes itself via its `onClose`.)
+    func openFromPalette(_ path: String, newTab: Bool) async {
+        if newTab { await openInNewTab(path) } else { await open(path) }
+    }
+
+    /// "查看全部 N 条 →": jump to that type's browse list, seed its search box.
+    func paletteViewAll(type: EntryType, query: String) {
+        select(pane: .type(type))
+        setSearchText(query)
+    }
 
     func selectTab(_ id: NavTab.ID) async {
         mutateWorkspace { $0.select(id) }

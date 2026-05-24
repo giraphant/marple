@@ -42,25 +42,31 @@ public struct IndexDatabase: Sendable {
                        theme: String?, limit: Int) throws -> [SearchHit] {
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, let queue = try openQueue() else { return [] }
-        // FTS5 trigram needs ≥ 3 characters to form a trigram; for shorter queries
-        // (common with CJK bigrams like "量表") fall back to a LIKE scan.
-        let canUseFTS = trimmed.unicodeScalars.count >= 3
+        // Split into whitespace terms and AND them (each term a substring, any
+        // order) — NOT one rigid phrase, so "汽车 维修" matches text containing both
+        // "汽车" and "维修" even when not adjacent. FTS5 trigram needs ≥3 chars per
+        // term; if EVERY term qualifies use FTS (fast, ranked), else fall back to a
+        // LIKE-AND scan (handles 1–2 char CJK terms, which are extremely common).
+        let terms = trimmed.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard !terms.isEmpty else { return [] }
+        let canUseFTS = terms.allSatisfy { $0.unicodeScalars.count >= 3 }
         return try queue.read { db in
             guard try db.tableExists("entry_trigram"), try db.tableExists("entries") else { return [] }
             if canUseFTS {
-                return try Self.searchViaFTS(db: db, trimmed: trimmed, type: type,
+                return try Self.searchViaFTS(db: db, terms: terms, type: type,
                                              minRating: minRating, theme: theme, limit: limit)
             } else {
-                return try Self.searchViaLike(db: db, trimmed: trimmed, type: type,
+                return try Self.searchViaLike(db: db, terms: terms, type: type,
                                               minRating: minRating, theme: theme, limit: limit)
             }
         }
     }
 
-    private static func searchViaFTS(db: Database, trimmed: String, type: EntryType?,
+    private static func searchViaFTS(db: Database, terms: [String], type: EntryType?,
                                      minRating: Double?, theme: String?,
                                      limit: Int) throws -> [SearchHit] {
-        let match = ftsPhrase(trimmed)
+        // Each term as its own quoted phrase, space-joined = implicit AND in FTS5.
+        let match = terms.map(ftsPhrase).joined(separator: " ")
         var sql = """
             SELECT e.path AS path, e.type AS type, e.book AS book, e.title AS title,
                    e.author AS author, e.year_json AS year_json, e.rating_score AS rating_score,
@@ -91,16 +97,19 @@ public struct IndexDatabase: Sendable {
         }
     }
 
-    private static func searchViaLike(db: Database, trimmed: String, type: EntryType?,
+    private static func searchViaLike(db: Database, terms: [String], type: EntryType?,
                                       minRating: Double?, theme: String?,
                                       limit: Int) throws -> [SearchHit] {
         // SQL LIKE treats `_`/`%` as wildcards. Escape them (and the escape char
-        // itself) so a 1–2 char query matches the literal substring, not everything.
-        let escaped = trimmed
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "%",  with: "\\%")
-            .replacingOccurrences(of: "_",  with: "\\_")
-        let pattern = "%" + escaped + "%"
+        // itself) so a 1–2 char term matches the literal substring, not everything.
+        func pattern(_ s: String) -> String {
+            let escaped = s
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "%",  with: "\\%")
+                .replacingOccurrences(of: "_",  with: "\\_")
+            return "%" + escaped + "%"
+        }
+        let likeClause = terms.map { _ in "t.text LIKE ? ESCAPE '\\'" }.joined(separator: " AND ")
         var sql = """
             SELECT e.path AS path, e.type AS type, e.book AS book, e.title AS title,
                    e.author AS author, e.year_json AS year_json, e.rating_score AS rating_score,
@@ -111,9 +120,9 @@ public struct IndexDatabase: Sendable {
                    NULL AS snip
             FROM entry_trigram t
             JOIN entries e ON e.path = t.path
-            WHERE t.text LIKE ? ESCAPE '\\'
+            WHERE \(likeClause)
             """
-        var args: [(any DatabaseValueConvertible)?] = [pattern]
+        var args: [(any DatabaseValueConvertible)?] = terms.map { pattern($0) }
         if let type { sql += "\n  AND e.type = ?"; args.append(type.rawValue) }
         if let minRating { sql += "\n  AND e.rating_score >= ?"; args.append(minRating) }
         if let theme {
