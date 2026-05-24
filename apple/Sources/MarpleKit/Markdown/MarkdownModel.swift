@@ -9,6 +9,7 @@ public enum RenderBlock: Equatable, Sendable {
     case quote([InlineToken])
     case codeBlock(language: String?, code: String)
     case thematicBreak
+    case table(headers: [[InlineToken]], rows: [[[InlineToken]]])
 }
 
 public enum MarkdownModel {
@@ -44,6 +45,12 @@ public enum MarkdownModel {
             blocks.append(.codeBlock(language: lang, code: code.code))
         case is ThematicBreak:
             blocks.append(.thematicBreak)
+        case let table as Table:
+            let headers: [[InlineToken]] = table.head.cells.map { inline($0, refs) }
+            let rows: [[[InlineToken]]] = table.body.rows.map { row in
+                row.cells.map { inline($0, refs) }
+            }
+            blocks.append(.table(headers: headers, rows: rows))
         default:
             let text = plainText(of: markup)
             if !text.isEmpty { blocks.append(.paragraph(Wikilink.restore(text, refs))) }

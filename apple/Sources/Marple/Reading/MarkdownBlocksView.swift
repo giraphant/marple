@@ -94,6 +94,8 @@ struct BlockView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
         case .thematicBreak:
             Divider().padding(.vertical, Space.s4)
+        case .table(let headers, let rows):
+            TableView(headers: headers, rows: rows)
         }
     }
     func headingFont(_ level: Int) -> Font {
@@ -102,6 +104,50 @@ struct BlockView: View {
         case 2: return Typo.title
         case 3: return Typo.title3
         default: return Typo.headline
+        }
+    }
+}
+
+private struct TableView: View {
+    let headers: [[InlineToken]]
+    let rows: [[[InlineToken]]]
+    @Environment(\.readingFont) private var readingFont
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(Array(headers.enumerated()), id: \.offset) { _, cellTokens in
+                        Text(attributedInline(cellTokens))
+                            .font(Typo.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, Space.s5)
+                            .padding(.vertical, Space.s4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .background(.quaternary)
+
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    GridRow {
+                        ForEach(Array(row.enumerated()), id: \.offset) { _, cellTokens in
+                            Text(attributedInline(cellTokens))
+                                .font(readingFont.bodyFont)
+                                .lineSpacing(readingFont.lineSpacing)
+                                .padding(.horizontal, Space.s5)
+                                .padding(.vertical, Space.s4)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Divider()
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(.quaternary, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
     }
 }
