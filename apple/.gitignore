@@ -6,3 +6,10 @@ DerivedData/
 # won't compile .metal). Drop at package root so `swift test` finds it via MLX's
 # CWD fallback. Regenerate, never commit (version-tied to mlx-swift).
 *.metallib
+
+# Bundled reading fonts: kept out of git — large (~42MB) and some (方正系) are
+# commercial / not redistributable. The Fonts/ dir + README are tracked so the
+# target's `Bundle.module` resource exists; drop the actual faces in locally.
+Sources/Marple/Resources/Fonts/*.ttf
+Sources/Marple/Resources/Fonts/*.otf
+Sources/Marple/Resources/Fonts/*.ttc

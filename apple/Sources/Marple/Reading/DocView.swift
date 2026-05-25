@@ -44,6 +44,21 @@ struct DocView: View {
                 )
             }
         }
+        .overlay(alignment: .top) { toastOverlay }
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.toast)
+    }
+
+    @ViewBuilder private var toastOverlay: some View {
+        if let toast = model.toast {
+            ToastBanner(text: toast.text, symbol: toast.symbol)
+                .id(toast.id)
+                .padding(.top, Space.s7)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .task(id: toast.id) {
+                    try? await Task.sleep(for: .seconds(1.6))
+                    if model.toast?.id == toast.id { model.toast = nil }
+                }
+        }
     }
 
     private var renderStyle: RenderStyle {
@@ -155,5 +170,23 @@ private struct ImageObjectDetailView: View {
     private func fallbackTitle(for entry: Entry) -> String {
         ImageAsset.slug(forImageEntryPath: entry.path)
             ?? (entry.path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+    }
+}
+
+/// Transient confirmation banner (e.g. 已复制引用), floated near the reader's top.
+private struct ToastBanner: View {
+    let text: String
+    let symbol: String
+
+    var body: some View {
+        HStack(spacing: Space.s2) {
+            Image(systemName: symbol).foregroundStyle(.green)
+            Text(text).font(Typo.body)
+        }
+        .padding(.horizontal, Space.s5)
+        .padding(.vertical, Space.s3)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.separator.opacity(0.4), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.14), radius: 8, y: 3)
     }
 }

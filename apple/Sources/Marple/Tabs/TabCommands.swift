@@ -2,22 +2,10 @@ import SwiftUI
 import AppKit
 import MarpleKit
 
-// Classic FocusedValueKey (the @Entry macro needs a newer SDK than these Command
-// Line Tools ship). RootView publishes the model via .focusedSceneValue.
-private struct AppModelFocusKey: FocusedValueKey { typealias Value = AppModel }
-
-extension FocusedValues {
-    var appModel: AppModel? {
-        get { self[AppModelFocusKey.self] }
-        set { self[AppModelFocusKey.self] = newValue }
-    }
-}
-
-/// The 标签 menu: tab + history shortcuts, reachable from anywhere in the focused
-/// window via @FocusedValue.
+/// The 标签 menu: tab + history shortcuts. The main window is AppKit-owned, which
+/// SwiftUI's `@FocusedValue` can't reach, so these read the global `ActiveModel`
+/// (Marple is single-window). Actions are guarded, so always-enabled items are safe.
 struct TabCommands: Commands {
-    @FocusedValue(\.appModel) private var model
-
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("新建笔记") { run { await $0.newIdeaNote() } }
@@ -28,7 +16,7 @@ struct TabCommands: Commands {
         // window); window-close relocates to ⇧⌘W. (Pattern from CodeEdit.)
         CommandGroup(replacing: .saveItem) {
             Button("关闭标签") {
-                if let m = model, m.tabs.count > 1 {
+                if let m = ActiveModel.current, m.tabs.count > 1 {
                     Task { await m.closeActiveTab() }
                 } else {
                     NSApp.keyWindow?.performClose(nil)
@@ -41,17 +29,15 @@ struct TabCommands: Commands {
         }
 
         CommandMenu("标签") {
-            Button("搜索…") { if let model { CommandPalettePresenter.toggle(model: model) } }
+            Button("搜索…") { if let m = ActiveModel.current { CommandPalettePresenter.toggle(model: m) } }
                 .keyboardShortcut("t", modifiers: .command)
 
             Divider()
 
             Button("后退") { run { await $0.goBack() } }
                 .keyboardShortcut("[", modifiers: .command)
-                .disabled(!(model?.canGoBack ?? false))
             Button("前进") { run { await $0.goForward() } }
                 .keyboardShortcut("]", modifiers: .command)
-                .disabled(!(model?.canGoForward ?? false))
 
             Divider()
 
@@ -70,7 +56,7 @@ struct TabCommands: Commands {
     }
 
     private func run(_ action: @escaping (AppModel) async -> Void) {
-        guard let model else { return }
-        Task { await action(model) }
+        guard let m = ActiveModel.current else { return }
+        Task { await action(m) }
     }
 }
