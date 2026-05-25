@@ -1,15 +1,13 @@
 import SwiftUI
-import AppKit
 import MarpleKit
 
-/// Ulysses-style right inspector: a tabbed panel with three independent sections
-/// — 信息 / 目录 / 统计 — picked via a top icon strip. Only the active section
-/// renders, instead of stacking all three in one scroll.
+/// Ulysses-style right inspector: a tabbed panel with independent sections picked
+/// via a top icon strip. Only the active section renders.
 struct InspectorView: View {
     @Bindable var model: AppModel
     @State private var tab: Tab = .info
 
-    private enum Tab: Hashable { case info, outline, stats }
+    private enum Tab: Hashable { case info, outline, stats, notes }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,6 +19,7 @@ struct InspectorView: View {
                     case .info:    InfoSection(model: model)
                     case .outline: OutlineSection(model: model)
                     case .stats:   StatsSection(stats: model.openStats)
+                    case .notes:   NotesSection(model: model)
                     }
                 }
                 .padding(16)
@@ -34,6 +33,7 @@ struct InspectorView: View {
             tabButton(.info, "doc.text", "信息")
             tabButton(.outline, "list.bullet.indent", "目录")
             tabButton(.stats, "chart.bar", "统计")
+            tabButton(.notes, "text.bubble", "笔记")
         }
         .padding(.vertical, 6)
     }
@@ -242,10 +242,6 @@ private struct InfoSection: View {
                 .disabled(model.savingField != nil)
                 ThemesEditor(model: model, themes: e.themes)
                 RelationsView(model: model)
-                if e.type == .paperAnalysis || e.type == .bookOverview {
-                    CitationControl(entry: e).id(e.path)
-                }
-                PDFOpenGroup(model: model)
             } else {
                 Text("—").foregroundStyle(.secondary).font(.callout)
             }
@@ -385,6 +381,67 @@ private struct ThemeChip: View {
     }
 }
 
+private struct NotesSection: View {
+    @Bindable var model: AppModel
+    private var notes: [Entry] { model.openRelations?.annotations ?? [] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeader(notes.isEmpty ? "笔记" : "笔记 (\(notes.count))")
+            if notes.isEmpty {
+                Text("暂无关联笔记").foregroundStyle(.secondary).font(Typo.callout)
+            } else {
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    ForEach(notes) { note in
+                        NoteRow(entry: note) { Task { await model.open(note.path) } }
+                    }
+                }
+            }
+            Button { Task { await model.newAnnotationForOpenDoc() } } label: {
+                Text("添加...")
+                    .font(Typo.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, Space.s2)
+            }
+            .buttonStyle(.plain)
+            .disabled(model.openEntry == nil)
+        }
+    }
+}
+
+private struct NoteRow: View {
+    let entry: Entry
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.title ?? fallbackTitle)
+                    .font(Typo.callout)
+                    .lineLimit(1)
+                Text(entry.preview.isEmpty ? entry.path : entry.preview)
+                    .font(Typo.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, Space.s2)
+            .padding(.horizontal, Space.s2)
+        }
+        .buttonStyle(.plain)
+        .background {
+            RoundedRectangle(cornerRadius: 6).fill(.quaternary).opacity(hovering ? 1 : 0)
+        }
+        .onHover { hovering = $0 }
+    }
+
+    private var fallbackTitle: String {
+        (entry.path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+    }
+}
+
 private struct RelationsView: View {
     @Bindable var model: AppModel
     var body: some View {
@@ -398,7 +455,6 @@ private struct RelationsView: View {
                 }
                 relGroup("同作者", r.siblings)
                 relGroup("同主题相似", r.similar)
-                relGroup("我的批注", r.annotations)
             }
         }
     }
@@ -432,99 +488,5 @@ private struct RelationRow: View {
             RoundedRectangle(cornerRadius: 6).fill(.quaternary).opacity(hovering ? 1 : 0)
         }
         .onHover { hovering = $0 }
-    }
-}
-
-// MARK: - 引用
-
-/// One-tap citation copy mirroring the web ActionsRow: a format menu (seeded from
-/// the default in Settings, overridable per use), a live preview, and a copy
-/// button. Reset per document via `.id(entry.path)` at the call site.
-private struct CitationControl: View {
-    let entry: Entry
-    @AppStorage(SettingsKeys.citationFormat) private var defaultFormat = CitationFormat.inlineEN
-    @State private var override: CitationFormat?
-    @State private var copied = false
-
-    private var format: CitationFormat { override ?? defaultFormat }
-
-    var body: some View {
-        let preview = buildCitation(entry, format: format)
-        VStack(alignment: .leading, spacing: Space.s3) {
-            HStack {
-                SectionHeader("引用")
-                Spacer()
-                Menu {
-                    ForEach(CitationFormat.allCases, id: \.self) { f in
-                        Button {
-                            override = f; copied = false
-                        } label: {
-                            if f == format { Label(f.label, systemImage: "checkmark") }
-                            else { Text(f.label) }
-                        }
-                    }
-                } label: {
-                    Text(format.label)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .font(.caption)
-            }
-
-            if preview.isEmpty {
-                Text("缺少作者 / 年份等信息").font(.callout).foregroundStyle(.secondary)
-            } else {
-                Text(preview)
-                    .font(.callout).foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(preview, forType: .string)
-                copied = true
-                Task { try? await Task.sleep(nanoseconds: 1_500_000_000); copied = false }
-            } label: {
-                Label(copied ? "✓ 已复制" : "复制引用",
-                      systemImage: copied ? "checkmark" : "doc.on.doc")
-                    .font(.callout)
-            }
-            .buttonStyle(.bordered)
-            .disabled(preview.isEmpty)
-        }
-    }
-}
-
-// MARK: - PDF 打开
-
-private struct PDFOpenGroup: View {
-    @Bindable var model: AppModel
-    var body: some View {
-        if model.canOpenPDF || model.canOpenTranslation {
-            VStack(alignment: .leading, spacing: Space.s2) {
-                SectionHeader("原文")
-                HStack(spacing: Space.s2) {
-                    if model.canOpenPDF {
-                        Button {
-                            Task { await model.openPDF() }
-                        } label: {
-                            Label("阅读原文", systemImage: "doc.richtext")
-                                .font(.callout)
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    if model.canOpenTranslation {
-                        Button {
-                            Task { await model.openTranslation() }
-                        } label: {
-                            Label("阅读译本", systemImage: "doc.text")
-                                .font(.callout)
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-            }
-        }
     }
 }
