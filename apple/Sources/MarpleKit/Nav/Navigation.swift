@@ -55,31 +55,96 @@ public struct NavTab: Identifiable, Hashable, Sendable {
     public var location: NavLocation { history.current }
 }
 
+public struct TabGroup: Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public var name: String
+    public var tabIDs: [NavTab.ID]
+    public var isCollapsed: Bool
+
+    public init(id: UUID = UUID(), name: String, tabIDs: [NavTab.ID], isCollapsed: Bool = false) {
+        self.id = id
+        self.name = name
+        self.tabIDs = tabIDs
+        self.isCollapsed = isCollapsed
+    }
+}
+
+public struct WorkspaceGroupSnapshot: Codable, Sendable, Equatable {
+    public var name: String
+    public var tabIndices: [Int]
+    public var isCollapsed: Bool
+
+    public init(name: String, tabIndices: [Int], isCollapsed: Bool = false) {
+        self.name = name
+        self.tabIndices = tabIndices
+        self.isCollapsed = isCollapsed
+    }
+}
+
+public struct WorkspaceSpace: Identifiable, Sendable {
+    public let id: UUID
+    public var name: String
+    public var workspace: Workspace
+
+    public init(id: UUID = UUID(), name: String, workspace: Workspace) {
+        self.id = id
+        self.name = name
+        self.workspace = workspace
+    }
+}
+
 /// The ordered set of tabs plus which one is active. A pure value type — `AppModel`
 /// holds one and `@Observable` tracks mutations through the stored property.
 public struct Workspace: Sendable {
     public private(set) var tabs: [NavTab]
     public private(set) var activeID: NavTab.ID
+    public private(set) var tabGroups: [TabGroup]
 
     public init(initial: NavLocation) {
         let t = NavTab(location: initial)
         tabs = [t]
         activeID = t.id
+        tabGroups = []
     }
 
     /// Rebuild a workspace from persisted tab snapshots. Each tab starts with a
     /// fresh single-entry history at its saved location. Returns nil if empty.
-    public init?(restoring tabs: [(location: NavLocation, pinned: Bool)], activeIndex: Int) {
+    public init?(restoring tabs: [(location: NavLocation, pinned: Bool)], activeIndex: Int,
+                 groups: [WorkspaceGroupSnapshot] = []) {
         guard !tabs.isEmpty else { return nil }
         let built = tabs.map { NavTab(location: $0.location, pinned: $0.pinned) }
         self.tabs = built
         let idx = built.indices.contains(activeIndex) ? activeIndex : 0
         self.activeID = built[idx].id
+        self.tabGroups = groups.map { snapshot in
+            let ids = snapshot.tabIndices.compactMap { built.indices.contains($0) ? built[$0].id : nil }
+            return TabGroup(name: snapshot.name, tabIDs: ids, isCollapsed: snapshot.isCollapsed)
+        }
+        normalizeGroups()
     }
 
     public var activeTab: NavTab { tabs.first { $0.id == activeID } ?? tabs[0] }
 
+    public var groupSnapshots: [WorkspaceGroupSnapshot] {
+        let positions = Dictionary(uniqueKeysWithValues: tabs.enumerated().map { ($0.element.id, $0.offset) })
+        return tabGroups.compactMap { group in
+            let indices = group.tabIDs.compactMap { positions[$0] }
+            guard indices.count >= 2 else { return nil }
+            return WorkspaceGroupSnapshot(name: group.name, tabIndices: indices, isCollapsed: group.isCollapsed)
+        }
+    }
+
     private var activeIndex: Int { tabs.firstIndex { $0.id == activeID } ?? 0 }
+
+    public func group(containing tabID: NavTab.ID) -> TabGroup? {
+        tabGroups.first { $0.tabIDs.contains(tabID) }
+    }
+
+    public func tabs(in groupID: TabGroup.ID) -> [NavTab] {
+        guard let group = tabGroups.first(where: { $0.id == groupID }) else { return [] }
+        let byID = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
+        return group.tabIDs.compactMap { byID[$0] }
+    }
 
     // MARK: navigation on the active tab
 
@@ -107,7 +172,12 @@ public struct Workspace: Sendable {
         guard let i = tabs.firstIndex(where: { $0.id == id }) else { return }
         let wasActive = (id == activeID)
         tabs.remove(at: i)
-        guard !tabs.isEmpty else { return }
+        removeTabFromGroups(id)
+        normalizeGroups()
+        guard !tabs.isEmpty else {
+            tabGroups = []
+            return
+        }
         if wasActive {
             activeID = tabs[min(i, tabs.count - 1)].id
         }
@@ -133,6 +203,76 @@ public struct Workspace: Sendable {
         tabs[i].pinned.toggle()
     }
 
+    public mutating func groupTab(_ sourceID: NavTab.ID, onto targetID: NavTab.ID) {
+        guard sourceID != targetID, tabExists(sourceID), tabExists(targetID) else { return }
+        if let sourceGroup = group(containing: sourceID),
+           let targetGroup = group(containing: targetID),
+           sourceGroup.id == targetGroup.id {
+            return
+        }
+        if let targetGroup = group(containing: targetID) {
+            moveTab(sourceID, toGroup: targetGroup.id)
+            return
+        }
+        removeTabFromGroups(sourceID)
+        normalizeGroups()
+        moveTabInOrder(sourceID, after: targetID)
+        tabGroups.append(TabGroup(name: nextTabGroupName(), tabIDs: [targetID, sourceID]))
+        normalizeGroups()
+    }
+
+    public mutating func moveTab(_ tabID: NavTab.ID, toGroup groupID: TabGroup.ID) {
+        moveTab(tabID, toGroup: groupID, at: nil)
+    }
+
+    public mutating func moveTab(_ tabID: NavTab.ID, toGroup groupID: TabGroup.ID, at childIndex: Int?) {
+        guard tabExists(tabID), tabGroups.contains(where: { $0.id == groupID }) else { return }
+        let currentGroupID = group(containing: tabID)?.id
+        if currentGroupID != groupID {
+            removeTabFromGroups(tabID)
+            normalizeGroups()
+        }
+        guard let idx = tabGroups.firstIndex(where: { $0.id == groupID }) else { return }
+        var ids = tabGroups[idx].tabIDs.filter { $0 != tabID }
+        let referenceIDs = ids
+        let insertAt = min(max(childIndex ?? ids.count, 0), ids.count)
+        ids.insert(tabID, at: insertAt)
+        tabGroups[idx].tabIDs = ids
+        placeTabs(ids, atEarliestPositionOf: referenceIDs.isEmpty ? ids : referenceIDs)
+        normalizeGroups()
+    }
+
+    public mutating func moveTabToRoot(_ tabID: NavTab.ID, beforeTab targetID: NavTab.ID?) {
+        guard tabExists(tabID), targetID == nil || tabExists(targetID!) else { return }
+        removeTabFromGroups(tabID)
+        normalizeGroups()
+        moveTabInOrder(tabID, before: targetID)
+    }
+
+    public mutating func moveGroup(_ groupID: TabGroup.ID, beforeTab targetID: NavTab.ID?) {
+        guard let group = tabGroups.first(where: { $0.id == groupID }) else { return }
+        if let targetID, group.tabIDs.contains(targetID) { return }
+        let target = targetID.flatMap { self.group(containing: $0)?.tabIDs.first ?? $0 }
+        moveTabsInOrder(group.tabIDs, before: target)
+        normalizeGroups()
+    }
+
+    public mutating func moveGroup(_ sourceGroupID: TabGroup.ID, beforeGroup targetGroupID: TabGroup.ID) {
+        guard sourceGroupID != targetGroupID,
+              let target = tabGroups.first(where: { $0.id == targetGroupID })?.tabIDs.first else { return }
+        moveGroup(sourceGroupID, beforeTab: target)
+    }
+
+    public mutating func toggleGroupCollapsed(_ groupID: TabGroup.ID) {
+        guard let idx = tabGroups.firstIndex(where: { $0.id == groupID }) else { return }
+        tabGroups[idx].isCollapsed.toggle()
+    }
+
+    public mutating func setGroupCollapsed(_ groupID: TabGroup.ID, collapsed: Bool) {
+        guard let idx = tabGroups.firstIndex(where: { $0.id == groupID }) else { return }
+        tabGroups[idx].isCollapsed = collapsed
+    }
+
     /// Reorder the tabs to match `ids` (the order produced by a drag). `ids` must be
     /// a permutation of the current tab ids — anything else (incomplete / unknown /
     /// duplicate) is a no-op. The active tab is unchanged.
@@ -140,6 +280,7 @@ public struct Workspace: Sendable {
         guard ids.count == tabs.count, Set(ids) == Set(tabs.map(\.id)) else { return }
         let map = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
         tabs = ids.compactMap { map[$0] }
+        normalizeGroups()
     }
 
     /// Null out the current open path of any tab whose open file is no longer in
@@ -150,6 +291,79 @@ public struct Workspace: Sendable {
             if let p = loc.openPath, !validPaths.contains(p) {
                 tabs[i].history.replaceCurrent(with: NavLocation(pane: loc.pane, openPath: nil))
             }
+        }
+    }
+
+    private func tabExists(_ id: NavTab.ID) -> Bool {
+        tabs.contains { $0.id == id }
+    }
+
+    private func tabIDsInCurrentOrder(_ ids: Set<NavTab.ID>) -> [NavTab.ID] {
+        tabs.map(\.id).filter { ids.contains($0) }
+    }
+
+    private mutating func moveTabInOrder(_ tabID: NavTab.ID, after anchorID: NavTab.ID) {
+        guard let from = tabs.firstIndex(where: { $0.id == tabID }),
+              let anchor = tabs.firstIndex(where: { $0.id == anchorID }) else { return }
+        let tab = tabs.remove(at: from)
+        let anchorAfterRemoval = tabs.firstIndex(where: { $0.id == anchorID }) ?? max(0, anchor - 1)
+        tabs.insert(tab, at: min(anchorAfterRemoval + 1, tabs.count))
+    }
+
+    private mutating func moveTabInOrder(_ tabID: NavTab.ID, before targetID: NavTab.ID?) {
+        guard let from = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        let tab = tabs.remove(at: from)
+        let targetIndex = targetID.flatMap { target in tabs.firstIndex { $0.id == target } } ?? tabs.count
+        tabs.insert(tab, at: targetIndex)
+    }
+
+    private mutating func moveTabsInOrder(_ movingIDs: [NavTab.ID], before targetID: NavTab.ID?) {
+        let moving = Set(movingIDs)
+        let block = tabs.filter { moving.contains($0.id) }
+        guard !block.isEmpty else { return }
+        tabs.removeAll { moving.contains($0.id) }
+        let targetIndex = targetID.flatMap { target in tabs.firstIndex { $0.id == target } } ?? tabs.count
+        tabs.insert(contentsOf: block, at: targetIndex)
+    }
+
+    private mutating func placeTabs(_ ids: [NavTab.ID], atEarliestPositionOf referenceIDs: [NavTab.ID]) {
+        let moving = Set(ids)
+        let block = ids.compactMap { id in tabs.first { $0.id == id } }
+        guard !block.isEmpty else { return }
+        let referencePositions = referenceIDs.compactMap { id in tabs.firstIndex { $0.id == id } }
+        let insertion = referencePositions.min() ?? tabs.count
+        tabs.removeAll { moving.contains($0.id) }
+        tabs.insert(contentsOf: block, at: min(insertion, tabs.count))
+    }
+
+    private func nextTabGroupName() -> String {
+        let prefix = "标签组 "
+        let used = Set(tabGroups.compactMap { group -> Int? in
+            guard group.name.hasPrefix(prefix) else { return nil }
+            return Int(group.name.dropFirst(prefix.count))
+        })
+        var n = 1
+        while used.contains(n) { n += 1 }
+        return "\(prefix)\(n)"
+    }
+
+    private mutating func removeTabFromGroups(_ id: NavTab.ID) {
+        for i in tabGroups.indices {
+            tabGroups[i].tabIDs.removeAll { $0 == id }
+        }
+    }
+
+    private mutating func normalizeGroups() {
+        var seen: Set<NavTab.ID> = []
+        let orderedIDs = tabs.map(\.id)
+        for i in tabGroups.indices {
+            let wanted = Set(tabGroups[i].tabIDs)
+            tabGroups[i].tabIDs = orderedIDs.filter { wanted.contains($0) && seen.insert($0).inserted }
+        }
+        tabGroups.removeAll { $0.tabIDs.count < 2 }
+        let positions = Dictionary(uniqueKeysWithValues: orderedIDs.enumerated().map { ($0.element, $0.offset) })
+        tabGroups.sort {
+            (positions[$0.tabIDs[0]] ?? Int.max) < (positions[$1.tabIDs[0]] ?? Int.max)
         }
     }
 }

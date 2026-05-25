@@ -97,6 +97,30 @@ import Foundation
         #expect(ws.tabs[1].pinned)
     }
 
+    @Test func makeWorkspaceRestoresDefaultSpaceGroups() throws {
+        let s = PersistedState(
+            browsePane: .type(.paperAnalysis),
+            isBrowsing: false,
+            tabs: [PersistedTab(location: NavLocation(pane: .type(.paperAnalysis), openPath: "v/x.md"), pinned: false),
+                   PersistedTab(location: NavLocation(pane: .theme("X"), openPath: "v/a.md"), pinned: true),
+                   PersistedTab(location: NavLocation(pane: .trash), pinned: false)],
+            activeIndex: 1,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "grid",
+            currentSpace: PersistedWorkspaceSpace(groups: [
+                WorkspaceGroupSnapshot(name: "标签组 1", tabIndices: [0, 1], isCollapsed: true)
+            ]))
+        let data = try JSONEncoder().encode(s)
+        let restored = try JSONDecoder().decode(PersistedState.self, from: data)
+        let ws = try #require(restored.makeWorkspace())
+        let group = try #require(ws.tabGroups.first)
+        #expect(group.name == "标签组 1")
+        #expect(group.isCollapsed)
+        #expect(ws.tabs(in: group.id).map(\.location.openPath) == ["v/x.md", "v/a.md"])
+    }
+
     @Test func userDefaultsStoreRoundTrips() throws {
         let suite = "marple.test.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

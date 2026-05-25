@@ -10,6 +10,16 @@ public struct PersistedTab: Codable, Sendable, Equatable {
     }
 }
 
+public struct PersistedWorkspaceSpace: Codable, Sendable, Equatable {
+    public var name: String
+    public var groups: [WorkspaceGroupSnapshot]
+
+    public init(name: String = "默认 Space", groups: [WorkspaceGroupSnapshot] = []) {
+        self.name = name
+        self.groups = groups
+    }
+}
+
 /// A launch-to-launch snapshot of the user's place: the browse category + whether
 /// we're browsing vs reading, the open document tabs + the active one, plus the
 /// global browse controls. `browseMode` is a raw string so MarpleKit stays agnostic
@@ -23,19 +33,23 @@ public struct PersistedState: Codable, Sendable, Equatable {
     public var filterClauses: [FilterClause]
     public var filterMatch: FilterMatch
     public var browseMode: String
+    public var currentSpace: PersistedWorkspaceSpace?
 
     public init(browsePane: Pane, isBrowsing: Bool, tabs: [PersistedTab], activeIndex: Int,
                 sortClauses: [SortClause], filterClauses: [FilterClause],
-                filterMatch: FilterMatch, browseMode: String) {
+                filterMatch: FilterMatch, browseMode: String,
+                currentSpace: PersistedWorkspaceSpace? = nil) {
         self.browsePane = browsePane; self.isBrowsing = isBrowsing
         self.tabs = tabs; self.activeIndex = activeIndex
         self.sortClauses = sortClauses; self.filterClauses = filterClauses
         self.filterMatch = filterMatch; self.browseMode = browseMode
+        self.currentSpace = currentSpace
     }
 
     public func makeWorkspace() -> Workspace? {
         Workspace(restoring: tabs.map { (location: $0.location, pinned: $0.pinned) },
-                  activeIndex: activeIndex)
+                  activeIndex: activeIndex,
+                  groups: currentSpace?.groups ?? [])
     }
 }
 
