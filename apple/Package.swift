@@ -68,6 +68,7 @@ let package = Package(
         .testTarget(
             name: "MarpleKitTests",
             dependencies: [
+                "Marple",
                 "MarpleKit",
                 "MarpleEmbeddings",
                 .product(name: "GRDB", package: "GRDB.swift"),

@@ -47,7 +47,7 @@ public struct RenderStyle: Equatable {
     }
 
     var codeFont: NSFont {
-        NSFont.monospacedSystemFont(ofSize: size * 0.9, weight: .regular)
+        NSFont.monospacedSystemFont(ofSize: size * 0.92, weight: .regular)
     }
 
     var tableBodyFont: NSFont {
@@ -67,20 +67,27 @@ public struct RenderStyle: Equatable {
     }
 
     func headingFont(level: Int) -> NSFont {
-        let scale: CGFloat = [1.65, 1.35, 1.15, 1.0, 0.95, 0.9][min(level, 6) - 1]
-        return NSFont.systemFont(ofSize: size * scale, weight: .bold)
+        let clamped = min(level, 6) - 1
+        let scale: CGFloat = [1.8, 1.5, 1.25, 1.125, 1.0, 1.0][clamped]
+        let weight: NSFont.Weight = [.bold, .semibold, .medium, .medium, .regular, .regular][clamped]
+        return NSFont.systemFont(ofSize: size * scale, weight: weight)
     }
 
     // MARK: Colors
 
     var textColor: NSColor { .textColor }
     var linkColor: NSColor { .linkColor }
-    var codeBackgroundColor: NSColor { .textBackgroundColor.withAlphaComponent(0.5) }
+    var codeBackgroundColor: NSColor { .textColor.withAlphaComponent(0.035) }
     var quoteTextColor: NSColor { .secondaryLabelColor }
+    var separatorTextColor: NSColor { .tertiaryLabelColor }
     var tableBorderColor: NSColor { .separatorColor.withAlphaComponent(0.30) }
     var tableHeaderBorderColor: NSColor { .separatorColor.withAlphaComponent(0.7) }
     var tableHeaderBackgroundColor: NSColor { .textColor.withAlphaComponent(0.07) }
     var tableRowAlternateBackgroundColor: NSColor { .textColor.withAlphaComponent(0.035) }
+
+    func headingColor(level: Int) -> NSColor {
+        level >= 6 ? .secondaryLabelColor : textColor
+    }
 
     // MARK: Line spacing
 
@@ -92,29 +99,45 @@ public struct RenderStyle: Equatable {
     var bodyParagraphStyle: NSParagraphStyle {
         let ps = NSMutableParagraphStyle()
         ps.lineSpacing = lineSpacing
+        ps.paragraphSpacing = CGFloat(size * 0.95)
+        return ps
+    }
+
+    func headingParagraphStyle(level _: Int, followsHeading: Bool = false, followsContent: Bool = false) -> NSParagraphStyle {
+        let before: CGFloat = followsHeading ? 0 : (followsContent ? CGFloat(size * 0.25) : 0)
+        let after: CGFloat = CGFloat(size * 0.4)
+        let ps = NSMutableParagraphStyle()
+        ps.lineSpacing = lineSpacing
+        ps.paragraphSpacingBefore = before
+        ps.paragraphSpacing = after
         return ps
     }
 
     var codeParagraphStyle: NSParagraphStyle {
         let ps = NSMutableParagraphStyle()
-        ps.lineSpacing = lineSpacing
+        ps.lineSpacing = max(lineSpacing, CGFloat(size * 0.55))
         ps.headIndent = 16
         ps.firstLineHeadIndent = 16
+        ps.paragraphSpacingBefore = 24
+        ps.paragraphSpacing = 24
         return ps
     }
 
     func quoteParagraphStyle(depth: Int = 1) -> NSParagraphStyle {
         let ps = NSMutableParagraphStyle()
         ps.lineSpacing = lineSpacing
-        let indent = CGFloat(20 * depth)
+        let indent = CGFloat(28 * depth)
         ps.headIndent = indent
         ps.firstLineHeadIndent = indent
+        ps.paragraphSpacingBefore = 24
+        ps.paragraphSpacing = 24
         return ps
     }
 
     func listParagraphStyle(depth: Int = 1) -> NSParagraphStyle {
         let ps = NSMutableParagraphStyle()
         ps.lineSpacing = lineSpacing
+        ps.paragraphSpacing = CGFloat(size * 0.4)
         let indent = CGFloat(24 * depth)
         ps.headIndent = indent
         ps.firstLineHeadIndent = 0
@@ -126,6 +149,8 @@ public struct RenderStyle: Equatable {
         let ps = NSMutableParagraphStyle()
         ps.alignment = .center
         ps.lineSpacing = lineSpacing
+        ps.paragraphSpacingBefore = CGFloat(size * 0.95)
+        ps.paragraphSpacing = CGFloat(size * 0.95)
         return ps
     }
 }
@@ -146,6 +171,10 @@ public enum MarkdownRenderer {
 // MARK: - Render context (private)
 
 private final class RenderContext {
+    private enum PreviousBlock {
+        case heading, content
+    }
+
     let attributed = NSMutableAttributedString()
     let style: RenderStyle
     var headings: [HeadingAnchor] = []
@@ -156,11 +185,15 @@ private final class RenderContext {
     var traits: NSFontDescriptor.SymbolicTraits = []
     /// Active paragraph style for the current block.
     var ps: NSParagraphStyle
+    /// Active block text color, used for quotes and dim headings.
+    var activeTextColor: NSColor?
     /// Active link URL (non-nil when inside a Link element).
     var linkURL: String?
 
     var currentFont: NSFont {
-        let desc = baseFont.fontDescriptor.withSymbolicTraits(traits)
+        guard !traits.isEmpty else { return baseFont }
+        let combinedTraits = baseFont.fontDescriptor.symbolicTraits.union(traits)
+        let desc = baseFont.fontDescriptor.withSymbolicTraits(combinedTraits)
         return NSFont(descriptor: desc, size: baseFont.pointSize) ?? baseFont
     }
 
@@ -173,14 +206,21 @@ private final class RenderContext {
     // MARK: Top-level walk
 
     func walk(_ markup: Markup) {
-        for child in markup.children { visitBlock(child) }
+        var previousBlock: PreviousBlock?
+        for child in markup.children {
+            if let emittedBlock = visitBlock(child, previousBlock: previousBlock) {
+                previousBlock = emittedBlock
+            }
+        }
     }
 
     // MARK: Block visitors
 
-    private func visitBlock(_ markup: Markup) {
+    private func visitBlock(_ markup: Markup, previousBlock: PreviousBlock? = nil) -> PreviousBlock? {
         switch markup {
-        case let h as Heading:       visitHeading(h)
+        case let h as Heading:
+            visitHeading(h, previousBlock: previousBlock)
+            return .heading
         case let p as Paragraph:     visitParagraph(p)
         case let c as CodeBlock:     visitCodeBlock(c)
         case let q as BlockQuote:    visitBlockQuote(q)
@@ -191,15 +231,19 @@ private final class RenderContext {
         case let h as HTMLBlock:
             append(h.rawHTML, color: .tertiaryLabelColor)
             newlines(2)
-        default: break
+        default: return nil
         }
+        return .content
     }
 
-    private func visitHeading(_ heading: Heading) {
+    private func visitHeading(_ heading: Heading, previousBlock: PreviousBlock? = nil) {
         let start = attributed.length
         baseFont = style.headingFont(level: heading.level)
         traits = []
-        ps = style.bodyParagraphStyle
+        ps = style.headingParagraphStyle(level: heading.level,
+                                         followsHeading: previousBlock == .heading,
+                                         followsContent: previousBlock == .content)
+        activeTextColor = style.headingColor(level: heading.level)
         walkInlines(heading.children)
         let text = plainText(of: heading)
         headings.append(HeadingAnchor(
@@ -207,27 +251,30 @@ private final class RenderContext {
             text: text,
             range: NSRange(location: start, length: attributed.length - start)
         ))
-        newlines(2)
+        newlines(1)
         baseFont = style.bodyFont
         traits = []
         ps = style.bodyParagraphStyle
+        activeTextColor = nil
     }
 
     private func visitParagraph(_ paragraph: Paragraph) {
         ps = style.bodyParagraphStyle
         walkInlines(paragraph.children)
-        newlines(2)
+        newlines(1)
     }
 
     private func visitCodeBlock(_ block: CodeBlock) {
         ps = style.codeParagraphStyle
         append(block.code, font: style.codeFont, bg: style.codeBackgroundColor)
-        newlines(2)
+        newlines(1)
         ps = style.bodyParagraphStyle
     }
 
     private func visitBlockQuote(_ quote: BlockQuote, depth: Int = 1) {
+        let previousTextColor = activeTextColor
         ps = style.quoteParagraphStyle(depth: depth)
+        activeTextColor = style.quoteTextColor
         for child in quote.children {
             if let p = child as? Paragraph {
                 walkInlines(p.children)
@@ -235,21 +282,20 @@ private final class RenderContext {
             } else if let nested = child as? BlockQuote {
                 visitBlockQuote(nested, depth: depth + 1)
             } else {
-                visitBlock(child)
+                _ = visitBlock(child)
             }
         }
-        newlines(1)
         ps = style.bodyParagraphStyle
+        activeTextColor = previousTextColor
     }
 
     private func visitUnorderedList(_ list: UnorderedList, depth: Int = 1) {
         ps = style.listParagraphStyle(depth: depth)
         for item in list.listItems {
-            append("\u{2022} ", font: style.bodyFont)
+            append("· ", font: style.bodyFont, color: style.quoteTextColor)
             walkListItemChildren(item.children, depth: depth)
             newlines(1)
         }
-        newlines(1)
         ps = style.bodyParagraphStyle
     }
 
@@ -257,12 +303,11 @@ private final class RenderContext {
         ps = style.listParagraphStyle(depth: depth)
         var n = list.startIndex
         for item in list.listItems {
-            append("\(n). ", font: style.bodyFont)
+            append("\(n). ", font: style.codeFont, color: style.quoteTextColor)
             walkListItemChildren(item.children, depth: depth)
             newlines(1)
             n += 1
         }
-        newlines(1)
         ps = style.bodyParagraphStyle
     }
 
@@ -280,9 +325,13 @@ private final class RenderContext {
 
     private func visitThematicBreak() {
         ps = style.centerParagraphStyle
-        append(String(repeating: "\u{2500}", count: 24), color: .tertiaryLabelColor)
-        newlines(2)
+        append("· · ·", color: style.separatorTextColor, kern: CGFloat(sizeDependentKern()))
+        newlines(1)
         ps = style.bodyParagraphStyle
+    }
+
+    private func sizeDependentKern() -> Double {
+        style.size * 0.5
     }
 
     private func visitTable(_ table: Table) {
@@ -486,7 +535,7 @@ private final class RenderContext {
     private func visitInline(_ markup: Markup) {
         switch markup {
         case let t as Text:
-            let color: NSColor = linkURL != nil ? style.linkColor : style.textColor
+            let color: NSColor = linkURL != nil ? style.linkColor : (activeTextColor ?? style.textColor)
             append(t.string, font: currentFont, color: color, link: linkURL)
 
         case let strong as Strong:
@@ -535,13 +584,14 @@ private final class RenderContext {
     // MARK: Append helpers
 
     private func append(_ text: String, font: NSFont? = nil, color: NSColor? = nil,
-                        bg: NSColor? = nil, link: String? = nil) {
+                        bg: NSColor? = nil, link: String? = nil, kern: CGFloat? = nil) {
         var attrs: [NSAttributedString.Key: Any] = [
             .font: font ?? currentFont,
-            .foregroundColor: color ?? style.textColor,
+            .foregroundColor: color ?? activeTextColor ?? style.textColor,
             .paragraphStyle: ps,
         ]
         if let bg { attrs[.backgroundColor] = bg }
+        if let kern { attrs[.kern] = kern }
         if let url = link {
             attrs[.link] = url
             attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
