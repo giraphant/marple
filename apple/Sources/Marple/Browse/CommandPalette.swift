@@ -18,6 +18,7 @@ struct PaletteResult: Sendable {
 struct CommandPalette: View {
     @Bindable var model: AppModel
     let onClose: () -> Void
+    @Environment(\.ui) private var ui
 
     @State private var query = ""
     @State private var mode: SearchMode = .fast
@@ -89,7 +90,7 @@ struct CommandPalette: View {
 
             TextField(mode.placeholder, text: $query)
                 .textFieldStyle(.plain)
-                .font(Typo.title3)
+                .font(ui.title)
                 .focused($fieldFocused)
                 .onSubmit { openSelected() }
 
@@ -114,7 +115,7 @@ struct CommandPalette: View {
                 let disabled = (m == .deep && !model.semanticAvailable)   // 深度 needs the vector index
                 Button { if !disabled { mode = m } } label: {
                     Text(m.label)
-                        .font(Typo.caption)
+                        .font(ui.meta)
                         .padding(.horizontal, Space.s4)
                         .padding(.vertical, Space.s2)
                         .background(mode == m ? Color.accentColor : Color.clear)
@@ -178,7 +179,7 @@ struct CommandPalette: View {
                     model.paletteViewAll(type: section.type, query: query)
                 } label: {
                     Text("在「\(section.type.label)」中查看全部 \(section.total) 条 →")
-                        .font(Typo.caption)
+                        .font(ui.meta)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, Space.s5)
@@ -189,8 +190,8 @@ struct CommandPalette: View {
         } header: {
             HStack(spacing: Space.s3) {
                 TypeBadge(type: section.type, size: 16)
-                Text(section.type.label).font(Typo.caption).foregroundStyle(.primary)
-                Text("(\(section.total))").font(Typo.caption2).foregroundStyle(.secondary)
+                Text(section.type.label).font(ui.meta).foregroundStyle(.primary)
+                Text("(\(section.total))").font(ui.caption).foregroundStyle(.secondary)
                     .monospacedDigit()
                 Spacer()
             }
@@ -207,11 +208,11 @@ struct CommandPalette: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: Space.s3) {
                     Text(entry.title ?? fileStem(entry.path))
-                        .font(Typo.body)
+                        .font(ui.body)
                         .lineLimit(1)
                     if let badge = searchSourceBadge(sourceByPath[entry.path]) {
                         Text(badge)
-                            .font(Typo.caption2)
+                            .font(ui.caption)
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.accentColor.opacity(0.18),
                                         in: RoundedRectangle(cornerRadius: 4))
@@ -219,7 +220,7 @@ struct CommandPalette: View {
                     }
                 }
                 Text(metaLine(entry))
-                    .font(Typo.caption)
+                    .font(ui.meta)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -236,7 +237,7 @@ struct CommandPalette: View {
 
     private func placeholder(_ text: String) -> some View {
         Text(text)
-            .font(Typo.callout)
+            .font(ui.body)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

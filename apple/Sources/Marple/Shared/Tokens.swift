@@ -20,19 +20,45 @@ enum Space {
     static let s10: CGFloat = 40
 }
 
-/// Type roles = size + weight (the skeleton). Face stays system until theming.
-/// Namespaced under `Typo` so it never shadows SwiftUI's own `Font.title` etc.
-enum Typo {
-    static let display     = Font.system(size: 28, weight: .semibold)
-    static let title       = Font.system(size: 20, weight: .semibold)
-    static let title3      = Font.system(size: 17, weight: .semibold)
-    static let headline    = Font.system(size: 15, weight: .semibold)
-    static let readingBody = Font.system(size: 17.5, weight: .regular)
-    static let body        = Font.system(size: 15, weight: .regular)
-    static let callout     = Font.system(size: 13, weight: .regular)
-    static let subheadline = Font.system(size: 13, weight: .regular)
-    static let caption     = Font.system(size: 11, weight: .medium)
-    static let caption2    = Font.system(size: 10.5, weight: .medium)
+/// UI type scale (design system v1 — "TYPE — UI (SANS)"). The `init(scale:)`
+/// multiplier turns these base (标准) sizes into real point sizes, so the 界面字号
+/// setting scales the whole chrome deterministically — Dynamic Type can't be
+/// relied on for native macOS controls. Inject via `.environment(\.ui, …)` and
+/// read with `@Environment(\.ui) private var ui`.
+struct ScaledTypography: Equatable {
+    var title: Font        // 17 / semibold — search field, pane titles
+    var headline: Font     // 14.5 / semibold — item titles
+    var body: Font         // 14 / regular — labels, previews, links
+    var meta: Font         // 11 / medium — author · year
+    var caption: Font      // 10 / medium — overline section heads
+    var metaTracking: CGFloat  // 0.04em at the meta size
+    var bodyLeading: CGFloat   // gentle line spacing for stacked body text
+    var bodySize: CGFloat      // body point size, for line-height math (row height)
+
+    init(scale: CGFloat) {
+        title    = .system(size: 17 * scale, weight: .semibold)
+        headline = .system(size: 14.5 * scale, weight: .semibold)
+        body     = .system(size: 14 * scale, weight: .regular)
+        meta     = .system(size: 11 * scale, weight: .medium)
+        caption  = .system(size: 10 * scale, weight: .medium)
+        metaTracking = 0.04 * 11 * scale
+        bodyLeading = 3 * scale
+        bodySize = 14 * scale
+    }
+
+    static let base = ScaledTypography(scale: 1)
+}
+
+private struct UITypographyKey: EnvironmentKey {
+    static let defaultValue = ScaledTypography.base
+}
+
+extension EnvironmentValues {
+    /// Scaled UI type scale. Read as `@Environment(\.ui) private var ui`.
+    var ui: ScaledTypography {
+        get { self[UITypographyKey.self] }
+        set { self[UITypographyKey.self] = newValue }
+    }
 }
 
 /// Reading-column metrics (spec §5).

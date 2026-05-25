@@ -64,7 +64,14 @@ enum CommandPalettePresenter {
         // all). Maccy/CotEditor present their command panels standalone for exactly
         // this reason.
         let panel = CommandPalettePanel()
+        // The panel is a standalone window, so it doesn't inherit RootView's
+        // Dynamic Type override — mirror the 界面字号 setting here so the palette
+        // scales with the rest of the UI.
+        let size = UITextSize(rawValue: UserDefaults.standard.string(forKey: SettingsKeys.uiTextSize) ?? "")
+            ?? .standard
         let root = CommandPalette(model: model) { [weak panel] in panel?.close() }
+            .environment(\.ui, ScaledTypography(scale: size.scale))
+            .dynamicTypeSize(size.dynamicTypeSize)
         panel.contentView = NSHostingView(rootView: root)
         panel.center()
         NSApp.activate(ignoringOtherApps: true)

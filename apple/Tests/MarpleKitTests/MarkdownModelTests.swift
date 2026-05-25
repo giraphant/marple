@@ -28,4 +28,30 @@ import Testing
         let blocks = MarkdownModel.blocks(from: "```swift\nlet x = 1\n```")
         #expect(blocks == [.codeBlock(language: "swift", code: "let x = 1\n")])
     }
+
+    @Test func testStripsLeadingKVLabelBlock() {
+        let body = """
+        # 标题
+
+        **英文原标题**：The Title
+        **作者**：Someone
+
+        ## 正文
+
+        Real content.
+        """
+        #expect(MarkdownModel.blocks(from: body) == [
+            .heading(level: 1, [.text("标题")]),
+            .heading(level: 2, [.text("正文")]),
+            .paragraph([.text("Real content.")]),
+        ])
+    }
+
+    @Test func testKeepsKVShapedLineAfterContent() {
+        let body = "Intro prose.\n\n**Note**：kept because it follows real content."
+        #expect(MarkdownModel.blocks(from: body) == [
+            .paragraph([.text("Intro prose.")]),
+            .paragraph([.text("Note：kept because it follows real content.")]),
+        ])
+    }
 }

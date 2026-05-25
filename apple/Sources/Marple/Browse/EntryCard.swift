@@ -2,9 +2,11 @@ import SwiftUI
 import MarpleKit
 
 /// One masonry browse card: meta · title · preview · themes. Uses the layout
-/// tokens (Space / Typo); colors ride system semantic colors (spec §1.3).
+/// tokens (Space) + the scaled UI type scale (\.ui); colors ride system semantic
+/// colors (spec §1.3).
 struct EntryCard: View {
     let entry: Entry
+    @Environment(\.ui) private var ui
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s3) {
@@ -20,24 +22,25 @@ struct EntryCard: View {
                         }
                     }
                 }
-                .font(Typo.caption)
+                .font(ui.meta)
+                .tracking(ui.metaTracking)
                 .foregroundStyle(.secondary)
             }
 
             Text(entry.title ?? fallbackTitle)
-                .font(Typo.headline)
+                .font(ui.headline)
                 .lineLimit(2)
 
             if !entry.preview.isEmpty {
                 Text(entry.preview)
-                    .font(Typo.subheadline)
+                    .font(ui.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(12)
             }
 
             if !entry.themes.isEmpty {
                 Text(entry.themes.prefix(4).joined(separator: " · "))
-                    .font(Typo.caption2)
+                    .font(ui.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }

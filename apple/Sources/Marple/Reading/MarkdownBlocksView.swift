@@ -98,12 +98,15 @@ struct BlockView: View {
             TableView(headers: headers, rows: rows)
         }
     }
+    /// Headings share the chosen reading face (so a serif body doesn't leave the
+    /// titles in system sans). Sizes follow a display/title/title3/headline scale;
+    /// weight is semibold across the board.
     func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: return Typo.display
-        case 2: return Typo.title
-        case 3: return Typo.title3
-        default: return Typo.headline
+        case 1: return readingFont.font(size: 28, weight: .semibold)
+        case 2: return readingFont.font(size: 20, weight: .semibold)
+        case 3: return readingFont.font(size: 17, weight: .semibold)
+        default: return readingFont.font(size: 15, weight: .semibold)
         }
     }
 }
@@ -112,6 +115,7 @@ private struct TableView: View {
     let headers: [[InlineToken]]
     let rows: [[[InlineToken]]]
     @Environment(\.readingFont) private var readingFont
+    @Environment(\.ui) private var ui
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -119,7 +123,7 @@ private struct TableView: View {
                 GridRow {
                     ForEach(Array(headers.enumerated()), id: \.offset) { _, cellTokens in
                         Text(attributedInline(cellTokens))
-                            .font(Typo.caption)
+                            .font(ui.caption)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, Space.s5)
                             .padding(.vertical, Space.s4)

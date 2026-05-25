@@ -51,7 +51,10 @@ let package = Package(
                 "MarpleKit",
                 "MarpleEmbeddings",
                 .product(name: "SwiftUILazyContainer", package: "SwiftUILazyContainer"),
-            ]
+            ],
+            // Bundled reading fonts — there's no Info.plist (run via `swift run`),
+            // so these get registered with CoreText at launch (see FontRegistration).
+            resources: [.copy("Resources/Fonts")]
         ),
         // Standalone semantic-search CLI (build/query the vector index without the
         // GUI). Run from the package root so MLX finds default.metallib.

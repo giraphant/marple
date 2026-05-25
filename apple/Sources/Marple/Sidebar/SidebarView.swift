@@ -14,6 +14,7 @@ private enum SidebarItem: Hashable {
 /// wrapping a List) is what renders with correct sidebar insets.
 struct SidebarView: View {
     @Bindable var model: AppModel
+    @Environment(\.ui) private var ui
 
     private var selection: Binding<SidebarItem?> {
         Binding(
@@ -30,20 +31,14 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: selection) {
-            Section("物件") {
+            Section {
                 ForEach(EntryType.modeled, id: \.self) { t in
                     categoryRow(t.label, icon(for: t), model.counts[t] ?? 0)
                         .tag(SidebarItem.pane(.type(t)))
                 }
-            }
-            Section("视图") {
-                categoryRow("主题", "tag", model.themeIndex.count)
-                    .tag(SidebarItem.pane(.themesIndex))
-                categoryRow("回收站", "trash", model.trashItems.count)
-                    .tag(SidebarItem.pane(.trash))
-            }
+            } header: { Text("物件").font(ui.caption) }
             if !model.tabs.isEmpty {
-                Section("标签") {
+                Section {
                     ForEach(model.tabs) { tab in
                         tabRow(tab).tag(SidebarItem.tab(tab.id))
                     }
@@ -52,19 +47,10 @@ struct SidebarView: View {
                         ids.move(fromOffsets: from, toOffset: to)
                         model.setTabOrder(ids)
                     }
-                }
+                } header: { Text("标签").font(ui.caption) }
             }
         }
         .listStyle(.sidebar)
-        .navigationTitle("Marple")
-        .safeAreaInset(edge: .bottom) {
-            Button { Task { await model.newIdeaNote() } } label: {
-                Label("新建笔记", systemImage: "square.and.pencil")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderless)
-            .padding(8)
-        }
     }
 
     private func categoryRow(_ label: String, _ icon: String, _ count: Int) -> some View {
@@ -75,6 +61,7 @@ struct SidebarView: View {
                 Text("\(count)").foregroundStyle(.secondary).monospacedDigit()
             }
         } icon: { Image(systemName: icon) }
+        .font(ui.body)
     }
 
     private func tabRow(_ tab: NavTab) -> some View {
@@ -89,6 +76,7 @@ struct SidebarView: View {
         } icon: {
             Image(systemName: model.tabIsDoc(tab) ? "doc.text" : "list.bullet")
         }
+        .font(ui.body)
         .contextMenu {
             Button(tab.pinned ? "取消固定" : "固定标签") { model.togglePin(tab.id) }
             Divider()
