@@ -80,6 +80,18 @@ final class AppModel {
     // Inspector → reader scroll channel; an outline tap sets this, DocView observes.
     var scrollTarget: Int?
 
+    /// Right inspector visibility. Lives here (not as view @State) so the AppKit
+    /// toolbar's far-right toggle can drive it while SwiftUI's `.inspector` observes.
+    var inspectorVisible = true
+
+    /// Transient confirmation shown briefly over the reader (e.g. "已复制引用"), since
+    /// a copy/placeholder action otherwise gives no visible signal. DocView renders it.
+    struct Toast: Equatable { let id = UUID(); var text: String; var symbol: String }
+    var toast: Toast?
+    func flash(_ text: String, symbol: String = "checkmark.circle.fill") {
+        toast = Toast(text: text, symbol: symbol)
+    }
+
     // Metadata write state.
     private(set) var savingField: String?
     var writeError: String?

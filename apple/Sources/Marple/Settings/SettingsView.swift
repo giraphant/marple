@@ -11,8 +11,8 @@ struct SettingsView: View {
                 .tabItem { Label("外观", systemImage: "paintbrush") }
             ReadingSettings()
                 .tabItem { Label("阅读", systemImage: "textformat") }
-            CitationSettings()
-                .tabItem { Label("引用", systemImage: "quote.bubble") }
+            ToolbarSettings()
+                .tabItem { Label("工具栏", systemImage: "hand.tap") }
         }
         .frame(width: 480, height: 340)
     }
@@ -48,7 +48,7 @@ private struct ReadingSettings: View {
                 Picker("字体", selection: $family) {
                     ForEach(ReadingFontFamily.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
 
                 Picker("字号", selection: $size) {
                     ForEach(ReadingDefaults.fontSizeOptions, id: \.self) {
@@ -96,7 +96,7 @@ private struct EditorPicker: View {
                     let active = preset.app == value
                     Button(preset.label) { value = preset.app }
                         .buttonStyle(.plain)
-                        .font(Typo.callout)
+                        .font(Typo.body)
                         .padding(.horizontal, Space.s4).padding(.vertical, Space.s2)
                         .background(active ? Color.accentColor.opacity(0.15) : Color(.quaternaryLabelColor).opacity(0.4),
                                     in: RoundedRectangle(cornerRadius: 6))
@@ -109,13 +109,25 @@ private struct EditorPicker: View {
     }
 }
 
-// MARK: - 引用
+// MARK: - 工具栏
 
-private struct CitationSettings: View {
+private struct ToolbarSettings: View {
     @AppStorage(SettingsKeys.citationFormat) private var format = CitationFormat.inlineEN
+    @AppStorage(SettingsKeys.citationClickAction) private var citationClick = CitationClickAction.copyDefault
+    @AppStorage(SettingsKeys.originalClickAction) private var originalClick = OriginalClickAction.openOriginal
 
     var body: some View {
         Form {
+            Section("按钮点击行为") {
+                Picker("引用", selection: $citationClick) {
+                    ForEach(CitationClickAction.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                Picker("原文", selection: $originalClick) {
+                    ForEach(OriginalClickAction.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                Text("右键始终弹出完整菜单。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("默认引用格式") {
                 Picker("格式", selection: $format) {
                     ForEach(CitationFormat.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -124,8 +136,6 @@ private struct CitationSettings: View {
                 Text("示例：\(format.example)")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Text("阅读时在右侧检查器「信息」区可一键复制；那里也能临时切换格式。")
-                .font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
     }
