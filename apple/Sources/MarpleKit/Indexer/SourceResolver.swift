@@ -32,8 +32,9 @@ public func bookSlug(_ rel: String) -> String? {
 }
 
 // MARK: - pdfSlug
-// Mirrors indexer.rs pdf_slug derivation (:158-162):
-// "paper-analysis" → fileStem; "book-overview" → bookSlug(rel); else nil.
+// PDF source slug derivation:
+// paper-analysis → fileStem; book-overview → bookSlug(rel);
+// chapter-summary → bookSlug(rel)-fileStem to avoid cross-book chapter-name collisions.
 
 public func pdfSlug(type: String, rel: String, fileStem: String) -> String? {
     switch type {
@@ -41,6 +42,8 @@ public func pdfSlug(type: String, rel: String, fileStem: String) -> String? {
         return fileStem
     case "book-overview":
         return bookSlug(rel)
+    case "chapter-summary":
+        return bookSlug(rel).map { "\($0)-\(fileStem)" }
     default:
         return nil
     }

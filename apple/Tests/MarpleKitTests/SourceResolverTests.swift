@@ -45,10 +45,14 @@ struct SourceResolverTests {
         #expect(pdfSlug(type: "book-overview", rel: "vault/papers/overview.md", fileStem: "overview") == nil)
     }
 
+    @Test("pdfSlug: chapter-summary → bookSlug-fileStem")
+    func pdfSlugChapterSummary() {
+        #expect(pdfSlug(type: "chapter-summary", rel: "vault/books/x/ch1.md", fileStem: "ch1") == "x-ch1")
+    }
+
     @Test("pdfSlug: other type → nil")
     func pdfSlugOtherType() {
         #expect(pdfSlug(type: "note", rel: "vault/notes/foo.md", fileStem: "foo") == nil)
-        #expect(pdfSlug(type: "chapter-summary", rel: "vault/books/x/ch1.md", fileStem: "ch1") == nil)
         #expect(pdfSlug(type: "topic-synthesis", rel: "vault/topics/x.md", fileStem: "x") == nil)
     }
 

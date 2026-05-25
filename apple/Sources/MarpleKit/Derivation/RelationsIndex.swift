@@ -28,22 +28,46 @@ public func buildAuthorIndex(_ entries: [Entry]) -> [String: [Entry]] {
     return idx
 }
 
+public func annotationAnchor(for entry: Entry, in entries: [Entry]) -> Entry {
+    let overviewBySlug = bookOverviewBySlug(entries)
+    return annotationAnchor(for: entry, overviewBySlug: overviewBySlug)
+}
+
 /// target path → note entries annotating it.
 public func buildAnnotationIndex(_ entries: [Entry]) -> [String: [Entry]] {
     var idx: [String: [Entry]] = [:]
+    let byPath = Dictionary(uniqueKeysWithValues: entries.map { ($0.path, $0) })
+    let overviewBySlug = bookOverviewBySlug(entries)
     for e in entries where e.type == .note {
         if let target = e.annotates, !target.isEmpty {
-            idx[target, default: []].append(e)
+            let anchor = byPath[target].map { annotationAnchor(for: $0, overviewBySlug: overviewBySlug).path } ?? target
+            idx[anchor, default: []].append(e)
         }
     }
     return idx
+}
+
+private func bookOverviewBySlug(_ entries: [Entry]) -> [String: Entry] {
+    var out: [String: Entry] = [:]
+    for e in entries where e.type == .bookOverview {
+        if let slug = bookSlug(e.path), out[slug] == nil { out[slug] = e }
+    }
+    return out
+}
+
+private func annotationAnchor(for entry: Entry, overviewBySlug: [String: Entry]) -> Entry {
+    if entry.type == .chapterSummary {
+        let slug = entry.book ?? bookSlug(entry.path)
+        if let slug, let overview = overviewBySlug[slug] { return overview }
+    }
+    return entry
 }
 
 public struct Relations: Equatable, Sendable {
     public var works: [Entry] = []          // author-profile: all works by this author
     public var siblings: [Entry] = []       // paper/book: other works by same author(s)
     public var similar: [Entry] = []        // same-type entries sharing ≥2 themes (cap 6)
-    public var annotations: [Entry] = []    // notes whose `annotates` == this path
+    public var annotations: [Entry] = []    // notes keyed by this entry's annotation anchor
     public var authorProfile: Entry?        // paper/book: matching author-profile entry
     public init() {}
 }
@@ -55,7 +79,8 @@ public func relations(for entry: Entry, in entries: [Entry],
                       authorIndex: [String: [Entry]],
                       annotationIndex: [String: [Entry]]) -> Relations {
     var out = Relations()
-    out.annotations = (annotationIndex[entry.path] ?? []).sorted(by: byRatingDesc)
+    let anchor = annotationAnchor(for: entry, in: entries)
+    out.annotations = (annotationIndex[anchor.path] ?? []).sorted(by: byRatingDesc)
 
     if entry.type == .authorProfile {
         let key = (entry.title ?? "").lowercased().trimmingCharacters(in: .whitespaces)
