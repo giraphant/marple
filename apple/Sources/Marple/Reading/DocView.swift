@@ -39,6 +39,21 @@ struct DocView: View {
                 }
             }
         }
+        .overlay(alignment: .top) { toastOverlay }
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.toast)
+    }
+
+    @ViewBuilder private var toastOverlay: some View {
+        if let toast = model.toast {
+            ToastBanner(text: toast.text, symbol: toast.symbol)
+                .id(toast.id)
+                .padding(.top, Space.s7)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .task(id: toast.id) {
+                    try? await Task.sleep(for: .seconds(1.6))
+                    if model.toast?.id == toast.id { model.toast = nil }
+                }
+        }
     }
 
     /// Vertical rhythm between blocks (spec §5): more air *before* a heading than
@@ -54,5 +69,24 @@ struct DocView: View {
     private func isHeading(_ block: RenderBlock) -> Bool {
         if case .heading = block { return true }
         return false
+    }
+}
+
+/// Transient confirmation banner (e.g. 已复制引用), floated near the reader's top.
+private struct ToastBanner: View {
+    let text: String
+    let symbol: String
+    @Environment(\.ui) private var ui
+
+    var body: some View {
+        HStack(spacing: Space.s2) {
+            Image(systemName: symbol).foregroundStyle(.green)
+            Text(text).font(ui.body)
+        }
+        .padding(.horizontal, Space.s5)
+        .padding(.vertical, Space.s3)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.separator.opacity(0.4), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.14), radius: 8, y: 3)
     }
 }

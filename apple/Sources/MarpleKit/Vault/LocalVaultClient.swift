@@ -63,6 +63,38 @@ public struct LocalVaultClient: VaultClient {
         #endif
     }
 
+    // MARK: PDFs (open directly via NSWorkspace — no backend)
+
+    private func translatedPDFURL(_ slug: String) -> URL {
+        absURL("processing/translations/\(slug)-zh.pdf")
+    }
+
+    public func hasTranslatedPDF(slug: String) -> Bool {
+        !slug.isEmpty && FileManager.default.fileExists(atPath: translatedPDFURL(slug).path)
+    }
+
+    public func openSourcePDF(slug: String) async throws {
+        // The actual file may differ from the slug (the indexer matches fuzzily),
+        // so resolve the same way `has_pdf` was computed.
+        let slugs = loadSourceSlugs(sourcesDir: absURL("sources").path)
+        let stem = slugs.contains(slug) ? slug : fuzzyPickSource(slug, slugs)
+        guard let stem else { throw VaultError.notFound("sources/\(slug).pdf") }
+        let url = absURL("sources/\(stem).pdf")
+        #if canImport(AppKit)
+        _ = await MainActor.run { NSWorkspace.shared.open(url) }
+        #endif
+    }
+
+    public func openTranslatedPDF(slug: String) async throws {
+        let url = translatedPDFURL(slug)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw VaultError.notFound(url.lastPathComponent)
+        }
+        #if canImport(AppKit)
+        _ = await MainActor.run { NSWorkspace.shared.open(url) }
+        #endif
+    }
+
     // MARK: trash (file moves under vault/notes/.trash, name = "{base}.{ts}.md")
 
     public func moveToTrash(path: String) async throws -> String {

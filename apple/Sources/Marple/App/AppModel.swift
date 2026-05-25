@@ -80,6 +80,18 @@ final class AppModel {
     // Inspector → reader scroll channel; an outline tap sets this, DocView observes.
     var scrollTarget: Int?
 
+    /// Right inspector visibility. Lives here (not as view @State) so the AppKit
+    /// toolbar's far-right toggle can drive it while SwiftUI's `.inspector` observes.
+    var inspectorVisible = true
+
+    /// Transient confirmation shown briefly over the reader (e.g. "已复制引用"), since
+    /// a copy/placeholder action otherwise gives no visible signal. DocView renders it.
+    struct Toast: Equatable { let id = UUID(); var text: String; var symbol: String }
+    var toast: Toast?
+    func flash(_ text: String, symbol: String = "checkmark.circle.fill") {
+        toast = Toast(text: text, symbol: symbol)
+    }
+
     // Metadata write state.
     private(set) var savingField: String?
     var writeError: String?
@@ -479,6 +491,36 @@ final class AppModel {
             status = "open-in-editor failed: \(error)"
             print("[marple] openInEditor FAILED \(p): \(error)")
         }
+    }
+
+    // MARK: source PDF (打开原文 / 译本)
+
+    /// `pdf_slug` for the open doc, derived the way the indexer does (paper → file
+    /// stem, book → book slug). The actual PDF file is resolved in the client.
+    private var openPDFSlug: String? {
+        guard let e = openEntry else { return nil }
+        let stem = URL(fileURLWithPath: e.path).deletingPathExtension().lastPathComponent
+        return pdfSlug(type: e.type.rawValue, rel: e.path, fileStem: stem)
+    }
+
+    /// Whether the open doc has a source PDF (gates 阅读原文).
+    var openHasPDF: Bool { openEntry?.hasPDF ?? false }
+    /// Whether the open doc has a translated PDF (gates 打开译本).
+    var openHasTranslation: Bool {
+        guard let slug = openPDFSlug else { return false }
+        return client.hasTranslatedPDF(slug: slug)
+    }
+
+    func openOriginalPDF() async {
+        guard let slug = openPDFSlug else { return }
+        do { try await client.openSourcePDF(slug: slug) }
+        catch { status = "打开原文失败: \(error)"; print("[marple] open pdf FAILED \(slug): \(error)") }
+    }
+
+    func openTranslatedPDF() async {
+        guard let slug = openPDFSlug else { return }
+        do { try await client.openTranslatedPDF(slug: slug) }
+        catch { status = "打开译本失败: \(error)"; print("[marple] open translation FAILED \(slug): \(error)") }
     }
 
     // MARK: note creation

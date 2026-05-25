@@ -34,6 +34,12 @@ public protocol VaultClient: Sendable {
     func entryText(path: String) async throws -> String
     func search(_ query: SearchQuery) async throws -> [SearchHit]
     func openInEditor(path: String, app: String) async throws
+    /// Open the source PDF for `slug` (resolves sources/<stem>.pdf, exact-or-fuzzy).
+    func openSourcePDF(slug: String) async throws
+    /// Open the translated PDF (processing/translations/<slug>-zh.pdf).
+    func openTranslatedPDF(slug: String) async throws
+    /// Whether a translated PDF exists for `slug` (gates the 打开译本 affordance).
+    func hasTranslatedPDF(slug: String) -> Bool
     func writeFile(path: String, text: String) async throws
     func createNote(path: String, text: String) async throws
     func moveToTrash(path: String) async throws -> String
@@ -87,6 +93,9 @@ public struct StubVaultClient: VaultClient {
     }
     public func search(_ query: SearchQuery) async throws -> [SearchHit] { hits }
     public func openInEditor(path: String, app: String) async throws {}
+    public func openSourcePDF(slug: String) async throws {}
+    public func openTranslatedPDF(slug: String) async throws {}
+    public func hasTranslatedPDF(slug: String) -> Bool { false }
     public func writeFile(path: String, text: String) async throws { writeLog.record(path, text) }
     public func createNote(path: String, text: String) async throws { createLog.record(path, text) }
     public func moveToTrash(path: String) async throws -> String {

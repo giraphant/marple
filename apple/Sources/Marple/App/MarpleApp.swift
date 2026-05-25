@@ -56,60 +56,32 @@ final class AppState: ObservableObject {
 @main
 struct MarpleApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var state = AppState()
-    @AppStorage("marple.workspaceRoot") private var workspaceRoot = ""
 
     init() {
         setvbuf(stdout, nil, _IOLBF, 0)  // line-buffer so logs stream to the captured file
+        FontRegistration.registerBundledFonts()
     }
 
+    // The main window is AppKit-owned (see MarpleWindowController) so the split view
+    // can be the window's contentViewController. SwiftUI keeps only the Settings
+    // scene and the menu commands.
     var body: some Scene {
-        WindowGroup {
-            content.frame(minWidth: 900, minHeight: 600)
-        }
-        .commands { TabCommands() }
-
         Settings { SettingsView() }
-    }
-
-    /// Boot routing: no library picked → setup; library picked → boot with VaultIndexer.
-    private enum BootContext {
-        case needsLibrary
-        case ready(VaultPaths)
-    }
-
-    private var bootContext: BootContext {
-        guard !workspaceRoot.isEmpty,
-              let ws = try? resolveWorkspace(pickedPath: workspaceRoot) else {
-            return .needsLibrary
-        }
-        return .ready(VaultPaths(workspaceRoot: ws.workspaceRoot, vaultDir: ws.vaultDir))
-    }
-
-    @ViewBuilder private var content: some View {
-        switch bootContext {
-        case .needsLibrary:
-            SetupView { picked in workspaceRoot = picked }
-        case .ready(let paths):
-            if let model = state.model {
-                RootView(model: model)
-            } else if let err = state.bootError {
-                ContentUnavailableView("启动失败", systemImage: "exclamationmark.triangle",
-                                       description: Text(err))
-            } else {
-                ProgressView("建立索引…")
-                    .padding()
-                    .task { await state.boot(paths: paths) }
-            }
-        }
+            .commands { TabCommands() }
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var windowController: MarpleWindowController?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Running a SwiftUI app from `swift run` needs an explicit activation
-        // policy + activate so the window comes to the front.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+        let wc = MarpleWindowController()
+        windowController = wc
+        wc.start()
     }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
