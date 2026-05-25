@@ -110,8 +110,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
         case .citation:
             return buttonItem(id, "quote.bubble", "复制引用 · 右键选格式",
                               #selector(citationPrimary(_:)), menu: citationMenu) { [weak self] in
-                guard let e = self?.model?.openEntry else { return false }
-                return e.type == .paperAnalysis || e.type == .bookOverview
+                self?.model?.openCitationEntry != nil
             }
         case .original:
             return buttonItem(id, "doc.richtext", "阅读原文 · 右键打开译本",
@@ -217,7 +216,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
     }
 
     private func buildCitationMenu(_ menu: NSMenu) {
-        guard let e = model?.openEntry, e.type == .paperAnalysis || e.type == .bookOverview else { return }
+        guard model?.openCitationEntry != nil else { return }
         let def = defaultCitationFormat()
         for f in CitationFormat.allCases {
             let mi = NSMenuItem(title: f.label, action: #selector(copyCitationFromMenu(_:)), keyEquivalent: "")
@@ -251,7 +250,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
     }
 
     private func copyCitation(format: CitationFormat) {
-        guard let e = model?.openEntry else { return }
+        guard let e = model?.openCitationEntry else { return }
         let text = buildCitation(e, format: format)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
