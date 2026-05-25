@@ -1,42 +1,47 @@
 import SwiftUI
+import AppKit
 import MarpleKit
+
+// MARK: - WikiURL
+
+enum WikiURL {
+    static let scheme = "marple"
+    static func make(_ target: String) -> URL? {
+        let enc = target.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? target
+        return URL(string: "\(scheme)://wiki/\(enc)")
+    }
+    static func target(from url: URL) -> String? {
+        guard url.scheme == scheme else { return nil }
+        let p = url.path
+        return p.hasPrefix("/") ? String(p.dropFirst()) : p
+    }
+}
+
+// MARK: - DocView
 
 struct DocView: View {
     @Bindable var model: AppModel
+    @Environment(\.readingFont) private var readingFont
 
     var body: some View {
         Group {
             if model.openPath == nil {
                 ContentUnavailableView("选择一篇文档", systemImage: "doc.text")
+            } else if model.openEntry?.type == .image {
+                ImageObjectDetailView(model: model)
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(model.openBlocks.enumerated()), id: \.offset) { idx, block in
-                                BlockView(block: block)
-                                    .id(idx)
-                                    .padding(.top, topGap(at: idx))
-                            }
-                        }
-                        .padding(.vertical, Space.s9)
-                        .frame(maxWidth: Reading.measure, alignment: .leading)
-                        .padding(.horizontal, Space.s10)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                    .onChange(of: model.scrollTarget) { _, target in
-                        if let t = target {
-                            withAnimation { proxy.scrollTo(t, anchor: .top) }
-                            model.scrollTarget = nil
-                        }
-                    }
-                    .environment(\.openURL, OpenURLAction { url in
+                MarkdownTextView(
+                    markdown: Wikilink.preprocessForRendering(model.openBody),
+                    style: renderStyle,
+                    scrollTarget: resolvedScrollTarget,
+                    onLinkClick: { url in
                         if let target = WikiURL.target(from: url) {
                             Task { await model.follow(target) }
-                            return .handled
+                            return true
                         }
-                        return .systemAction
-                    })
-                }
+                        return false
+                    }
+                )
             }
         }
         .overlay(alignment: .top) { toastOverlay }
@@ -56,19 +61,115 @@ struct DocView: View {
         }
     }
 
-    /// Vertical rhythm between blocks (spec §5): more air *before* a heading than
-    /// after it. The first block gets none — the column's own top padding handles it.
-    private func topGap(at idx: Int) -> CGFloat {
-        let blocks = model.openBlocks
-        guard idx > 0 else { return 0 }
-        if isHeading(blocks[idx]) { return Space.s8 }      // 24 above a heading
-        if isHeading(blocks[idx - 1]) { return Space.s4 }  // 8 just after a heading
-        return Space.s6                                     // 16 between body blocks
+    private var renderStyle: RenderStyle {
+        let design: MarkdownFontDesign
+        switch readingFont.design {
+        case .default:     design = .sans
+        case .serif:       design = .serif
+        case .monospaced:  design = .mono
+        default:           design = .sans
+        }
+        return RenderStyle(size: readingFont.size, design: design, lineHeight: readingFont.lineHeight)
     }
 
-    private func isHeading(_ block: RenderBlock) -> Bool {
-        if case .heading = block { return true }
-        return false
+    private var resolvedScrollTarget: NSRange? {
+        guard let t = model.scrollTarget,
+              let item = model.openOutline.first(where: { $0.blockIndex == t }),
+              let range = item.characterRange else {
+            return nil
+        }
+        return range
+    }
+}
+
+private struct ImageObjectDetailView: View {
+    @Bindable var model: AppModel
+    @State private var image: NSImage?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.s6) {
+                imageView
+
+                if let entry = model.openEntry {
+                    VStack(alignment: .leading, spacing: Space.s3) {
+                        Text(entry.title ?? fallbackTitle(for: entry))
+                            .font(.title2.weight(.semibold))
+                            .textSelection(.enabled)
+
+                        if let author = entry.author, !author.isEmpty {
+                            Label(author, systemImage: "person")
+                                .font(Typo.callout)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        if let source = entry.source, !source.isEmpty {
+                            Label(source, systemImage: "link")
+                                .font(Typo.callout)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        if !entry.themes.isEmpty {
+                            Text(entry.themes.joined(separator: " · "))
+                                .font(Typo.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+
+                let notes = model.openBody.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !notes.isEmpty {
+                    Divider()
+                    Text(notes)
+                        .font(Typo.body)
+                        .lineSpacing(4)
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: Reading.measure, alignment: .leading)
+            .padding(.horizontal, Space.s10)
+            .padding(.vertical, Space.s9)
+            .frame(maxWidth: .infinity)
+        }
+        .task(id: model.openPath) { await loadImage() }
+    }
+
+    @ViewBuilder private var imageView: some View {
+        if let image {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1))
+        } else {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.quaternary)
+                .aspectRatio(1.3, contentMode: .fit)
+                .overlay {
+                    Image(systemName: "photo")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.secondary)
+                }
+        }
+    }
+
+    private func loadImage() async {
+        guard let entry = model.openEntry,
+              let url = try? await model.client.imageOriginalURL(forImageEntryPath: entry.path) else {
+            image = nil
+            return
+        }
+        let loaded = await Task.detached(priority: .utility) {
+            NSImage(contentsOf: url)
+        }.value
+        guard !Task.isCancelled else { return }
+        image = loaded
+    }
+
+    private func fallbackTitle(for entry: Entry) -> String {
+        ImageAsset.slug(forImageEntryPath: entry.path)
+            ?? (entry.path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
     }
 }
 
@@ -76,12 +177,11 @@ struct DocView: View {
 private struct ToastBanner: View {
     let text: String
     let symbol: String
-    @Environment(\.ui) private var ui
 
     var body: some View {
         HStack(spacing: Space.s2) {
             Image(systemName: symbol).foregroundStyle(.green)
-            Text(text).font(ui.body)
+            Text(text).font(Typo.body)
         }
         .padding(.horizontal, Space.s5)
         .padding(.vertical, Space.s3)

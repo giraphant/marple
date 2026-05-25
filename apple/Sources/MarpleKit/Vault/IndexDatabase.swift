@@ -31,7 +31,8 @@ public struct IndexDatabase: Sendable {
             guard try db.tableExists("entries") else { return [] }
             let rows = try Row.fetchAll(db, sql: """
                 SELECT path, type, book, title, author, year_json, rating_score,
-                       themes_json, topic, source, doi, annotates, has_pdf, mtime, preview, added
+                       themes_json, topic, source, doi, annotates, has_pdf, pdf_slug,
+                       mtime, preview, added
                 FROM entries
                 """)
             return rows.map(Self.entry(from:))
@@ -72,6 +73,7 @@ public struct IndexDatabase: Sendable {
                    e.author AS author, e.year_json AS year_json, e.rating_score AS rating_score,
                    e.themes_json AS themes_json, e.topic AS topic, e.source AS source,
                    e.doi AS doi, e.annotates AS annotates, e.has_pdf AS has_pdf,
+                   e.pdf_slug AS pdf_slug,
                    e.mtime AS mtime, e.preview AS preview, e.added AS added,
                    bm25(entry_trigram) AS score,
                    snippet(entry_trigram, 2, '〔', '〕', '…', 8) AS snip
@@ -115,6 +117,7 @@ public struct IndexDatabase: Sendable {
                    e.author AS author, e.year_json AS year_json, e.rating_score AS rating_score,
                    e.themes_json AS themes_json, e.topic AS topic, e.source AS source,
                    e.doi AS doi, e.annotates AS annotates, e.has_pdf AS has_pdf,
+                   e.pdf_slug AS pdf_slug,
                    e.mtime AS mtime, e.preview AS preview, e.added AS added,
                    0.0 AS score,
                    NULL AS snip
@@ -152,6 +155,7 @@ public struct IndexDatabase: Sendable {
         let mtime: Double? = mtimeRaw.map(Double.init)
         let added: Double? = addedRaw.map(Double.init)
         let hasPDFRaw: Int64? = row["has_pdf"]
+        let pdfSlug: String? = row["pdf_slug"]
         let ratingScore: Double = row["rating_score"] ?? 0
         let path: String = row["path"]
         let typeRaw: String = row["type"]
@@ -173,6 +177,7 @@ public struct IndexDatabase: Sendable {
             themes: themes,
             preview: preview,
             hasPDF: (hasPDFRaw ?? 0) != 0,
+            pdfSlug: pdfSlug,
             mtime: mtime,
             added: added,
             source: source,

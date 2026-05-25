@@ -22,6 +22,10 @@ final class CommandPalettePanel: NSPanel, NSWindowDelegate {
         // the SwiftUI view draws its own rounded material card.
         isOpaque = false
         backgroundColor = .clear
+        // The default panel fade-in/out is the perceived lag on both ⌘T-open and
+        // Esc-close; disabling it makes the palette feel instant (Maccy uses .none,
+        // CotEditor .utilityWindow for the same reason).
+        animationBehavior = .none
         center()
     }
 
@@ -64,17 +68,14 @@ enum CommandPalettePresenter {
         // all). Maccy/CotEditor present their command panels standalone for exactly
         // this reason.
         let panel = CommandPalettePanel()
-        // The panel is a standalone window, so it doesn't inherit RootView's
-        // Dynamic Type override — mirror the 界面字号 setting here so the palette
-        // scales with the rest of the UI.
-        let size = UITextSize(rawValue: UserDefaults.standard.string(forKey: SettingsKeys.uiTextSize) ?? "")
-            ?? .standard
         let root = CommandPalette(model: model) { [weak panel] in panel?.close() }
-            .environment(\.ui, ScaledTypography(scale: size.scale))
-            .dynamicTypeSize(size.dynamicTypeSize)
         panel.contentView = NSHostingView(rootView: root)
         panel.center()
-        NSApp.activate(ignoringOtherApps: true)
+        // Only activate when the app isn't already frontmost (e.g. ⌘T from the menu
+        // while inactive) — the common in-app ⌘T path is already active, so skipping
+        // the activate avoids its window-reorder latency. An active app's key panel
+        // still lands focus via the onAppear nudge.
+        if !NSApp.isActive { NSApp.activate() }
         panel.makeKeyAndOrderFront(nil)
         Self.panel = panel
     }

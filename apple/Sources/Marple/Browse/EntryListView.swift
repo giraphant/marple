@@ -5,83 +5,49 @@ struct EntryListView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        List(model.visibleEntries, selection: Binding(
-            get: { model.openPath },
-            set: { if let p = $0 { Task { await model.open(p) } } }
-        )) { entry in
-            EntryRow(entry: entry)
-                .contextMenu {
-                    Button("在新标签页打开") { Task { await model.openInNewTab(entry.path) } }
-                    Button("新建批注") { Task { await model.newAnnotation(for: entry) } }
-                    Divider()
-                    Button("移到回收站", role: .destructive) {
-                        Task { await model.moveToTrash(entry.path) }
+        VStack(spacing: 0) {
+            header
+            Divider()
+            List(model.visibleEntries, selection: Binding(
+                get: { model.openPath },
+                set: { if let p = $0 { Task { await model.open(p) } } }
+            )) { entry in
+                EntryRow(entry: entry)
+                    .contextMenu {
+                        Button("在新标签页打开") { Task { await model.openInNewTab(entry.path) } }
+                        Button("新建批注") { Task { await model.newAnnotation(for: entry) } }
+                        Divider()
+                        Button("移到回收站", role: .destructive) {
+                            Task { await model.moveToTrash(entry.path) }
+                        }
                     }
-                }
-        }
-        .listStyle(.inset)
-    }
-}
-
-/// Shared browse header for both list and card modes (so the view toggle stays
-/// reachable in either): the pane name + count on the left; icon-only search /
-/// sort / filter / view-mode controls on the right. The pane name lives here,
-/// not in the window title bar.
-struct BrowseHeader: View {
-    @Bindable var model: AppModel
-    @State private var showSearch = false
-    @Environment(\.ui) private var ui
-
-    var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(paneTitle).font(ui.title).foregroundStyle(.primary)
-                    Text("\(model.visibleEntries.count)")
-                        .font(ui.body).foregroundStyle(.secondary).monospacedDigit()
-                }
-                Spacer()
-                Button {
-                    showSearch.toggle()
-                    if !showSearch { model.setSearchText("") }
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(showSearch ? Color.accentColor : Color.secondary)
-                .help("在当前列表内搜索")
-                sortMenu
-                filterMenu
-                viewToggle
             }
-            if showSearch {
-                SearchField(model: model)
-            }
+            .listStyle(.inset)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
+        .navigationTitle(title)
     }
 
-    private var paneTitle: String {
+    private var title: String {
         switch model.pane {
-        case .type(let t):   return t.label
-        case .theme(let n):  return n
+        case .type(let t):   return "\(t.label) (\(model.visibleEntries.count))"
+        case .theme(let n):  return "主题: \(n) (\(model.visibleEntries.count))"
         case .themesIndex:   return "主题"
         case .trash:         return "回收站"
         }
     }
 
-    private var viewToggle: some View {
-        Button {
-            model.browseMode = (model.browseMode == .list) ? .grid : .list
-        } label: {
-            Image(systemName: model.browseMode == .list ? "square.grid.2x2" : "rectangle.grid.1x2")
+    private var header: some View {
+        HStack(spacing: 8) {
+            SearchField(model: model)
+            sortMenu
+            filterMenu
         }
-        .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .help(model.browseMode == .list ? "切换到卡片" : "切换到列表")
+        .padding(8)
+        .disabled(isThemesIndex)   // header is meaningless on the themes index pane
+        .opacity(isThemesIndex ? 0.4 : 1)
     }
+
+    private var isThemesIndex: Bool { if case .themesIndex = model.pane { return true } else { return false } }
 
     private var sortMenu: some View {
         Menu {
@@ -96,11 +62,7 @@ struct BrowseHeader: View {
         } label: {
             Image(systemName: "arrow.up.arrow.down")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .foregroundStyle(model.sortClauses.isEmpty ? Color.secondary : Color.accentColor)
-        .help("排序")
+        .menuStyle(.borderlessButton).fixedSize()
     }
 
     private var filterMenu: some View {
@@ -121,13 +83,9 @@ struct BrowseHeader: View {
                 }
             ))
         } label: {
-            Image(systemName: "line.3.horizontal.decrease")
+            Image(systemName: "line.3.horizontal.decrease.circle")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .foregroundStyle(model.filterClauses.isEmpty ? Color.secondary : Color.accentColor)
-        .help("筛选")
+        .menuStyle(.borderlessButton).fixedSize()
     }
 
     private func setSingle(_ field: FilterField, _ op: FilterOp, _ value: String) {
@@ -142,16 +100,15 @@ struct BrowseHeader: View {
 /// (potentially ~11k row) results list (mirrors CodeEdit's query/results split).
 private struct SearchField: View {
     @Bindable var model: AppModel
-    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 4) {
-            TextField("检索 标题/作者/主题…", text: Binding(
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("搜索", text: Binding(
                 get: { model.searchText },
                 set: { model.setSearchText($0) }
             ))
             .textFieldStyle(.plain)
-            .focused($focused)
             if !model.searchText.isEmpty {
                 Button { model.setSearchText("") } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
@@ -160,6 +117,5 @@ private struct SearchField: View {
         }
         .padding(6)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-        .onAppear { focused = true }
     }
 }

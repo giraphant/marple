@@ -14,39 +14,13 @@ public enum RenderBlock: Equatable, Sendable {
 
 public enum MarkdownModel {
     public static func blocks(from body: String) -> [RenderBlock] {
-        let (protected, refs) = Wikilink.protect(stripLeadingKVBlock(body))
+        let (protected, refs) = Wikilink.protect(body)
         let document = Document(parsing: protected)
         var blocks: [RenderBlock] = []
         for child in document.children {
             appendBlock(child, refs: refs, into: &blocks)
         }
         return blocks
-    }
-
-    /// Drop the leading metadata block — the run of `**label**：value` lines that
-    /// many vault docs place right under the H1 (原标题 / 作者 / 来源 / DOI). These
-    /// belong in the Inspector, not the rendered prose. Only paragraphs *before*
-    /// the first real (non-heading) content are eligible, so a stray KV-shaped
-    /// line deeper in the body is left untouched. Reuses the indexer's `isKVLabel`.
-    private static func stripLeadingKVBlock(_ body: String) -> String {
-        let paragraphs = body.replacingOccurrences(of: "\r\n", with: "\n")
-            .components(separatedBy: "\n\n")
-        var kept: [String] = []
-        var sawContent = false
-        for paragraph in paragraphs {
-            let lines = paragraph
-                .components(separatedBy: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            if !sawContent, !lines.isEmpty, lines.allSatisfy(isKVLabel) {
-                continue
-            }
-            if !sawContent, let first = lines.first, !first.hasPrefix("#") {
-                sawContent = true
-            }
-            kept.append(paragraph)
-        }
-        return kept.joined(separator: "\n\n")
     }
 
     private static func inline(_ markup: Markup, _ refs: [String: WikiRef]) -> [InlineToken] {

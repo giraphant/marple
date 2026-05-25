@@ -22,7 +22,6 @@ struct SettingsView: View {
 
 private struct AppearanceSettings: View {
     @AppStorage(SettingsKeys.theme) private var theme = ThemePreference.system
-    @AppStorage(SettingsKeys.uiTextSize) private var uiTextSize = UITextSize.standard
 
     var body: some View {
         Form {
@@ -30,13 +29,6 @@ private struct AppearanceSettings: View {
                 ForEach(ThemePreference.allCases, id: \.self) { Text($0.label).tag($0) }
             }
             .pickerStyle(.segmented)
-
-            Picker("界面字号", selection: $uiTextSize) {
-                ForEach(UITextSize.allCases, id: \.self) { Text($0.label).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            Text("缩放整个界面（边栏、列表、检查器）。阅读正文的字号在「阅读」里单独设置。")
-                .font(.caption).foregroundStyle(.secondary)
         }
         .padding(20)
     }
@@ -87,7 +79,6 @@ private struct ReadingSettings: View {
 /// else. The value is what gets passed to `open -a` ('' = OS default).
 private struct EditorPicker: View {
     @Binding var value: String
-    @Environment(\.ui) private var ui
 
     private static let presets: [(app: String, label: String)] = [
         ("", "系统默认"),
@@ -105,7 +96,7 @@ private struct EditorPicker: View {
                     let active = preset.app == value
                     Button(preset.label) { value = preset.app }
                         .buttonStyle(.plain)
-                        .font(ui.body)
+                        .font(Typo.body)
                         .padding(.horizontal, Space.s4).padding(.vertical, Space.s2)
                         .background(active ? Color.accentColor.opacity(0.15) : Color(.quaternaryLabelColor).opacity(0.4),
                                     in: RoundedRectangle(cornerRadius: 6))

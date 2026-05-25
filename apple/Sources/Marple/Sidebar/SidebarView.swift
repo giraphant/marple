@@ -14,7 +14,6 @@ private enum SidebarItem: Hashable {
 /// wrapping a List) is what renders with correct sidebar insets.
 struct SidebarView: View {
     @Bindable var model: AppModel
-    @Environment(\.ui) private var ui
 
     private var selection: Binding<SidebarItem?> {
         Binding(
@@ -31,14 +30,21 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: selection) {
-            Section {
-                ForEach(EntryType.modeled, id: \.self) { t in
+            Section("物件") {
+                ForEach(model.typeOrder, id: \.self) { t in
                     categoryRow(t.label, icon(for: t), model.counts[t] ?? 0)
                         .tag(SidebarItem.pane(.type(t)))
+                        .contextMenu { typeContextMenu(for: t) }
                 }
-            } header: { Text("物件").font(ui.caption) }
+            }
+            Section("视图") {
+                categoryRow("主题", "tag", model.themeIndex.count)
+                    .tag(SidebarItem.pane(.themesIndex))
+                categoryRow("回收站", "trash", model.trashItems.count)
+                    .tag(SidebarItem.pane(.trash))
+            }
             if !model.tabs.isEmpty {
-                Section {
+                Section("标签") {
                     ForEach(model.tabs) { tab in
                         tabRow(tab).tag(SidebarItem.tab(tab.id))
                     }
@@ -47,11 +53,48 @@ struct SidebarView: View {
                         ids.move(fromOffsets: from, toOffset: to)
                         model.setTabOrder(ids)
                     }
-                } header: { Text("标签").font(ui.caption) }
+                }
             }
         }
         .listStyle(.sidebar)
+        .navigationTitle("Marple")
+        .safeAreaInset(edge: .bottom) {
+            Button { Task { await model.newIdeaNote() } } label: {
+                Label("新建笔记", systemImage: "square.and.pencil")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderless)
+            .padding(8)
+        }
     }
+
+    // MARK: - Type reorder context menu
+
+    @ViewBuilder
+    private func typeContextMenu(for type: EntryType) -> some View {
+        let idx = model.typeOrder.firstIndex(of: type) ?? 0
+        if idx > 0 {
+            Button("上移") { moveType(type, by: -1) }
+        }
+        if idx < model.typeOrder.count - 1 {
+            Button("下移") { moveType(type, by: 1) }
+        }
+        if idx > 0 || idx < model.typeOrder.count - 1 {
+            Divider()
+        }
+        Button("重置顺序") { model.setTypeOrder(EntryType.modeled) }
+    }
+
+    private func moveType(_ type: EntryType, by delta: Int) {
+        var order = model.typeOrder
+        guard let idx = order.firstIndex(of: type) else { return }
+        let target = idx + delta
+        guard order.indices.contains(target) else { return }
+        order.swapAt(idx, target)
+        model.setTypeOrder(order)
+    }
+
+    // MARK: - Row builders
 
     private func categoryRow(_ label: String, _ icon: String, _ count: Int) -> some View {
         Label {
@@ -61,7 +104,6 @@ struct SidebarView: View {
                 Text("\(count)").foregroundStyle(.secondary).monospacedDigit()
             }
         } icon: { Image(systemName: icon) }
-        .font(ui.body)
     }
 
     private func tabRow(_ tab: NavTab) -> some View {
@@ -74,9 +116,12 @@ struct SidebarView: View {
                 }
             }
         } icon: {
-            Image(systemName: model.tabIsDoc(tab) ? "doc.text" : "list.bullet")
+            if let entry = tabEntry(tab) {
+                TypeBadge(type: entry.type, size: 16)
+            } else {
+                Image(systemName: "list.bullet")
+            }
         }
-        .font(ui.body)
         .contextMenu {
             Button(tab.pinned ? "取消固定" : "固定标签") { model.togglePin(tab.id) }
             Divider()
@@ -86,4 +131,9 @@ struct SidebarView: View {
     }
 
     private func icon(for t: EntryType) -> String { t.symbolName }
+
+    private func tabEntry(_ tab: NavTab) -> Entry? {
+        guard let path = tab.location.openPath else { return nil }
+        return model.entries.first { $0.path == path }
+    }
 }

@@ -116,7 +116,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
         case .original:
             return buttonItem(id, "doc.richtext", "阅读原文 · 右键打开译本",
                               #selector(originalPrimary(_:)), menu: originalMenu) { [weak self] in
-                self?.model?.openHasPDF ?? false
+                self?.model?.canOpenPDF ?? false
             }
         case .assistant:
             return buttonItem(id, "sparkles", "AI 助手（待实现）", #selector(aiAssistant)) { [weak self] in
@@ -180,8 +180,8 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
     @objc private func goForward()       { Task { await model?.goForward() } }
     @objc private func toggleInspector() { model?.inspectorVisible.toggle() }
     @objc private func openExternal()    { Task { await model?.openExternally() } }
-    @objc private func readOriginal()    { Task { await model?.openOriginalPDF() } }
-    @objc private func readTranslation() { Task { await model?.openTranslatedPDF() } }
+    @objc private func readOriginal()    { Task { await model?.openPDF() } }
+    @objc private func readTranslation() { Task { await model?.openTranslation() } }
     @objc private func aiAssistant()     { model?.flash("AI 助手：待实现", symbol: "sparkles") }
 
     /// Click on 引用: per the setting, copy the default format or pop the menu.
@@ -204,7 +204,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
         if mode == .showMenu {
             originalMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
         } else {
-            Task { await model?.openOriginalPDF() }
+            Task { await model?.openPDF() }
         }
     }
 
@@ -229,11 +229,11 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
     }
 
     private func buildOriginalMenu(_ menu: NSMenu) {
-        guard model?.openHasPDF == true else { return }
+        guard model?.canOpenPDF == true else { return }
         let read = NSMenuItem(title: "阅读原文", action: #selector(readOriginal), keyEquivalent: "")
         read.target = self
         menu.addItem(read)
-        if model?.openHasTranslation == true {
+        if model?.canOpenTranslation == true {
             let tr = NSMenuItem(title: "打开译本", action: #selector(readTranslation), keyEquivalent: "")
             tr.target = self
             menu.addItem(tr)

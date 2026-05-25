@@ -102,6 +102,12 @@ final class AppModel {
     /// True when a vector index exists, so 深度 (semantic) mode can run.
     var semanticAvailable: Bool { semantic != nil }
 
+    /// User-customised sidebar type order. Defaults to the canonical order; persisted
+    /// separately from workspace state via UserDefaults.
+    private(set) var typeOrder: [EntryType] = EntryType.modeled {
+        didSet { persistTypeOrder() }
+    }
+
     init(client: VaultClient, stateStore: StateStore? = nil, semantic: (any SemanticBackend)? = nil) {
         self.client = client
         self.stateStore = stateStore
@@ -115,6 +121,7 @@ final class AppModel {
             filterMatch = s.filterMatch
             browseMode = BrowseMode(rawValue: s.browseMode) ?? .grid
         }
+        loadTypeOrder()
     }
 
     /// Save the current place (browse category + doc tabs + controls). Cheap — a small
@@ -136,6 +143,28 @@ final class AppModel {
             browseMode: browseMode.rawValue))
     }
 
+    // MARK: type order persistence
+
+    private static let typeOrderKey = "marple.typeOrder"
+
+    private func loadTypeOrder() {
+        guard let data = UserDefaults.standard.data(forKey: Self.typeOrderKey),
+              let decoded = try? JSONDecoder().decode([EntryType].self, from: data) else { return }
+        var order = decoded
+        // Append any new modeled types not yet in the saved order.
+        for t in EntryType.modeled where !order.contains(t) { order.append(t) }
+        typeOrder = order
+    }
+
+    private func persistTypeOrder() {
+        guard let data = try? JSONEncoder().encode(typeOrder) else { return }
+        UserDefaults.standard.set(data, forKey: Self.typeOrderKey)
+    }
+
+    func setTypeOrder(_ order: [EntryType]) {
+        typeOrder = order
+    }
+
     // MARK: derived recompute
 
     /// Rebuild the index-wide caches (counts + theme index). O(n) over all entries;
@@ -154,7 +183,11 @@ final class AppModel {
     /// the index for relations; runs on open / reload / metadata write, not per render.
     private func recomputeOpenDerived() {
         openEntry = entries.first { $0.path == openPath }
-        openOutline = outline(from: openBlocks)
+        let preprocessed = Wikilink.preprocessForRendering(openBody)
+        let rendered = MarkdownRenderer.render(preprocessed, style: RenderStyle(
+            size: ReadingDefaults.fontSize, design: .sans, lineHeight: ReadingDefaults.lineHeight
+        ))
+        openOutline = outline(from: rendered.headings)
         openStats = openBody.isEmpty ? nil : computeDocStats(openBody)
         if let e = openEntry {
             openRelations = relations(for: e, in: entries,
@@ -493,34 +526,53 @@ final class AppModel {
         }
     }
 
-    // MARK: source PDF (打开原文 / 译本)
-
-    /// `pdf_slug` for the open doc, derived the way the indexer does (paper → file
-    /// stem, book → book slug). The actual PDF file is resolved in the client.
-    private var openPDFSlug: String? {
-        guard let e = openEntry else { return nil }
-        let stem = URL(fileURLWithPath: e.path).deletingPathExtension().lastPathComponent
-        return pdfSlug(type: e.type.rawValue, rel: e.path, fileStem: stem)
+    func openPDF() async {
+        guard let slug = openEntry?.pdfSlug, !slug.isEmpty else { return }
+        do {
+            try await client.openPDF(slug: slug)
+            print("[marple] openPDF \(slug)")
+        } catch {
+            status = "open-PDF failed: \(error)"
+            print("[marple] openPDF FAILED \(slug): \(error)")
+        }
     }
 
-    /// Whether the open doc has a source PDF (gates 阅读原文).
-    var openHasPDF: Bool { openEntry?.hasPDF ?? false }
-    /// Whether the open doc has a translated PDF (gates 打开译本).
-    var openHasTranslation: Bool {
-        guard let slug = openPDFSlug else { return false }
-        return client.hasTranslatedPDF(slug: slug)
+    func openTranslation() async {
+        guard let slug = openEntry?.pdfSlug, !slug.isEmpty else { return }
+        do {
+            try await client.openTranslation(slug: slug)
+            print("[marple] openTranslation \(slug)")
+        } catch {
+            status = "open-translation failed: \(error)"
+            print("[marple] openTranslation FAILED \(slug): \(error)")
+        }
     }
 
-    func openOriginalPDF() async {
-        guard let slug = openPDFSlug else { return }
-        do { try await client.openSourcePDF(slug: slug) }
-        catch { status = "打开原文失败: \(error)"; print("[marple] open pdf FAILED \(slug): \(error)") }
+    var canOpenPDF: Bool {
+        guard let e = openEntry else { return false }
+        return e.hasPDF && e.pdfSlug != nil
     }
 
-    func openTranslatedPDF() async {
-        guard let slug = openPDFSlug else { return }
-        do { try await client.openTranslatedPDF(slug: slug) }
-        catch { status = "打开译本失败: \(error)"; print("[marple] open translation FAILED \(slug): \(error)") }
+    var canOpenTranslation: Bool {
+        guard let slug = openEntry?.pdfSlug, !slug.isEmpty else { return false }
+        return client.hasTranslation(slug: slug)
+    }
+
+    // MARK: object creation
+
+    func importImage(from url: URL) async {
+        writeError = nil
+        do {
+            let entry = try await client.createImageObject(from: url, title: nil)
+            entries.append(entry)
+            rebuildIndexDerived()
+            select(pane: .type(.image))
+            await open(entry.path)
+            print("[marple] imported image \(entry.path)")
+        } catch {
+            writeError = "\(error)"
+            print("[marple] import image FAILED \(url.path): \(error)")
+        }
     }
 
     // MARK: note creation
@@ -662,6 +714,20 @@ final class AppModel {
         await applyPatch(field: "year",
             { FrontmatterPatch.setScalar($0, key: "year", value: val, numeric: true) },
             local: { $0.with(year: .some(val)) })
+    }
+
+    func setTitle(_ text: String?) async {
+        let val = normalize(text)
+        await applyPatch(field: "title",
+            { FrontmatterPatch.setScalar($0, key: "title", value: val) },
+            local: { $0.with(title: .some(val)) })
+    }
+
+    func setAuthor(_ text: String?) async {
+        let val = normalize(text)
+        await applyPatch(field: "author",
+            { FrontmatterPatch.setScalar($0, key: "author", value: val) },
+            local: { $0.with(author: .some(val)) })
     }
 
     func setSource(_ text: String?) async {

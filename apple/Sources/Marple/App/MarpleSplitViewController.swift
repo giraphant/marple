@@ -126,10 +126,9 @@ final class MarpleSplitViewController: NSSplitViewController {
     }
 }
 
-/// Re-applies the `@AppStorage`-driven environment (UI scale / reading font) inside
-/// each hosted column, since each `NSHostingController` is its own SwiftUI tree.
+/// Re-applies the `@AppStorage`-driven reading-font environment inside each hosted
+/// column, since each `NSHostingController` is its own SwiftUI tree.
 private struct Chrome<Content: View>: View {
-    @AppStorage(SettingsKeys.uiTextSize) private var uiTextSize = UITextSize.standard
     @AppStorage(SettingsKeys.readingFontFamily) private var fontFamily = ReadingFontFamily.sans
     @AppStorage(SettingsKeys.readingFontSize) private var fontSize = ReadingDefaults.fontSize
     @AppStorage(SettingsKeys.readingLineHeight) private var lineHeight = ReadingDefaults.lineHeight
@@ -141,10 +140,7 @@ private struct Chrome<Content: View>: View {
     }
 
     var body: some View {
-        content
-            .environment(\.readingFont, readingFont)
-            .environment(\.ui, ScaledTypography(scale: uiTextSize.scale))
-            .dynamicTypeSize(uiTextSize.dynamicTypeSize)
+        content.environment(\.readingFont, readingFont)
     }
 }
 
@@ -157,14 +153,10 @@ struct BrowseColumn: View {
         case .themesIndex: ThemesView(model: model)
         case .trash:       TrashView(model: model)
         default:
-            VStack(spacing: 0) {
-                BrowseHeader(model: model)
-                Divider()
-                if model.browseMode == .grid {
-                    EntryGridView(model: model)
-                } else {
-                    EntryListView(model: model)
-                }
+            if model.browseMode == .grid {
+                EntryGridView(model: model)
+            } else {
+                EntryListView(model: model)
             }
         }
     }

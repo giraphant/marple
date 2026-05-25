@@ -5,7 +5,6 @@ import MarpleKit
 /// blob: the set is small and each control binds to one key directly.
 enum SettingsKeys {
     static let theme = "marple.theme"
-    static let uiTextSize = "marple.uiTextSize"
     static let readingFontFamily = "marple.readingFontFamily"
     static let readingFontSize = "marple.readingFontSize"
     static let readingLineHeight = "marple.readingLineHeight"
@@ -35,40 +34,6 @@ enum OriginalClickAction: String, CaseIterable {
         switch self {
         case .openOriginal: return "打开原始 PDF"
         case .showMenu:     return "打开菜单（原文 / 译本）"
-        }
-    }
-}
-
-/// App-wide UI text size. Drives a concrete scale multiplier that the design-system
-/// type scale (`ScaledTypography`) multiplies into real point sizes — deterministic
-/// on macOS, where Dynamic Type doesn't reliably move native chrome. A matching
-/// `dynamicTypeSize` is still applied as a best-effort bonus for any semantic-font
-/// views. Distinct from the reading column, which has its own 字号 control.
-enum UITextSize: String, CaseIterable {
-    case small, standard, large, xlarge
-    var label: String {
-        switch self {
-        case .small:    return "小"
-        case .standard: return "标准"
-        case .large:    return "大"
-        case .xlarge:   return "特大"
-        }
-    }
-    /// Concrete multiplier applied to every UI role's base size.
-    var scale: CGFloat {
-        switch self {
-        case .small:    return 0.9
-        case .standard: return 1.0
-        case .large:    return 1.15
-        case .xlarge:   return 1.3
-        }
-    }
-    var dynamicTypeSize: DynamicTypeSize {
-        switch self {
-        case .small:    return .small
-        case .standard: return .large   // system default
-        case .large:    return .xLarge
-        case .xlarge:   return .xxLarge
         }
     }
 }

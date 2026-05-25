@@ -88,11 +88,28 @@ import Testing
         #expect(entries[0].annotates == nil)
     }
 
+    @Test func testImageTypeIsModeled() {
+        #expect(EntryType(rawValue: "image") == .image)
+        #expect(EntryType.image.rawValue == "image")
+        #expect(EntryType.image.label == "图片")
+        #expect(EntryType.modeled.contains(.image))
+    }
+
+    @Test func testEntryWithUpdatesImageEditableMetadata() {
+        let entry = Entry(path: "vault/images/loop/image.md", type: .image, title: "Old",
+                          author: "Alice", year: nil, ratingScore: 0, themes: [],
+                          preview: "", hasPDF: false)
+        let updated = entry.with(title: .some("New"), author: .some("Bob"))
+        #expect(updated.title == "New")
+        #expect(updated.author == "Bob")
+    }
+
     @Test func testModeledTypesOrderAndLabels() {
         #expect(EntryType.modeled == [.paperAnalysis, .bookOverview, .authorProfile,
-                                      .topicSynthesis, .chapterSummary, .note])
+                                      .topicSynthesis, .chapterSummary, .note, .image])
         #expect(EntryType.paperAnalysis.label == "论文")
         #expect(EntryType.note.label == "笔记")
+        #expect(EntryType.image.label == "图片")
         #expect(EntryType.other("topic-reading-list").label == "topic-reading-list")
     }
 }

@@ -23,32 +23,30 @@ struct InspectorView: View {
                     case .stats:   StatsSection(stats: model.openStats)
                     }
                 }
-                .padding(20)
+                .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
     private var tabStrip: some View {
-        HStack(spacing: Space.s4) {
-            tabButton(.info, "list.bullet.rectangle", "信息")
-            tabButton(.outline, "list.number", "目录")
+        HStack(spacing: 0) {
+            tabButton(.info, "doc.text", "信息")
+            tabButton(.outline, "list.bullet.indent", "目录")
             tabButton(.stats, "chart.bar", "统计")
         }
-        .padding(.vertical, Space.s4)
+        .padding(.vertical, 6)
     }
 
     private func tabButton(_ t: Tab, _ symbol: String, _ label: String) -> some View {
-        Button { tab = t } label: {
+        let active = tab == t
+        return Button { tab = t } label: {
             Image(systemName: symbol)
-                .font(.system(size: 13))
-                .frame(width: 30, height: 22)
-                .foregroundStyle(tab == t ? Color.accentColor : Color.secondary)
-                .background {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.accentColor.opacity(0.15))
-                        .opacity(tab == t ? 1 : 0)
-                }
+                .symbolVariant(active ? .fill : .none)
+                .font(.system(size: 13).weight(active ? .semibold : .regular))
+                .foregroundStyle(active ? Color.accentColor : .secondary)
+                .frame(width: 38, height: 22)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(label)
@@ -60,11 +58,10 @@ struct InspectorView: View {
 
 private struct SectionHeader: View {
     let title: String
-    @Environment(\.ui) private var ui
     init(_ t: String) { title = t }
     var body: some View {
         // No .uppercase: it does nothing for Chinese and only harms Latin labels (spec §6).
-        Text(title).font(ui.caption).fontWeight(.semibold)
+        Text(title).font(Typo.caption).fontWeight(.semibold)
             .foregroundStyle(.tertiary)
     }
 }
@@ -74,7 +71,7 @@ private struct SectionHeader: View {
 private struct StatsSection: View {
     let stats: DocStats?
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             SectionHeader("统计")
             if let s = stats {
                 StatRow("字符", "\(s.chars)")
@@ -82,7 +79,7 @@ private struct StatsSection: View {
                 StatRow("段落", "\(s.paragraphs)")
                 StatRow("阅读时间", s.minutes > 0 ? "\(s.minutes) 分钟" : "—")
             } else {
-                Text("—").foregroundStyle(.secondary).font(.system(size: 14))
+                Text("—").foregroundStyle(.secondary).font(.callout)
             }
         }
     }
@@ -93,7 +90,7 @@ private struct StatRow: View {
     init(_ l: String, _ v: String) { label = l; value = v }
     var body: some View {
         HStack { Text(label).foregroundStyle(.secondary); Spacer(); Text(value).monospacedDigit() }
-            .font(.system(size: 14))
+            .font(.callout)
     }
 }
 
@@ -102,7 +99,7 @@ private struct StatRow: View {
 private struct OutlineSection: View {
     @Bindable var model: AppModel
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 14) {
             if let book = model.openBook {
                 BookNavGroup(model: model, book: book)
             }
@@ -118,7 +115,7 @@ private struct BookNavGroup: View {
     @Bindable var model: AppModel
     let book: BookContext
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s4) {
+        VStack(alignment: .leading, spacing: Space.s1) {
             SectionHeader("本书")
             if let ov = book.overview {
                 BookNavRow(label: "概述",
@@ -149,11 +146,10 @@ private struct BookNavRow: View {
     let active: Bool
     let action: () -> Void
     @State private var hovering = false
-    @Environment(\.ui) private var ui
 
     var body: some View {
         Button(action: action) {
-            Text(label).font(ui.body).lineLimit(1)
+            Text(label).font(Typo.callout).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, Space.s1).padding(.horizontal, Space.s2)
                 .foregroundStyle(active ? Color.accentColor : Color.primary)
@@ -176,14 +172,14 @@ private struct BookNavRow: View {
 private struct PageOutlineGroup: View {
     @Bindable var model: AppModel
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             if model.openOutline.isEmpty {
-                Text("无标题").foregroundStyle(.secondary).font(.system(size: 14))
+                Text("无标题").foregroundStyle(.secondary).font(.callout)
             } else {
                 ForEach(model.openOutline) { item in
                     Button { model.scrollTarget = item.blockIndex } label: {
                         Text(item.text)
-                            .font(.system(size: 14)).lineLimit(1)
+                            .font(.callout).lineLimit(1)
                             .padding(.leading, CGFloat((item.level - 1) * 12))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -205,6 +201,7 @@ private func editableFields(for type: EntryType) -> Set<String> {
     case .authorProfile:  return ["rating"]
     case .topicSynthesis: return ["rating", "topic"]
     case .note:           return []
+    case .image:          return ["title", "author", "source", "topic"]
     case .other:          return []
     }
 }
@@ -212,19 +209,26 @@ private func editableFields(for type: EntryType) -> Set<String> {
 private struct InfoSection: View {
     @Bindable var model: AppModel
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 14) {
             SectionHeader("信息")
             if let err = model.writeError {
                 Text("保存失败：\(err)").font(.caption).foregroundStyle(.red)
             }
             if let e = model.openEntry {
                 let fields = editableFields(for: e.type)
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     if fields.contains("rating") { RatingRow(model: model, score: Int(e.ratingScore)) }
+                    if fields.contains("title") {
+                        ScalarRow(model: model, label: "名称", value: e.title) { await model.setTitle($0) }
+                    }
                     if fields.contains("year") {
                         ScalarRow(model: model, label: "年份", value: e.year) { await model.setYear($0) }
                     }
-                    if e.author?.isEmpty == false { AuthorRow(model: model, entry: e) }
+                    if fields.contains("author") {
+                        ScalarRow(model: model, label: "作者", value: e.author) { await model.setAuthor($0) }
+                    } else if e.author?.isEmpty == false {
+                        AuthorRow(model: model, entry: e)
+                    }
                     if fields.contains("source") {
                         ScalarRow(model: model, label: "来源", value: e.source) { await model.setSource($0) }
                     }
@@ -238,8 +242,12 @@ private struct InfoSection: View {
                 .disabled(model.savingField != nil)
                 ThemesEditor(model: model, themes: e.themes)
                 RelationsView(model: model)
+                if e.type == .paperAnalysis || e.type == .bookOverview {
+                    CitationControl(entry: e).id(e.path)
+                }
+                PDFOpenGroup(model: model)
             } else {
-                Text("—").foregroundStyle(.secondary).font(.system(size: 14))
+                Text("—").foregroundStyle(.secondary).font(.callout)
             }
         }
     }
@@ -260,7 +268,7 @@ private struct RatingRow: View {
                 .foregroundStyle(.yellow)
             }
         }
-        .font(.system(size: 14))
+        .font(.callout)
     }
 }
 
@@ -293,7 +301,7 @@ private struct ScalarRow: View {
                 .buttonStyle(.plain)
             }
         }
-        .font(.system(size: 14))
+        .font(.callout)
     }
 }
 
@@ -313,7 +321,7 @@ private struct AuthorRow: View {
                 Text(entry.author ?? "").lineLimit(1)
             }
         }
-        .font(.system(size: 14))
+        .font(.callout)
     }
 }
 
@@ -324,7 +332,7 @@ private struct ThemesEditor: View {
     @State private var draft = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 SectionHeader("主题")
                 Spacer()
@@ -332,7 +340,7 @@ private struct ThemesEditor: View {
                     .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
             }
             if themes.isEmpty {
-                Text("—").foregroundStyle(.secondary).font(.system(size: 14))
+                Text("—").foregroundStyle(.secondary).font(.callout)
             } else {
                 FlowLayout(spacing: Space.s2, lineSpacing: Space.s2) {
                     ForEach(themes, id: \.self) { t in
@@ -359,7 +367,6 @@ private struct ThemeChip: View {
     let onTap: () -> Void
     let onRemove: () -> Void
     @State private var hovering = false
-    @Environment(\.ui) private var ui
 
     var body: some View {
         HStack(spacing: Space.s1) {
@@ -371,7 +378,7 @@ private struct ThemeChip: View {
                 .buttonStyle(.plain).foregroundStyle(.secondary)
             }
         }
-        .font(ui.caption)
+        .font(Typo.caption2)
         .padding(.horizontal, Space.s3).padding(.vertical, Space.s1)
         .background(.quaternary, in: Capsule())
         .onHover { hovering = $0 }
@@ -382,7 +389,7 @@ private struct RelationsView: View {
     @Bindable var model: AppModel
     var body: some View {
         if let r = model.openRelations {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 14) {
                 if !r.works.isEmpty {
                     let books = r.works.filter { $0.type == .bookOverview }
                     let papers = r.works.filter { $0.type == .paperAnalysis }
@@ -398,7 +405,7 @@ private struct RelationsView: View {
 
     @ViewBuilder private func relGroup(_ title: String, _ list: [Entry]) -> some View {
         if !list.isEmpty {
-            VStack(alignment: .leading, spacing: Space.s4) {
+            VStack(alignment: .leading, spacing: Space.s1) {
                 SectionHeader("\(title) (\(list.count))")
                 ForEach(list.prefix(30)) { e in
                     RelationRow(title: e.title ?? e.path) { Task { await model.open(e.path) } }
@@ -413,11 +420,10 @@ private struct RelationRow: View {
     let title: String
     let action: () -> Void
     @State private var hovering = false
-    @Environment(\.ui) private var ui
 
     var body: some View {
         Button(action: action) {
-            Text(title).font(ui.body).lineLimit(1)
+            Text(title).font(Typo.callout).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, Space.s1).padding(.horizontal, Space.s2)
         }
@@ -426,5 +432,99 @@ private struct RelationRow: View {
             RoundedRectangle(cornerRadius: 6).fill(.quaternary).opacity(hovering ? 1 : 0)
         }
         .onHover { hovering = $0 }
+    }
+}
+
+// MARK: - 引用
+
+/// One-tap citation copy mirroring the web ActionsRow: a format menu (seeded from
+/// the default in Settings, overridable per use), a live preview, and a copy
+/// button. Reset per document via `.id(entry.path)` at the call site.
+private struct CitationControl: View {
+    let entry: Entry
+    @AppStorage(SettingsKeys.citationFormat) private var defaultFormat = CitationFormat.inlineEN
+    @State private var override: CitationFormat?
+    @State private var copied = false
+
+    private var format: CitationFormat { override ?? defaultFormat }
+
+    var body: some View {
+        let preview = buildCitation(entry, format: format)
+        VStack(alignment: .leading, spacing: Space.s3) {
+            HStack {
+                SectionHeader("引用")
+                Spacer()
+                Menu {
+                    ForEach(CitationFormat.allCases, id: \.self) { f in
+                        Button {
+                            override = f; copied = false
+                        } label: {
+                            if f == format { Label(f.label, systemImage: "checkmark") }
+                            else { Text(f.label) }
+                        }
+                    }
+                } label: {
+                    Text(format.label)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .font(.caption)
+            }
+
+            if preview.isEmpty {
+                Text("缺少作者 / 年份等信息").font(.callout).foregroundStyle(.secondary)
+            } else {
+                Text(preview)
+                    .font(.callout).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(preview, forType: .string)
+                copied = true
+                Task { try? await Task.sleep(nanoseconds: 1_500_000_000); copied = false }
+            } label: {
+                Label(copied ? "✓ 已复制" : "复制引用",
+                      systemImage: copied ? "checkmark" : "doc.on.doc")
+                    .font(.callout)
+            }
+            .buttonStyle(.bordered)
+            .disabled(preview.isEmpty)
+        }
+    }
+}
+
+// MARK: - PDF 打开
+
+private struct PDFOpenGroup: View {
+    @Bindable var model: AppModel
+    var body: some View {
+        if model.canOpenPDF || model.canOpenTranslation {
+            VStack(alignment: .leading, spacing: Space.s2) {
+                SectionHeader("原文")
+                HStack(spacing: Space.s2) {
+                    if model.canOpenPDF {
+                        Button {
+                            Task { await model.openPDF() }
+                        } label: {
+                            Label("阅读原文", systemImage: "doc.richtext")
+                                .font(.callout)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    if model.canOpenTranslation {
+                        Button {
+                            Task { await model.openTranslation() }
+                        } label: {
+                            Label("阅读译本", systemImage: "doc.text")
+                                .font(.callout)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+        }
     }
 }

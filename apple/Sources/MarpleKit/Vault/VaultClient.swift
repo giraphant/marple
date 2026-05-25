@@ -34,12 +34,11 @@ public protocol VaultClient: Sendable {
     func entryText(path: String) async throws -> String
     func search(_ query: SearchQuery) async throws -> [SearchHit]
     func openInEditor(path: String, app: String) async throws
-    /// Open the source PDF for `slug` (resolves sources/<stem>.pdf, exact-or-fuzzy).
-    func openSourcePDF(slug: String) async throws
-    /// Open the translated PDF (processing/translations/<slug>-zh.pdf).
-    func openTranslatedPDF(slug: String) async throws
-    /// Whether a translated PDF exists for `slug` (gates the 打开译本 affordance).
-    func hasTranslatedPDF(slug: String) -> Bool
+    func openPDF(slug: String) async throws
+    func openTranslation(slug: String) async throws
+    func hasTranslation(slug: String) -> Bool
+    func imageOriginalURL(forImageEntryPath path: String) async throws -> URL?
+    func createImageObject(from sourceURL: URL, title: String?) async throws -> Entry
     func writeFile(path: String, text: String) async throws
     func createNote(path: String, text: String) async throws
     func moveToTrash(path: String) async throws -> String
@@ -93,9 +92,19 @@ public struct StubVaultClient: VaultClient {
     }
     public func search(_ query: SearchQuery) async throws -> [SearchHit] { hits }
     public func openInEditor(path: String, app: String) async throws {}
-    public func openSourcePDF(slug: String) async throws {}
-    public func openTranslatedPDF(slug: String) async throws {}
-    public func hasTranslatedPDF(slug: String) -> Bool { false }
+    public func openPDF(slug: String) async throws {}
+    public func openTranslation(slug: String) async throws {}
+    public func hasTranslation(slug: String) -> Bool { false }
+    public func imageOriginalURL(forImageEntryPath path: String) async throws -> URL? { nil }
+    public func createImageObject(from sourceURL: URL, title: String?) async throws -> Entry {
+        let name = title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? title!.trimmingCharacters(in: .whitespacesAndNewlines)
+            : sourceURL.deletingPathExtension().lastPathComponent
+        let path = "vault/images/\(ImageAsset.slug(fromTitle: name))/image.md"
+        createLog.record(path, "")
+        return Entry(path: path, type: .image, title: name, author: nil, year: nil,
+                     ratingScore: 0, themes: [], preview: "", hasPDF: false)
+    }
     public func writeFile(path: String, text: String) async throws { writeLog.record(path, text) }
     public func createNote(path: String, text: String) async throws { createLog.record(path, text) }
     public func moveToTrash(path: String) async throws -> String {

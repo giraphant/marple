@@ -63,36 +63,68 @@ public struct LocalVaultClient: VaultClient {
         #endif
     }
 
-    // MARK: PDFs (open directly via NSWorkspace — no backend)
-
-    private func translatedPDFURL(_ slug: String) -> URL {
-        absURL("processing/translations/\(slug)-zh.pdf")
-    }
-
-    public func hasTranslatedPDF(slug: String) -> Bool {
-        !slug.isEmpty && FileManager.default.fileExists(atPath: translatedPDFURL(slug).path)
-    }
-
-    public func openSourcePDF(slug: String) async throws {
-        // The actual file may differ from the slug (the indexer matches fuzzily),
-        // so resolve the same way `has_pdf` was computed.
-        let slugs = loadSourceSlugs(sourcesDir: absURL("sources").path)
-        let stem = slugs.contains(slug) ? slug : fuzzyPickSource(slug, slugs)
-        guard let stem else { throw VaultError.notFound("sources/\(slug).pdf") }
-        let url = absURL("sources/\(stem).pdf")
-        #if canImport(AppKit)
-        _ = await MainActor.run { NSWorkspace.shared.open(url) }
-        #endif
-    }
-
-    public func openTranslatedPDF(slug: String) async throws {
-        let url = translatedPDFURL(slug)
+    public func openPDF(slug: String) async throws {
+        let url = absURL("sources/\(slug).pdf")
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw VaultError.notFound(url.lastPathComponent)
+            throw VaultError.notFound("sources/\(slug).pdf")
         }
         #if canImport(AppKit)
         _ = await MainActor.run { NSWorkspace.shared.open(url) }
         #endif
+    }
+
+    public func openTranslation(slug: String) async throws {
+        let url = absURL("processing/translations/\(slug)-zh.pdf")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw VaultError.notFound("processing/translations/\(slug)-zh.pdf")
+        }
+        #if canImport(AppKit)
+        _ = await MainActor.run { NSWorkspace.shared.open(url) }
+        #endif
+    }
+
+    public func hasTranslation(slug: String) -> Bool {
+        let url = absURL("processing/translations/\(slug)-zh.pdf")
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    public func imageOriginalURL(forImageEntryPath path: String) async throws -> URL? {
+        let dir = absURL(path).deletingLastPathComponent()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        guard let rel = ImageAsset.originalPath(forImageEntryPath: path, existingFilenames: names) else { return nil }
+        return absURL(rel)
+    }
+
+    public func createImageObject(from sourceURL: URL, title requestedTitle: String?) async throws -> Entry {
+        let ext = sourceURL.pathExtension.lowercased()
+        guard ImageAsset.isSupportedImageURL(sourceURL) else {
+            throw VaultError.decode("unsupported image extension: \(ext)")
+        }
+        let title = Self.imageTitle(requestedTitle, fallback: sourceURL.deletingPathExtension().lastPathComponent)
+        let slug = uniqueImageSlug(ImageAsset.slug(fromTitle: title))
+        let relDir = "vault/images/\(slug)"
+        let dir = absURL(relDir)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: sourceURL, to: dir.appendingPathComponent("\(ImageAsset.originalStem).\(ext)"))
+        let metadata = FrontmatterPatch.setScalar("---\ntype: image\n---\n\n", key: "title", value: title)
+        try metadata.write(to: dir.appendingPathComponent("image.md"), atomically: true, encoding: .utf8)
+        return Entry(path: "\(relDir)/image.md", type: .image, title: title, author: nil, year: nil,
+                     ratingScore: 0, themes: [], preview: "", hasPDF: false)
+    }
+
+    private func uniqueImageSlug(_ base: String) -> String {
+        var slug = base
+        var n = 2
+        while FileManager.default.fileExists(atPath: absURL("vault/images/\(slug)").path) {
+            slug = "\(base)-\(n)"
+            n += 1
+        }
+        return slug
+    }
+
+    private static func imageTitle(_ title: String?, fallback: String) -> String {
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed! : fallback
     }
 
     // MARK: trash (file moves under vault/notes/.trash, name = "{base}.{ts}.md")

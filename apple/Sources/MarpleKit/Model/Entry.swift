@@ -7,6 +7,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
     case authorProfile
     case topicSynthesis
     case note
+    case image
     /// Any entry type the reader doesn't model yet. The vault is produced by an
     /// evolving pipeline (e.g. "topic-reading-list"); preserving the raw value
     /// here means one unknown type never fails the whole index decode.
@@ -20,6 +21,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
         case "author-profile": self = .authorProfile
         case "topic-synthesis": self = .topicSynthesis
         case "note": self = .note
+        case "image": self = .image
         default: self = .other(rawValue)
         }
     }
@@ -32,6 +34,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
         case .authorProfile: return "author-profile"
         case .topicSynthesis: return "topic-synthesis"
         case .note: return "note"
+        case .image: return "image"
         case .other(let raw): return raw
         }
     }
@@ -51,7 +54,7 @@ public extension EntryType {
     /// The six modeled types in the canonical sidebar order (mirrors web TYPES).
     static let modeled: [EntryType] = [
         .paperAnalysis, .bookOverview, .authorProfile,
-        .topicSynthesis, .chapterSummary, .note,
+        .topicSynthesis, .chapterSummary, .note, .image,
     ]
 
     var label: String {
@@ -62,6 +65,7 @@ public extension EntryType {
         case .topicSynthesis: return "主题"
         case .chapterSummary: return "章节"
         case .note:           return "笔记"
+        case .image:          return "图片"
         case .other(let raw): return raw
         }
     }
@@ -78,6 +82,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public let themes: [String]
     public let preview: String
     public let hasPDF: Bool
+    public let pdfSlug: String?
     public let mtime: Double?
     public let added: Double?
     public let source: String?
@@ -91,6 +96,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         case ratingScore = "rating_score"
         case themes
         case hasPDF = "has_pdf"
+        case pdfSlug = "pdf_slug"
         case mtime, added, source, book, topic, doi, annotates
     }
 
@@ -104,6 +110,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         ratingScore = (try? c.decodeIfPresent(Double.self, forKey: .ratingScore)) ?? 0
         themes = (try? c.decodeIfPresent([String].self, forKey: .themes)) ?? []
         hasPDF = (try? c.decodeIfPresent(Bool.self, forKey: .hasPDF)) ?? false
+        pdfSlug = try? c.decodeIfPresent(String.self, forKey: .pdfSlug)
         if let s = try? c.decodeIfPresent(String.self, forKey: .year) {
             year = s
         } else if let i = try? c.decodeIfPresent(Int.self, forKey: .year) {
@@ -124,7 +131,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
 
     public init(path: String, type: EntryType, title: String?, author: String?,
                 year: String?, ratingScore: Double, themes: [String],
-                preview: String, hasPDF: Bool,
+                preview: String, hasPDF: Bool, pdfSlug: String? = nil,
                 mtime: Double? = nil, added: Double? = nil, source: String? = nil,
                 book: String? = nil, topic: String? = nil, doi: String? = nil,
                 annotates: String? = nil) {
@@ -137,6 +144,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         self.themes = themes
         self.preview = preview
         self.hasPDF = hasPDF
+        self.pdfSlug = pdfSlug
         self.mtime = mtime
         self.added = added
         self.source = source
@@ -150,12 +158,13 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
 public extension Entry {
     /// Copy with selected metadata fields replaced. Double-optional params let a
     /// caller clear a field (`.some(nil)`) vs leave it unchanged (omit).
-    func with(ratingScore: Double? = nil, year: String?? = nil, source: String?? = nil,
+    func with(title: String?? = nil, author: String?? = nil,
+              ratingScore: Double? = nil, year: String?? = nil, source: String?? = nil,
               topic: String?? = nil, doi: String?? = nil, themes: [String]? = nil) -> Entry {
-        Entry(path: path, type: type, title: title, author: author,
+        Entry(path: path, type: type, title: title ?? self.title, author: author ?? self.author,
               year: year ?? self.year, ratingScore: ratingScore ?? self.ratingScore,
               themes: themes ?? self.themes, preview: preview, hasPDF: hasPDF,
-              mtime: mtime, added: added, source: source ?? self.source,
+              pdfSlug: pdfSlug, mtime: mtime, added: added, source: source ?? self.source,
               book: book, topic: topic ?? self.topic, doi: doi ?? self.doi,
               annotates: annotates)
     }
