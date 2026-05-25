@@ -68,6 +68,39 @@ import Foundation
         #expect(try await client.listTrash() == [])
     }
 
+    @Test func imageOriginalURLResolvesOriginalBesideImageMarkdown() async throws {
+        let (root, client) = try makeWorkspace()
+        let imageDir = URL(fileURLWithPath: root).appendingPathComponent("vault/images/loop")
+        try FileManager.default.createDirectory(at: imageDir, withIntermediateDirectories: true)
+        try "---\ntype: image\ntitle: Loop\n---\n".write(
+            to: imageDir.appendingPathComponent("image.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: imageDir.appendingPathComponent("original.png"))
+
+        let url = try await client.imageOriginalURL(forImageEntryPath: "vault/images/loop/image.md")
+
+        #expect(url?.path == imageDir.appendingPathComponent("original.png").path)
+    }
+
+    @Test func createImageObjectCopiesOriginalAndWritesMetadata() async throws {
+        let (root, client) = try makeWorkspace()
+        let source = URL(fileURLWithPath: root).appendingPathComponent("AI Agent Loop Diagram.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: source)
+
+        let entry = try await client.createImageObject(from: source, title: nil)
+
+        #expect(entry.path == "vault/images/ai-agent-loop-diagram/image.md")
+        #expect(entry.type == .image)
+        #expect(entry.title == "AI Agent Loop Diagram")
+        let imageDir = URL(fileURLWithPath: root).appendingPathComponent("vault/images/ai-agent-loop-diagram")
+        #expect(FileManager.default.fileExists(atPath: imageDir.appendingPathComponent("original.png").path))
+        let metadata = try String(contentsOf: imageDir.appendingPathComponent("image.md"), encoding: .utf8)
+        #expect(metadata.contains("type: image"))
+        #expect(metadata.contains("title: AI Agent Loop Diagram"))
+    }
+
     @Test func indexDelegatesEmptyWhenNoDB() async throws {
         let (_, client) = try makeWorkspace()
         #expect(try await client.index() == [])

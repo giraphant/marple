@@ -63,6 +63,28 @@ public enum Wikilink {
         return tokens
     }
 
+    /// Convert `[[target]]` and `[[target|label]]` into standard markdown links
+    /// for renderers (Textual) that don't natively understand wikilink syntax.
+    /// `marple://wiki/<target>` is intercepted by `WikiURL.target(from:)`.
+    public static func preprocessForRendering(_ body: String) -> String {
+        let ns = body as NSString
+        var result = ""
+        var last = 0
+        for m in regex.matches(in: body, range: NSRange(location: 0, length: ns.length)) {
+            result += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+            let target = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
+            let labelRange = m.range(at: 2)
+            let label = labelRange.location == NSNotFound
+                ? target
+                : ns.substring(with: labelRange).trimmingCharacters(in: .whitespaces)
+            let enc = target.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? target
+            result += "[\(label)](marple://wiki/\(enc))"
+            last = m.range.location + m.range.length
+        }
+        result += ns.substring(from: last)
+        return result
+    }
+
     public static func tokenize(_ s: String) -> [InlineToken] {
         let (p, refs) = protect(s)
         return restore(p, refs)

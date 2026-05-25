@@ -22,4 +22,11 @@ import Foundation
     @Test func emptyPreviewStillHasChrome() {
         #expect(CardMetrics.estimatedHeight(for: entry(preview: "")) > 40)
     }
+
+    @Test func imageEntriesReserveThumbnailHeight() {
+        let image = Entry(path: "vault/images/loop/image.md", type: .image, title: "Loop",
+                          author: nil, year: nil, ratingScore: 0, themes: [],
+                          preview: "", hasPDF: false)
+        #expect(CardMetrics.estimatedHeight(for: image) >= 280)
+    }
 }

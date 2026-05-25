@@ -60,14 +60,9 @@ struct EntryListView: View {
                 }
             }
         } label: {
-            Label(sortLabel, systemImage: "arrow.up.arrow.down")
+            Image(systemName: "arrow.up.arrow.down")
         }
         .menuStyle(.borderlessButton).fixedSize()
-    }
-
-    private var sortLabel: String {
-        guard let c = model.sortClauses.first else { return "排序" }
-        return "\(c.field.label)\(c.dir == .asc ? "↑" : "↓")"
     }
 
     private var filterMenu: some View {
@@ -88,8 +83,7 @@ struct EntryListView: View {
                 }
             ))
         } label: {
-            Label(model.filterClauses.isEmpty ? "筛选" : "筛选(\(model.filterClauses.count))",
-                  systemImage: "line.3.horizontal.decrease.circle")
+            Image(systemName: "line.3.horizontal.decrease.circle")
         }
         .menuStyle(.borderlessButton).fixedSize()
     }
@@ -110,7 +104,7 @@ private struct SearchField: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("检索 标题/作者/主题…", text: Binding(
+            TextField("搜索", text: Binding(
                 get: { model.searchText },
                 set: { model.setSearchText($0) }
             ))

@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Marple",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .library(name: "MarpleKit", targets: ["MarpleKit"]),
         .executable(name: "Marple", targets: ["Marple"]),
@@ -51,6 +51,9 @@ let package = Package(
                 "MarpleKit",
                 "MarpleEmbeddings",
                 .product(name: "SwiftUILazyContainer", package: "SwiftUILazyContainer"),
+            ],
+            resources: [
+                .process("Resources"),
             ]
         ),
         // Standalone semantic-search CLI (build/query the vector index without the

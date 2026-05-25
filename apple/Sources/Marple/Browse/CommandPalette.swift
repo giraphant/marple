@@ -264,7 +264,7 @@ struct CommandPalette: View {
             let result = await model.commandSearch(q, mode: currentMode)
             if Task.isCancelled { return }
             let secs = paletteSections(result.map { (entry: $0.entry, score: $0.score) },
-                                       order: EntryType.modeled, promote: promote, perType: perType)
+                                       order: model.typeOrder, promote: promote, perType: perType)
             var src: [String: String] = [:]
             for r in result where r.source != nil { src[r.entry.path] = r.source }
             sections = secs

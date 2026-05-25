@@ -343,6 +343,44 @@ struct IndexedEntryTests {
         #expect(entry.author == "Solo Author")
     }
 
+    // MARK: - Image entries
+
+    @Test("image: indexes title author source themes from image.md")
+    func imageEntryMetadata() throws {
+        let text = """
+        ---
+        type: image
+        title: AI Agent Loop Diagram
+        author: Alice Example
+        source: https://example.com/agent-loop
+        themes:
+          - AI
+          - architecture
+        ---
+
+        A diagram explaining the agent loop.
+        """
+        let outcome = build(text: text,
+                            rel: "vault/images/ai-agent-loop-diagram/image.md",
+                            fileStem: "image")
+        guard case .indexed(let entry) = outcome else {
+            Issue.record("Expected .indexed, got \(outcome)")
+            return
+        }
+
+        #expect(entry.entryType == "image")
+        #expect(entry.path == "vault/images/ai-agent-loop-diagram/image.md")
+        #expect(entry.title == "AI Agent Loop Diagram")
+        #expect(entry.author == "Alice Example")
+        #expect(entry.source == "https://example.com/agent-loop")
+        #expect(entry.themes == ["AI", "architecture"])
+        #expect(entry.hasPDF == false)
+        #expect(entry.pdfSlug == nil)
+        #expect(entry.searchText.contains("AI Agent Loop Diagram"))
+        #expect(entry.searchText.contains("Alice Example"))
+        #expect(entry.searchText.contains("agent loop"))
+    }
+
     // MARK: - Optional fields: topic, source, doi, publisher, isbn
 
     @Test("optional metadata fields populated correctly")

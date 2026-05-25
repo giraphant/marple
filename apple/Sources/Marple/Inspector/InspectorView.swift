@@ -30,25 +30,23 @@ struct InspectorView: View {
     }
 
     private var tabStrip: some View {
-        HStack(spacing: Space.s4) {
-            tabButton(.info, "list.bullet.rectangle", "信息")
-            tabButton(.outline, "list.number", "目录")
+        HStack(spacing: 0) {
+            tabButton(.info, "doc.text", "信息")
+            tabButton(.outline, "list.bullet.indent", "目录")
             tabButton(.stats, "chart.bar", "统计")
         }
-        .padding(.vertical, Space.s4)
+        .padding(.vertical, 6)
     }
 
     private func tabButton(_ t: Tab, _ symbol: String, _ label: String) -> some View {
-        Button { tab = t } label: {
+        let active = tab == t
+        return Button { tab = t } label: {
             Image(systemName: symbol)
-                .font(.system(size: 13))
-                .frame(width: 30, height: 22)
-                .foregroundStyle(tab == t ? Color.accentColor : Color.secondary)
-                .background {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.accentColor.opacity(0.15))
-                        .opacity(tab == t ? 1 : 0)
-                }
+                .symbolVariant(active ? .fill : .none)
+                .font(.system(size: 13).weight(active ? .semibold : .regular))
+                .foregroundStyle(active ? Color.accentColor : .secondary)
+                .frame(width: 38, height: 22)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(label)
@@ -203,6 +201,7 @@ private func editableFields(for type: EntryType) -> Set<String> {
     case .authorProfile:  return ["rating"]
     case .topicSynthesis: return ["rating", "topic"]
     case .note:           return []
+    case .image:          return ["title", "author", "source", "topic"]
     case .other:          return []
     }
 }
@@ -219,10 +218,17 @@ private struct InfoSection: View {
                 let fields = editableFields(for: e.type)
                 VStack(alignment: .leading, spacing: 8) {
                     if fields.contains("rating") { RatingRow(model: model, score: Int(e.ratingScore)) }
+                    if fields.contains("title") {
+                        ScalarRow(model: model, label: "名称", value: e.title) { await model.setTitle($0) }
+                    }
                     if fields.contains("year") {
                         ScalarRow(model: model, label: "年份", value: e.year) { await model.setYear($0) }
                     }
-                    if e.author?.isEmpty == false { AuthorRow(model: model, entry: e) }
+                    if fields.contains("author") {
+                        ScalarRow(model: model, label: "作者", value: e.author) { await model.setAuthor($0) }
+                    } else if e.author?.isEmpty == false {
+                        AuthorRow(model: model, entry: e)
+                    }
                     if fields.contains("source") {
                         ScalarRow(model: model, label: "来源", value: e.source) { await model.setSource($0) }
                     }
@@ -239,6 +245,7 @@ private struct InfoSection: View {
                 if e.type == .paperAnalysis || e.type == .bookOverview {
                     CitationControl(entry: e).id(e.path)
                 }
+                PDFOpenGroup(model: model)
             } else {
                 Text("—").foregroundStyle(.secondary).font(.callout)
             }
@@ -485,6 +492,39 @@ private struct CitationControl: View {
             }
             .buttonStyle(.bordered)
             .disabled(preview.isEmpty)
+        }
+    }
+}
+
+// MARK: - PDF 打开
+
+private struct PDFOpenGroup: View {
+    @Bindable var model: AppModel
+    var body: some View {
+        if model.canOpenPDF || model.canOpenTranslation {
+            VStack(alignment: .leading, spacing: Space.s2) {
+                SectionHeader("原文")
+                HStack(spacing: Space.s2) {
+                    if model.canOpenPDF {
+                        Button {
+                            Task { await model.openPDF() }
+                        } label: {
+                            Label("阅读原文", systemImage: "doc.richtext")
+                                .font(.callout)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    if model.canOpenTranslation {
+                        Button {
+                            Task { await model.openTranslation() }
+                        } label: {
+                            Label("阅读译本", systemImage: "doc.text")
+                                .font(.callout)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
         }
     }
 }

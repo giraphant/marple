@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 import MarpleKit
 
 /// The booted app shell (Arc-style): a first-class sidebar that holds categories
@@ -75,6 +77,13 @@ struct RootView: View {
             .disabled(!model.canGoForward)
         }
         ToolbarItemGroup(placement: .primaryAction) {
+            if isImagePane {
+                Button { importImages() } label: {
+                    Image(systemName: "photo.badge.plus")
+                }
+                .help("导入图片")
+            }
+
             Picker("视图", selection: $model.browseMode) {
                 Image(systemName: "rectangle.grid.1x2").tag(BrowseMode.list)
                 Image(systemName: "square.grid.2x2").tag(BrowseMode.grid)
@@ -99,6 +108,23 @@ struct RootView: View {
                 }
                 .help("检查器")
             }
+        }
+    }
+
+    private var isImagePane: Bool {
+        if case .type(.image) = model.pane { return true }
+        return false
+    }
+
+    private func importImages() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = ImageAsset.supportedExtensions.compactMap { UTType(filenameExtension: $0) }
+        guard panel.runModal() == .OK else { return }
+        let urls = panel.urls
+        Task {
+            for url in urls { await model.importImage(from: url) }
         }
     }
 }

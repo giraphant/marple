@@ -13,6 +13,7 @@ extension EntryType {
         case .topicSynthesis: return "square.stack.3d.up"
         case .chapterSummary: return "list.bullet.rectangle"
         case .note:           return "note.text"
+        case .image:          return "photo"
         case .other:          return "questionmark.square.dashed"
         }
     }
@@ -25,6 +26,7 @@ extension EntryType {
         case .topicSynthesis: return .teal
         case .chapterSummary: return .indigo
         case .note:           return .yellow
+        case .image:          return .pink
         case .other:          return .gray
         }
     }
