@@ -52,10 +52,10 @@ public struct RenderStyle: Equatable {
 
     var tableBodyFont: NSFont {
         switch design {
-        case .sans:  return NSFont.systemFont(ofSize: size * 0.94, weight: .regular)
-        case .serif: return NSFont(name: "Songti SC", size: size * 0.94)
-            ?? NSFont.systemFont(ofSize: size * 0.94, weight: .regular)
-        case .mono:  return NSFont.monospacedSystemFont(ofSize: size * 0.94, weight: .regular)
+        case .sans:  return NSFont.systemFont(ofSize: size * 0.90, weight: .regular)
+        case .serif: return NSFont(name: "Songti SC", size: size * 0.90)
+            ?? NSFont.systemFont(ofSize: size * 0.90, weight: .regular)
+        case .mono:  return NSFont.monospacedSystemFont(ofSize: size * 0.90, weight: .regular)
         }
     }
 
@@ -63,7 +63,7 @@ public struct RenderStyle: Equatable {
         let bodyFont = tableBodyFont
         let descriptor = bodyFont.fontDescriptor.withSymbolicTraits(.bold)
         return NSFont(descriptor: descriptor, size: bodyFont.pointSize)
-            ?? NSFont.systemFont(ofSize: size * 0.94, weight: .semibold)
+            ?? NSFont.systemFont(ofSize: size * 0.90, weight: .semibold)
     }
 
     func headingFont(level: Int) -> NSFont {
@@ -80,10 +80,12 @@ public struct RenderStyle: Equatable {
     var codeBackgroundColor: NSColor { .textColor.withAlphaComponent(0.035) }
     var quoteTextColor: NSColor { .secondaryLabelColor }
     var separatorTextColor: NSColor { .tertiaryLabelColor }
-    var tableBorderColor: NSColor { .separatorColor.withAlphaComponent(0.30) }
-    var tableHeaderBorderColor: NSColor { .separatorColor.withAlphaComponent(0.7) }
-    var tableHeaderBackgroundColor: NSColor { .textColor.withAlphaComponent(0.07) }
-    var tableRowAlternateBackgroundColor: NSColor { .textColor.withAlphaComponent(0.035) }
+    var tableBorderColor: NSColor { .separatorColor.withAlphaComponent(0.24) }
+    var tableHeaderBorderColor: NSColor { .separatorColor.withAlphaComponent(0.48) }
+    var tableOuterBorderColor: NSColor { .separatorColor.withAlphaComponent(0.40) }
+    var tableHeaderBackgroundColor: NSColor { .textColor.withAlphaComponent(0.04) }
+    var tableHeaderTextColor: NSColor { .secondaryLabelColor }
+    var tableHeaderKern: CGFloat { CGFloat(size * 0.03) }
 
     func headingColor(level: Int) -> NSColor {
         level >= 6 ? .secondaryLabelColor : textColor
@@ -187,6 +189,8 @@ private final class RenderContext {
     var ps: NSParagraphStyle
     /// Active block text color, used for quotes and dim headings.
     var activeTextColor: NSColor?
+    /// Active kerning (letter-spacing) for the current run; used for table headers.
+    var activeKern: CGFloat?
     /// Active link URL (non-nil when inside a Link element).
     var linkURL: String?
 
@@ -349,15 +353,19 @@ private final class RenderContext {
         let columnWidths = tableColumnWidthPercentages(headerCells: headerCells,
                                                        bodyRows: bodyRows,
                                                        columnCount: columnCount)
+        let columnAlignments = table.columnAlignments
+        let lastRow = bodyRows.count
 
         for column in 0..<columnCount {
             visitTableCell(column < headerCells.count ? headerCells[column] : nil,
                            table: textTable,
                            row: 0,
                            column: column,
+                           columnCount: columnCount,
                            isHeader: true,
-                           isAlternateRow: false,
-                           columnWidthPercent: columnWidths[column])
+                           isLastRow: lastRow == 0,
+                           columnWidthPercent: columnWidths[column],
+                           columnAlignment: column < columnAlignments.count ? columnAlignments[column] : nil)
         }
 
         for (rowOffset, rowCells) in bodyRows.enumerated() {
@@ -366,9 +374,11 @@ private final class RenderContext {
                                table: textTable,
                                row: rowOffset + 1,
                                column: column,
+                               columnCount: columnCount,
                                isHeader: false,
-                               isAlternateRow: rowOffset % 2 == 1,
-                               columnWidthPercent: columnWidths[column])
+                               isLastRow: rowOffset + 1 == lastRow,
+                               columnWidthPercent: columnWidths[column],
+                               columnAlignment: column < columnAlignments.count ? columnAlignments[column] : nil)
             }
         }
 
@@ -382,7 +392,7 @@ private final class RenderContext {
     /// shared in proportion to each column's natural single-line width.
     private func tableColumnWidthPercentages(headerCells: [Markup], bodyRows: [[Markup]], columnCount: Int) -> [CGFloat] {
         let referenceContentWidth: CGFloat = 700
-        let cellHorizontalPadding: CGFloat = 20
+        let cellHorizontalPadding: CGFloat = 24
         let budget = max(referenceContentWidth - CGFloat(columnCount) * cellHorizontalPadding, 1)
         let naturalCap = budget * 0.45
 
@@ -468,21 +478,27 @@ private final class RenderContext {
         }
     }
 
-    private func visitTableCell(_ cell: Markup?, table: NSTextTable, row: Int, column: Int, isHeader: Bool, isAlternateRow: Bool, columnWidthPercent: CGFloat) {
+    private func visitTableCell(_ cell: Markup?, table: NSTextTable, row: Int, column: Int, columnCount: Int, isHeader: Bool, isLastRow: Bool, columnWidthPercent: CGFloat, columnAlignment: Table.ColumnAlignment?) {
         let previousBaseFont = baseFont
         let previousTraits = traits
         let previousParagraphStyle = ps
+        let previousTextColor = activeTextColor
+        let previousKern = activeKern
         let previousLinkURL = linkURL
 
         baseFont = isHeader ? style.tableHeaderFont : style.tableBodyFont
         traits = []
+        activeTextColor = isHeader ? style.tableHeaderTextColor : previousTextColor
+        activeKern = isHeader ? style.tableHeaderKern : nil
         linkURL = nil
         ps = tableCellParagraphStyle(table: table,
                                      row: row,
                                      column: column,
+                                     columnCount: columnCount,
                                      isHeader: isHeader,
-                                     isAlternateRow: isAlternateRow,
-                                     columnWidthPercent: columnWidthPercent)
+                                     isLastRow: isLastRow,
+                                     columnWidthPercent: columnWidthPercent,
+                                     columnAlignment: columnAlignment)
 
         let start = attributed.length
         if let cell {
@@ -496,34 +512,61 @@ private final class RenderContext {
         baseFont = previousBaseFont
         traits = previousTraits
         ps = previousParagraphStyle
+        activeTextColor = previousTextColor
+        activeKern = previousKern
         linkURL = previousLinkURL
     }
 
-    private func tableCellParagraphStyle(table: NSTextTable, row: Int, column: Int, isHeader: Bool, isAlternateRow: Bool, columnWidthPercent: CGFloat) -> NSParagraphStyle {
+    private func tableCellParagraphStyle(table: NSTextTable, row: Int, column: Int, columnCount: Int, isHeader: Bool, isLastRow: Bool, columnWidthPercent: CGFloat, columnAlignment: Table.ColumnAlignment?) -> NSParagraphStyle {
         let block = NSTextTableBlock(table: table,
                                      startingRow: row,
                                      rowSpan: 1,
                                      startingColumn: column,
                                      columnSpan: 1)
         block.setValue(columnWidthPercent, type: .percentageValueType, for: .width)
-        block.setWidth(10, type: .absoluteValueType, for: .padding, edge: .minX)
-        block.setWidth(10, type: .absoluteValueType, for: .padding, edge: .maxX)
-        block.setWidth(6, type: .absoluteValueType, for: .padding, edge: .minY)
-        block.setWidth(6, type: .absoluteValueType, for: .padding, edge: .maxY)
+        block.setWidth(12, type: .absoluteValueType, for: .padding, edge: .minX)
+        block.setWidth(12, type: .absoluteValueType, for: .padding, edge: .maxX)
+        block.setWidth(7, type: .absoluteValueType, for: .padding, edge: .minY)
+        block.setWidth(7, type: .absoluteValueType, for: .padding, edge: .maxY)
         block.setWidth(0, type: .absoluteValueType, for: .border)
-        block.setWidth(isHeader ? 1.0 : 0.5, type: .absoluteValueType, for: .border, edge: .maxY)
-        block.setBorderColor(isHeader ? style.tableHeaderBorderColor : style.tableBorderColor, for: .maxY)
+
+        // Horizontal rules: outer frame top/bottom, stronger rule under the header,
+        // faint hairlines between body rows.
+        if row == 0 {
+            block.setWidth(0.75, type: .absoluteValueType, for: .border, edge: .minY)
+            block.setBorderColor(style.tableOuterBorderColor, for: .minY)
+        }
+        block.setWidth(isHeader || isLastRow ? 0.75 : 0.5, type: .absoluteValueType, for: .border, edge: .maxY)
+        block.setBorderColor(isLastRow ? style.tableOuterBorderColor : (isHeader ? style.tableHeaderBorderColor : style.tableBorderColor), for: .maxY)
+
+        // Vertical rules: outer frame on the leading/trailing columns, faint inner
+        // hairlines between columns (collapsed against the neighbour's edge).
+        block.setWidth(column == 0 ? 0.75 : 0.5, type: .absoluteValueType, for: .border, edge: .minX)
+        block.setBorderColor(column == 0 ? style.tableOuterBorderColor : style.tableBorderColor, for: .minX)
+        if column == columnCount - 1 {
+            block.setWidth(0.75, type: .absoluteValueType, for: .border, edge: .maxX)
+            block.setBorderColor(style.tableOuterBorderColor, for: .maxX)
+        }
+
         if isHeader {
             block.backgroundColor = style.tableHeaderBackgroundColor
-        } else if isAlternateRow {
-            block.backgroundColor = style.tableRowAlternateBackgroundColor
         }
 
         let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = textAlignment(for: columnAlignment)
         paragraphStyle.lineSpacing = style.tableLineSpacing
         paragraphStyle.lineBreakMode = .byWordWrapping
         paragraphStyle.textBlocks = [block]
         return paragraphStyle
+    }
+
+    private func textAlignment(for columnAlignment: Table.ColumnAlignment?) -> NSTextAlignment {
+        switch columnAlignment {
+        case .left: return .left
+        case .center: return .center
+        case .right: return .right
+        case nil: return .natural
+        }
     }
 
     // MARK: Inline visitors
@@ -536,7 +579,7 @@ private final class RenderContext {
         switch markup {
         case let t as Text:
             let color: NSColor = linkURL != nil ? style.linkColor : (activeTextColor ?? style.textColor)
-            append(t.string, font: currentFont, color: color, link: linkURL)
+            append(t.string, font: currentFont, color: color, link: linkURL, kern: activeKern)
 
         case let strong as Strong:
             traits.insert(.bold)

@@ -45,20 +45,61 @@ import Testing
         #expect(!rendered.attributedString.string.contains(" | "))
     }
 
-    @Test func renderedTablesUseReaderTableStyling() throws {
+    @Test func renderedTablesUseEnclosedHairlineGridStyling() throws {
         let rendered = Self.renderTable("| A | B |\n|---|---|\n| 1 | |")
         let headerBlock = try Self.tableBlock(in: rendered, containing: "A")
         let emptyCellBlock = try Self.tableBlock(in: rendered, containing: "—")
+        let headerFont = try Self.font(in: rendered, containing: "A")
+        let bodyFont = try Self.font(in: rendered, containing: "1")
 
-        #expect(headerBlock.width(for: .padding, edge: .minX) == 10)
-        #expect(headerBlock.width(for: .padding, edge: .maxX) == 10)
-        #expect(headerBlock.width(for: .padding, edge: .minY) == 6)
-        #expect(headerBlock.width(for: .padding, edge: .maxY) == 6)
-        #expect(emptyCellBlock.width(for: .border, edge: .minX) == 0)
-        #expect(emptyCellBlock.width(for: .border, edge: .maxX) == 0)
-        #expect(emptyCellBlock.width(for: .border, edge: .maxY) == 0.5)
-        #expect(headerBlock.backgroundColor != nil)
+        #expect(headerBlock.width(for: .padding, edge: .minX) == 12)
+        #expect(headerBlock.width(for: .padding, edge: .maxX) == 12)
+        #expect(headerBlock.width(for: .padding, edge: .minY) == 7)
+        #expect(headerBlock.width(for: .padding, edge: .maxY) == 7)
+        // Outer frame on the leading column + top, stronger rule under the header.
+        #expect(headerBlock.width(for: .border, edge: .minX) == 0.75)
+        #expect(headerBlock.width(for: .border, edge: .minY) == 0.75)
+        #expect(headerBlock.width(for: .border, edge: .maxY) == 0.75)
+        // Trailing column carries the right-hand outer frame; inner edge is a hairline.
+        #expect(emptyCellBlock.width(for: .border, edge: .minX) == 0.5)
+        #expect(emptyCellBlock.width(for: .border, edge: .maxX) == 0.75)
+        #expect(emptyCellBlock.width(for: .border, edge: .maxY) == 0.75)
+        let headerBackground = try #require(headerBlock.backgroundColor)
+        #expect(Self.alpha(of: headerBackground) == 0.04)
+        #expect(headerFont.pointSize == 15.3)
+        #expect(bodyFont.pointSize == 15.3)
+        #expect(Self.fontWeight(headerFont) > Self.fontWeight(bodyFont))
+        #expect(try Self.kern(in: rendered, containing: "A") > 0)
+        #expect(try Self.foregroundColor(in: rendered, containing: "A") == .secondaryLabelColor)
         #expect(try Self.foregroundColor(in: rendered, containing: "—") == .tertiaryLabelColor)
+    }
+
+    @Test func renderedTablesEncloseColumnsWithoutZebra() throws {
+        let rendered = Self.renderTable("| Term | Value |\n|---|---|\n| Alpha | 1 |\n| Beta | 2 |")
+        let firstColumnInnerRow = try Self.tableBlock(in: rendered, containing: "Alpha")
+        let secondColumnInnerRow = try Self.tableBlock(in: rendered, containing: "1")
+        let firstColumnLastRow = try Self.tableBlock(in: rendered, containing: "Beta")
+
+        // Body rows carry no fill — the design never stripes.
+        #expect(secondColumnInnerRow.backgroundColor == nil)
+        #expect(firstColumnLastRow.backgroundColor == nil)
+        // Leading column framed; inner column separated by a faint vertical hairline.
+        #expect(firstColumnInnerRow.width(for: .border, edge: .minX) == 0.75)
+        #expect(secondColumnInnerRow.width(for: .border, edge: .minX) == 0.5)
+        #expect(secondColumnInnerRow.width(for: .border, edge: .maxX) == 0.75)
+        // Faint horizontal hairline between body rows (not the heavier outer frame).
+        #expect(firstColumnInnerRow.width(for: .border, edge: .maxY) == 0.5)
+    }
+
+    @Test func renderedTablesHonorColumnAlignmentMarkers() throws {
+        let rendered = Self.renderTable("| Left | Number | Scope |\n|:---|---:|:---:|\n| Alpha | 42 | middle |")
+        let leftStyle = try Self.paragraphStyle(in: rendered, containing: "Alpha")
+        let numberStyle = try Self.paragraphStyle(in: rendered, containing: "42")
+        let scopeStyle = try Self.paragraphStyle(in: rendered, containing: "middle")
+
+        #expect(leftStyle.alignment == .left)
+        #expect(numberStyle.alignment == .right)
+        #expect(scopeStyle.alignment == .center)
     }
 
     @Test func renderedTablesUseCompactAdaptiveColumns() throws {
@@ -238,6 +279,10 @@ import Testing
                                                             at: range.location,
                                                             effectiveRange: nil)
         return try #require(attribute as? Double)
+    }
+
+    private static func alpha(of color: NSColor) -> Double {
+        Double((color.alphaComponent * 1_000).rounded() / 1_000)
     }
 
     private static func range(of text: String, in rendered: RenderedDocument) throws -> NSRange {
