@@ -1,0 +1,429 @@
+import AppKit
+import SwiftUI
+import MarpleKit
+
+/// NSViewRepresentable around NSTableView, replacing SwiftUI `List` for the
+/// middle browse column. Why direct AppKit:
+///
+/// 1. **Ulysses two-layer selection (QUA-95)**: `selectionHighlightStyle =
+///    .sourceList` produces the pale-blue selection cycle (active = pale blue,
+///    unemphasized = pale gray, emphasized via first-responder), which SwiftUI
+///    `List` doesn't expose at any preset.
+/// 2. **Reentrant warning (QUA-103)**: SwiftUI `List`'s internal NSTableView
+///    delegate re-enters on @Observable invalidation during the first paint
+///    (lldb-confirmed); owning the table lets us coalesce reloads through
+///    `DispatchQueue.main.async` and dispatch observation callbacks on the
+///    next runloop turn, which the SwiftUI shell can't.
+///
+/// Pattern mirrors `SidebarTabOutlineView` (the sibling AppKit-wrap in this
+/// codebase). Difference: rows host the existing SwiftUI `EntryRow` via
+/// `NSHostingView` so the row content (preview, badges, matched-line buttons)
+/// stays declarative; the table only owns selection, focus, and reload.
+struct EntryListTable: NSViewRepresentable {
+    var model: AppModel
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let table = NSTableView()
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("entry"))
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        // The key knob SwiftUI never exposed. .sourceList style gives the
+        // Ulysses pale-blue selection PLUS the automatic emphasized /
+        // unemphasized cycle on first-responder change (window-key transitions,
+        // ⌘F focus moves, etc.). Apple deprecated the older
+        // `selectionHighlightStyle = .sourceList` knob in macOS 12 and points
+        // here instead.
+        table.style = .sourceList
+        table.backgroundColor = .clear
+        // SwiftUI List(.inset) used ~8pt visible row separation; match that so
+        // the pale-blue source-list selection has visible gutters between rows.
+        table.intercellSpacing = NSSize(width: 0, height: 8)
+        table.allowsMultipleSelection = false
+        table.allowsEmptySelection = true
+        // We measure row height ourselves via `tableView(_:heightOfRow:)`.
+        // `usesAutomaticRowHeights = true` fed NSHostingView's ideal (single-
+        // line) intrinsic size into the row, which collapsed multi-line preview
+        // and broke worse the moment search expansion added matched lines.
+        // CodeEdit's FindNavigator does the same: probe view + sizeThatFits +
+        // per-row cache, invalidated on column width change.
+        table.usesAutomaticRowHeights = false
+        table.rowSizeStyle = .custom
+        table.delegate = context.coordinator
+        table.dataSource = context.coordinator
+        table.target = context.coordinator
+        table.action = #selector(Coordinator.tableClicked(_:))
+        table.refusesFirstResponder = false
+
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.delegate = context.coordinator
+        table.menu = menu
+
+        context.coordinator.tableView = table
+
+        let scroll = NSScrollView()
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+
+        // First paint after the table is in a window: defer to next runloop turn
+        // so AppKit's own initial layout pass finishes before we touch
+        // selection/reload (the QUA-103 reentrancy root cause was exactly this
+        // ordering inside SwiftUI's List).
+        DispatchQueue.main.async { [weak coordinator = context.coordinator, weak table] in
+            guard let coordinator, let table else { return }
+            coordinator.reload(table)
+            coordinator.observeModel()
+        }
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        context.coordinator.model = model
+        guard let table = scroll.documentView as? NSTableView else { return }
+        context.coordinator.scheduleReload(table)
+    }
+
+    @MainActor final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
+        var model: AppModel
+        weak var tableView: NSTableView?
+        private var entries: [Entry] = []
+        private var lastExpanded: Set<String> = []
+        private var lastMatchLineCounts: [String: Int] = [:]
+        private var isUpdatingSelection = false
+        private var pendingReload = false
+        /// Key: "<path>|e:<0|1>|m:<matchLineCount>". Value: measured row height.
+        /// Width invalidates the whole cache (see `measurementWidth`); structural
+        /// reloads also clear it.
+        private var rowHeightCache: [String: CGFloat] = [:]
+        private var measurementWidth: CGFloat = 0
+        private var measurementController: NSHostingController<EntryListRowHost>?
+        private static let cellIdentifier = NSUserInterfaceItemIdentifier("entry-row-cell")
+        private static let minimumRowHeight: CGFloat = 60
+        private static let rowHorizontalInset: CGFloat = 12
+
+        init(model: AppModel) {
+            self.model = model
+        }
+
+        /// AppModel is @Observable; subscribe to the keys that change a row's
+        /// content or order, then re-arm after each fire. Dispatch the work on
+        /// the next main-runloop tick — never reenter the delegate from within
+        /// the observation callback (that was QUA-101 for derived data, and the
+        /// SwiftUI List version of the same problem is QUA-103).
+        func observeModel() {
+            withObservationTracking {
+                _ = model.visibleEntries.count
+                _ = model.openPath
+                _ = model.searchMatchQuery
+                _ = model.matchExpanded
+                _ = model.matchJump
+                for entry in model.visibleEntries {
+                    _ = model.searchMatches[entry.path]?.lines.count
+                }
+            } onChange: { [weak self] in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.observeModel()
+                    if let table = self.tableView { self.scheduleReload(table) }
+                }
+            }
+        }
+
+        func scheduleReload(_ table: NSTableView) {
+            guard !pendingReload else { return }
+            pendingReload = true
+            DispatchQueue.main.async { [weak self, weak table] in
+                guard let self, let table else { return }
+                self.pendingReload = false
+                self.reload(table)
+            }
+        }
+
+        /// Decide between three reload strategies:
+        ///   1. Full `reloadData()` when entries differ — order or per-row
+        ///      metadata (title/author/rating/year/hasPDF) changed. Entry is
+        ///      Equatable so this catches metadata edits the previous
+        ///      path-only signature missed.
+        ///   2. `noteHeightOfRows(withIndexesChanged:)` when the visible rows
+        ///      are the same but match-expansion or per-entry match-line count
+        ///      changed — the row content stays but the row HEIGHT does.
+        ///   3. Just `syncSelection` + active-cue refresh otherwise (e.g.
+        ///      `openPath` or `matchJump` flipped without any structural
+        ///      change).
+        func reload(_ table: NSTableView) {
+            let newEntries = model.visibleEntries
+            let newExpanded = model.matchExpanded
+            let newCounts = matchLineCounts(for: newEntries)
+
+            if entries != newEntries {
+                entries = newEntries
+                lastExpanded = newExpanded
+                lastMatchLineCounts = newCounts
+                rowHeightCache.removeAll(keepingCapacity: true)
+                table.reloadData()
+                syncSelection(in: table)
+                return
+            }
+
+            // Same entry list — but expansion or match counts may have moved
+            // (e.g. user toggled "再显示 N 个匹配项…" or the search backend
+            // republished match lines). Push fresh content + remeasure heights.
+            //
+            // Match-jump / open-path flips don't need this: EntryListRowHost is
+            // @Bindable on AppModel, so observation re-renders the SwiftUI body
+            // inside NSHostingView without any manual refresh.
+            if newExpanded != lastExpanded || newCounts != lastMatchLineCounts {
+                lastExpanded = newExpanded
+                lastMatchLineCounts = newCounts
+                rowHeightCache.removeAll(keepingCapacity: true)
+                refreshVisibleHostedViews(in: table)
+                table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<entries.count))
+            }
+            syncSelection(in: table)
+        }
+
+        private func matchLineCounts(for entries: [Entry]) -> [String: Int] {
+            var counts: [String: Int] = [:]
+            for entry in entries {
+                if let n = model.searchMatches[entry.path]?.lines.count, n > 0 {
+                    counts[entry.path] = n
+                }
+            }
+            return counts
+        }
+
+        private func refreshVisibleHostedViews(in table: NSTableView) {
+            let visibleRange = table.rows(in: table.visibleRect)
+            guard visibleRange.length > 0 else { return }
+            for row in visibleRange.location..<(visibleRange.location + visibleRange.length) {
+                guard row >= 0 && row < entries.count,
+                      let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? EntryHostingCell
+                else { continue }
+                cell.configure(entry: entries[row], model: model)
+            }
+        }
+
+        private func syncSelection(in table: NSTableView) {
+            let targetRow: Int = {
+                guard let path = model.openPath else { return -1 }
+                return entries.firstIndex(where: { $0.path == path }) ?? -1
+            }()
+            isUpdatingSelection = true
+            defer { isUpdatingSelection = false }
+            if targetRow >= 0 {
+                if table.selectedRow != targetRow {
+                    table.selectRowIndexes(IndexSet(integer: targetRow), byExtendingSelection: false)
+                    table.scrollRowToVisible(targetRow)
+                }
+            } else if table.selectedRow >= 0 {
+                table.deselectAll(nil)
+            }
+        }
+
+        // MARK: NSTableViewDataSource
+
+        func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
+
+        func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+            guard row >= 0 && row < entries.count else { return nil }
+            let cell = tableView.makeView(withIdentifier: Self.cellIdentifier, owner: self) as? EntryHostingCell
+                ?? EntryHostingCell()
+            cell.identifier = Self.cellIdentifier
+            cell.configure(entry: entries[row], model: model)
+            return cell
+        }
+
+        /// Measure each row at the actual column width. `usesAutomaticRowHeights`
+        /// fed NSHostingView's ideal (single-line) intrinsic size to the table,
+        /// which collapsed multi-line preview and broke worse with search-expand.
+        /// Cache by (path, expanded, matchLineCount); column-resize wipes it
+        /// (mirrors CodeEdit FindNavigator's probe pattern).
+        func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+            guard row >= 0 && row < entries.count else { return Self.minimumRowHeight }
+            let entry = entries[row]
+            let columnWidth = tableView.tableColumns.first?.width ?? tableView.bounds.width
+            if abs(columnWidth - measurementWidth) > 0.5 {
+                rowHeightCache.removeAll(keepingCapacity: true)
+                measurementWidth = columnWidth
+            }
+            let key = heightCacheKey(for: entry)
+            if let cached = rowHeightCache[key] { return cached }
+
+            let availableWidth = max(columnWidth - Self.rowHorizontalInset * 2, 100)
+            let controller: NSHostingController<EntryListRowHost>
+            if let existing = measurementController {
+                existing.rootView = EntryListRowHost(entry: entry, model: model)
+                controller = existing
+            } else {
+                let c = NSHostingController(rootView: EntryListRowHost(entry: entry, model: model))
+                measurementController = c
+                controller = c
+            }
+            // NSHostingController.sizeThatFits(in:) is the documented "what
+            // height does the SwiftUI body want at this width" API. The
+            // NSHostingView intrinsicContentSize / fittingSize path returned
+            // the IDEAL size (Text treated as infinite-width, never wrapping),
+            // which was why lineLimit(2-3) was collapsing every row to one line.
+            let target = NSSize(width: availableWidth, height: .greatestFiniteMagnitude)
+            let measured = controller.sizeThatFits(in: target).height
+            let height = max(measured, Self.minimumRowHeight)
+            rowHeightCache[key] = height
+            return height
+        }
+
+        private func heightCacheKey(for entry: Entry) -> String {
+            let expanded = lastExpanded.contains(entry.path) ? "1" : "0"
+            let matchLines = lastMatchLineCounts[entry.path] ?? 0
+            // Path + state covers structural changes; entry-metadata edits invalidate
+            // the entire cache via the `entries != newEntries` reload branch.
+            return "\(entry.path)|e:\(expanded)|m:\(matchLines)"
+        }
+
+        // MARK: NSTableViewDelegate
+
+        func tableViewSelectionDidChange(_ notification: Notification) {
+            guard !isUpdatingSelection,
+                  let table = notification.object as? NSTableView else { return }
+            let row = table.selectedRow
+            guard row >= 0 && row < entries.count else { return }
+            let path = entries[row].path
+            guard model.openPath != path else { return }
+            Task { await model.open(path) }
+        }
+
+        @objc fileprivate func tableClicked(_ sender: NSTableView) {
+            // Single-click already changes selection (handled in selectionDidChange).
+            // Keep this hook free for any future single-click-only behavior.
+        }
+
+        /// Column-width changes (sidebar drag, window resize via autoresizing)
+        /// invalidate every cached row height since wrap-points move. Wipe the
+        /// cache and tell AppKit to re-query heights.
+        func tableViewColumnDidResize(_ notification: Notification) {
+            guard let table = tableView else { return }
+            rowHeightCache.removeAll(keepingCapacity: true)
+            measurementWidth = 0
+            table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<entries.count))
+        }
+
+        // MARK: NSMenuDelegate
+
+        func menuNeedsUpdate(_ menu: NSMenu) {
+            menu.removeAllItems()
+            guard let table = tableView else { return }
+            // Right-click clamps selection to clicked row when it's not part of
+            // the current selection, so clickedRow is the source of truth.
+            let row = table.clickedRow
+            guard row >= 0 && row < entries.count else { return }
+            let entry = entries[row]
+            menu.addItem(menuItem("在新页面页打开", action: #selector(openInNewTabFromMenu(_:)), path: entry.path))
+            menu.addItem(menuItem("新建批注", action: #selector(newAnnotationFromMenu(_:)), path: entry.path))
+            menu.addItem(.separator())
+            menu.addItem(menuItem("移到回收站", action: #selector(moveToTrashFromMenu(_:)), path: entry.path))
+        }
+
+        private func menuItem(_ title: String, action: Selector, path: String) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = path
+            return item
+        }
+
+        @objc private func openInNewTabFromMenu(_ sender: NSMenuItem) {
+            guard let path = sender.representedObject as? String else { return }
+            Task { await model.openInNewTab(path) }
+        }
+
+        @objc private func newAnnotationFromMenu(_ sender: NSMenuItem) {
+            guard let path = sender.representedObject as? String,
+                  let entry = entries.first(where: { $0.path == path }) else { return }
+            Task { await model.newAnnotation(for: entry) }
+        }
+
+        @objc private func moveToTrashFromMenu(_ sender: NSMenuItem) {
+            guard let path = sender.representedObject as? String else { return }
+            Task { await model.moveToTrash(path) }
+        }
+    }
+}
+
+/// Row cell: an NSHostingView wrapping the SwiftUI EntryRow plus the
+/// per-matched-line active cue. Keeping `model` as a `@Bindable` lets the row
+/// observe matchJump / matchExpanded inside the SwiftUI body — no manual
+/// invalidation needed when those flip.
+@MainActor
+private final class EntryHostingCell: NSTableCellView {
+    private var host: NSHostingView<EntryListRowHost>?
+
+    func configure(entry: Entry, model: AppModel) {
+        let root = EntryListRowHost(entry: entry, model: model)
+        if let host {
+            host.rootView = root
+        } else {
+            let h = NSHostingView(rootView: root)
+            // CRITICAL for `usesAutomaticRowHeights`: without this, NSHostingView
+            // does NOT publish the SwiftUI body's natural size as its intrinsic
+            // content size, so NSTableView measures the row at a stale height
+            // (rows overlap when search-mode expands match lines, no breathing
+            // room when collapsed). macOS 13+ API; we target macOS 15.
+            h.sizingOptions = .intrinsicContentSize
+            h.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(h)
+            NSLayoutConstraint.activate([
+                h.topAnchor.constraint(equalTo: topAnchor),
+                h.bottomAnchor.constraint(equalTo: bottomAnchor),
+                h.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+                h.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            ])
+            host = h
+        }
+    }
+}
+
+/// Tiny SwiftUI bridge: forwards EntryRow inputs and lifts the per-row
+/// active-match-ordinal out of AppModel. Living in this file keeps the
+/// model-touching cell-host glue separate from the pure-presentation EntryRow.
+private struct EntryListRowHost: View {
+    let entry: Entry
+    @Bindable var model: AppModel
+
+    var body: some View {
+        EntryRow(
+            entry: entry,
+            matches: searching ? model.searchMatches[entry.path] : nil,
+            expanded: model.matchExpanded.contains(entry.path),
+            activeMatchOrdinal: activeMatchOrdinal,
+            onToggleExpand: { model.toggleMatchExpanded(entry.path) },
+            onMatchTap: { line in
+                Task {
+                    await model.openMatchedLine(
+                        path: entry.path,
+                        query: model.searchMatchQuery,
+                        ordinal: line.matchOrdinal,
+                        anchor: line.anchor)
+                }
+            }
+        )
+    }
+
+    private var searching: Bool { !model.searchText.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    private var activeMatchOrdinal: Int? {
+        // matchJump survives until the next match-line click or until search is
+        // cleared, so an "A" jump can outlive the user moving on to query "B".
+        // Gate by the query that produced the current match set — if the user
+        // is now searching something else, no row should claim active.
+        guard model.openPath == entry.path,
+              let jump = model.matchJump,
+              jump.query == model.searchMatchQuery
+        else { return nil }
+        return jump.ordinal
+    }
+}
