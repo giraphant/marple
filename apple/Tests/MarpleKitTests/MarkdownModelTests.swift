@@ -51,8 +51,8 @@ import Testing
 
         #expect(headerBlock.width(for: .padding, edge: .minX) == 10)
         #expect(headerBlock.width(for: .padding, edge: .maxX) == 10)
-        #expect(headerBlock.width(for: .padding, edge: .minY) == 5)
-        #expect(headerBlock.width(for: .padding, edge: .maxY) == 5)
+        #expect(headerBlock.width(for: .padding, edge: .minY) == 6)
+        #expect(headerBlock.width(for: .padding, edge: .maxY) == 6)
         #expect(emptyCellBlock.width(for: .border, edge: .minX) == 0)
         #expect(emptyCellBlock.width(for: .border, edge: .maxX) == 0)
         #expect(emptyCellBlock.width(for: .border, edge: .maxY) == 0.5)

@@ -573,8 +573,23 @@ final class AppModel {
         }
     }
 
+    var openCitationEntry: Entry? {
+        guard let e = openEntry else { return nil }
+        return citationEntry(for: e, in: entries)
+    }
+
+    private var openPDFSlug: String? {
+        guard let e = openEntry, let slug = pdfEntry(for: e, in: entries)?.pdfSlug, !slug.isEmpty else { return nil }
+        return slug
+    }
+
+    private var openTranslationSlug: String? {
+        guard let e = openEntry else { return nil }
+        return sourceSlugCandidates(for: e, in: entries).first { client.hasTranslation(slug: $0) }
+    }
+
     func openPDF() async {
-        guard let slug = openEntry?.pdfSlug, !slug.isEmpty else { return }
+        guard let slug = openPDFSlug else { return }
         do {
             try await client.openPDF(slug: slug)
             print("[marple] openPDF \(slug)")
@@ -585,7 +600,7 @@ final class AppModel {
     }
 
     func openTranslation() async {
-        guard let slug = openEntry?.pdfSlug, !slug.isEmpty else { return }
+        guard let slug = openTranslationSlug else { return }
         do {
             try await client.openTranslation(slug: slug)
             print("[marple] openTranslation \(slug)")
@@ -595,15 +610,9 @@ final class AppModel {
         }
     }
 
-    var canOpenPDF: Bool {
-        guard let e = openEntry else { return false }
-        return e.hasPDF && e.pdfSlug != nil
-    }
+    var canOpenPDF: Bool { openPDFSlug != nil }
 
-    var canOpenTranslation: Bool {
-        guard let slug = openEntry?.pdfSlug, !slug.isEmpty else { return false }
-        return client.hasTranslation(slug: slug)
-    }
+    var canOpenTranslation: Bool { openTranslationSlug != nil }
 
     // MARK: object creation
 
@@ -630,8 +639,9 @@ final class AppModel {
     }
 
     func newAnnotation(for entry: Entry) async {
-        let draft = NoteBuilder.annotation(target: entry)
-        await createAndReveal(draft, entry: annotationEntry(from: draft, target: entry))
+        let target = annotationAnchor(for: entry, in: entries)
+        let draft = NoteBuilder.annotation(target: target)
+        await createAndReveal(draft, entry: annotationEntry(from: draft, target: target))
     }
 
     func newAnnotationForOpenDoc() async {

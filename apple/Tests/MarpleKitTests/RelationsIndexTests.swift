@@ -3,10 +3,11 @@ import Testing
 
 @Suite struct RelationsIndexTests {
     func mk(_ path: String, _ type: String, title: String? = nil, author: String? = nil,
-            themes: [String] = [], rating: Double = 0, annotates: String? = nil) -> Entry {
+            themes: [String] = [], rating: Double = 0, book: String? = nil,
+            annotates: String? = nil) -> Entry {
         Entry(path: path, type: EntryType(rawValue: type), title: title, author: author,
               year: nil, ratingScore: rating, themes: themes, preview: "", hasPDF: false,
-              annotates: annotates)
+              book: book, annotates: annotates)
     }
 
     @Test func splitAuthorsSeparators() {
@@ -26,6 +27,48 @@ import Testing
                             authorIndex: buildAuthorIndex(entries),
                             annotationIndex: buildAnnotationIndex(entries))
         #expect(rel.annotations.map(\.path) == ["vault/notes/n.md"])
+    }
+
+    @Test func chapterAnnotationsResolveToBookOverview() {
+        let overview = mk("vault/books/smith-2020/00-overview.md", "book-overview")
+        let chapter = mk("vault/books/smith-2020/ch01.md", "chapter-summary", book: "smith-2020")
+        let note = mk("vault/notes/chapter-note.md", "note", annotates: "vault/books/smith-2020/ch01.md")
+        let entries = [overview, chapter, note]
+        let annotationIndex = buildAnnotationIndex(entries)
+
+        #expect(annotationAnchor(for: chapter, in: entries).path == overview.path)
+        #expect(annotationIndex[overview.path]?.map(\.path) == [note.path])
+        #expect(annotationIndex[chapter.path] == nil)
+
+        let overviewRel = relations(for: overview, in: entries,
+                                    authorIndex: buildAuthorIndex(entries),
+                                    annotationIndex: annotationIndex)
+        let chapterRel = relations(for: chapter, in: entries,
+                                   authorIndex: buildAuthorIndex(entries),
+                                   annotationIndex: annotationIndex)
+        #expect(overviewRel.annotations.map(\.path) == [note.path])
+        #expect(chapterRel.annotations.map(\.path) == [note.path])
+    }
+
+    @Test func chapterPathSlugFindsOverviewWhenBookFieldIsMissing() {
+        let overview = mk("vault/books/smith-2020/00-overview.md", "book-overview")
+        let chapter = mk("vault/books/smith-2020/ch01.md", "chapter-summary")
+        let note = mk("vault/notes/chapter-note.md", "note", annotates: chapter.path)
+        let entries = [overview, chapter, note]
+        let annotationIndex = buildAnnotationIndex(entries)
+
+        #expect(annotationAnchor(for: chapter, in: entries).path == overview.path)
+        #expect(annotationIndex[overview.path]?.map(\.path) == [note.path])
+    }
+
+    @Test func chapterWithoutOverviewKeepsItsOwnAnnotationAnchor() {
+        let chapter = mk("vault/books/missing/ch01.md", "chapter-summary", book: "missing")
+        let note = mk("vault/notes/chapter-note.md", "note", annotates: chapter.path)
+        let entries = [chapter, note]
+        let annotationIndex = buildAnnotationIndex(entries)
+
+        #expect(annotationAnchor(for: chapter, in: entries).path == chapter.path)
+        #expect(annotationIndex[chapter.path]?.map(\.path) == [note.path])
     }
 
     @Test func siblingsAndAuthorProfile() {

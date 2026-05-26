@@ -298,8 +298,52 @@ struct IndexedEntryTests {
         }
         #expect(entry.entryType == "chapter-summary")
         #expect(entry.book == "smith-dogs-2020")
-        // chapter-summary pdfSlug = nil (only paper-analysis and book-overview get pdfSlug)
-        #expect(entry.pdfSlug == nil)
+        #expect(entry.pdfSlug == "smith-dogs-2020-ch1")
+        #expect(entry.hasPDF == false)
+    }
+
+    @Test("chapter-summary: bare chapter source slug does not collide across books")
+    func chapterBareSourceSlugDoesNotMatch() throws {
+        let text = """
+        ---
+        type: chapter
+        title: Chapter One
+        ---
+
+        Chapter content here.
+        """
+        let outcome = build(text: text,
+                            rel: "vault/books/smith-dogs-2020/ch1.md",
+                            fileStem: "ch1",
+                            sourceSlugs: ["ch1"])
+        guard case .indexed(let entry) = outcome else {
+            Issue.record("Expected .indexed, got \(outcome)")
+            return
+        }
+        #expect(entry.pdfSlug == "smith-dogs-2020-ch1")
+        #expect(entry.hasPDF == false)
+    }
+
+    @Test("chapter-summary: book-prefixed chapter source slug marks hasPDF")
+    func chapterBookPrefixedSourceSlugMatches() throws {
+        let text = """
+        ---
+        type: chapter
+        title: Chapter One
+        ---
+
+        Chapter content here.
+        """
+        let outcome = build(text: text,
+                            rel: "vault/books/smith-dogs-2020/ch1.md",
+                            fileStem: "ch1",
+                            sourceSlugs: ["smith-dogs-2020-ch1"])
+        guard case .indexed(let entry) = outcome else {
+            Issue.record("Expected .indexed, got \(outcome)")
+            return
+        }
+        #expect(entry.pdfSlug == "smith-dogs-2020-ch1")
+        #expect(entry.hasPDF == true)
     }
 
     // MARK: - Author & multi-author flatten

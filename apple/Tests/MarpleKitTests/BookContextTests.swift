@@ -2,9 +2,12 @@ import Testing
 @testable import MarpleKit
 
 @Suite struct BookContextTests {
-    func mk(_ path: String, _ type: String, title: String? = nil, book: String? = nil) -> Entry {
-        Entry(path: path, type: EntryType(rawValue: type), title: title, author: nil,
-              year: nil, ratingScore: 0, themes: [], preview: "", hasPDF: false, book: book)
+    func mk(_ path: String, _ type: String, title: String? = nil, author: String? = nil,
+            year: String? = nil, book: String? = nil, hasPDF: Bool = false,
+            pdfSlug: String? = nil, source: String? = nil, doi: String? = nil) -> Entry {
+        Entry(path: path, type: EntryType(rawValue: type), title: title, author: author,
+              year: year, ratingScore: 0, themes: [], preview: "", hasPDF: hasPDF,
+              pdfSlug: pdfSlug, source: source, book: book, doi: doi)
     }
 
     @Test func gathersOverviewAndChaptersFromChapter() {
@@ -57,5 +60,47 @@ import Testing
         let ctx = bookContext(for: aCh, in: [aOv, aCh, bCh])
         #expect(ctx?.overview?.path == aOv.path)
         #expect(ctx?.chapters.map(\.path) == ["vault/books/a-2020/ch01.md"])
+    }
+
+    @Test func citationEntryForChapterFallsBackToOverviewWhenChapterHasNoCitationMetadata() {
+        let ov = mk("vault/books/smith-2020/00-overview.md", "book-overview",
+                    title: "Smith Book", author: "Jane Smith", year: "2020")
+        let ch = mk("vault/books/smith-2020/ch01.md", "chapter-summary", title: "Chapter One", book: "smith-2020")
+        #expect(citationEntry(for: ch, in: [ov, ch])?.path == ov.path)
+    }
+
+    @Test func citationEntryForChapterUsesChapterWhenItHasCitationMetadata() {
+        let ov = mk("vault/books/smith-2020/00-overview.md", "book-overview",
+                    title: "Smith Book", author: "Jane Smith", year: "2020")
+        let ch = mk("vault/books/smith-2020/ch01.md", "chapter-summary", title: "Chapter One",
+                    author: "Chapter Author", year: "2021", book: "smith-2020")
+        #expect(citationEntry(for: ch, in: [ov, ch])?.path == ch.path)
+    }
+
+    @Test func pdfEntryForChapterFallsBackToOverviewWhenChapterHasNoPDF() {
+        let ov = mk("vault/books/smith-2020/00-overview.md", "book-overview",
+                    hasPDF: true, pdfSlug: "smith-2020")
+        let ch = mk("vault/books/smith-2020/ch01.md", "chapter-summary", book: "smith-2020")
+        #expect(pdfEntry(for: ch, in: [ov, ch])?.path == ov.path)
+    }
+
+    @Test func pdfEntryForChapterUsesChapterWhenItHasPDF() {
+        let ov = mk("vault/books/smith-2020/00-overview.md", "book-overview",
+                    hasPDF: true, pdfSlug: "smith-2020")
+        let ch = mk("vault/books/smith-2020/ch01.md", "chapter-summary", book: "smith-2020",
+                    hasPDF: true, pdfSlug: "smith-2020-ch01")
+        #expect(pdfEntry(for: ch, in: [ov, ch])?.path == ch.path)
+    }
+
+    @Test func sourceSlugCandidatesForChapterPreferChapterThenOverview() {
+        let ov = mk("vault/books/smith-2020/00-overview.md", "book-overview", pdfSlug: "smith-2020")
+        let ch = mk("vault/books/smith-2020/ch01.md", "chapter-summary", book: "smith-2020",
+                    pdfSlug: "smith-2020-ch01")
+        #expect(sourceSlugCandidates(for: ch, in: [ov, ch]) == ["smith-2020-ch01", "smith-2020"])
+    }
+
+    @Test func sourceSlugCandidatesForBookDoNotRequirePDF() {
+        let ov = mk("vault/books/smith-2020/00-overview.md", "book-overview", pdfSlug: "smith-2020")
+        #expect(sourceSlugCandidates(for: ov, in: [ov]) == ["smith-2020"])
     }
 }
