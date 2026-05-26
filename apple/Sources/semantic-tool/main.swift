@@ -20,6 +20,7 @@ func usage() -> Never {
     usage:
       semantic-tool build <workspace>
       semantic-tool query <workspace> "<text>" [topK]
+      semantic-tool bench <workspace>          # QUA-102/104: time buildFull + loadEntries
     """)
 }
 
@@ -46,7 +47,72 @@ let workspaceArg = args[2]
 
 let (workspaceRoot, _) = try resolveWorkspace(pickedPath: workspaceArg)
 let marpleDir = URL(fileURLWithPath: workspaceRoot).appendingPathComponent(".marple")
-let indexDB = IndexDatabase(indexDBPath: marpleDir.appendingPathComponent("index.sqlite").path)
+let indexPath = marpleDir.appendingPathComponent("index.sqlite").path
+
+// `bench` runs before loadEntries so it can build a fresh index from scratch.
+if cmd == "bench" {
+    let indexer = VaultIndexer(workspaceRoot: workspaceRoot)
+    print("# QUA-102 bench on \(workspaceRoot)")
+
+    // 1. Force a full rebuild (delete any existing index first so we measure
+    //    the cold buildFull path, not a delta reconcile).
+    let fm = FileManager.default
+    if fm.fileExists(atPath: indexPath) {
+        let oldSize = (try? fm.attributesOfItem(atPath: indexPath)[.size] as? Int) ?? 0
+        print("  pre-existing index: \(oldSize / 1_000_000) MB — removing")
+        try? fm.removeItem(atPath: indexPath)
+        try? fm.removeItem(atPath: indexPath + "-wal")
+        try? fm.removeItem(atPath: indexPath + "-shm")
+    }
+    let buildStart = Date()
+    let count = try indexer.buildFull()
+    let buildSecs = Date().timeIntervalSince(buildStart)
+    let newSize = (try? fm.attributesOfItem(atPath: indexPath)[.size] as? Int) ?? 0
+    print(String(format: "  buildFull: %d entries in %.2fs → DB %d MB",
+                 count, buildSecs, newSize / 1_000_000))
+
+    // 2. Cold loadEntries: open a fresh IndexDatabase value (no shared queue)
+    //    after purging the OS page cache via `sudo purge` is the gold standard,
+    //    but we don't want sudo here — instead drop and re-create the value so
+    //    at least the GRDB connection is cold.
+    let coldStart = Date()
+    let coldEntries = try IndexDatabase(indexDBPath: indexPath).loadEntries()
+    let coldSecs = Date().timeIntervalSince(coldStart)
+    print(String(format: "  loadEntries cold (fresh queue): %d entries in %.0f ms",
+                 coldEntries.count, coldSecs * 1000))
+
+    // 3. Warm loadEntries on the same IndexDatabase value (reuses the queue).
+    let warmDB = IndexDatabase(indexDBPath: indexPath)
+    _ = try warmDB.loadEntries()
+    let warmStart = Date()
+    let warmEntries = try warmDB.loadEntries()
+    let warmSecs = Date().timeIntervalSince(warmStart)
+    print(String(format: "  loadEntries warm (shared queue): %d entries in %.0f ms",
+                 warmEntries.count, warmSecs * 1000))
+
+    // 4. Wait for the async cache write triggered by step 2 to land,
+    //    then time a fresh-queue load that should hit the cache (QUA-104).
+    let cachePath = marpleDir.appendingPathComponent("entries.cache").path
+    let waitDeadline = Date().addingTimeInterval(5.0)
+    while !fm.fileExists(atPath: cachePath), Date() < waitDeadline {
+        try await Task.sleep(nanoseconds: 50_000_000) // 50 ms
+    }
+    if let cacheSize = (try? fm.attributesOfItem(atPath: cachePath)[.size] as? Int) {
+        print("  cache file: \(cacheSize / 1_000_000) MB")
+    } else {
+        print("  cache file: not written (skipping cache-hit bench)")
+        exit(0)
+    }
+
+    let hitStart = Date()
+    let hitEntries = try IndexDatabase(indexDBPath: indexPath).loadEntries()
+    let hitSecs = Date().timeIntervalSince(hitStart)
+    print(String(format: "  loadEntries cold-hit (cache present): %d entries in %.0f ms",
+                 hitEntries.count, hitSecs * 1000))
+    exit(0)
+}
+
+let indexDB = IndexDatabase(indexDBPath: indexPath)
 let entries = try indexDB.loadEntries()
 guard !entries.isEmpty else { die("no entries in index — run the app's indexer first") }
 

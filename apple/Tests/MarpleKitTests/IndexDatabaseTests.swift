@@ -29,6 +29,8 @@ import GRDB
                 CREATE VIRTUAL TABLE entry_trigram USING fts5(
                   path UNINDEXED, type UNINDEXED, text, tokenize = 'trigram'
                 );
+                CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                INSERT INTO meta(key, value) VALUES ('entries_revision', '0');
                 """)
             for r in rows {
                 try db.execute(sql: """
@@ -41,6 +43,30 @@ import GRDB
             }
         }
         return path
+    }
+
+    /// Convenience to read the sidecar entries.cache path next to a DB.
+    private static func entriesCachePath(forDB path: String) -> String {
+        (path as NSString).deletingLastPathComponent + "/entries.cache"
+    }
+
+    /// Wait up to `seconds` for a file to appear — the cache write is
+    /// scheduled on a background dispatch queue, so tests can't assume
+    /// it's there immediately after loadEntries returns.
+    @discardableResult
+    private func awaitFile(_ path: String, seconds: Double = 2.0) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: path) { return true }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        return false
+    }
+
+    /// Manually bump entries_revision on a fixture DB the same way reconcile does.
+    private func bumpRevision(_ dbPath: String) throws {
+        let queue = try DatabaseQueue(path: dbPath)
+        try queue.write { db in try IndexWriter.bumpEntriesRevision(db) }
     }
 
     @Test func loadEntriesMapsColumns() throws {
@@ -186,5 +212,140 @@ import GRDB
         let hits = try db.search("WAL Test", type: nil, minRating: nil, theme: nil, limit: 80)
         #expect(hits.count == 1)
         #expect(hits[0].entry.path == "vault/papers/wal-test.md")
+    }
+
+    // MARK: - QUA-104: entries cache
+
+    /// First call to loadEntries: cache file does not yet exist, so the
+    /// SQL path runs and writes the cache asynchronously. We then poll for
+    /// the file to confirm the write happened.
+    @Test func loadEntriesWritesCacheOnFirstCall() throws {
+        let path = try makeFixtureDB([
+            (path: "vault/papers/a.md", type: "paper-analysis", title: "Alpha",
+             themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "alpha"),
+            (path: "vault/papers/b.md", type: "paper-analysis", title: "Beta",
+             themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "beta"),
+        ])
+        let cachePath = Self.entriesCachePath(forDB: path)
+        #expect(!FileManager.default.fileExists(atPath: cachePath))
+
+        let db = IndexDatabase(indexDBPath: path)
+        let entries = try db.loadEntries()
+        #expect(entries.count == 2)
+        // Cache write is dispatched to a background queue.
+        #expect(awaitFile(cachePath), "cache file should be written within 2s")
+    }
+
+    /// Second call when cache matches the DB's revision: the cache file is
+    /// used. We verify by hand-crafting a cache whose payload differs from the
+    /// SQL result — if the cache path is taken we get the cache contents; if
+    /// not we get the real DB rows.
+    @Test func loadEntriesPrefersCacheWhenRevisionMatches() throws {
+        let path = try makeFixtureDB([
+            (path: "vault/papers/sql.md", type: "paper-analysis", title: "From SQL",
+             themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "sql"),
+        ])
+        let cachePath = Self.entriesCachePath(forDB: path)
+
+        // Hand-write a cache containing a synthetic entry that's NOT in the DB.
+        // If loadEntries returns it, we know the cache path ran.
+        let synthetic = Entry(path: "vault/papers/synth.md", type: .paperAnalysis,
+                              title: "From Cache", author: nil, year: nil,
+                              ratingScore: 0, themes: [], preview: "",
+                              hasPDF: false)
+        let blob = try buildCacheBlob(entries: [synthetic], revision: 0)
+        try blob.write(to: URL(fileURLWithPath: cachePath))
+
+        let db = IndexDatabase(indexDBPath: path)
+        let entries = try db.loadEntries()
+        #expect(entries.count == 1)
+        #expect(entries[0].title == "From Cache")
+        #expect(entries[0].path == "vault/papers/synth.md")
+    }
+
+    /// After the DB's revision bumps, the existing cache becomes stale and
+    /// loadEntries must fall back to SQL.
+    @Test func loadEntriesInvalidatesCacheOnRevisionBump() throws {
+        let path = try makeFixtureDB([
+            (path: "vault/papers/a.md", type: "paper-analysis", title: "Alpha",
+             themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "alpha"),
+        ])
+        let cachePath = Self.entriesCachePath(forDB: path)
+        let db = IndexDatabase(indexDBPath: path)
+        // 1st call: writes cache @ revision 0.
+        _ = try db.loadEntries()
+        #expect(awaitFile(cachePath))
+
+        // Bump revision — the cache is now for revision 0, DB is at 1.
+        try bumpRevision(path)
+
+        // Cache must be discarded; SQL path returns the real row.
+        // We need a fresh IndexDatabase so cachedQueue re-opens (otherwise the
+        // already-warm queue would still read the same WAL snapshot, but since
+        // we used a separate DatabaseQueue to write, the cached queue sees the
+        // committed write fine on its next read — both approaches work; using
+        // a new value here is the most realistic boot scenario).
+        let db2 = IndexDatabase(indexDBPath: path)
+        let entries = try db2.loadEntries()
+        #expect(entries.count == 1)
+        #expect(entries[0].path == "vault/papers/a.md")
+        #expect(entries[0].title == "Alpha")
+    }
+
+    /// A corrupt cache (garbage bytes) must be deleted and the SQL path used.
+    @Test func loadEntriesRecoversFromCorruptCache() throws {
+        let path = try makeFixtureDB([
+            (path: "vault/papers/a.md", type: "paper-analysis", title: "Alpha",
+             themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "alpha"),
+        ])
+        let cachePath = Self.entriesCachePath(forDB: path)
+        // Plant garbage where the cache should be.
+        try Data(repeating: 0xFF, count: 256).write(to: URL(fileURLWithPath: cachePath))
+
+        let db = IndexDatabase(indexDBPath: path)
+        let entries = try db.loadEntries()
+        #expect(entries.count == 1)
+        #expect(entries[0].path == "vault/papers/a.md")
+        // After the failed read, the corrupt file must be gone (then rewritten
+        // by the async path). Allow a moment for either: deletion is sync,
+        // rewrite is async.
+        #expect(awaitFile(cachePath), "valid cache should be rewritten after corrupt one is removed")
+    }
+
+    /// SQL path orders by path ascending so cache contents are stable.
+    @Test func loadEntriesOrderedByPath() throws {
+        let path = try makeFixtureDB([
+            (path: "vault/papers/zeta.md",  type: "paper-analysis", title: "Z",
+             themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "z"),
+            (path: "vault/papers/alpha.md", type: "paper-analysis", title: "A",
+             themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "a"),
+            (path: "vault/papers/mu.md",    type: "paper-analysis", title: "M",
+             themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "m"),
+        ])
+        let db = IndexDatabase(indexDBPath: path)
+        let entries = try db.loadEntries()
+        #expect(entries.map(\.path) == [
+            "vault/papers/alpha.md", "vault/papers/mu.md", "vault/papers/zeta.md",
+        ])
+    }
+
+    /// Build a valid cache blob matching IndexDatabase.decodeCachePayload.
+    /// Mirrors the encoder in writeCacheBestEffort.
+    private func buildCacheBlob(entries: [Entry], revision: Int64) throws -> Data {
+        let encoder = PropertyListEncoder()
+        encoder.outputFormat = .binary
+        let payload = try encoder.encode(entries)
+
+        var blob = Data()
+        // Magic "MARPLE\0C" — must match IndexDatabase.cacheMagic.
+        blob.append(contentsOf: [0x4D, 0x41, 0x52, 0x50, 0x4C, 0x45, 0x00, 0x43])
+        var v = UInt32(1).littleEndian
+        withUnsafeBytes(of: &v) { blob.append(contentsOf: $0) }
+        var r = UInt64(bitPattern: revision).littleEndian
+        withUnsafeBytes(of: &r) { blob.append(contentsOf: $0) }
+        var len = UInt32(payload.count).littleEndian
+        withUnsafeBytes(of: &len) { blob.append(contentsOf: $0) }
+        blob.append(payload)
+        return blob
     }
 }

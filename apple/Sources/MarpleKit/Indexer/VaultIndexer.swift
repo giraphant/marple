@@ -140,6 +140,10 @@ public final class VaultIndexer: @unchecked Sendable {
                 for entry in entries {
                     try IndexWriter.insert(db, entry)
                 }
+                // QUA-104: bump revision in the same transaction so any
+                // surviving entries.cache from before this rebuild is
+                // invalidated on next loadEntries.
+                try IndexWriter.bumpEntriesRevision(db)
             }
             // Ensure all writes are flushed before we close the queue.
         }
@@ -154,6 +158,15 @@ public final class VaultIndexer: @unchecked Sendable {
             try FileManager.default.removeItem(atPath: indexDBPath)
         }
         try FileManager.default.moveItem(atPath: tmpPath, toPath: indexDBPath)
+
+        // QUA-104: a stale entries.cache from before this rebuild may still
+        // happen to carry a revision number equal to the new DB's
+        // freshly-bumped revision (both could be 1 if entries_revision wraps
+        // back to 0 after createSchema). Nuke the cache file so the next
+        // loadEntries takes the SQL path once and writes a cache tied to the
+        // new DB's revision.
+        let cachePath = workspaceRoot + "/.marple/entries.cache"
+        try? FileManager.default.removeItem(atPath: cachePath)
 
         // 6. Flip to WAL so all subsequent readers can open concurrently.
         //    Mirrors: let _ = open_index_rw(&paths.index_db);
@@ -254,6 +267,16 @@ public final class VaultIndexer: @unchecked Sendable {
             }
         }
 
+        // QUA-104: bump entries_revision once at the end if any rows changed,
+        // so the next loadEntries sees the cache as stale and rebuilds it.
+        // Skipping the bump on no-op reconciles lets the cache stay valid
+        // across watcher-triggered reconciles that found nothing to do.
+        if stats.upserted + stats.removed > 0 {
+            try pool.write { db in
+                try IndexWriter.bumpEntriesRevision(db)
+            }
+        }
+
         return stats
     }
 
@@ -343,12 +366,15 @@ public final class VaultIndexer: @unchecked Sendable {
 
     // MARK: indexSchemaCurrent
 
-    /// Returns true iff the live index exists and contains all REQUIRED columns.
-    /// Mirrors `index_schema_current` / `entries_schema_current` (:323-343).
+    /// Returns true iff the live index exists, has all REQUIRED columns AND no
+    /// retired tables. Returning false here forces `reconcile()` to fall back
+    /// to `buildFull`, which is how QUA-102 migrates an existing 1.4 GB DB
+    /// (with `entry_search` / `entry_text`) down to the current ~750 MB shape.
     private func indexSchemaCurrent() throws -> Bool {
         guard FileManager.default.fileExists(atPath: indexDBPath) else { return false }
 
-        // Required columns (mirrors REQUIRED_ENTRY_COLUMNS in indexer.rs :50-57).
+        // Required `entries` columns: missing any of these → schema predates
+        // the second translation/PDF metadata expansion.
         let required: Set<String> = [
             "title_en", "title_cn", "publisher", "isbn",
             "translation_title_cn", "translation_douban_url",
@@ -357,33 +383,39 @@ public final class VaultIndexer: @unchecked Sendable {
         var config = Configuration()
         config.readonly = true
         config.busyMode = .timeout(5)
-        // Use DatabaseQueue (read-only) for the schema check.
-        // IndexDatabase's commentary explains why we open read-write even for reads
-        // on WAL DBs. For a schema-check-only path we open via DatabasePool to
-        // avoid CANTOPEN on the -shm file.
+        // Use DatabasePool — a read-only DatabaseQueue cannot attach the WAL
+        // -shm on a closed-writer DB (CANTOPEN). See IndexDatabase for the same
+        // reason.
         let pool = try DatabasePool(path: indexDBPath, configuration: config)
-        let columns: Set<String> = try pool.read { db in
-            var cols = Set<String>()
+        return try pool.read { db in
+            var columns = Set<String>()
             let rows = try Row.fetchAll(db, sql: "PRAGMA table_info(entries)")
             for row in rows {
                 if let name: String = row["name"] {
-                    cols.insert(name)
+                    columns.insert(name)
                 }
             }
-            return cols
+            guard required.isSubset(of: columns) else { return false }
+
+            // QUA-102 schema bump: presence of `entry_search` (the dropped
+            // 12-column FTS5 table) means this DB was built by an older marple
+            // and is now ~660 MB heavier than necessary. Trigger a full rebuild.
+            let hasRetiredEntrySearch = try Bool.fetchOne(db, sql: """
+                SELECT EXISTS(
+                  SELECT 1 FROM sqlite_master
+                  WHERE type IN ('table','view') AND name = 'entry_search'
+                )
+                """) ?? false
+            return !hasRetiredEntrySearch
         }
-        return required.isSubset(of: columns)
     }
 
     // MARK: deletePathRows
 
-    /// Delete all rows for `rel` across the 5 tables.
-    /// Mirrors `delete_path_rows` (:463-470).
+    /// Delete all rows for `rel` across the 3 tables we write to.
     private func deletePathRows(_ db: Database, rel: String) throws {
         try db.execute(sql: "DELETE FROM entries WHERE path = ?",      arguments: [rel])
-        try db.execute(sql: "DELETE FROM entry_text WHERE path = ?",   arguments: [rel])
         try db.execute(sql: "DELETE FROM entry_themes WHERE path = ?", arguments: [rel])
-        try db.execute(sql: "DELETE FROM entry_search WHERE path = ?", arguments: [rel])
         try db.execute(sql: "DELETE FROM entry_trigram WHERE path = ?",arguments: [rel])
     }
 
