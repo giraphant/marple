@@ -111,7 +111,7 @@ struct SidebarOutlineView: NSViewRepresentable {
         outline.floatsGroupRows = false
         outline.indentationPerLevel = 14
         outline.backgroundColor = .clear
-        outline.allowsMultipleSelection = false
+        outline.allowsMultipleSelection = true
         outline.delegate = context.coordinator
         outline.dataSource = context.coordinator
         outline.target = context.coordinator
@@ -355,6 +355,14 @@ struct SidebarOutlineView: NSViewRepresentable {
             }
             let row = outline.row(forItem: target)
             guard row >= 0 else { return }
+            // Preserve a multi-selection across reloads as long as it still covers
+            // the active row. Re-collapsing to a single index would defeat the
+            // whole point of Shift/Cmd-click. Only nudge the selection when the
+            // active row isn't already part of it.
+            if outline.selectedRowIndexes.count > 1, outline.selectedRowIndexes.contains(row) {
+                outline.scrollRowToVisible(row)
+                return
+            }
             isUpdatingSelection = true
             outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             outline.scrollRowToVisible(row)
@@ -512,12 +520,106 @@ struct SidebarOutlineView: NSViewRepresentable {
         func menuNeedsUpdate(_ contextMenu: NSMenu) {
             contextMenu.removeAllItems()
             guard let outline = outlineView else { return }
-            let row = outline.clickedRow
-            guard row >= 0,
-                  let node = outline.item(atRow: row) as? SidebarOutlineNode else { return }
-            for item in menuItems(for: node) {
-                contextMenu.addItem(item)
+            // Right-click on a section header (non-selectable) shouldn't pop a
+            // menu over the current selection, which sits elsewhere.
+            let clicked = outline.clickedRow
+            if clicked >= 0, let clickedNode = outline.item(atRow: clicked) as? SidebarOutlineNode,
+               case .section = clickedNode.kind { return }
+            // AppKit auto-collapses selection to the clicked row when the clicked
+            // row isn't already selected, so `selectedRowIndexes` is the truth.
+            let nodes = outline.selectedRowIndexes
+                .compactMap { outline.item(atRow: $0) as? SidebarOutlineNode }
+                .filter { node in
+                    switch node.kind {
+                    case .section, .pane: return false
+                    case .tab, .group: return true
+                    }
+                }
+            guard !nodes.isEmpty else { return }
+            let items: [NSMenuItem] = nodes.count == 1
+                ? menuItems(for: nodes[0])
+                : batchMenuItems(for: nodes)
+            for item in items { contextMenu.addItem(item) }
+        }
+
+        /// Build the multi-selection context menu. Always offers "关闭这 N 个";
+        /// the new-group action is only shown for a pure-tab selection because the
+        /// semantics of grouping a mixed tab/group selection are ambiguous (see
+        /// QUA-94 拍板项).
+        fileprivate func batchMenuItems(for nodes: [SidebarOutlineNode]) -> [NSMenuItem] {
+            let n = nodes.count
+            let allTabs = nodes.allSatisfy { if case .tab = $0.kind { return true } else { return false } }
+            let tabIDs = collectTabIDs(in: nodes)
+            var items: [NSMenuItem] = []
+
+            let closeItem = NSMenuItem(title: "关闭这 \(n) 个", action: #selector(closeBatchFromMenu(_:)), keyEquivalent: "")
+            closeItem.target = self
+            closeItem.representedObject = Array(tabIDs) as NSArray
+            // Pin-only selection has no actionable closes; reflect that visually.
+            let pinned = Set(model.tabs.filter(\.pinned).map(\.id))
+            closeItem.isEnabled = !tabIDs.allSatisfy { pinned.contains($0) }
+            items.append(closeItem)
+
+            if allTabs {
+                let groupItem = NSMenuItem(title: "把这 \(n) 个合成一个新组",
+                                           action: #selector(groupBatchFromMenu(_:)), keyEquivalent: "")
+                groupItem.target = self
+                let pureTabIDs = nodes.compactMap { node -> NavTab.ID? in
+                    if case .tab(let id) = node.kind { return id }
+                    return nil
+                }
+                groupItem.representedObject = pureTabIDs as NSArray
+                items.append(groupItem)
             }
+            return items
+        }
+
+        /// Flatten a selection into tab ids: tabs contribute themselves, groups
+        /// contribute every descendant tab leaf. Used by batch close.
+        private func collectTabIDs(in nodes: [SidebarOutlineNode]) -> [NavTab.ID] {
+            var out: [NavTab.ID] = []
+            var seen: Set<NavTab.ID> = []
+            func append(_ id: NavTab.ID) {
+                if seen.insert(id).inserted { out.append(id) }
+            }
+            for node in nodes {
+                switch node.kind {
+                case .tab(let id):
+                    append(id)
+                case .group(let gid):
+                    if let group = model.tabGroups.first(where: { $0.id == gid }) {
+                        for id in descendantTabIDs(of: group) { append(id) }
+                    }
+                case .section, .pane:
+                    break
+                }
+            }
+            return out
+        }
+
+        private func descendantTabIDs(of group: TabGroup) -> [NavTab.ID] {
+            var out: [NavTab.ID] = []
+            for child in group.children {
+                switch child {
+                case .tab(let id): out.append(id)
+                case .group(let g): out.append(contentsOf: descendantTabIDs(of: g))
+                }
+            }
+            return out
+        }
+
+        @objc private func closeBatchFromMenu(_ sender: NSMenuItem) {
+            guard let raw = sender.representedObject as? [Any] else { return }
+            let ids = raw.compactMap { $0 as? NavTab.ID }
+            guard !ids.isEmpty else { return }
+            Task { await model.closeTabs(Set(ids)) }
+        }
+
+        @objc private func groupBatchFromMenu(_ sender: NSMenuItem) {
+            guard let raw = sender.representedObject as? [Any] else { return }
+            let ids = raw.compactMap { $0 as? NavTab.ID }
+            guard ids.count >= 2 else { return }
+            model.groupTabs(ids)
         }
 
         fileprivate func menuItems(for node: SidebarOutlineNode) -> [NSMenuItem] {
@@ -585,6 +687,10 @@ struct SidebarOutlineView: NSViewRepresentable {
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !isUpdatingSelection,
                   let outline = notification.object as? NSOutlineView else { return }
+            // Multi-select must not steal navigation: only a single-row selection
+            // drives the active tab/pane. Shift/Cmd-click leaves the active tab
+            // untouched — matches CodeEdit's ProjectNavigator behavior.
+            guard outline.selectedRowIndexes.count == 1 else { return }
             let row = outline.selectedRow
             guard row >= 0, let node = outline.item(atRow: row) as? SidebarOutlineNode else { return }
             switch node.kind {
@@ -622,9 +728,25 @@ struct SidebarOutlineView: NSViewRepresentable {
             return pasteboardItem
         }
 
+        /// All `SidebarTabPayload`s carried by the current drag. AppKit packs one
+        /// pasteboard item per dragged row; this reads each one rather than the
+        /// implicit `string(forType:)` shortcut that only sees the first.
+        private func payloads(from info: NSDraggingInfo) -> [SidebarTabPayload] {
+            guard let items = info.draggingPasteboard.pasteboardItems else { return [] }
+            return items.compactMap { item in
+                item.string(forType: Self.pasteboardType).flatMap(SidebarTabPayload.init)
+            }
+        }
+
         func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo,
                          proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
-            guard let payload = SidebarTabPayload(info.draggingPasteboard.string(forType: Self.pasteboardType)) else { return [] }
+            let allPayloads = payloads(from: info)
+            if allPayloads.count > 1 {
+                return validateMultiDrop(outlineView, info: info, payloads: allPayloads,
+                                         item: item, childIndex: index)
+            }
+            guard let payload = allPayloads.first
+                    ?? SidebarTabPayload(info.draggingPasteboard.string(forType: Self.pasteboardType)) else { return [] }
             let point = draggingPoint(in: outlineView, info: info)
             logDrop("validate proposed=\(describe(item as? SidebarOutlineNode)) index=\(index) row=\(rowAtY(point.y, in: outlineView)) x=\(String(format: "%.1f", point.x)) y=\(String(format: "%.1f", point.y)) sticky=\(describe(stickyRowDropTarget)) payload=\(describe(payload))")
             if case .type = payload {
@@ -661,7 +783,16 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo,
                          item: Any?, childIndex index: Int) -> Bool {
-            guard let payload = SidebarTabPayload(info.draggingPasteboard.string(forType: Self.pasteboardType)) else { return false }
+            let allPayloads = payloads(from: info)
+            if allPayloads.count > 1 {
+                let accepted = acceptMultiDrop(outlineView, info: info, payloads: allPayloads,
+                                               item: item, childIndex: index)
+                stickyRowDropTarget = nil
+                if accepted { reload(outlineView) }
+                return accepted
+            }
+            guard let payload = allPayloads.first
+                    ?? SidebarTabPayload(info.draggingPasteboard.string(forType: Self.pasteboardType)) else { return false }
             if case .type(let type) = payload {
                 let accepted = acceptType(type, into: item as? SidebarOutlineNode, childIndex: index,
                                           outlineView: outlineView, info: info)
@@ -694,6 +825,94 @@ struct SidebarOutlineView: NSViewRepresentable {
             stickyRowDropTarget = nil
             if accepted { reload(outlineView) }
             return accepted
+        }
+
+        /// Split payloads into tab/group ids, drop type payloads, apply
+        /// "上级胜出". Used by the multi-payload DnD path.
+        private func classifyAndFilter(_ payloads: [SidebarTabPayload]) -> (tabs: [NavTab.ID], groups: [TabGroup.ID]) {
+            var rawTabs: [NavTab.ID] = []
+            var rawGroups: [TabGroup.ID] = []
+            for p in payloads {
+                switch p {
+                case .tab(let id): rawTabs.append(id)
+                case .group(let id): rawGroups.append(id)
+                case .type: break   // pane reorder doesn't participate in batch DnD
+                }
+            }
+            return model.payloadAncestorFilter(tabIDs: rawTabs, groupIDs: rawGroups)
+        }
+
+        private func validateMultiDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
+                                       payloads: [SidebarTabPayload],
+                                       item: Any?, childIndex index: Int) -> NSDragOperation {
+            let (tabs, groups) = classifyAndFilter(payloads)
+            guard !(tabs.isEmpty && groups.isEmpty) else { return [] }
+            // Drop on the root tabs section or between rows.
+            guard let node = item as? SidebarOutlineNode else { return .move }
+            switch node.kind {
+            case .section(.tabs):
+                return .move
+            case .group(let targetGroupID):
+                // Reject the whole batch if any group payload would cycle.
+                if groups.contains(where: { !model.canNestGroup($0, into: targetGroupID) }) { return [] }
+                // Reject if any tab payload is already a descendant of target via
+                // a *different* group also in selection — but ancestor filter
+                // already pruned that case. So allow.
+                return .move
+            case .tab(let targetID):
+                // Multi-onto-tab only makes sense for a pure-tab batch (forms a
+                // new group containing target + dragged tabs).
+                guard groups.isEmpty else { return [] }
+                guard !tabs.contains(targetID) else { return [] }   // drop onto self
+                if index != NSOutlineViewDropOnItemIndex {
+                    outlineView.setDropItem(node, dropChildIndex: NSOutlineViewDropOnItemIndex)
+                }
+                return .move
+            case .section, .pane:
+                return []
+            }
+        }
+
+        private func acceptMultiDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
+                                     payloads: [SidebarTabPayload],
+                                     item: Any?, childIndex index: Int) -> Bool {
+            let (tabs, groups) = classifyAndFilter(payloads)
+            guard !(tabs.isEmpty && groups.isEmpty) else { return false }
+            logDrop("acceptMulti tabs=\(tabs.count) groups=\(groups.count) target=\(describe(item as? SidebarOutlineNode)) index=\(index)")
+            // Root drop: item is nil OR a .section(.tabs).
+            if item == nil
+                || (item as? SidebarOutlineNode).map({ if case .section(.tabs) = $0.kind { return true } else { return false } }) == true {
+                let safeIndex: Int? = index >= 0 ? index : nil
+                if !tabs.isEmpty { model.moveTabsToRoot(tabs, at: safeIndex) }
+                if !groups.isEmpty {
+                    // Shift groups' index past freshly-rooted tabs so they land after.
+                    let groupIndex: Int? = safeIndex.map { $0 + tabs.count }
+                    model.moveGroupsToRoot(groups, at: groupIndex)
+                }
+                return true
+            }
+            guard let node = item as? SidebarOutlineNode else { return false }
+            switch node.kind {
+            case .group(let targetGroupID):
+                var insertAt: Int? = index >= 0 ? index : nil
+                if !tabs.isEmpty {
+                    model.moveTabs(tabs, toGroup: targetGroupID, at: insertAt)
+                    if let a = insertAt { insertAt = a + tabs.count }
+                }
+                for gid in groups {
+                    guard model.canNestGroup(gid, into: targetGroupID) else { continue }
+                    model.moveGroup(gid, intoGroup: targetGroupID, at: insertAt)
+                    if let a = insertAt { insertAt = a + 1 }
+                }
+                return true
+            case .tab(let targetID):
+                guard groups.isEmpty else { return false }
+                let combined = [targetID] + tabs.filter { $0 != targetID }
+                model.groupTabs(combined)
+                return true
+            case .section, .pane:
+                return false
+            }
         }
 
         private func validateTypeDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
