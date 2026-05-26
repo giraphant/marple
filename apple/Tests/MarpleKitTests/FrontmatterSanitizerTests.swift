@@ -141,6 +141,44 @@ import Testing
         #expect(!out.contains("(#)"))
     }
 
+    /// QUA-108 + QUA-109 work together: a Ulysses-bitten vault file with
+    /// `author: [A, B](#)` should sanitize → parse as a 2-element list →
+    /// when rewritten via `setSequence` come back as canonical block-list →
+    /// re-parse to the same list. Idempotency confirms the read+write
+    /// pipeline doesn't drift.
+    @Test func qua108Plus109RoundTrip() {
+        let damaged = """
+        ---
+        type: paper
+        title: Foo
+        author: [Smith, John Jr.](#)
+        year: 2020
+        ---
+
+        body content.
+        """
+        // Step 1: sanitize + YAML parse → list.
+        let (rawFm, _) = Frontmatter.split(damaged)
+        let parsed = YamlFrontmatter.parseMapping(rawFm ?? "")
+        let authors = parseAuthors(parsed.first(where: { $0.0 == "author" })?.1)
+        // Yams parses `[Smith, John Jr.]` (after sanitizer strip) as a 2-element
+        // flow sequence — accepted QUA-109 lossy behavior for legacy flow form.
+        #expect(authors == ["Smith", "John Jr."])
+
+        // Step 2: rewrite the cleaned author list back as canonical block.
+        let rewritten = FrontmatterPatch.setSequence(damaged, key: "author", values: authors)
+        #expect(rewritten.contains("author:\n  - Smith\n  - John Jr."))
+        #expect(!rewritten.contains("[](#)"))
+        #expect(!rewritten.contains("[Smith"))
+
+        // Step 3: re-parse the rewritten file — should be idempotent on the
+        // author list (block sequence in, block sequence out).
+        let (rawFm2, _) = Frontmatter.split(rewritten)
+        let parsed2 = YamlFrontmatter.parseMapping(rawFm2 ?? "")
+        let authors2 = parseAuthors(parsed2.first(where: { $0.0 == "author" })?.1)
+        #expect(authors2 == authors)
+    }
+
     @Test func parseMappingHandlesDamagedInput() {
         // End-to-end: parseMapping should now successfully parse damaged input
         // because sanitizer cleans it first.
