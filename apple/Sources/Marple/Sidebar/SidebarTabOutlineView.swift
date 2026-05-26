@@ -132,6 +132,7 @@ struct SidebarOutlineView: NSViewRepresentable {
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         context.coordinator.reload(outline)
+        context.coordinator.observeModel()
         return scroll
     }
 
@@ -172,6 +173,31 @@ struct SidebarOutlineView: NSViewRepresentable {
                 guard let self, let outline else { return }
                 self.pendingReload = false
                 self.reload(outline)
+            }
+        }
+
+        /// The sidebar lives in an AppKit-hosted SwiftUI column whose body never reads
+        /// the model's tab/pane state, so Observation never invalidates it (and thus
+        /// `updateNSView` never fires) when tabs are added/closed/reordered. Drive
+        /// reloads explicitly, re-armed on each fire — mirrors
+        /// `MarpleSplitViewController`'s inspector observation. The read set matches
+        /// `reloadSignature()` so every input that changes a row triggers a refresh.
+        func observeModel() {
+            withObservationTracking {
+                _ = model.entries.count
+                _ = model.isBrowsing
+                _ = model.pane
+                _ = model.activeTabID
+                _ = model.typeOrder
+                _ = model.counts
+                _ = model.tabs
+                _ = model.tabGroups
+            } onChange: { [weak self] in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.observeModel()
+                    if let outline = self.outlineView { self.scheduleReload(outline) }
+                }
             }
         }
 
