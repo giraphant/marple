@@ -164,6 +164,17 @@ public final class VaultIndexer: @unchecked Sendable {
         return entries.count
     }
 
+    // MARK: - canSkipFullBuild
+
+    /// Returns true iff the live index exists and its schema is current — i.e.
+    /// `reconcile()` would take the fast delta path, not the buildFull fallback.
+    /// Used by boot to decide whether the UI can be shown from the existing
+    /// index immediately while reconcile runs in the background.
+    public func canSkipFullBuild() -> Bool {
+        guard FileManager.default.fileExists(atPath: indexDBPath) else { return false }
+        return (try? indexSchemaCurrent()) ?? false
+    }
+
     // MARK: - reconcile
 
     /// Delta sync. Self-healing: if the index is missing or the schema is stale,
