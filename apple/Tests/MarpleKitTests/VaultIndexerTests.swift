@@ -224,6 +224,44 @@ struct VaultIndexerTests {
         #expect(count == 1)
     }
 
+    // MARK: - canSkipFullBuild
+
+    @Test("canSkipFullBuild is false before any build runs")
+    func canSkipFullBuildFalseWhenMissing() throws {
+        let ws = try makeTempWorkspace()
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        #expect(indexer.canSkipFullBuild() == false)
+    }
+
+    @Test("canSkipFullBuild is true after a successful buildFull")
+    func canSkipFullBuildTrueAfterBuild() throws {
+        let ws = try makeTempWorkspace()
+        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+        #expect(indexer.canSkipFullBuild() == true)
+    }
+
+    @Test("canSkipFullBuild is false when schema is stale")
+    func canSkipFullBuildFalseOnStaleSchema() throws {
+        let ws = try makeTempWorkspace()
+        // Plant a DB with a stripped schema — same shape as the stale-schema test below.
+        let marpleDir = ws + "/.marple"
+        try FileManager.default.createDirectory(atPath: marpleDir, withIntermediateDirectories: true)
+        let indexPath = marpleDir + "/index.sqlite"
+        let queue = try DatabaseQueue(path: indexPath)
+        try queue.write { db in
+            try db.execute(sql: """
+                CREATE TABLE entries (
+                  path TEXT PRIMARY KEY,
+                  type TEXT NOT NULL
+                );
+                """)
+        }
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        #expect(indexer.canSkipFullBuild() == false)
+    }
+
     // MARK: - reconcile when schema is stale
 
     @Test("reconcile triggers full build when schema is stale")
