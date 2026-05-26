@@ -3,8 +3,8 @@ dist
 .vite
 *.log
 
-# Rust build output
-rust/target/
+# Rust build output (legacy)
+legacy/rust/target/
 
-# Local machine config (points at your vault checkout); use marple.config.example.json
-marple.config.json
+# Local machine config (legacy)
+legacy/marple.config.json
