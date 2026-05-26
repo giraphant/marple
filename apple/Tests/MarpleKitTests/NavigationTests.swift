@@ -559,3 +559,164 @@ import Foundation
         _ = (ids, g1)
     }
 }
+
+@Suite struct BatchTabActionsTests {
+    private func loc(_ i: Int) -> NavLocation { NavLocation(pane: .type(.note), openPath: "t\(i).md") }
+
+    private func workspace(_ n: Int) -> (Workspace, [NavTab.ID]) {
+        var w = Workspace(initial: loc(0))
+        for i in 1..<n { w.newTab(loc(i)) }
+        return (w, w.tabs.map(\.id))
+    }
+
+    @Test func closeTabsRemovesNonPinnedAndSkipsPinned() throws {
+        var (w, ids) = workspace(4)
+        w.togglePin(ids[1])                              // pin id 1
+        w.closeTabs(Set([ids[0], ids[1], ids[3]]))       // ask to close 0, 1 (pinned), 3
+        #expect(w.tabs.map(\.id) == [ids[1], ids[2]])    // only 0 and 3 close; 1 stays
+    }
+
+    @Test func closeTabsActivatesNeighborWhenActiveIsClosed() throws {
+        var (w, ids) = workspace(4)
+        w.select(ids[1])
+        w.closeTabs(Set([ids[1], ids[2]]))
+        #expect(w.tabs.map(\.id) == [ids[0], ids[3]])
+        #expect(w.activeID == ids[3])                    // neighbor reactivation followed each removal
+    }
+
+    @Test func groupTabsPlacesNewGroupAtEarliestTabsPositionAndFlatOrder() throws {
+        var (w, ids) = workspace(4)
+        // group 0 + 2 → new group should sit where ids[0] was (root index 0)
+        w.groupTabs([ids[2], ids[0]])                    // input order reversed; DFS order should win
+        let group = try #require(w.tabGroups.first)
+        #expect(w.rootNodes.first?.group?.id == group.id)
+        #expect(group.tabIDs == [ids[0], ids[2]])        // DFS order = visual order
+        // remaining root nodes: ids[1], ids[3] follow
+        #expect(w.tabs.map(\.id) == [ids[0], ids[2], ids[1], ids[3]])
+    }
+
+    @Test func groupTabsAcrossParentsAnchorsAtRoot() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1] at root[0]
+        let g = try #require(w.tabGroups.first?.id)
+        // ids[0] is in G, ids[2] is at root → mixed parents; new group anchors at
+        // root[0] (root-level slot of the earliest's ancestor G). G keeps ids[1]
+        // alone, dissolves.
+        w.groupTabs([ids[0], ids[2]])
+        #expect(w.group(g) == nil)                       // G dissolved (1 child left)
+        #expect(w.tabGroups.count == 1)
+        let new = try #require(w.tabGroups.first)
+        #expect(new.tabIDs == [ids[0], ids[2]])
+        // root order: new group, then orphaned ids[1], then ids[3]
+        #expect(w.tabs.map(\.id) == [ids[0], ids[2], ids[1], ids[3]])
+    }
+
+    @Test func groupTabsIgnoresLessThanTwoIDs() throws {
+        var (w, ids) = workspace(3)
+        let before = w.rootNodes
+        w.groupTabs([ids[0]])                            // <2 → no-op
+        #expect(w.rootNodes == before)
+        w.groupTabs([ids[0], ids[0]])                    // duplicates collapse to <2 → no-op
+        #expect(w.rootNodes == before)
+    }
+
+    @Test func moveTabsBulkIntoGroupPreservesInputOrder() throws {
+        var (w, ids) = workspace(5)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1]
+        let g = try #require(w.tabGroups.first?.id)
+        // append ids[4], ids[2] to G in that order at the end
+        w.moveTabs([ids[4], ids[2]], toGroup: g, at: nil)
+        #expect(w.tabs(in: g).map(\.id) == [ids[0], ids[1], ids[4], ids[2]])
+        // depth-first ordering of remaining root: ids[3] before nothing else
+        #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[4], ids[2], ids[3]])
+    }
+
+    @Test func moveTabsAdjustsIndexForInGroupSources() throws {
+        var (w, ids) = workspace(5)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1]
+        let g = try #require(w.tabGroups.first?.id)
+        w.moveTab(ids[2], toGroup: g)                    // G = [ids0, ids1, ids2]
+        w.moveTab(ids[3], toGroup: g)                    // G = [ids0, ids1, ids2, ids3]
+        // ids4 is still at root; move (ids0, ids4) so they land between ids2 and ids3
+        // childIndex = 3 (the slot of ids3 in G). ids0 lives at G[0] < 3, so it shifts.
+        w.moveTabs([ids[0], ids[4]], toGroup: g, at: 3)
+        let order = w.tabs(in: g).map(\.id)
+        #expect(order == [ids[1], ids[2], ids[0], ids[4], ids[3]])
+    }
+
+    // MARK: phase 3 — multi-item drag
+
+    @Test func moveTabsToRootDissolvesEmptiedSourceGroup() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1] at root[0]
+        // Lift both group members back to root at index 1. G empties and
+        // dissolves; the new tabs occupy the positions where G used to sit.
+        w.moveTabsToRoot([ids[0], ids[1]], at: 1)
+        #expect(w.tabGroups.isEmpty)
+        #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[2], ids[3]])
+    }
+
+    @Test func moveTabsToRootKeepsPartiallyEmptiedGroupAlive() throws {
+        var (w, ids) = workspace(6)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1]
+        let g = try #require(w.tabGroups.first?.id)
+        w.moveTab(ids[2], toGroup: g)
+        w.moveTab(ids[3], toGroup: g)                    // G = [ids0, ids1, ids2, ids3]
+        // Root before move: [G, ids4, ids5]. Lift ids0 + ids1 to root index 1.
+        // G keeps [ids2, ids3] → survives. Inserted at root[1] (after G).
+        w.moveTabsToRoot([ids[0], ids[1]], at: 1)
+        #expect(w.group(g) != nil)
+        #expect(w.tabs(in: g).map(\.id) == [ids[2], ids[3]])
+        #expect(w.tabs.map(\.id) == [ids[2], ids[3], ids[0], ids[1], ids[4], ids[5]])
+    }
+
+    @Test func moveTabsToRootAppendsWhenIndexIsNil() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1]
+        w.moveTabsToRoot([ids[0], ids[1]], at: nil)      // append at end
+        #expect(w.tabs.map(\.id) == [ids[2], ids[3], ids[0], ids[1]])
+    }
+
+    @Test func moveGroupsToRootHoistsNestedGroupBack() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G1 = [ids0, ids1]
+        w.groupTab(ids[3], onto: ids[2])                 // G2 = [ids2, ids3]
+        let g1 = try #require(w.tabGroups.first?.id)
+        let g2 = try #require(w.tabGroups.last?.id)
+        w.moveGroup(g2, intoGroup: g1)                   // G1 = [ids0, ids1, G2]
+        w.moveGroupsToRoot([g2], at: 0)                  // hoist G2 back, at root[0]
+        // Now G1 has 2 children left; should not dissolve.
+        #expect(w.group(g2) != nil)
+        #expect(w.group(g1) != nil)
+        // Root order: G2 first, then G1.
+        let roots = w.rootNodes.compactMap(\.group?.id)
+        #expect(roots == [g2, g1])
+        // Tabs DFS: ids2, ids3 (from G2), then ids0, ids1 (from G1).
+        #expect(w.tabs.map(\.id) == [ids[2], ids[3], ids[0], ids[1]])
+    }
+
+    @Test func payloadAncestorFilterDropsDescendantsOfSelectedGroups() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1]
+        let g = try #require(w.tabGroups.first?.id)
+        // Selection: G + ids0 (descendant) + ids2 (independent).
+        // ids0 must be dropped (G already moves it); G + ids2 remain.
+        let result = w.payloadAncestorFilter(tabIDs: [ids[0], ids[2]], groupIDs: [g])
+        #expect(result.tabs == [ids[2]])
+        #expect(result.groups == [g])
+    }
+
+    @Test func payloadAncestorFilterDropsNestedGroupOfSelectedGroup() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G1
+        w.groupTab(ids[3], onto: ids[2])                 // G2
+        let g1 = try #require(w.tabGroups[0].id)
+        let g2 = try #require(w.tabGroups[1].id)
+        w.moveGroup(g2, intoGroup: g1)                   // G2 nested in G1
+        // Selecting both G1 and G2: G2 is a descendant → drop.
+        let result = w.payloadAncestorFilter(tabIDs: [], groupIDs: [g1, g2])
+        #expect(result.tabs.isEmpty)
+        #expect(result.groups == [g1])
+        _ = ids
+    }
+}
