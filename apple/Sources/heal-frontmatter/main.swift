@@ -92,19 +92,34 @@ let (vault, apply) = parseCLI()
 
 guard let enumerator = FileManager.default.enumerator(
     at: vault,
-    includingPropertiesForKeys: [.isRegularFileKey]
+    includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey]
 ) else {
     die("cannot enumerate \(vault.path)")
 }
 
 var totalFiles = 0
 var changedFiles = 0
+var skippedUnreadable = 0
 
 while let next = enumerator.nextObject() as? URL {
+    // Skip dot-directories (`.git`, `.obsidian`, `.quasi`, etc.) and any
+    // dot-files — mirrors VaultIndexer's scan policy.
+    if next.lastPathComponent.hasPrefix(".") {
+        let isDir = (try? next.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+        if isDir { enumerator.skipDescendants() }
+        continue
+    }
     guard next.pathExtension == "md" else { continue }
     totalFiles += 1
 
-    guard let text = try? String(contentsOf: next, encoding: .utf8) else { continue }
+    let text: String
+    do {
+        text = try String(contentsOf: next, encoding: .utf8)
+    } catch {
+        skippedUnreadable += 1
+        FileHandle.standardError.write(Data("skipped (read failed): \(next.path): \(error)\n".utf8))
+        continue
+    }
     let healed = heal(text)
     if healed == text { continue }
 
@@ -122,4 +137,7 @@ while let next = enumerator.nextObject() as? URL {
 print("---")
 print("scanned: \(totalFiles) .md files")
 print("changed: \(changedFiles)")
+if skippedUnreadable > 0 {
+    print("skipped (read failed): \(skippedUnreadable) — see stderr")
+}
 print(apply ? "mode: APPLIED" : "mode: DRY-RUN — re-run with --apply to write")

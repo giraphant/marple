@@ -15,7 +15,9 @@ public enum FrontmatterPatch {
         guard raw.hasPrefix("---\n") || raw.hasPrefix("---\r\n") else { return nil }
         let lines = raw.components(separatedBy: "\n")
         var close: Int?
-        for i in 1..<lines.count where lines[i].trimmingCharacters(in: .whitespaces) == "---" {
+        // `.whitespacesAndNewlines` so CRLF (`---\r`) trims to `---` too.
+        for i in 1..<lines.count
+        where lines[i].trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
             close = i; break
         }
         guard let c = close else { return nil }
@@ -164,7 +166,8 @@ public enum FrontmatterPatch {
             v.isEmpty ||
             v.contains(",") || v.contains("[") || v.contains("]") ||
             v.contains("{") || v.contains("}") ||
-            v.contains(": ") || v.contains("\"") || v.contains("#") ||
+            v.contains(": ") || v.hasSuffix(":") ||
+            v.contains("\"") || v.contains("#") ||
             (first.map { "-?*&!%@`|>".contains($0) } ?? false) ||
             (first.map { " \t".contains($0) } ?? false) ||
             (v.last.map { " \t".contains($0) } ?? false) ||
