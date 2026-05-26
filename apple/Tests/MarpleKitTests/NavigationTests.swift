@@ -662,6 +662,99 @@ import Foundation
         #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[2], ids[3]])
     }
 
+    /// QUA-99 coverage gap (Codex 5a): LCA at depth ≥3. Tabs identified by
+    /// NavLocation since the restoring init re-orders `tabs` to DFS leaf order.
+    /// Layout: G[H[J[t0, anchorJ], K[t1, anchorK]], t2]. groupTabs([t1, t0]) —
+    /// paths [G, H, J] vs [G, H, K] → LCA = [G, H]. New group lands inside H
+    /// at slot 0 (the slot of J, which contains earliest tab t0). J keeps its
+    /// anchor; K keeps its anchor; both survive (≥2 children each? No — each
+    /// has 1 child left and dissolves). Final H = [newGroup, anchorJ, anchorK].
+    @Test func groupTabsAcrossDeeplyNestedSiblingsAnchorsAtLCA() throws {
+        let l0 = loc(0); let l1 = loc(1); let lT2 = loc(2)
+        let lAJ = loc(3); let lAK = loc(4)
+        let tabSpecs: [(location: NavLocation, pinned: Bool, customTitle: String?)] =
+            [l0, l1, lT2, lAJ, lAK].map { (location: $0, pinned: false, customTitle: nil) }
+        let snap = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "G", isCollapsed: false, children: [
+                .group(.init(name: "H", isCollapsed: false, children: [
+                    .group(.init(name: "J", isCollapsed: false, children: [.tab(0), .tab(3)])),
+                    .group(.init(name: "K", isCollapsed: false, children: [.tab(1), .tab(4)])),
+                ])),
+                .tab(2),
+            ])),
+        ])
+        var w = try #require(Workspace(restoring: tabSpecs, activeIndex: 0, tree: snap))
+        let tabID: (NavLocation) -> NavTab.ID = { loc in w.tabs.first { $0.location == loc }!.id }
+        let t0 = tabID(l0), t1 = tabID(l1), tT2 = tabID(lT2), aJ = tabID(lAJ), aK = tabID(lAK)
+        let h = try #require(w.tabGroups.first { $0.name == "H" }?.id)
+
+        w.groupTabs([t1, t0])
+
+        let hGroup = try #require(w.group(h))
+        // J dissolves to anchorJ; K dissolves to anchorK; H = [newGroup, aJ, aK].
+        #expect(hGroup.children.count == 3)
+        let newGroup = try #require(hGroup.children[0].group)
+        #expect(newGroup.tabIDs == [t0, t1])
+        #expect(hGroup.children[1].tabID == aJ)
+        #expect(hGroup.children[2].tabID == aK)
+        // DFS leaf order: [t0, t1, anchorJ, anchorK, tT2].
+        #expect(w.tabs.map(\.id) == [t0, t1, aJ, aK, tT2])
+    }
+
+    /// QUA-100 coverage gap (Codex 5b): moveItems when the destination group
+    /// already contains some of the dragged items — verifies in-parent
+    /// adjusted-index applies correctly to the mixed case.
+    @Test func moveItemsIntoGroupWithExistingDraggedTabsReorders() throws {
+        let tabSpecs = (0..<5).map { (location: loc($0), pinned: false, customTitle: String?.none) }
+        let snap = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "Dst", isCollapsed: false, children: [.tab(0), .tab(1), .tab(2)])),
+            .group(.init(name: "Sub", isCollapsed: false, children: [.tab(3), .tab(4)])),
+        ])
+        var w = try #require(Workspace(restoring: tabSpecs, activeIndex: 0, tree: snap))
+        let ids = w.tabs.map(\.id)
+        let dst = try #require(w.tabGroups.first { $0.name == "Dst" }?.id)
+        let sub = try #require(w.tabGroups.first { $0.name == "Sub" }?.id)
+        // Move [ids0 (already inside Dst at slot 0), Sub] into Dst at slot 2.
+        // Adjustment: ids0 detaches from Dst at slot 0 < 2 → baseTarget = 1.
+        // After detach: Dst = [ids1, ids2]. Insert ids0, then Sub at slots 1, 2.
+        // Result: Dst = [ids1, ids0, Sub, ids2].
+        w.moveItems([.tab(ids[0]), .group(sub)], toGroup: dst, at: 2)
+        let dstGroup = try #require(w.group(dst))
+        #expect(dstGroup.children.count == 4)
+        #expect(dstGroup.children[0].tabID == ids[1])
+        #expect(dstGroup.children[1].tabID == ids[0])
+        #expect(dstGroup.children[2].group?.id == sub)
+        #expect(dstGroup.children[3].tabID == ids[2])
+        #expect(w.tabs.map(\.id) == [ids[1], ids[0], ids[3], ids[4], ids[2]])
+    }
+
+    /// QUA-100 coverage gap (Codex 5c): all-root group-only reorder via
+    /// moveItemsToRoot. Confirms baseTarget adjustment when every source sits
+    /// in the destination (root) at slots before the raw index.
+    @Test func moveItemsToRootGroupOnlyReorderAdjustsBaseTarget() throws {
+        let tabSpecs = (0..<4).map { (location: loc($0), pinned: false, customTitle: String?.none) }
+        let snap = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "G1", isCollapsed: false, children: [.tab(0), .tab(1)])),
+            .group(.init(name: "G2", isCollapsed: false, children: [.tab(2), .tab(3)])),
+        ])
+        var w = try #require(Workspace(restoring: tabSpecs, activeIndex: 0, tree: snap))
+        let g1 = try #require(w.tabGroups.first { $0.name == "G1" }?.id)
+        let g2 = try #require(w.tabGroups.first { $0.name == "G2" }?.id)
+        // Move [G1, G2] to root at slot 2 (i.e., after current root.count == 2 → end).
+        // Both detach from root at slots 0, 1 → both < 2 → baseTarget = 0.
+        // Re-insert in supplied order at slots 0, 1 → root stays [G1, G2].
+        let beforeIds = w.tabs.map(\.id)
+        w.moveItemsToRoot([.group(g1), .group(g2)], at: 2)
+        let roots = w.rootNodes.compactMap(\.group?.id)
+        #expect(roots == [g1, g2])
+        #expect(w.tabs.map(\.id) == beforeIds)
+        // Now swap: [G2, G1] at end. G2 detaches from slot 1, G1 from slot 0,
+        // raw 2, both < 2 → baseTarget = 0. Insert G2 at 0, G1 at 1 → [G2, G1].
+        w.moveItemsToRoot([.group(g2), .group(g1)], at: 2)
+        let rootsAfter = w.rootNodes.compactMap(\.group?.id)
+        #expect(rootsAfter == [g2, g1])
+    }
+
     @Test func groupTabsIgnoresLessThanTwoIDs() throws {
         var (w, ids) = workspace(3)
         let before = w.rootNodes
