@@ -63,12 +63,17 @@ public enum YamlFrontmatter {
     /// Fallback: if Yams throws OR the top-level node is not a mapping, run
     /// the lenient line parser ported verbatim from `parse_lenient_mapping`.
     ///
+    /// Pre-parse: `FrontmatterSanitizer` strips Ulysses-bite damage
+    /// (`themes: [a, b](#)` → `themes: [a, b]`) on the known list-shaped
+    /// keys so existing damaged vault files still parse cleanly.
+    ///
     /// Returns `[]` when there is no usable mapping.
     public static func parseMapping(_ raw: String) -> [(String, YamlValue)] {
-        if let pairs = tryYamsParse(raw) {
+        let sanitized = FrontmatterSanitizer.sanitizeBody(raw)
+        if let pairs = tryYamsParse(sanitized) {
             return pairs
         }
-        return parseLenientMapping(raw) ?? []
+        return parseLenientMapping(sanitized) ?? []
     }
 
     // MARK: - Primary path: Yams

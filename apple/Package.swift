@@ -65,6 +65,13 @@ let package = Package(
             name: "semantic-tool",
             dependencies: ["MarpleKit", "MarpleEmbeddings"]
         ),
+        // Bulk frontmatter healer — strips Ulysses-bite damage and upgrades
+        // flow-form arrays to block lists across an entire vault.
+        //   swift run heal-frontmatter --vault <path> --dry-run | --apply
+        .executableTarget(
+            name: "heal-frontmatter",
+            dependencies: ["MarpleKit"]
+        ),
         .testTarget(
             name: "MarpleKitTests",
             dependencies: [
