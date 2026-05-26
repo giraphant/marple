@@ -611,6 +611,16 @@ final class AppModel {
         mutateWorkspace { $0.moveGroupsToRoot(ids, at: index) }
     }
 
+    /// Interleaved bulk move (tabs + groups together). Used by multi-drag to
+    /// preserve the source/visual order of a mixed selection.
+    func moveItems(_ items: [WorkspaceItem], toGroup groupID: TabGroup.ID, at childIndex: Int? = nil) {
+        mutateWorkspace { $0.moveItems(items, toGroup: groupID, at: childIndex) }
+    }
+
+    func moveItemsToRoot(_ items: [WorkspaceItem], at index: Int? = nil) {
+        mutateWorkspace { $0.moveItemsToRoot(items, at: index) }
+    }
+
     /// "上级胜出": filter a payload set so descendants of selected ancestors fall
     /// out (their ancestors will move them implicitly).
     func payloadAncestorFilter(tabIDs: [NavTab.ID],

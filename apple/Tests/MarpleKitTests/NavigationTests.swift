@@ -599,9 +599,9 @@ import Foundation
         var (w, ids) = workspace(4)
         w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1] at root[0]
         let g = try #require(w.tabGroups.first?.id)
-        // ids[0] is in G, ids[2] is at root → mixed parents; new group anchors at
-        // root[0] (root-level slot of the earliest's ancestor G). G keeps ids[1]
-        // alone, dissolves.
+        // ids[0] is in G, ids[2] is at root → no common group; new group anchors
+        // at root[0] (root-level slot of the earliest's ancestor G). G keeps
+        // ids[1] alone, dissolves.
         w.groupTabs([ids[0], ids[2]])
         #expect(w.group(g) == nil)                       // G dissolved (1 child left)
         #expect(w.tabGroups.count == 1)
@@ -609,6 +609,57 @@ import Foundation
         #expect(new.tabIDs == [ids[0], ids[2]])
         // root order: new group, then orphaned ids[1], then ids[3]
         #expect(w.tabs.map(\.id) == [ids[0], ids[2], ids[1], ids[3]])
+    }
+
+    /// QUA-99: when the selection spans sibling groups under a common non-root
+    /// ancestor, the new group lands inside that ancestor — not at root.
+    @Test func groupTabsAcrossSiblingGroupsAnchorsAtCommonAncestor() throws {
+        let tabSpecs = (0..<5).map { (location: loc($0), pinned: false, customTitle: String?.none) }
+        let snap = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "G", isCollapsed: false, children: [
+                .group(.init(name: "A", isCollapsed: false, children: [.tab(0), .tab(1)])),
+                .group(.init(name: "B", isCollapsed: false, children: [.tab(2), .tab(3)])),
+            ])),
+            .tab(4),
+        ])
+        var w = try #require(Workspace(restoring: tabSpecs, activeIndex: 0, tree: snap))
+        let ids = w.tabs.map(\.id)
+        let g = try #require(w.tabGroups.first { $0.name == "G" }?.id)
+        let bID = try #require(w.tabGroups.first { $0.name == "B" }?.id)
+
+        // ids[0] is in G/A, ids[2] is in G/B → LCA is G. New group should sit
+        // inside G at A's slot (the LCA child containing the earliest tab).
+        w.groupTabs([ids[2], ids[0]])
+
+        let newGroup = try #require(w.tabGroups.first { $0.id != g && $0.id != bID })
+        let outer = try #require(w.group(g))
+        // A dissolves (one child left after lift); B dissolves (one child left).
+        // G now contains: [newGroup, ids1 (from A), ids3 (from B)].
+        #expect(outer.children.first?.group?.id == newGroup.id)
+        #expect(outer.tabIDs.dropFirst(0) == [ids[1], ids[3]])
+        #expect(newGroup.tabIDs == [ids[0], ids[2]])
+        #expect(w.tabs.map(\.id) == [ids[0], ids[2], ids[1], ids[3], ids[4]])
+    }
+
+    /// QUA-99: same-parent case still places the new group inside that parent
+    /// at the earliest tab's slot — unchanged behavior.
+    @Test func groupTabsSameNonRootParentAnchorsAtEarliestSlot() throws {
+        let tabSpecs = (0..<4).map { (location: loc($0), pinned: false, customTitle: String?.none) }
+        let snap = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "A", isCollapsed: false, children: [
+                .tab(0), .tab(1), .tab(2),
+            ])),
+            .tab(3),
+        ])
+        var w = try #require(Workspace(restoring: tabSpecs, activeIndex: 0, tree: snap))
+        let ids = w.tabs.map(\.id)
+        let a = try #require(w.tabGroups.first?.id)
+        w.groupTabs([ids[1], ids[0]])
+        let newGroup = try #require(w.tabGroups.first { $0.id != a })
+        let outer = try #require(w.group(a))
+        #expect(outer.children.first?.group?.id == newGroup.id)
+        #expect(newGroup.tabIDs == [ids[0], ids[1]])
+        #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[2], ids[3]])
     }
 
     @Test func groupTabsIgnoresLessThanTwoIDs() throws {
@@ -704,6 +755,82 @@ import Foundation
         let result = w.payloadAncestorFilter(tabIDs: [ids[0], ids[2]], groupIDs: [g])
         #expect(result.tabs == [ids[2]])
         #expect(result.groups == [g])
+    }
+
+    // MARK: QUA-100 — interleaved order preservation
+
+    @Test func moveItemsToRootPreservesInterleavedOrder() throws {
+        var (w, ids) = workspace(5)
+        w.groupTab(ids[1], onto: ids[0])                  // G = [ids0, ids1] at root[0]
+        let g = try #require(w.tabGroups.first?.id)
+        // Root before: [G, ids2, ids3, ids4]. Drop a tab/group/tab sequence at
+        // root[0]. Visual order: ids2, G, ids4 → expect those three contiguously
+        // at the head of root, in that exact order.
+        w.moveItemsToRoot([.tab(ids[2]), .group(g), .tab(ids[4])], at: 0)
+        let roots = w.rootNodes
+        #expect(roots.count == 4)
+        #expect(roots[0].tabID == ids[2])
+        #expect(roots[1].group?.id == g)
+        #expect(roots[2].tabID == ids[4])
+        #expect(roots[3].tabID == ids[3])
+        #expect(w.tabs(in: g).map(\.id) == [ids[0], ids[1]])
+    }
+
+    @Test func moveItemsToRootSkipsTabsBeforeGroupsWhenInterleaved() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                  // G = [ids0, ids1]
+        let g = try #require(w.tabGroups.first?.id)
+        // Append [G, ids2] at end (preserving order): root → [_, ids3, G, ids2]
+        // ... actually with G removed first: root = [ids3], then re-insert G, ids2 at end.
+        w.moveItemsToRoot([.group(g), .tab(ids[2])], at: nil)
+        let roots = w.rootNodes
+        #expect(roots.compactMap(\.tabID) == [ids[3], ids[2]])
+        #expect(roots[1].group?.id == g)
+    }
+
+    @Test func moveItemsIntoGroupPreservesInterleavedOrder() throws {
+        // Dst needs ≥2 anchor tabs so it survives normalize after Src + ids4
+        // land inside it; otherwise dissolveSmall would unwrap Dst.
+        let tabSpecs = (0..<5).map { (location: loc($0), pinned: false, customTitle: String?.none) }
+        let snap = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "Dst", isCollapsed: false, children: [.tab(0), .tab(1)])),
+            .group(.init(name: "Src", isCollapsed: false, children: [.tab(2), .tab(3)])),
+            .tab(4),
+        ])
+        var w = try #require(Workspace(restoring: tabSpecs, activeIndex: 0, tree: snap))
+        let ids = w.tabs.map(\.id)
+        let dst = try #require(w.tabGroups.first { $0.name == "Dst" }?.id)
+        let src = try #require(w.tabGroups.first { $0.name == "Src" }?.id)
+        // Drop [Src, ids4] into Dst at end. Order must be Src first, then ids4.
+        w.moveItems([.group(src), .tab(ids[4])], toGroup: dst, at: nil)
+        let dstGroup = try #require(w.group(dst))
+        #expect(dstGroup.children.count == 4)
+        #expect(dstGroup.children[0].tabID == ids[0])
+        #expect(dstGroup.children[1].tabID == ids[1])
+        #expect(dstGroup.children[2].group?.id == src)
+        #expect(dstGroup.children[3].tabID == ids[4])
+        #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[2], ids[3], ids[4]])
+    }
+
+    @Test func moveItemsSkipsCycleSilently() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])
+        w.groupTab(ids[3], onto: ids[2])
+        let g1 = try #require(w.tabGroups[0].id)
+        let g2 = try #require(w.tabGroups[1].id)
+        w.moveGroup(g2, intoGroup: g1)                    // G2 nested inside G1
+        let before = w.rootNodes
+        // Attempt to nest G1 into G2 (its own descendant) bundled with a tab.
+        // The cycle group should be skipped; ids2 should still be moved.
+        w.moveItems([.group(g1), .tab(ids[2])], toGroup: g2, at: nil)
+        // G1 must NOT have been removed-and-not-reinserted; it stays where it was.
+        // ids[2] is already inside G2 (since we nested G2 into G1 which contains
+        // ids2 indirectly); moving ids2 into G2 is a no-op for its parent but
+        // still legal — verify the tree isn't broken.
+        #expect(w.group(g1) != nil)
+        #expect(w.group(g2) != nil)
+        #expect(w.group(g2, isInsideSubtreeOf: g1))       // still nested
+        _ = before
     }
 
     @Test func payloadAncestorFilterDropsNestedGroupOfSelectedGroup() throws {

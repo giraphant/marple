@@ -211,12 +211,55 @@ struct SidebarOutlineView: NSViewRepresentable {
                 selectCurrentItem(in: outline)
                 return
             }
+            // Snapshot the multi-selection by stable payload before reloadData
+            // wipes row indices. selectCurrentItem already keeps a multi-row
+            // selection that covers the active row across no-op reloads — this
+            // extends the same guarantee to structural reloads (QUA-98).
+            let preservedPayloads = capturedMultiSelectionPayloads(in: outline)
             lastReloadSignature = signature
             stickyRowDropTarget = nil
             rootItems = makeRootItems()
             outline.reloadData()
             restoreExpansion(in: outline)
+            restoreMultiSelection(payloads: preservedPayloads, in: outline)
             selectCurrentItem(in: outline)
+        }
+
+        /// Payload set of a multi-row selection (>=2 rows). Returns empty for a
+        /// single-row selection — `selectCurrentItem` will re-pick that case
+        /// from the active tab/pane on its own.
+        private func capturedMultiSelectionPayloads(in outline: NSOutlineView) -> [SidebarTabPayload] {
+            let indices = outline.selectedRowIndexes
+            guard indices.count > 1 else { return [] }
+            return indices.compactMap { row in
+                (outline.item(atRow: row) as? SidebarOutlineNode)
+                    .flatMap { SidebarTabPayload($0.payload) }
+            }
+        }
+
+        /// Re-select rows for surviving payloads. Payloads whose row is hidden
+        /// (parent group is collapsed) are dropped — respect the user's persisted
+        /// collapse state rather than forcing those ancestors open.
+        private func restoreMultiSelection(payloads: [SidebarTabPayload], in outline: NSOutlineView) {
+            guard payloads.count > 1 else { return }
+            var rows = IndexSet()
+            for payload in payloads {
+                guard let node = findNode(for: payload, in: rootItems) else { continue }
+                let row = outline.row(forItem: node)
+                if row >= 0 { rows.insert(row) }
+            }
+            guard rows.count > 1 else { return }
+            isUpdatingSelection = true
+            outline.selectRowIndexes(rows, byExtendingSelection: false)
+            isUpdatingSelection = false
+        }
+
+        private func findNode(for payload: SidebarTabPayload, in nodes: [SidebarOutlineNode]) -> SidebarOutlineNode? {
+            switch payload {
+            case .tab(let id): return findTabNode(id, in: nodes)
+            case .group(let id): return findGroupNode(id, in: nodes)
+            case .type(let type): return findPaneNode(.type(type), in: nodes)
+            }
         }
 
         private func reloadSignature() -> String {
@@ -842,6 +885,23 @@ struct SidebarOutlineView: NSViewRepresentable {
             return model.payloadAncestorFilter(tabIDs: rawTabs, groupIDs: rawGroups)
         }
 
+        /// Same filter as `classifyAndFilter` but preserves the original
+        /// payload-sequence order (Finder-style mixed selection — QUA-100).
+        /// Type payloads drop out; ancestor filter still drops descendants
+        /// whose container is also selected.
+        private func orderedItems(_ payloads: [SidebarTabPayload]) -> [WorkspaceItem] {
+            let (tabs, groups) = classifyAndFilter(payloads)
+            let allowedTabs = Set(tabs)
+            let allowedGroups = Set(groups)
+            return payloads.compactMap { payload in
+                switch payload {
+                case .tab(let id): return allowedTabs.contains(id) ? .tab(id) : nil
+                case .group(let id): return allowedGroups.contains(id) ? .group(id) : nil
+                case .type: return nil
+                }
+            }
+        }
+
         private func validateMultiDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
                                        payloads: [SidebarTabPayload],
                                        item: Any?, childIndex index: Int) -> NSDragOperation {
@@ -876,38 +936,32 @@ struct SidebarOutlineView: NSViewRepresentable {
         private func acceptMultiDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
                                      payloads: [SidebarTabPayload],
                                      item: Any?, childIndex index: Int) -> Bool {
-            let (tabs, groups) = classifyAndFilter(payloads)
-            guard !(tabs.isEmpty && groups.isEmpty) else { return false }
-            logDrop("acceptMulti tabs=\(tabs.count) groups=\(groups.count) target=\(describe(item as? SidebarOutlineNode)) index=\(index)")
+            let items = orderedItems(payloads)
+            guard !items.isEmpty else { return false }
+            logDrop("acceptMulti items=\(items.count) target=\(describe(item as? SidebarOutlineNode)) index=\(index)")
             // Root drop: item is nil OR a .section(.tabs).
             if item == nil
                 || (item as? SidebarOutlineNode).map({ if case .section(.tabs) = $0.kind { return true } else { return false } }) == true {
                 let safeIndex: Int? = index >= 0 ? index : nil
-                if !tabs.isEmpty { model.moveTabsToRoot(tabs, at: safeIndex) }
-                if !groups.isEmpty {
-                    // Shift groups' index past freshly-rooted tabs so they land after.
-                    let groupIndex: Int? = safeIndex.map { $0 + tabs.count }
-                    model.moveGroupsToRoot(groups, at: groupIndex)
-                }
+                model.moveItemsToRoot(items, at: safeIndex)
                 return true
             }
             guard let node = item as? SidebarOutlineNode else { return false }
             switch node.kind {
             case .group(let targetGroupID):
-                var insertAt: Int? = index >= 0 ? index : nil
-                if !tabs.isEmpty {
-                    model.moveTabs(tabs, toGroup: targetGroupID, at: insertAt)
-                    if let a = insertAt { insertAt = a + tabs.count }
-                }
-                for gid in groups {
-                    guard model.canNestGroup(gid, into: targetGroupID) else { continue }
-                    model.moveGroup(gid, intoGroup: targetGroupID, at: insertAt)
-                    if let a = insertAt { insertAt = a + 1 }
-                }
+                model.moveItems(items, toGroup: targetGroupID, at: index >= 0 ? index : nil)
                 return true
             case .tab(let targetID):
-                guard groups.isEmpty else { return false }
-                let combined = [targetID] + tabs.filter { $0 != targetID }
+                // Pure-tab onto-tab forms a new group of [target, ...dragged].
+                // `groupTabs` already DFS-orders, so source visual order is
+                // re-resolved to tree position — that's the correct policy for
+                // creating a fresh group rather than a flat sequence.
+                let tabIDs = items.compactMap { item -> NavTab.ID? in
+                    if case .tab(let id) = item { return id }
+                    return nil
+                }
+                guard tabIDs.count == items.count else { return false }
+                let combined = [targetID] + tabIDs.filter { $0 != targetID }
                 model.groupTabs(combined)
                 return true
             case .section, .pane:
