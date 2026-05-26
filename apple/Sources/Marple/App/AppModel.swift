@@ -73,8 +73,10 @@ final class AppModel {
     private(set) var authorIndex: [String: [Entry]] = [:]
     private(set) var annotationIndex: [String: [Entry]] = [:]
     /// Prebuilt field-weighted index for the command palette's 快速 mode (rebuilt
-    /// whenever `entries` changes, like the other derived caches).
-    private(set) var searchDocs: [SearchDocument] = []
+    /// whenever `entries` changes, like the other derived caches). Carries a
+    /// trigram inverted index so per-keystroke ranking only scores hundreds of
+    /// candidate docs instead of 15k full-scans.
+    private(set) var searchIndex: SearchIndex = .empty
 
     // Trash list (loaded lazily; sidebar badge reads .count).
     private(set) var trashItems: [TrashItem] = []
@@ -198,7 +200,7 @@ final class AppModel {
 
     /// Rebuild the index-wide caches. Split into two phases:
     /// - immediate: counts + themeIndex (cheap; the sidebar needs them right away)
-    /// - deferred: authorIndex/annotationIndex/searchDocs (heavy; only needed by
+    /// - deferred: authorIndex/annotationIndex/searchIndex (heavy; only needed by
     ///   the reading view's relations panel and the Cmd-K palette, neither of
     ///   which is exercised in the first few hundred ms after launch)
     private func rebuildIndexDerived() {
@@ -209,7 +211,7 @@ final class AppModel {
         scheduleDeferredDerivedRebuild()
     }
 
-    /// Build the heavy derived caches (authors, annotations, search docs) on a
+    /// Build the heavy derived caches (authors, annotations, search index) on a
     /// background task and publish them on the main actor when done. If
     /// `entries` changes again before this task completes, the in-flight task
     /// is cancelled and stale dispatch blocks are vetoed by generation counter
@@ -241,7 +243,7 @@ final class AppModel {
                 guard let self, self.derivedGeneration == generation else { return }
                 self.authorIndex = result.0
                 self.annotationIndex = result.1
-                self.searchDocs = result.2
+                self.searchIndex = result.2
                 if self.openEntry != nil { self.recomputeOpenDerived() }
             }
         }
@@ -529,10 +531,12 @@ final class AppModel {
         guard !q.isEmpty else { return [] }
         switch mode {
         case .fast:
-            // Rank ~15k docs OFF the main actor so typing never hitches.
-            let docs = searchDocs
+            // Rank ~15k docs OFF the main actor so typing never hitches. Trigram
+            // prefilter inside `searchDocuments` typically narrows to <300 docs
+            // before scoring (QUA-96).
+            let index = searchIndex
             let ranked = await Task.detached(priority: .userInitiated) {
-                searchDocuments(docs, q)
+                searchDocuments(index, q)
             }.value
             return ranked.map { PaletteResult(entry: $0.entry, score: $0.score, source: nil) }
         case .balanced:
@@ -648,6 +652,16 @@ final class AppModel {
 
     func moveGroupsToRoot(_ ids: [TabGroup.ID], at index: Int? = nil) {
         mutateWorkspace { $0.moveGroupsToRoot(ids, at: index) }
+    }
+
+    /// Interleaved bulk move (tabs + groups together). Used by multi-drag to
+    /// preserve the source/visual order of a mixed selection.
+    func moveItems(_ items: [WorkspaceItem], toGroup groupID: TabGroup.ID, at childIndex: Int? = nil) {
+        mutateWorkspace { $0.moveItems(items, toGroup: groupID, at: childIndex) }
+    }
+
+    func moveItemsToRoot(_ items: [WorkspaceItem], at index: Int? = nil) {
+        mutateWorkspace { $0.moveItemsToRoot(items, at: index) }
     }
 
     /// "上级胜出": filter a payload set so descendants of selected ancestors fall
