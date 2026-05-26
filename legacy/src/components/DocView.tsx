@@ -223,7 +223,7 @@ export function DocView({
 
   const handleDelete = useCallback(async () => {
     const fallback = entry.title || entry.path.split('/').pop()!.replace(/\.md$/, '');
-    if (!window.confirm(`将「${fallback}」移到回收站？\n\n文件会被移动到 vault/notes/.trash/ 下，带时间戳，不会立刻消失，但 reader 中将看不到。`)) return;
+    if (!window.confirm(`将「${fallback}」移到回收站？\n\n文件会被移动到 vault/notes/.trash/ 下，带时间戳，不会立刻消失，但 Marple 中将看不到。`)) return;
     if (timerRef.current != null) { clearTimeout(timerRef.current); timerRef.current = null; }
     setMenuOpen(false);
     try {

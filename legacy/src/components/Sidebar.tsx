@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import type { Entry, EntryType, TypeMeta } from '../types';
 import { TypeIcon } from './TypeIcon';
 import { Icon } from './Icon';
+import PhLeaf from '~icons/ph/leaf';
 import PhTag from '~icons/ph/tag';
 import PhChartLineUp from '~icons/ph/chart-line-up';
 import PhArrowsClockwise from '~icons/ph/arrows-clockwise';
@@ -89,8 +90,8 @@ export function Sidebar({
       <div class={`border-b border-base flex items-center ${collapsed ? 'justify-center px-1 py-2.5' : 'justify-between px-4 py-2.5'}`}>
         {!collapsed && (
           <div class="min-w-0 flex items-center gap-2.5">
-            <span class="shrink-0 w-7 h-7 rounded-[10px] bg-accent text-white flex items-center justify-center font-bold text-[14px]" aria-hidden="true">q</span>
-            <span class="text-[14px] font-bold tracking-[-0.01em] text-primary truncate">qua reader</span>
+            <span class="shrink-0 w-7 h-7 rounded-[10px] bg-accent text-white flex items-center justify-center text-[14px]" aria-hidden="true"><PhLeaf width="1.2em" height="1.2em" /></span>
+            <span class="text-[14px] font-bold tracking-[-0.01em] text-primary truncate">Marple</span>
           </div>
         )}
         <button
