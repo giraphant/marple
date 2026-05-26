@@ -5,8 +5,19 @@ import Foundation
 public struct PersistedTab: Codable, Sendable, Equatable {
     public var location: NavLocation
     public var pinned: Bool
-    public init(location: NavLocation, pinned: Bool) {
-        self.location = location; self.pinned = pinned
+    public var customTitle: String?
+    public init(location: NavLocation, pinned: Bool, customTitle: String? = nil) {
+        self.location = location; self.pinned = pinned; self.customTitle = customTitle
+    }
+}
+
+public struct PersistedWorkspaceSpace: Codable, Sendable, Equatable {
+    public var name: String
+    public var groups: [WorkspaceGroupSnapshot]
+
+    public init(name: String = "默认 Space", groups: [WorkspaceGroupSnapshot] = []) {
+        self.name = name
+        self.groups = groups
     }
 }
 
@@ -23,19 +34,23 @@ public struct PersistedState: Codable, Sendable, Equatable {
     public var filterClauses: [FilterClause]
     public var filterMatch: FilterMatch
     public var browseMode: String
+    public var currentSpace: PersistedWorkspaceSpace?
 
     public init(browsePane: Pane, isBrowsing: Bool, tabs: [PersistedTab], activeIndex: Int,
                 sortClauses: [SortClause], filterClauses: [FilterClause],
-                filterMatch: FilterMatch, browseMode: String) {
+                filterMatch: FilterMatch, browseMode: String,
+                currentSpace: PersistedWorkspaceSpace? = nil) {
         self.browsePane = browsePane; self.isBrowsing = isBrowsing
         self.tabs = tabs; self.activeIndex = activeIndex
         self.sortClauses = sortClauses; self.filterClauses = filterClauses
         self.filterMatch = filterMatch; self.browseMode = browseMode
+        self.currentSpace = currentSpace
     }
 
     public func makeWorkspace() -> Workspace? {
-        Workspace(restoring: tabs.map { (location: $0.location, pinned: $0.pinned) },
-                  activeIndex: activeIndex)
+        Workspace(restoring: tabs.map { (location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) },
+                  activeIndex: activeIndex,
+                  groups: currentSpace?.groups ?? [])
     }
 }
 

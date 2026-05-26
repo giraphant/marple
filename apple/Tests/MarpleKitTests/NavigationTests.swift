@@ -172,6 +172,15 @@ import Testing
         #expect(w.tabs.map(\.location) == [c, a, b])
     }
 
+    @Test func testRenameTabTrimsAndClearsEmptyTitle() {
+        var w = Workspace(initial: a)
+        let id = w.activeID
+        w.renameTab(id, to: "  Workbench  ")
+        #expect(w.activeTab.customTitle == "Workbench")
+        w.renameTab(id, to: "   ")
+        #expect(w.activeTab.customTitle == nil)
+    }
+
     @Test func testReorderKeepsActiveAndIgnoresBadInput() {
         var w = Workspace(initial: a)
         w.newTab(b)                 // [a, b], active b
@@ -191,5 +200,113 @@ import Testing
         #expect(w.activeTab.location == a)
         w.forwardActive()
         #expect(w.activeTab.location == b)
+    }
+
+    @Test func testGroupTabCreatesNamedGroupInTabOrder() throws {
+        var w = Workspace(initial: a)
+        w.newTab(b)
+        w.newTab(c)
+        let first = w.tabs[0].id
+        let last = w.tabs[2].id
+        w.groupTab(last, onto: first)
+        let group = try #require(w.tabGroups.first)
+        #expect(group.name == "页面组 1")
+        #expect(group.tabIDs == [first, last])
+    }
+
+    @Test func testMoveTabIntoExistingGroupAndCollapse() throws {
+        var w = Workspace(initial: a)
+        w.newTab(b)
+        w.newTab(c)
+        let ids = w.tabs.map(\.id)
+        w.groupTab(ids[0], onto: ids[1])
+        let groupID = try #require(w.tabGroups.first?.id)
+        w.moveTab(ids[2], toGroup: groupID)
+        #expect(w.tabs(in: groupID).map(\.id) == [ids[1], ids[0], ids[2]])
+        w.toggleGroupCollapsed(groupID)
+        #expect(w.tabGroups.first?.isCollapsed == true)
+    }
+
+    @Test func testCloseTabDissolvesSmallGroup() throws {
+        var w = Workspace(initial: a)
+        w.newTab(b)
+        let ids = w.tabs.map(\.id)
+        w.groupTab(ids[0], onto: ids[1])
+        #expect(w.tabGroups.count == 1)
+        w.closeTab(ids[0])
+        #expect(w.tabGroups.isEmpty)
+        #expect(w.tabs.map(\.id) == [ids[1]])
+    }
+
+    @Test func testGroupingIgnoresBadInputAndSameGroupDrop() throws {
+        var w = Workspace(initial: a)
+        w.newTab(b)
+        let ids = w.tabs.map(\.id)
+        w.groupTab(ids[0], onto: ids[0])
+        #expect(w.tabGroups.isEmpty)
+        w.groupTab(ids[0], onto: ids[1])
+        let before = w.tabGroups
+        w.groupTab(ids[1], onto: ids[0])
+        #expect(w.tabGroups == before)
+    }
+
+    @Test func testMoveTabIntoLaterGroupKeepsGroupPosition() throws {
+        let d = NavLocation(pane: .trash)
+        var w = Workspace(initial: a)
+        w.newTab(b); w.newTab(c); w.newTab(d)
+        let ids = w.tabs.map(\.id)
+        w.groupTab(ids[3], onto: ids[2])
+        let groupID = try #require(w.tabGroups.first?.id)
+        w.moveTab(ids[0], toGroup: groupID, at: 1)
+        #expect(w.tabs.map(\.id) == [ids[1], ids[2], ids[0], ids[3]])
+        #expect(w.tabs(in: groupID).map(\.id) == [ids[2], ids[0], ids[3]])
+    }
+
+    @Test func testMoveTabToRootRemovesGroupMembership() throws {
+        var w = Workspace(initial: a)
+        w.newTab(b); w.newTab(c)
+        let ids = w.tabs.map(\.id)
+        w.groupTab(ids[1], onto: ids[0])
+        w.moveTabToRoot(ids[1], beforeTab: ids[2])
+        #expect(w.tabGroups.isEmpty)
+        #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[2]])
+    }
+
+    @Test func testMoveGroupMovesWholeBlockBeforeTarget() throws {
+        let d = NavLocation(pane: .trash)
+        var w = Workspace(initial: a)
+        w.newTab(b); w.newTab(c); w.newTab(d)
+        let ids = w.tabs.map(\.id)
+        w.groupTab(ids[1], onto: ids[0])
+        let groupID = try #require(w.tabGroups.first?.id)
+        w.moveGroup(groupID, beforeTab: ids[3])
+        #expect(w.tabs.map(\.id) == [ids[2], ids[0], ids[1], ids[3]])
+        #expect(w.tabs(in: groupID).map(\.id) == [ids[0], ids[1]])
+    }
+
+    @Test func testMoveGroupBeforeGroup() throws {
+        let d = NavLocation(pane: .trash)
+        var w = Workspace(initial: a)
+        w.newTab(b); w.newTab(c); w.newTab(d)
+        let ids = w.tabs.map(\.id)
+        w.groupTab(ids[1], onto: ids[0])
+        w.groupTab(ids[3], onto: ids[2])
+        #expect(w.tabGroups.count == 2)
+        let firstGroup = w.tabGroups[0].id
+        let secondGroup = w.tabGroups[1].id
+        w.moveGroup(secondGroup, beforeGroup: firstGroup)
+        #expect(w.tabs.map(\.id) == [ids[2], ids[3], ids[0], ids[1]])
+    }
+
+    @Test func testRenameGroupTrimsAndIgnoresEmptyName() throws {
+        var w = Workspace(initial: a)
+        w.newTab(b)
+        let ids = w.tabs.map(\.id)
+        w.groupTab(ids[1], onto: ids[0])
+        let groupID = try #require(w.tabGroups.first?.id)
+        w.renameGroup(groupID, to: "  Reading Stack  ")
+        #expect(w.tabGroups.first?.name == "Reading Stack")
+        w.renameGroup(groupID, to: "   ")
+        #expect(w.tabGroups.first?.name == "Reading Stack")
     }
 }

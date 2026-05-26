@@ -43,7 +43,8 @@ import Foundation
     }
 
     @Test func restoringEmptyReturnsNil() {
-        #expect(Workspace(restoring: [], activeIndex: 0) == nil)
+        let tabs: [(location: NavLocation, pinned: Bool)] = []
+        #expect(Workspace(restoring: tabs, activeIndex: 0) == nil)
     }
 
     @Test func restoringClampsActiveIndex() throws {
@@ -95,6 +96,62 @@ import Foundation
         #expect(ws.tabs.count == 2)
         #expect(ws.activeTab.location.openPath == "v/a.md")
         #expect(ws.tabs[1].pinned)
+    }
+
+    @Test func makeWorkspaceRestoresTabTitles() throws {
+        let s = PersistedState(
+            browsePane: .type(.paperAnalysis),
+            isBrowsing: false,
+            tabs: [PersistedTab(location: NavLocation(pane: .type(.paperAnalysis), openPath: "v/x.md"), pinned: false, customTitle: "Desk")],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "grid")
+        let ws = try #require(s.makeWorkspace())
+        #expect(ws.activeTab.customTitle == "Desk")
+    }
+
+    @Test func makeWorkspaceRestoresDefaultSpaceGroups() throws {
+        let s = PersistedState(
+            browsePane: .type(.paperAnalysis),
+            isBrowsing: false,
+            tabs: [PersistedTab(location: NavLocation(pane: .type(.paperAnalysis), openPath: "v/x.md"), pinned: false),
+                   PersistedTab(location: NavLocation(pane: .theme("X"), openPath: "v/a.md"), pinned: true),
+                   PersistedTab(location: NavLocation(pane: .trash), pinned: false)],
+            activeIndex: 1,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "grid",
+            currentSpace: PersistedWorkspaceSpace(groups: [
+                WorkspaceGroupSnapshot(name: "页面组 1", tabIndices: [0, 1], isCollapsed: true)
+            ]))
+        let data = try JSONEncoder().encode(s)
+        let restored = try JSONDecoder().decode(PersistedState.self, from: data)
+        let ws = try #require(restored.makeWorkspace())
+        let group = try #require(ws.tabGroups.first)
+        #expect(group.name == "页面组 1")
+        #expect(group.isCollapsed)
+        #expect(ws.tabs(in: group.id).map(\.location.openPath) == ["v/x.md", "v/a.md"])
+    }
+
+    @Test func makeWorkspaceMigratesOldGeneratedGroupNames() throws {
+        let s = PersistedState(
+            browsePane: .type(.paperAnalysis),
+            isBrowsing: false,
+            tabs: [PersistedTab(location: NavLocation(pane: .type(.paperAnalysis), openPath: "v/x.md"), pinned: false),
+                   PersistedTab(location: NavLocation(pane: .theme("X"), openPath: "v/a.md"), pinned: true)],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "grid",
+            currentSpace: PersistedWorkspaceSpace(groups: [
+                WorkspaceGroupSnapshot(name: "标签组 2", tabIndices: [0, 1])
+            ]))
+        let ws = try #require(s.makeWorkspace())
+        #expect(ws.tabGroups.first?.name == "页面组 2")
     }
 
     @Test func userDefaultsStoreRoundTrips() throws {
