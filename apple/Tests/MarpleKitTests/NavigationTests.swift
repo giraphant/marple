@@ -172,6 +172,15 @@ import Testing
         #expect(w.tabs.map(\.location) == [c, a, b])
     }
 
+    @Test func testRenameTabTrimsAndClearsEmptyTitle() {
+        var w = Workspace(initial: a)
+        let id = w.activeID
+        w.renameTab(id, to: "  Workbench  ")
+        #expect(w.activeTab.customTitle == "Workbench")
+        w.renameTab(id, to: "   ")
+        #expect(w.activeTab.customTitle == nil)
+    }
+
     @Test func testReorderKeepsActiveAndIgnoresBadInput() {
         var w = Workspace(initial: a)
         w.newTab(b)                 // [a, b], active b
@@ -201,7 +210,7 @@ import Testing
         let last = w.tabs[2].id
         w.groupTab(last, onto: first)
         let group = try #require(w.tabGroups.first)
-        #expect(group.name == "标签组 1")
+        #expect(group.name == "页面组 1")
         #expect(group.tabIDs == [first, last])
     }
 
@@ -287,5 +296,17 @@ import Testing
         let secondGroup = w.tabGroups[1].id
         w.moveGroup(secondGroup, beforeGroup: firstGroup)
         #expect(w.tabs.map(\.id) == [ids[2], ids[3], ids[0], ids[1]])
+    }
+
+    @Test func testRenameGroupTrimsAndIgnoresEmptyName() throws {
+        var w = Workspace(initial: a)
+        w.newTab(b)
+        let ids = w.tabs.map(\.id)
+        w.groupTab(ids[1], onto: ids[0])
+        let groupID = try #require(w.tabGroups.first?.id)
+        w.renameGroup(groupID, to: "  Reading Stack  ")
+        #expect(w.tabGroups.first?.name == "Reading Stack")
+        w.renameGroup(groupID, to: "   ")
+        #expect(w.tabGroups.first?.name == "Reading Stack")
     }
 }

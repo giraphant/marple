@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import MarpleKit
 
-/// The 标签 menu: tab + history shortcuts. The main window is AppKit-owned, which
+/// The 页面 menu: tab + history shortcuts. The main window is AppKit-owned, which
 /// SwiftUI's `@FocusedValue` can't reach, so these read the global `ActiveModel`
 /// (Marple is single-window). Actions are guarded, so always-enabled items are safe.
 struct TabCommands: Commands {
@@ -15,7 +15,7 @@ struct TabCommands: Commands {
         // Replace the standard File close group so plain ⌘W closes a tab (not the
         // window); window-close relocates to ⇧⌘W. (Pattern from CodeEdit.)
         CommandGroup(replacing: .saveItem) {
-            Button("关闭标签") {
+            Button("关闭页面") {
                 if let m = ActiveModel.current, m.tabs.count > 1 {
                     Task { await m.closeActiveTab() }
                 } else {
@@ -28,7 +28,7 @@ struct TabCommands: Commands {
                 .keyboardShortcut("w", modifiers: [.shift, .command])
         }
 
-        CommandMenu("标签") {
+        CommandMenu("页面") {
             Button("搜索…") { if let m = ActiveModel.current { CommandPalettePresenter.toggle(model: m) } }
                 .keyboardShortcut("t", modifiers: .command)
 
@@ -41,15 +41,15 @@ struct TabCommands: Commands {
 
             Divider()
 
-            Button("下一个标签") { run { await $0.selectNextTab() } }
+            Button("下一个页面") { run { await $0.selectNextTab() } }
                 .keyboardShortcut(.tab, modifiers: .control)
-            Button("上一个标签") { run { await $0.selectPrevTab() } }
+            Button("上一个页面") { run { await $0.selectPrevTab() } }
                 .keyboardShortcut(.tab, modifiers: [.control, .shift])
 
             Divider()
 
             ForEach(1...9, id: \.self) { n in
-                Button("选择标签 \(n)") { run { await $0.selectTab(index: n - 1) } }
+                Button("选择页面 \(n)") { run { await $0.selectTab(index: n - 1) } }
                     .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
             }
         }

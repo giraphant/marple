@@ -4,14 +4,12 @@ import MarpleKit
 
 private enum SidebarOutlineSection {
     case objects
-    case views
     case tabs
 
     var title: String {
         switch self {
         case .objects: return "物件"
-        case .views:   return "视图"
-        case .tabs:    return "标签"
+        case .tabs:    return "页面"
         }
     }
 }
@@ -45,9 +43,14 @@ private final class SidebarOutlineNode: NSObject {
 
     var payload: String? {
         switch kind {
-        case .tab(let id):   return "tab:\(id.uuidString)"
-        case .group(let id): return "group:\(id.uuidString)"
-        case .section, .pane: return nil
+        case .tab(let id):
+            return "tab:\(id.uuidString)"
+        case .group(let id):
+            return "group:\(id.uuidString)"
+        case .pane(.type(let type)):
+            return "type:\(type.rawValue)"
+        case .section, .pane:
+            return nil
         }
     }
 
@@ -68,15 +71,23 @@ private final class SidebarOutlineNode: NSObject {
 private enum SidebarTabPayload {
     case tab(NavTab.ID)
     case group(TabGroup.ID)
+    case type(EntryType)
 
     init?(_ raw: String?) {
         guard let raw else { return nil }
         let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2, let id = UUID(uuidString: parts[1]) else { return nil }
+        guard parts.count == 2 else { return nil }
         switch parts[0] {
-        case "tab":   self = .tab(id)
-        case "group": self = .group(id)
-        default:       return nil
+        case "tab":
+            guard let id = UUID(uuidString: parts[1]) else { return nil }
+            self = .tab(id)
+        case "group":
+            guard let id = UUID(uuidString: parts[1]) else { return nil }
+            self = .group(id)
+        case "type":
+            self = .type(EntryType(rawValue: parts[1]))
+        default:
+            return nil
         }
     }
 }
@@ -103,6 +114,13 @@ struct SidebarOutlineView: NSViewRepresentable {
         outline.allowsMultipleSelection = false
         outline.delegate = context.coordinator
         outline.dataSource = context.coordinator
+        outline.target = context.coordinator
+        outline.doubleAction = #selector(Coordinator.outlineDoubleClicked(_:))
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.delegate = context.coordinator
+        outline.menu = menu
+        context.coordinator.outlineView = outline
         outline.registerForDraggedTypes([Coordinator.pasteboardType])
         outline.setDraggingSourceOperationMask(.move, forLocal: true)
         outline.draggingDestinationFeedbackStyle = .sourceList
@@ -124,18 +142,22 @@ struct SidebarOutlineView: NSViewRepresentable {
         }
     }
 
-    @MainActor final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
+    @MainActor final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate, NSTextFieldDelegate {
         static let pasteboardType = NSPasteboard.PasteboardType("com.marple.sidebar-tab-item")
 
         var model: AppModel
+        weak var outlineView: NSOutlineView?
         private var rootItems: [SidebarOutlineNode] = []
+        private weak var editingField: NSTextField?
+        private var editingNode: SidebarOutlineNode?
+        private var cancelingRename = false
         private var isUpdatingSelection = false
         private var isRestoringExpansion = false
         private var pendingReload = false
         private var lastReloadSignature: String?
         private var stickyRowDropTarget: SidebarOutlineNode?
-        private let rowDropEnterEdgeRatio: CGFloat = 0.36
-        private let rowDropReleaseEdgeRatio: CGFloat = 0.36
+        private let rowDropEnterEdgeRatio: CGFloat = 0.40
+        private let rowDropReleaseEdgeRatio: CGFloat = 0.40
         private let rowDropExitEdgeRatio: CGFloat = 0.12
         private let dndLogging = ProcessInfo.processInfo.environment["MARPLE_DND_LOG"] == "1"
 
@@ -154,6 +176,7 @@ struct SidebarOutlineView: NSViewRepresentable {
         }
 
         func reload(_ outline: NSOutlineView) {
+            guard editingNode == nil else { return }
             let signature = reloadSignature()
             guard signature != lastReloadSignature else {
                 selectCurrentItem(in: outline)
@@ -174,8 +197,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             parts.append("active:\(model.activeTabID?.uuidString ?? "nil")")
             parts.append("types:\(model.typeOrder.map(String.init(describing:)).joined(separator: ","))")
             parts.append("counts:\(model.typeOrder.map { "\($0)=\(model.counts[$0] ?? 0)" }.joined(separator: ","))")
-            parts.append("views:\(model.themeIndex.count):\(model.trashItems.count)")
-            parts.append("tabs:\(model.tabs.map { "\($0.id.uuidString):\($0.location):\($0.pinned)" }.joined(separator: ","))")
+            parts.append("tabs:\(model.tabs.map { "\($0.id.uuidString):\($0.location):\($0.pinned):\($0.customTitle ?? "")" }.joined(separator: ","))")
             parts.append("groups:\(model.tabGroups.map { "\($0.id.uuidString):\($0.name):\($0.isCollapsed):\($0.tabIDs.map(\.uuidString).joined(separator: "."))" }.joined(separator: ","))")
             return parts.joined(separator: "|")
         }
@@ -189,18 +211,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                                                           title: type.label,
                                                           count: model.counts[type] ?? 0,
                                                           iconName: type.symbolName)
-                                   }),
-                SidebarOutlineNode(kind: .section(.views), title: SidebarOutlineSection.views.title,
-                                   children: [
-                                       SidebarOutlineNode(kind: .pane(.themesIndex),
-                                                          title: "主题",
-                                                          count: model.themeIndex.count,
-                                                          iconName: "tag"),
-                                       SidebarOutlineNode(kind: .pane(.trash),
-                                                          title: "回收站",
-                                                          count: model.trashItems.count,
-                                                          iconName: "trash")
-                                   ])
+                                   })
             ]
             if !model.tabs.isEmpty {
                 sections.append(SidebarOutlineNode(kind: .section(.tabs),
@@ -217,8 +228,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                     guard seenGroups.insert(group.id).inserted else { return nil }
                     return SidebarOutlineNode(kind: .group(group.id),
                                               title: group.name,
-                                              count: model.tabs(in: group.id).count,
-                                              iconName: "rectangle.stack",
+                                              count: nil,
+                                              iconName: "folder",
                                               children: model.tabs(in: group.id).map { tabNode($0, entryByPath: entryByPath) })
                 }
                 return tabNode(tab, entryByPath: entryByPath)
@@ -235,6 +246,7 @@ struct SidebarOutlineView: NSViewRepresentable {
         }
 
         private func tabTitle(_ tab: NavTab, entry: Entry?) -> String {
+            if let customTitle = tab.customTitle { return customTitle }
             let loc = tab.location
             if let path = loc.openPath {
                 return entry?.title ?? (path as NSString).lastPathComponent
@@ -267,6 +279,13 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         private var tabRootItems: [SidebarOutlineNode] {
             rootItems.first { $0.isTabsSection }?.children ?? []
+        }
+
+        private var objectsSection: SidebarOutlineNode? {
+            rootItems.first {
+                if case .section(.objects) = $0.kind { return true }
+                return false
+            }
         }
 
         private func selectCurrentItem(in outline: NSOutlineView) {
@@ -361,9 +380,156 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
             guard let node = item as? SidebarOutlineNode else { return nil }
-            let view = NSHostingView(rootView: SidebarOutlineRow(node: node, model: model))
-            view.identifier = NSUserInterfaceItemIdentifier("sidebar-row")
+            let view = outlineView.makeView(withIdentifier: SidebarOutlineCellView.identifier, owner: self) as? SidebarOutlineCellView
+                ?? SidebarOutlineCellView()
+            view.configure(node: node, coordinator: self)
             return view
+        }
+
+        fileprivate func beginRename(_ node: SidebarOutlineNode, in outlineView: NSOutlineView? = nil) {
+            guard canRename(node) else { return }
+            let target = liveNode(matching: node) ?? node
+            let outline = outlineView ?? self.outlineView
+            guard let outline, let row = rowForItem(target, in: outline),
+                  let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarOutlineCellView else { return }
+            editingNode = target
+            editingField = cell.titleField
+            cancelingRename = false
+            cell.beginEditing(delegate: self)
+        }
+
+        private func liveNode(matching node: SidebarOutlineNode) -> SidebarOutlineNode? {
+            switch node.kind {
+            case .tab(let id): return findTabNode(id, in: rootItems)
+            case .group(let id): return findGroupNode(id, in: rootItems)
+            case .section, .pane: return node
+            }
+        }
+
+        private func canRename(_ node: SidebarOutlineNode) -> Bool {
+            switch node.kind {
+            case .tab, .group: return true
+            case .section, .pane: return false
+            }
+        }
+
+        private func finishRename(commit: Bool) {
+            guard let node = editingNode, let field = editingField else { return }
+            defer {
+                field.isEditable = false
+                field.isSelectable = false
+                editingNode = nil
+                editingField = nil
+                cancelingRename = false
+                outlineView?.window?.makeFirstResponder(outlineView)
+                if let outlineView { reload(outlineView) }
+            }
+            guard commit else {
+                field.stringValue = node.title
+                return
+            }
+            let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            switch node.kind {
+            case .tab(let id):
+                model.renameTab(id, to: value)
+            case .group(let id):
+                if !value.isEmpty { model.renameTabGroup(id, to: value) }
+            case .section, .pane:
+                break
+            }
+        }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            guard obj.object as? NSTextField === editingField else { return }
+            finishRename(commit: !cancelingRename)
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                cancelingRename = true
+                control.window?.makeFirstResponder(outlineView)
+                return true
+            }
+            return false
+        }
+
+        @objc func outlineDoubleClicked(_ sender: NSOutlineView) {
+            let row = sender.clickedRow >= 0 ? sender.clickedRow : sender.selectedRow
+            guard row >= 0, let node = sender.item(atRow: row) as? SidebarOutlineNode else { return }
+            beginRename(node, in: sender)
+        }
+
+        func menuNeedsUpdate(_ contextMenu: NSMenu) {
+            contextMenu.removeAllItems()
+            guard let outline = outlineView else { return }
+            let row = outline.clickedRow
+            guard row >= 0,
+                  let node = outline.item(atRow: row) as? SidebarOutlineNode else { return }
+            for item in menuItems(for: node) {
+                contextMenu.addItem(item)
+            }
+        }
+
+        fileprivate func menuItems(for node: SidebarOutlineNode) -> [NSMenuItem] {
+            switch node.kind {
+            case .group(let id):
+                var items = [menuItem("重命名", action: #selector(renameFromMenu(_:)), node: node)]
+                if let group = model.tabGroups.first(where: { $0.id == id }) {
+                    items.append(menuItem(group.isCollapsed ? "展开页面组" : "折叠页面组",
+                                          action: #selector(toggleGroupFromMenu(_:)), node: node))
+                }
+                return items
+            case .tab(let id):
+                guard let tab = model.tabs.first(where: { $0.id == id }) else { return [] }
+                var items = [menuItem("重命名", action: #selector(renameFromMenu(_:)), node: node)]
+                items.append(.separator())
+                items.append(menuItem(tab.pinned ? "取消固定" : "固定页面",
+                                      action: #selector(togglePinFromMenu(_:)), node: node))
+                items.append(.separator())
+                let closeItem = menuItem("关闭页面", action: #selector(closeTabFromMenu(_:)), node: node)
+                closeItem.isEnabled = model.tabs.count > 1
+                items.append(closeItem)
+                items.append(menuItem("关闭其他页面", action: #selector(closeOtherTabsFromMenu(_:)), node: node))
+                return items
+            case .section, .pane:
+                return []
+            }
+        }
+
+        private func menuItem(_ title: String, action: Selector, node: SidebarOutlineNode) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = node
+            return item
+        }
+
+        @objc private func renameFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode else { return }
+            beginRename(node)
+        }
+
+        @objc private func toggleGroupFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode,
+                  case .group(let id) = node.kind else { return }
+            model.toggleTabGroup(id)
+        }
+
+        @objc private func togglePinFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode,
+                  case .tab(let id) = node.kind else { return }
+            model.togglePin(id)
+        }
+
+        @objc private func closeTabFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode,
+                  case .tab(let id) = node.kind else { return }
+            Task { await model.closeTab(id) }
+        }
+
+        @objc private func closeOtherTabsFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode,
+                  case .tab(let id) = node.kind else { return }
+            Task { await model.closeOtherTabs(id) }
         }
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -411,6 +577,9 @@ struct SidebarOutlineView: NSViewRepresentable {
             guard let payload = SidebarTabPayload(info.draggingPasteboard.string(forType: Self.pasteboardType)) else { return [] }
             let point = draggingPoint(in: outlineView, info: info)
             logDrop("validate proposed=\(describe(item as? SidebarOutlineNode)) index=\(index) row=\(rowAtY(point.y, in: outlineView)) x=\(String(format: "%.1f", point.x)) y=\(String(format: "%.1f", point.y)) sticky=\(describe(stickyRowDropTarget)) payload=\(describe(payload))")
+            if case .type = payload {
+                return validateTypeDrop(outlineView, info: info, item: item, childIndex: index)
+            }
             if shouldRetargetToRow(outlineView, info: info, payload: payload) {
                 logDrop("validate retarget sticky=\(describe(stickyRowDropTarget))")
                 return .move
@@ -435,6 +604,12 @@ struct SidebarOutlineView: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo,
                          item: Any?, childIndex index: Int) -> Bool {
             guard let payload = SidebarTabPayload(info.draggingPasteboard.string(forType: Self.pasteboardType)) else { return false }
+            if case .type(let type) = payload {
+                let accepted = acceptType(type, into: item as? SidebarOutlineNode, childIndex: index,
+                                          outlineView: outlineView, info: info)
+                if accepted { reload(outlineView) }
+                return accepted
+            }
             let point = draggingPoint(in: outlineView, info: info)
             let directTarget = rowDropTarget(outlineView, info: info, payload: payload,
                                             edgeRatio: rowDropReleaseEdgeRatio)
@@ -461,6 +636,32 @@ struct SidebarOutlineView: NSViewRepresentable {
             stickyRowDropTarget = nil
             if accepted { reload(outlineView) }
             return accepted
+        }
+
+        private func validateTypeDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
+                                      item: Any?, childIndex index: Int) -> NSDragOperation {
+            if let node = item as? SidebarOutlineNode,
+               case .section(.objects) = node.kind,
+               index >= 0 {
+                return .move
+            }
+            let point = draggingPoint(in: outlineView, info: info)
+            let row = rowAtY(point.y, in: outlineView)
+            guard row >= 0,
+                  let node = outlineView.item(atRow: row) as? SidebarOutlineNode,
+                  let objects = objectsSection else { return [] }
+            if case .pane(.type(let targetType)) = node.kind,
+               let targetIndex = model.typeOrder.firstIndex(of: targetType) {
+                let rect = outlineView.rect(ofRow: row)
+                let childIndex = point.y < rect.midY ? targetIndex : targetIndex + 1
+                outlineView.setDropItem(objects, dropChildIndex: childIndex)
+                return .move
+            }
+            if case .section(.objects) = node.kind {
+                outlineView.setDropItem(objects, dropChildIndex: 0)
+                return .move
+            }
+            return []
         }
 
         private func shouldRetargetToRow(_ outlineView: NSOutlineView, info: NSDraggingInfo,
@@ -522,6 +723,11 @@ struct SidebarOutlineView: NSViewRepresentable {
             outlineView.convert(info.draggingLocation, from: nil)
         }
 
+        private func rowForItem(_ item: Any, in outlineView: NSOutlineView) -> Int? {
+            let row = outlineView.row(forItem: item)
+            return row >= 0 ? row : nil
+        }
+
         private func rowAtY(_ y: CGFloat, in outlineView: NSOutlineView) -> Int {
             for row in 0..<outlineView.numberOfRows {
                 let rect = outlineView.rect(ofRow: row)
@@ -538,6 +744,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             switch payload {
             case .tab(let id): return "tab(\(id.uuidString.prefix(6)))"
             case .group(let id): return "group(\(id.uuidString.prefix(6)))"
+            case .type(let type): return "type(\(type.rawValue))"
             }
         }
 
@@ -557,7 +764,33 @@ struct SidebarOutlineView: NSViewRepresentable {
                 return acceptTab(sourceID, into: node, childIndex: childIndex)
             case .group(let groupID):
                 return acceptGroup(groupID, into: node, childIndex: childIndex)
+            case .type(let type):
+                return acceptType(type, into: node, childIndex: childIndex)
             }
+        }
+
+        private func acceptType(_ type: EntryType, into node: SidebarOutlineNode?, childIndex: Int,
+                                outlineView: NSOutlineView? = nil, info: NSDraggingInfo? = nil) -> Bool {
+            let targetIndex: Int? = {
+                guard let node else { return nil }
+                if case .section(.objects) = node.kind, childIndex >= 0 {
+                    return childIndex
+                }
+                guard let outlineView, let info,
+                      case .pane(.type(let targetType)) = node.kind,
+                      let row = rowForItem(node, in: outlineView),
+                      let index = model.typeOrder.firstIndex(of: targetType) else { return nil }
+                let point = draggingPoint(in: outlineView, info: info)
+                return point.y < outlineView.rect(ofRow: row).midY ? index : index + 1
+            }()
+            guard let targetIndex,
+                  let from = model.typeOrder.firstIndex(of: type) else { return false }
+            var order = model.typeOrder
+            order.remove(at: from)
+            let adjustedIndex = from < targetIndex ? targetIndex - 1 : targetIndex
+            order.insert(type, at: min(max(adjustedIndex, 0), order.count))
+            model.setTypeOrder(order)
+            return true
         }
 
         private func acceptTab(_ sourceID: NavTab.ID, into node: SidebarOutlineNode?, childIndex: Int) -> Bool {
@@ -605,92 +838,176 @@ struct SidebarOutlineView: NSViewRepresentable {
     }
 }
 
-private struct SidebarOutlineRow: View {
-    let node: SidebarOutlineNode
-    let model: AppModel
+@MainActor
+private final class SidebarOutlineCellView: NSTableCellView {
+    static let identifier = NSUserInterfaceItemIdentifier("sidebar-outline-cell")
 
-    var body: some View {
-        switch node.kind {
-        case .section:
-            Text(node.title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        case .pane, .tab, .group:
-            Label {
-                HStack {
-                    Text(node.title).lineLimit(1)
-                    Spacer(minLength: 0)
-                    if let count = node.count {
-                        Text("\(count)")
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    if node.pinned {
-                        Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-            } icon: {
-                icon
-            }
-            .contextMenu { menu }
+    private let stack = NSStackView()
+    private let iconContainer = NSView()
+    private let symbolImageView = NSImageView()
+    let titleField = NSTextField()
+    private let countField = NSTextField(labelWithString: "")
+    private let pinImageView = NSImageView()
+    private var badgeView: NSView?
+    private var iconCenterYConstraint: NSLayoutConstraint!
+    private weak var coordinator: SidebarOutlineView.Coordinator?
+    private weak var outlineView: NSOutlineView?
+    private var node: SidebarOutlineNode?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        identifier = Self.identifier
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        identifier = Self.identifier
+        setup()
+    }
+
+    func configure(node: SidebarOutlineNode, coordinator: SidebarOutlineView.Coordinator) {
+        self.node = node
+        self.coordinator = coordinator
+        self.outlineView = coordinator.outlineView
+        objectValue = node
+        titleField.stringValue = node.title
+        titleField.isEditable = false
+        titleField.isSelectable = false
+        titleField.delegate = nil
+        titleField.lineBreakMode = .byTruncatingTail
+        titleField.font = font(for: node)
+        titleField.textColor = textColor(for: node)
+
+        iconContainer.isHidden = isSection(node)
+        configureIcon(for: node)
+
+        if let count = node.count, !isSection(node) {
+            countField.stringValue = "\(count)"
+            countField.isHidden = false
+        } else {
+            countField.isHidden = true
+        }
+
+        pinImageView.isHidden = !node.pinned
+        clearMenus()
+    }
+
+    func beginEditing(delegate: NSTextFieldDelegate) {
+        titleField.isEditable = true
+        titleField.isSelectable = true
+        titleField.delegate = delegate
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.titleField.isEditable else { return }
+            self.window?.makeFirstResponder(self.titleField)
+            self.titleField.currentEditor()?.selectAll(nil)
         }
     }
 
-    @ViewBuilder private var icon: some View {
+    private func clearMenus() {
+        menu = nil
+        stack.menu = nil
+        iconContainer.menu = nil
+        symbolImageView.menu = nil
+        titleField.menu = nil
+        countField.menu = nil
+        pinImageView.menu = nil
+        badgeView?.menu = nil
+    }
+
+    private func setup() {
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        iconContainer.translatesAutoresizingMaskIntoConstraints = false
+        symbolImageView.translatesAutoresizingMaskIntoConstraints = false
+        symbolImageView.imageScaling = .scaleProportionallyDown
+        iconContainer.addSubview(symbolImageView)
+        iconCenterYConstraint = symbolImageView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor)
+
+        titleField.isBordered = false
+        titleField.drawsBackground = false
+        titleField.focusRingType = .none
+        titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textField = titleField
+
+        countField.isBordered = false
+        countField.drawsBackground = false
+        countField.textColor = .secondaryLabelColor
+        countField.alignment = .right
+        countField.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        countField.setContentHuggingPriority(.required, for: .horizontal)
+
+        pinImageView.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: nil)
+        pinImageView.symbolConfiguration = .init(pointSize: 9, weight: .regular)
+        pinImageView.contentTintColor = .secondaryLabelColor
+        pinImageView.imageScaling = .scaleProportionallyDown
+        pinImageView.setContentHuggingPriority(.required, for: .horizontal)
+
+        stack.addArrangedSubview(iconContainer)
+        stack.addArrangedSubview(titleField)
+        stack.addArrangedSubview(countField)
+        stack.addArrangedSubview(pinImageView)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconContainer.widthAnchor.constraint(equalToConstant: 18),
+            iconContainer.heightAnchor.constraint(equalToConstant: 18),
+            symbolImageView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+            iconCenterYConstraint,
+            symbolImageView.widthAnchor.constraint(equalToConstant: 18),
+            symbolImageView.heightAnchor.constraint(equalToConstant: 18),
+            pinImageView.widthAnchor.constraint(equalToConstant: 12),
+            pinImageView.heightAnchor.constraint(equalToConstant: 12),
+        ])
+    }
+
+    private func configureIcon(for node: SidebarOutlineNode) {
+        badgeView?.removeFromSuperview()
+        badgeView = nil
+        symbolImageView.isHidden = false
+        iconCenterYConstraint.constant = 0
+
         if let type = node.entryType {
-            TypeBadge(type: type, size: 16)
+            symbolImageView.isHidden = true
+            let badge = NSHostingView(rootView: TypeBadge(type: type, size: 16).allowsHitTesting(false))
+            badge.translatesAutoresizingMaskIntoConstraints = false
+            iconContainer.addSubview(badge)
+            NSLayoutConstraint.activate([
+                badge.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+                badge.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+                badge.widthAnchor.constraint(equalToConstant: 18),
+                badge.heightAnchor.constraint(equalToConstant: 18),
+            ])
+            badgeView = badge
         } else if let iconName = node.iconName {
-            Image(systemName: iconName)
-                .frame(width: 18, height: 18, alignment: .center)
+            let isGroup: Bool
+            if case .group = node.kind { isGroup = true } else { isGroup = false }
+            symbolImageView.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
+            symbolImageView.symbolConfiguration = .init(pointSize: 16, weight: .regular)
+            symbolImageView.contentTintColor = .labelColor
+            iconCenterYConstraint.constant = isGroup ? 1.5 : 0
+        } else {
+            symbolImageView.image = nil
         }
     }
 
-    @ViewBuilder private var menu: some View {
-        switch node.kind {
-        case .pane(let pane):
-            if case .type(let type) = pane {
-                typeContextMenu(for: type)
-            }
-        case .group(let id):
-            if let group = model.tabGroups.first(where: { $0.id == id }) {
-                Button(group.isCollapsed ? "展开标签组" : "折叠标签组") {
-                    model.toggleTabGroup(id)
-                }
-            }
-        case .tab(let id):
-            if let tab = model.tabs.first(where: { $0.id == id }) {
-                Button(tab.pinned ? "取消固定" : "固定标签") { model.togglePin(id) }
-                Divider()
-                Button("关闭标签") { Task { await model.closeTab(id) } }
-                Button("关闭其他标签") { Task { await model.closeOtherTabs(id) } }
-            }
-        case .section:
-            EmptyView()
-        }
+    private func isSection(_ node: SidebarOutlineNode) -> Bool {
+        if case .section = node.kind { return true }
+        return false
     }
 
-    @ViewBuilder
-    private func typeContextMenu(for type: EntryType) -> some View {
-        let idx = model.typeOrder.firstIndex(of: type) ?? 0
-        if idx > 0 {
-            Button("上移") { moveType(type, by: -1) }
-        }
-        if idx < model.typeOrder.count - 1 {
-            Button("下移") { moveType(type, by: 1) }
-        }
-        if idx > 0 || idx < model.typeOrder.count - 1 {
-            Divider()
-        }
-        Button("重置顺序") { model.setTypeOrder(EntryType.modeled) }
+    private func font(for node: SidebarOutlineNode) -> NSFont {
+        isSection(node) ? .systemFont(ofSize: 11) : .systemFont(ofSize: NSFont.systemFontSize)
     }
 
-    private func moveType(_ type: EntryType, by delta: Int) {
-        var order = model.typeOrder
-        guard let idx = order.firstIndex(of: type) else { return }
-        let target = idx + delta
-        guard order.indices.contains(target) else { return }
-        order.swapAt(idx, target)
-        model.setTypeOrder(order)
+    private func textColor(for node: SidebarOutlineNode) -> NSColor {
+        isSection(node) ? .secondaryLabelColor : .labelColor
     }
 }

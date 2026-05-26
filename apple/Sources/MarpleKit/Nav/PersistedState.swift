@@ -5,8 +5,9 @@ import Foundation
 public struct PersistedTab: Codable, Sendable, Equatable {
     public var location: NavLocation
     public var pinned: Bool
-    public init(location: NavLocation, pinned: Bool) {
-        self.location = location; self.pinned = pinned
+    public var customTitle: String?
+    public init(location: NavLocation, pinned: Bool, customTitle: String? = nil) {
+        self.location = location; self.pinned = pinned; self.customTitle = customTitle
     }
 }
 
@@ -47,7 +48,7 @@ public struct PersistedState: Codable, Sendable, Equatable {
     }
 
     public func makeWorkspace() -> Workspace? {
-        Workspace(restoring: tabs.map { (location: $0.location, pinned: $0.pinned) },
+        Workspace(restoring: tabs.map { (location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) },
                   activeIndex: activeIndex,
                   groups: currentSpace?.groups ?? [])
     }
