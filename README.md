@@ -1,201 +1,49 @@
 # marple
 
-> I like to pass unnoticed, which is why I hope that I am not deprived of old age. I aspire to Miss Marple’s persona: to be exactly as I am, decrepit nature yet supernature in one, equally alert on the damp ground and in the turbulent air. ——Gillian Rose
+> I like to pass unnoticed, which is why I hope that I am not deprived of old age. I aspire to Miss Marple's persona: to be exactly as I am, decrepit nature yet supernature in one, equally alert on the damp ground and in the turbulent air. ——Gillian Rose
 
-Card-style typed-object browser + Markdown editor over the qua vault.
-Browses 12k+ vault entries (papers / books / chapters / authors / topics /
-notes), edits frontmatter and note bodies, manages annotations and trash.
+A native macOS reader/browser over the qua vault — typed-object sidebar,
+swift-markdown reader, frontmatter inspector, tabs/history, trash, and
+in-process Qwen3-Embedding semantic search.
 
-Stack: **Vite 8 + TypeScript + Preact + CodeMirror 6 + unplugin-icons (Phosphor)**.
-Backend: **Rust (`reader-index` / `reader-api`) + SQLite**. Vite serves
-the SPA in dev; Rust builds the SQLite index, handles `/api/*`, vault
-write-back, sources/PDF reads, trash, and production `dist/` serving.
+**Stack:** Swift 6 (SwiftUI + AppKit shell) · MarpleKit (pure-Swift index + search) ·
+MLXEmbedders (Qwen3-Embedding for semantic search) · GRDB + SQLite FTS5 ·
+swift-markdown.
 
-For internals / architecture / how to extend, see [`context.md`](./context.md).
+The full app and library live in [`apple/`](./apple/). See
+[`apple/ARCHITECTURE.md`](./apple/ARCHITECTURE.md) for the structure map.
 
 ## Run
 
-First time:
-
 ```sh
-npm install
-cargo fetch --manifest-path rust/Cargo.toml
+cd apple
+swift build
+swift run Marple
 ```
 
-Then point marple at your vault: copy `marple.config.example.json` →
-`marple.config.json` and set `workspaceRoot` to your vault workspace (the
-directory that holds `vault/`). `VAULT_ROOT` env var overrides it.
-
-Day-to-day (`vite` + Rust `reader-api` concurrently):
+Tests (this Mac has Command Line Tools, not full Xcode — swift-testing needs
+the explicit framework path):
 
 ```sh
-npm run dev
+cd apple
+swift test -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks
 ```
 
-- SPA: `http://localhost:5173/reader/`
-- Backend: `http://localhost:5174` (vite proxies `/vault/*`,
-  `/reader/data/*`, `/api/*`, `/sources/*` through to it)
-
-Production build:
+Build a proper `.app` bundle (so the Dock icon shows up):
 
 ```sh
-npm run build           # rebuilds index, emits dist/
-npm run serve           # Rust API serves dist + vault writes in one process
+cd apple
+./build-app.sh
+open Marple.app
 ```
 
-Useful one-offs:
+First launch asks you to pick the vault workspace (the directory that
+contains your `.md` library). The choice is persisted in
+`@AppStorage("marple.workspaceRoot")`.
 
-```sh
-npm run build:index     # rebuild <workspace>/.marple/index.sqlite after vault changes
-npm run build:embeddings # build <workspace>/.marple/vectors.sqlite (downloads ~2.3 GB BGE-M3)
-npm run api             # run only the Rust reader-api backend
-npm run test:sql-index  # validate SQLite schema, themes mirror, and FTS
-npm run typecheck       # tsc --noEmit
-```
+## Legacy
 
-## Native macOS reader (experimental, P1)
-
-A SwiftUI reader lives in `apple/` and reuses this repo's `reader-api` as a
-sidecar (no web changes). Requires a built index at the configured
-`workspaceRoot`. Because this machine has Command Line Tools (no Xcode), tests
-use swift-testing and need the framework search path flag:
-
-```sh
-cd apple && swift build       # build the library + app
-cd apple && swift test -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks
-cd apple && swift run Marple  # launch the reader (spawns reader-api)
-```
-
-### Semantic vectors (hybrid search)
-
-The model-free index build above never touches embeddings. Semantic / hybrid
-search needs the vault's `.marple/vectors.sqlite`, built separately and **fully
-in the background** — it never blocks the API or UI from starting:
-
-- Trigger from ⚙ Settings → 重建语义向量, or `POST /api/embeddings` (returns
-  `202` immediately; poll `GET /api/embeddings/status`).
-- On startup the API auto-builds vectors if they're missing **and** the model is
-  already cached (a `.model-ready` sentinel under the global model cache
-  `~/.cache/marple/models`, written after the first successful download). Set
-  `MARPLE_AUTO_EMBED=0` to disable boot auto-build.
-- Until vectors exist, hybrid search transparently degrades to lexical.
-
-## What it does
-
-**Browsing**
-
-- 6 typed object lists: 论文 / 书 / 章节 / 作者 / 主题 / 笔记
-  (Capacities-style colored TypeIcon chips)
-- "横切视图 / 主题"：tag index sorted by frequency, click a chip to
-  filter that theme across types
-- Free-text search across title / author / themes / preview / source
-- Rating filter (≥ 0..4 stars)
-- **Sort** each type list by 标题 / 作者 / 年份 / 评分 / 更新时间 (asc/desc;
-  persisted), plus a 筛选 popover (作者 substring, 仅含 PDF) — all combine with
-  search / rating / theme
-- 4-column card grid, lazy-paginated past 300 entries
-
-**Reading**
-
-- Click a card → opens in the current tab as a `DocView` (center body +
-  a single tabbed right panel; markdown rendered with `[[wikilink]]`
-  resolution)
-- **Right panel** (tabbed, collapsible, width-draggable; state persisted):
-  - **目录** — book chapters (本书, formerly the left rail) + the current
-    doc's heading outline (本页). Click to jump; read mode scroll-spies the
-    current heading, edit mode scrolls the CodeMirror editor to the line
-  - **信息** — the editable property panel (frontmatter / themes / annotations)
-  - **统计** — char / word (CJK-aware) / paragraph counts + reading time
-- Wikilinks navigate within the current tab (history pushed)
-
-**Editing**
-
-- Frontmatter is always editable in `PropertyPanel`: rating ★ picker,
-  year, author, source, DOI, topic, themes chips (add / remove)
-- Note bodies edit through a **CodeMirror 6 Markdown editor** with a
-  Ulysses-style theme: monoline serif/sans-serif, muted markup, no
-  preview pane, no toolbar
-- **LLM-generated body** (paper/book/author/topic/chapter) is read-only
-  by default. Toggle "允许编辑 LLM 生成的正文" in ⚙ Settings to make all
-  entries editable through the same editor surface
-- Auto-save debounced 1.5 s; `Cmd+S` flushes immediately; switching tabs
-  or closing flushes; `beforeunload` guards unsaved changes
-
-**Notes**
-
-- Personal notes live in `vault/notes/*.md`, the only directory in vault
-  whose contents are human-written (vs LLM-generated analyses)
-- Two modes via one mechanism — frontmatter `annotates: <vault path>`
-  field. With it, the note is an **annotation** on that target and shows
-  up in the target's "我的批注 (N)" list. Without it, the note is a free
-  **idea note**. Same file shape, same UI; promotion is just adding the
-  field
-- "+ 新建批注" button on any non-note entry → POSTs a pre-filled draft to
-  `vault/notes/<slug>-note-<rand>.md`, opens it in a new tab
-- Sidebar "+ 新建 note" → POSTs a standalone idea note
-- `⋯` menu in a note's header → 移到回收站, soft-delete to
-  `vault/notes/.trash/<base>.<ISO ts>.md` (timestamped to never collide).
-  Visit "回收站" in sidebar to restore or purge
-
-**Tabs**
-
-- Top tab bar holds a heterogeneous list of tabs. Each tab has its own
-  back/forward history (Cmd+[, Cmd+])
-- Tabs come in 4 kinds: `list` (a type), `doc` (an entry),
-  `themes` (the index), `trash`
-- Click a card or sidebar item → navigates in the current tab.
-  Cmd / Ctrl + click → opens in a new tab
-- Pin: 📌 toggle on active tab. Pinned tabs sort left, hide × button.
-  Drag tabs to reorder (pinned and unpinned cannot swap regions)
-- Middle-click or × to close; last tab is unclosable
-
-**Settings (⚙ in sidebar)**
-
-- Editor font: 苹方 / 宋体 / 等宽 (live preview)
-- Editor font size 14 / 15 / 16 / 17 / 18 px
-- Line height 1.60 / 1.78 / 1.90
-- Allow editing LLM-generated body
-- All settings hot-swap into CodeMirror via `Compartment.reconfigure`
-  (caret / history / selection preserved)
-
-**Paper / book actions**
-
-- "复制引用" → markdown-style citation to clipboard:
-  `Author (year). *Title*. Source. https://doi.org/DOI`
-- "打开 PDF" → opens `sources/<pdf_slug>.pdf` in the **host's default PDF
-  app** (Preview / Acrobat …) via `POST /api/open-pdf` — the local
-  reader-api shells out to `open` (macOS) / `xdg-open` (Linux). Button only
-  appears when build-index found a matching PDF
-
-## Where files live
-
-| Path | What |
-|---|---|
-| `src/main.tsx` + `src/app.tsx` | Top-level wiring (tab state, indexes) |
-| `src/components/` | All UI components (one per file, see context.md) |
-| `src/icons/` | (empty by design — icons come from `~icons/ph/*` virtual modules) |
-| `src/types.ts` | `Entry`, `EntryType`, `Tab`, `TabContent` shapes |
-| `src/api.ts` | All fetch helpers (GET/PUT/POST/DELETE + trash) |
-| `src/frontmatter.ts` | yaml-based parse / serialize |
-| `src/wiki.ts` | `[[wikilink]]` resolver |
-| `src/settings.ts` | Settings type + persistence |
-| `src/list-sort.ts` | Per-type list sort + extra filters (pure) |
-| `src/doc-panel.ts` / `doc-outline.ts` / `doc-stats.ts` | Right-panel prefs / heading outline / doc stats (pure) |
-| `scripts/test-sql-index.mjs` | Validates SQLite schema, theme rows, and FTS smoke search |
-| `rust/reader-index` | CLI that walks `vault/` and emits `<workspace>/.marple/index.sqlite` |
-| `rust/reader-core` | Reusable Rust core: SQLite index build/read, path safety, vault/trash operations |
-| `rust/reader-api` | Axum HTTP adapter around `reader-core`; future Tauri commands can reuse core |
-| `<workspace>/.marple/index.sqlite` | Generated; read by `/api/index` on app boot |
-
-## Roadmap (not built)
-
-- Cmd+K global search palette
-- Daily Notes (date-named auto-created notes)
-- `[[` autocomplete in the editor
-- Focus mode / typewriter scrolling toggles
-- Theme as first-class object (`vault/themes/<slug>.md` with description page)
-- Auto-rebuild `<workspace>/.marple/index.sqlite` on vault changes (file watcher)
-- Real list virtualization for 12k+ cards
-- Bibtex / CSL citation export formats
-- MCP server exposing vault to AI tools
-- Tauri shell for native window
+The earlier Vite + Preact web SPA and Tauri shell, plus the Rust
+`reader-api` / `reader-core` sidecar, are archived under [`legacy/`](./legacy/).
+They are no longer maintained; the Swift port covers all of their
+runtime responsibilities (indexer, search, semantic search included).
