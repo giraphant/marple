@@ -48,6 +48,35 @@ import Testing
                                  match: .all).map(\.path)) == ["a", "b"])
     }
 
+    /// QUA-109 contract: author filter is "any author contains needle"
+    /// (case-insensitive substring against each author independently). This
+    /// replaces the pre-QUA-109 behavior of substring-matching against the
+    /// joined string, which let queries like ", " match any multi-author
+    /// entry. Document the new contract here so future refactors don't
+    /// regress it silently.
+    @Test func testAuthorFilterMatchesAnyAuthor() {
+        let solo = Entry(path: "vault/papers/solo.md", type: .paperAnalysis,
+                         title: nil, author: ["Sara Ahmed"], year: nil,
+                         ratingScore: 0, themes: [], preview: "", hasPDF: false)
+        let pair = Entry(path: "vault/papers/pair.md", type: .paperAnalysis,
+                         title: nil, author: ["Sara Ahmed", "Jane Doe"], year: nil,
+                         ratingScore: 0, themes: [], preview: "", hasPDF: false)
+        let other = Entry(path: "vault/papers/other.md", type: .paperAnalysis,
+                          title: nil, author: ["John Smith"], year: nil,
+                          ratingScore: 0, themes: [], preview: "", hasPDF: false)
+        let list = [solo, pair, other]
+
+        // Single-name needle matches both entries that have that author.
+        let aClause = FilterClause(field: .author, op: .contains, value: "Sara")
+        let hits = applyFilters(list, [aClause], match: .all).map(\.path)
+        #expect(Set(hits) == ["vault/papers/solo.md", "vault/papers/pair.md"])
+
+        // The ", " needle no longer falsely matches multi-author entries by
+        // exploiting the joined-string separator.
+        let bClause = FilterClause(field: .author, op: .contains, value: ", ")
+        #expect(applyFilters(list, [bClause], match: .all).isEmpty)
+    }
+
     @Test func testAddedWithinDays() {
         let now = Date(timeIntervalSince1970: 1_000_000) // fixed
         let recent = (now.timeIntervalSince1970 - 86400) * 1000   // 1 day ago, ms
