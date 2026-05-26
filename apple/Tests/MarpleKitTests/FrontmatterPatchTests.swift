@@ -122,6 +122,21 @@ import Testing
         #expect(out.contains(#"  - "no""#))
         #expect(out.contains(#"  - "True""#))
     }
+
+    @Test func quotesTrailingColon() {
+        // Trailing `:` would be parsed as an empty mapping key — must quote.
+        let f = "---\n---\nbody\n"
+        let out = FrontmatterPatch.setThemes(f, ["foo:"])
+        #expect(out.contains(#"  - "foo:""#))
+    }
+
+    @Test func handlesCRLFFrontmatter() {
+        // Windows-style CRLF lines — fence detector must trim the trailing \r.
+        let f = "---\r\ntype: paper\r\nthemes: [a, b]\r\n---\r\nbody\r\n"
+        let out = FrontmatterPatch.setThemes(f, ["x", "y"])
+        #expect(out.contains("themes:\n  - x\n  - y"))
+        #expect(!out.contains("themes: [a, b]"))
+    }
 }
 
 @Suite struct FrontmatterPatchSequenceTests {

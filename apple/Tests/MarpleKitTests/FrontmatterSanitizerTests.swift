@@ -111,6 +111,36 @@ import Testing
         #expect(FrontmatterSanitizer.sanitize(raw) == raw)
     }
 
+    @Test func preservesBodyParensExactly() {
+        // Real markdown bodies often contain parentheses inside or around
+        // links: nested footnote `(see [a](#ref))`, function signatures
+        // `foo(bar)`, citations `(Ahmed, 2010)`. None of these should be
+        // touched.
+        let raw = """
+        ---
+        type: paper
+        themes: [a](#)
+        ---
+
+        See [Ahmed (2010)](https://example.com/x?y=(z)) for context.
+        Citation: (Ahmed, 2010, pp. 12-15).
+        Code: foo(bar, baz(qux)).
+        """
+        let out = FrontmatterSanitizer.sanitize(raw)
+        #expect(out.contains("themes: [a]"))
+        #expect(out.contains("[Ahmed (2010)](https://example.com/x?y=(z))"))
+        #expect(out.contains("(Ahmed, 2010, pp. 12-15)"))
+        #expect(out.contains("foo(bar, baz(qux))"))
+    }
+
+    @Test func handlesCRLFFrontmatter() {
+        // Windows-style line endings should still allow fence detection.
+        let raw = "---\r\ntype: paper\r\nthemes: [a, b](#)\r\n---\r\nbody\r\n"
+        let out = FrontmatterSanitizer.sanitize(raw)
+        #expect(out.contains("themes: [a, b]"))
+        #expect(!out.contains("(#)"))
+    }
+
     @Test func parseMappingHandlesDamagedInput() {
         // End-to-end: parseMapping should now successfully parse damaged input
         // because sanitizer cleans it first.

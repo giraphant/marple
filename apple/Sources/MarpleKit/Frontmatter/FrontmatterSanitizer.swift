@@ -58,7 +58,9 @@ public enum FrontmatterSanitizer {
         guard raw.hasPrefix("---\n") || raw.hasPrefix("---\r\n") else { return raw }
         let lines = raw.components(separatedBy: "\n")
         var close: Int?
-        for i in 1..<lines.count where lines[i].trimmingCharacters(in: .whitespaces) == "---" {
+        // `.whitespacesAndNewlines` so CRLF (`---\r`) trims to `---` too.
+        for i in 1..<lines.count
+        where lines[i].trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
             close = i; break
         }
         guard let closeIdx = close else { return raw }
