@@ -603,6 +603,21 @@ final class AppModel {
         mutateWorkspace { $0.moveTabs(ids, toGroup: groupID, at: childIndex) }
     }
 
+    func moveTabsToRoot(_ ids: [NavTab.ID], at index: Int? = nil) {
+        mutateWorkspace { $0.moveTabsToRoot(ids, at: index) }
+    }
+
+    func moveGroupsToRoot(_ ids: [TabGroup.ID], at index: Int? = nil) {
+        mutateWorkspace { $0.moveGroupsToRoot(ids, at: index) }
+    }
+
+    /// "上级胜出": filter a payload set so descendants of selected ancestors fall
+    /// out (their ancestors will move them implicitly).
+    func payloadAncestorFilter(tabIDs: [NavTab.ID],
+                               groupIDs: [TabGroup.ID]) -> (tabs: [NavTab.ID], groups: [TabGroup.ID]) {
+        workspace?.payloadAncestorFilter(tabIDs: tabIDs, groupIDs: groupIDs) ?? (tabIDs, groupIDs)
+    }
+
     func togglePin(_ id: NavTab.ID) { mutateWorkspace { $0.togglePin(id) } }
 
     func renameTab(_ id: NavTab.ID, to title: String?) {

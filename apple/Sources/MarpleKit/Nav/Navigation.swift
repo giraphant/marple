@@ -518,8 +518,68 @@ public struct Workspace: Sendable {
         normalize()
     }
 
-    private static func uniqued(_ ids: [NavTab.ID]) -> [NavTab.ID] {
-        var seen: Set<NavTab.ID> = []
+    /// Bulk reorder a list of tabs into root, anchoring at `index` (or appending).
+    /// Same adjusted-index trick as `moveTabs` so a same-parent target slot doesn't
+    /// drift when sources detach from earlier indices in that parent.
+    public mutating func moveTabsToRoot(_ ids: [NavTab.ID], at index: Int?) {
+        let unique = Self.uniqued(ids).filter { hasTab($0) }
+        guard !unique.isEmpty else { return }
+        let originalLocs = unique.map { Self.locate(tab: $0, in: root) }
+        for id in unique { _ = Self.removeTab(id, from: &root) }
+        let baseTarget: Int = {
+            guard let raw = index else { return root.count }
+            let sameRootBefore = originalLocs.compactMap { $0 }.filter { $0.0 == nil && $0.1 < raw }.count
+            return min(max(raw - sameRootBefore, 0), root.count)
+        }()
+        var insertAt = baseTarget
+        for id in unique {
+            root.insert(.tab(id), at: min(insertAt, root.count))
+            insertAt += 1
+        }
+        normalize()
+    }
+
+    /// Bulk reparent groups to root in the given order at `index` (or end). Each
+    /// detaches in turn so the same adjusted-index logic applies.
+    public mutating func moveGroupsToRoot(_ ids: [TabGroup.ID], at index: Int?) {
+        let unique = Self.uniqued(ids).filter { Self.findGroup($0, in: root) != nil }
+        guard !unique.isEmpty else { return }
+        let originalLocs = unique.map { Self.locate(group: $0, in: root) }
+        var detached: [TabGroup] = []
+        for id in unique {
+            if let g = Self.removeGroup(id, from: &root) { detached.append(g) }
+        }
+        let baseTarget: Int = {
+            guard let raw = index else { return root.count }
+            let sameRootBefore = originalLocs.compactMap { $0 }.filter { $0.0 == nil && $0.1 < raw }.count
+            return min(max(raw - sameRootBefore, 0), root.count)
+        }()
+        var insertAt = baseTarget
+        for g in detached {
+            root.insert(.group(g), at: min(insertAt, root.count))
+            insertAt += 1
+        }
+        normalize()
+    }
+
+    /// "上级胜出": when a multi-drag selection contains both an ancestor group
+    /// and its descendant tabs/groups, drop the descendants — moving the
+    /// container already moves them implicitly. Pure function so the DnD path
+    /// can call it without mutating state.
+    public func payloadAncestorFilter(tabIDs: [NavTab.ID],
+                                      groupIDs: [TabGroup.ID]) -> (tabs: [NavTab.ID], groups: [TabGroup.ID]) {
+        let groupSet = Set(groupIDs)
+        let tabs = tabIDs.filter { id in
+            !groupSet.contains { gid in group(gid, containsTab: id) }
+        }
+        let groups = groupIDs.filter { gid in
+            !groupSet.contains { other in other != gid && group(gid, isInsideSubtreeOf: other) }
+        }
+        return (tabs, groups)
+    }
+
+    private static func uniqued<T: Hashable>(_ ids: [T]) -> [T] {
+        var seen: Set<T> = []
         return ids.filter { seen.insert($0).inserted }
     }
 
