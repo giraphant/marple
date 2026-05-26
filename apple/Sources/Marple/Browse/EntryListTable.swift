@@ -96,12 +96,26 @@ struct EntryListTable: NSViewRepresentable {
         private var entries: [Entry] = []
         private var lastExpanded: Set<String> = []
         private var lastMatchLineCounts: [String: Int] = [:]
+        /// Tracks whether the previous render was in search mode (any visible row
+        /// had a match line). When this flips, row classes change between default
+        /// and `EntryListSearchRowView`, so we must `reloadData` even when the
+        /// entry array compares equal (edge case: a query that returns the full
+        /// pane verbatim).
+        private var lastSearchMode = false
         private var isUpdatingSelection = false
         private var pendingReload = false
-        /// Key: "<path>|e:<0|1>|m:<matchLineCount>". Value: measured row height.
-        /// Width invalidates the whole cache (see `measurementWidth`); structural
-        /// reloads also clear it.
-        private var rowHeightCache: [String: CGFloat] = [:]
+        /// Row heights only vary by SHAPE — not by per-entry text content, since
+        /// `EntryRow`'s title+preview block is a fixed 76pt box. With ~6 unique
+        /// shapes across the whole list, this turns search activation from
+        /// `O(visible rows) probe runs` into `O(unique shapes) probe runs` —
+        /// each shape probed once, all subsequent rows of that shape are
+        /// constant-time lookups.
+        private struct RowShape: Hashable {
+            let hasMeta: Bool
+            let visibleMatchedLines: Int  // 0 = non-search; 1+ = search
+            let hasExpandButton: Bool      // matched-line count > matchCap
+        }
+        private var shapeHeightCache: [RowShape: CGFloat] = [:]
         private var measurementWidth: CGFloat = 0
         private var measurementController: NSHostingController<EntryListRowHost>?
         private static let cellIdentifier = NSUserInterfaceItemIdentifier("entry-row-cell")
@@ -162,20 +176,44 @@ struct EntryListTable: NSViewRepresentable {
             let newEntries = model.visibleEntries
             let newExpanded = model.matchExpanded
             let newCounts = matchLineCounts(for: newEntries)
+            let newSearchMode = !newCounts.isEmpty
 
-            if entries != newEntries {
+            let entriesChanged = entries != newEntries
+            // Even if entries compare equal, a search-mode flip requires a full
+            // reload so AppKit re-fetches rowViews via `rowViewForRow` and
+            // swaps between default `NSTableRowView` ↔ `EntryListSearchRowView`.
+            let searchModeFlipped = newSearchMode != lastSearchMode
+
+            if entriesChanged || searchModeFlipped {
+                let wasSearchMode = lastSearchMode
                 entries = newEntries
                 lastExpanded = newExpanded
                 lastMatchLineCounts = newCounts
-                rowHeightCache.removeAll(keepingCapacity: true)
+                lastSearchMode = newSearchMode
+                shapeHeightCache.removeAll(keepingCapacity: true)
+                // Suppress implicit scroll/content animations that produced the
+                // visible "jitter" on search activation. With duration 0 the
+                // transition reads as a single immediate frame instead of a
+                // cross-fade plus scroll-offset settle.
+                NSAnimationContext.beginGrouping()
+                NSAnimationContext.current.duration = 0
                 table.reloadData()
+                NSAnimationContext.endGrouping()
                 syncSelection(in: table)
+                // Search just turned on — show the top of the results rather
+                // than wherever the pre-search scroll happened to land (with
+                // row heights and counts both changing, the old offset would
+                // point into a different content region and feel like a shake).
+                if newSearchMode && !wasSearchMode {
+                    table.scrollRowToVisible(0)
+                }
                 return
             }
 
-            // Same entry list — but expansion or match counts may have moved
-            // (e.g. user toggled "再显示 N 个匹配项…" or the search backend
-            // republished match lines). Push fresh content + remeasure heights.
+            // Same entry list AND same mode — but expansion or match counts may
+            // have moved (e.g. user toggled "再显示 N 个匹配项…" or the search
+            // backend republished match lines). Push fresh content + remeasure
+            // heights.
             //
             // Match-jump / open-path flips don't need this: EntryListRowHost is
             // @Bindable on AppModel, so observation re-renders the SwiftUI body
@@ -183,7 +221,7 @@ struct EntryListTable: NSViewRepresentable {
             if newExpanded != lastExpanded || newCounts != lastMatchLineCounts {
                 lastExpanded = newExpanded
                 lastMatchLineCounts = newCounts
-                rowHeightCache.removeAll(keepingCapacity: true)
+                shapeHeightCache.removeAll(keepingCapacity: true)
                 refreshVisibleHostedViews(in: table)
                 table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<entries.count))
             }
@@ -269,18 +307,20 @@ struct EntryListTable: NSViewRepresentable {
         /// Measure each row at the actual column width. `usesAutomaticRowHeights`
         /// fed NSHostingView's ideal (single-line) intrinsic size to the table,
         /// which collapsed multi-line preview and broke worse with search-expand.
-        /// Cache by (path, expanded, matchLineCount); column-resize wipes it
-        /// (mirrors CodeEdit FindNavigator's probe pattern).
+        /// Cache by SHAPE (not by entry) — `EntryRow`'s title+preview block is
+        /// a fixed 76pt box, so all rows of the same shape have identical height
+        /// regardless of their text content. Search activation goes from 20×
+        /// probe runs to 1-2× probe runs.
         func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
             guard row >= 0 && row < entries.count else { return Self.minimumRowHeight }
             let entry = entries[row]
             let columnWidth = tableView.tableColumns.first?.width ?? tableView.bounds.width
             if abs(columnWidth - measurementWidth) > 0.5 {
-                rowHeightCache.removeAll(keepingCapacity: true)
+                shapeHeightCache.removeAll(keepingCapacity: true)
                 measurementWidth = columnWidth
             }
-            let key = heightCacheKey(for: entry)
-            if let cached = rowHeightCache[key] { return cached }
+            let shape = rowShape(for: entry)
+            if let cached = shapeHeightCache[shape] { return cached }
 
             let availableWidth = max(columnWidth - Self.rowHorizontalInset * 2, 100)
             let controller: NSHostingController<EntryListRowHost>
@@ -300,16 +340,31 @@ struct EntryListTable: NSViewRepresentable {
             let target = NSSize(width: availableWidth, height: .greatestFiniteMagnitude)
             let measured = controller.sizeThatFits(in: target).height
             let height = max(measured, Self.minimumRowHeight)
-            rowHeightCache[key] = height
+            shapeHeightCache[shape] = height
             return height
         }
 
-        private func heightCacheKey(for entry: Entry) -> String {
-            let expanded = lastExpanded.contains(entry.path) ? "1" : "0"
-            let matchLines = lastMatchLineCounts[entry.path] ?? 0
-            // Path + state covers structural changes; entry-metadata edits invalidate
-            // the entire cache via the `entries != newEntries` reload branch.
-            return "\(entry.path)|e:\(expanded)|m:\(matchLines)"
+        private func rowShape(for entry: Entry) -> RowShape {
+            let total = lastMatchLineCounts[entry.path] ?? 0
+            let expanded = lastExpanded.contains(entry.path)
+            let matchCap = 3  // mirror EntryRow.matchCap
+            let visible: Int = {
+                guard total > 0 else { return 0 }
+                return expanded ? total : min(total, matchCap)
+            }()
+            return RowShape(
+                hasMeta: rowHasMeta(entry),
+                visibleMatchedLines: visible,
+                hasExpandButton: total > matchCap
+            )
+        }
+
+        private func rowHasMeta(_ entry: Entry) -> Bool {
+            if let a = entry.author, !a.isEmpty { return true }
+            if let y = entry.year, !y.isEmpty { return true }
+            if entry.ratingScore > 0 { return true }
+            if entry.hasPDF { return true }
+            return false
         }
 
         // MARK: NSTableViewDelegate
@@ -334,7 +389,7 @@ struct EntryListTable: NSViewRepresentable {
         /// cache and tell AppKit to re-query heights.
         func tableViewColumnDidResize(_ notification: Notification) {
             guard let table = tableView else { return }
-            rowHeightCache.removeAll(keepingCapacity: true)
+            shapeHeightCache.removeAll(keepingCapacity: true)
             measurementWidth = 0
             table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<entries.count))
         }
