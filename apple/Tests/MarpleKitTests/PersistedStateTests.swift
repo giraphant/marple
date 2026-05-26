@@ -154,6 +154,66 @@ import Foundation
         #expect(ws.tabGroups.first?.name == "页面组 2")
     }
 
+    private func tabsFor(_ n: Int) -> [PersistedTab] {
+        (0..<n).map { PersistedTab(location: NavLocation(pane: .type(.note), openPath: "t\($0).md"), pinned: false) }
+    }
+
+    private func state(tabs: [PersistedTab], tree: WorkspaceTreeSnapshot) -> PersistedState {
+        PersistedState(browsePane: .type(.note), isBrowsing: false, tabs: tabs, activeIndex: 0,
+                       sortClauses: [], filterClauses: [], filterMatch: .all, browseMode: "list",
+                       currentSpace: PersistedWorkspaceSpace(tree: tree))
+    }
+
+    @Test func makeWorkspaceRestoresNestedTree() throws {
+        let tree = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "Outer", isCollapsed: false, children: [
+                .tab(0), .tab(1),
+                .group(.init(name: "Inner", isCollapsed: true, children: [.tab(2), .tab(3)])),
+            ])),
+        ])
+        let s = state(tabs: tabsFor(4), tree: tree)
+        let data = try JSONEncoder().encode(s)
+        let restored = try JSONDecoder().decode(PersistedState.self, from: data)
+        let ws = try #require(restored.makeWorkspace())
+
+        #expect(ws.tabs.count == 4)
+        let outer = try #require(ws.tabGroups.first { $0.name == "Outer" })
+        #expect(outer.children.count == 3)
+        let inner = try #require(ws.tabGroups.first { $0.name == "Inner" })
+        #expect(inner.isCollapsed)
+        #expect(ws.group(containing: ws.tabs[2].id)?.id == inner.id)
+        #expect(ws.tabs(in: inner.id).map(\.location.openPath) == ["t2.md", "t3.md"])
+        #expect(ws.tabs.map(\.location.openPath) == ["t0.md", "t1.md", "t2.md", "t3.md"])
+    }
+
+    @Test func makeWorkspaceDropsStaleLeavesAndKeepsOrphans() throws {
+        // Tree references an out-of-range tab index; tab 2 is absent from the tree.
+        let tree = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "G", isCollapsed: false, children: [.tab(0), .tab(1), .tab(9)])),
+        ])
+        let s = state(tabs: tabsFor(3), tree: tree)
+        let ws = try #require(s.makeWorkspace())
+        // stale index 9 dropped; orphan tab 2 appended at root; every tab present once.
+        #expect(ws.tabs.count == 3)
+        #expect(Set(ws.tabs.map(\.location.openPath)) == ["t0.md", "t1.md", "t2.md"])
+        let g = try #require(ws.tabGroups.first)
+        #expect(g.tabIDs.count == 2)
+        #expect(ws.group(containing: ws.tabs.first { $0.location.openPath == "t2.md" }!.id) == nil)
+    }
+
+    @Test func makeWorkspacePrefersTreeOverLegacyGroups() throws {
+        let tree = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "TreeGroup", isCollapsed: false, children: [.tab(0), .tab(1)])),
+        ])
+        var space = PersistedWorkspaceSpace(groups: [WorkspaceGroupSnapshot(name: "LegacyGroup", tabIndices: [0, 1])])
+        space.tree = tree
+        let s = PersistedState(browsePane: .type(.note), isBrowsing: false, tabs: tabsFor(2), activeIndex: 0,
+                               sortClauses: [], filterClauses: [], filterMatch: .all, browseMode: "list",
+                               currentSpace: space)
+        let ws = try #require(s.makeWorkspace())
+        #expect(ws.tabGroups.first?.name == "TreeGroup")
+    }
+
     @Test func userDefaultsStoreRoundTrips() throws {
         let suite = "marple.test.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

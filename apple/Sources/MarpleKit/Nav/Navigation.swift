@@ -57,20 +57,44 @@ public struct NavTab: Identifiable, Hashable, Sendable {
     public var location: NavLocation { history.current }
 }
 
+/// One node in the sidebar's 页面 forest: either a tab leaf or a (recursive) group.
+/// `Workspace.root` is the single source of truth for the sidebar's structure and
+/// order; the flat `tabs` array is kept as its depth-first leaf reflection.
+public indirect enum TabNode: Hashable, Sendable {
+    case tab(NavTab.ID)
+    case group(TabGroup)
+
+    public var tabID: NavTab.ID? { if case .tab(let id) = self { return id } else { return nil } }
+    public var group: TabGroup? { if case .group(let g) = self { return g } else { return nil } }
+}
+
+/// A named, collapsible group. `children` may interleave tabs and sub-groups to any
+/// depth. `tabIDs` exposes only the *direct* tab children for callers that predate
+/// nesting.
 public struct TabGroup: Identifiable, Hashable, Sendable {
     public let id: UUID
     public var name: String
-    public var tabIDs: [NavTab.ID]
+    public var children: [TabNode]
     public var isCollapsed: Bool
 
-    public init(id: UUID = UUID(), name: String, tabIDs: [NavTab.ID], isCollapsed: Bool = false) {
+    public init(id: UUID = UUID(), name: String, children: [TabNode], isCollapsed: Bool = false) {
         self.id = id
         self.name = name
-        self.tabIDs = tabIDs
+        self.children = children
         self.isCollapsed = isCollapsed
     }
+
+    /// Convenience for a flat group of tabs (legacy restore + simple grouping).
+    public init(id: UUID = UUID(), name: String, tabIDs: [NavTab.ID], isCollapsed: Bool = false) {
+        self.init(id: id, name: name, children: tabIDs.map { .tab($0) }, isCollapsed: isCollapsed)
+    }
+
+    /// Direct child tabs (not transitive descendants) in order.
+    public var tabIDs: [NavTab.ID] { children.compactMap(\.tabID) }
 }
 
+/// Legacy (v1) flat persistence of one group: member tabs by index into the flat
+/// tab array. Retained for backward-compatible decoding of already-stored state.
 public struct WorkspaceGroupSnapshot: Codable, Sendable, Equatable {
     public var name: String
     public var tabIndices: [Int]
@@ -81,6 +105,31 @@ public struct WorkspaceGroupSnapshot: Codable, Sendable, Equatable {
         self.tabIndices = tabIndices
         self.isCollapsed = isCollapsed
     }
+}
+
+/// Recursive (v2) persistence of the 页面 forest. Tab leaves reference the flat tab
+/// array by index; groups nest to any depth.
+public struct WorkspaceTreeSnapshot: Codable, Sendable, Equatable {
+    public enum Node: Codable, Sendable, Equatable {
+        case tab(Int)
+        case group(Group)
+    }
+
+    public struct Group: Codable, Sendable, Equatable {
+        public var name: String
+        public var isCollapsed: Bool
+        public var children: [Node]
+
+        public init(name: String, isCollapsed: Bool, children: [Node]) {
+            self.name = name
+            self.isCollapsed = isCollapsed
+            self.children = children
+        }
+    }
+
+    public var roots: [Node]
+
+    public init(roots: [Node]) { self.roots = roots }
 }
 
 public struct WorkspaceSpace: Identifiable, Sendable {
@@ -97,20 +146,28 @@ public struct WorkspaceSpace: Identifiable, Sendable {
 
 /// The ordered set of tabs plus which one is active. A pure value type — `AppModel`
 /// holds one and `@Observable` tracks mutations through the stored property.
+///
+/// Two stored facts, reconciled by `normalize()`:
+/// - `root`: the canonical structure + order of the sidebar 页面 forest (tabs and
+///   nested groups). All structural/ordering edits go here.
+/// - `tabs`: the canonical store of tab *values* (history, pinned, title) and the
+///   horizontal strip order. Kept equal to the depth-first leaf order of `root`.
+///
+/// Invariant: every live tab id appears exactly once as a leaf in `root`.
 public struct Workspace: Sendable {
     public private(set) var tabs: [NavTab]
     public private(set) var activeID: NavTab.ID
-    public private(set) var tabGroups: [TabGroup]
+    public private(set) var root: [TabNode]
 
     public init(initial: NavLocation) {
         let t = NavTab(location: initial)
         tabs = [t]
         activeID = t.id
-        tabGroups = []
+        root = [.tab(t.id)]
     }
 
-    /// Rebuild a workspace from persisted tab snapshots. Each tab starts with a
-    /// fresh single-entry history at its saved location. Returns nil if empty.
+    /// Rebuild a workspace from persisted tab snapshots + legacy (v1) flat groups.
+    /// Each tab starts with a fresh single-entry history. Returns nil if empty.
     public init?(restoring tabs: [(location: NavLocation, pinned: Bool, customTitle: String?)], activeIndex: Int,
                  groups: [WorkspaceGroupSnapshot] = []) {
         guard !tabs.isEmpty else { return nil }
@@ -118,11 +175,8 @@ public struct Workspace: Sendable {
         self.tabs = built
         let idx = built.indices.contains(activeIndex) ? activeIndex : 0
         self.activeID = built[idx].id
-        self.tabGroups = groups.map { snapshot in
-            let ids = snapshot.tabIndices.compactMap { built.indices.contains($0) ? built[$0].id : nil }
-            return TabGroup(name: Self.migratedGroupName(snapshot.name), tabIDs: ids, isCollapsed: snapshot.isCollapsed)
-        }
-        normalizeGroups()
+        self.root = Self.buildRoot(legacyGroups: groups, tabs: built)
+        normalize()
     }
 
     public init?(restoring tabs: [(location: NavLocation, pinned: Bool)], activeIndex: Int,
@@ -132,27 +186,92 @@ public struct Workspace: Sendable {
                   groups: groups)
     }
 
+    /// Rebuild from the recursive (v2) tree snapshot.
+    public init?(restoring tabs: [(location: NavLocation, pinned: Bool, customTitle: String?)], activeIndex: Int,
+                 tree: WorkspaceTreeSnapshot) {
+        guard !tabs.isEmpty else { return nil }
+        let built = tabs.map { NavTab(location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) }
+        self.tabs = built
+        let idx = built.indices.contains(activeIndex) ? activeIndex : 0
+        self.activeID = built[idx].id
+        self.root = Self.buildRoot(treeNodes: tree.roots, tabs: built)
+        normalize()
+    }
+
     public var activeTab: NavTab { tabs.first { $0.id == activeID } ?? tabs[0] }
 
-    public var groupSnapshots: [WorkspaceGroupSnapshot] {
-        let positions = Dictionary(uniqueKeysWithValues: tabs.enumerated().map { ($0.element.id, $0.offset) })
-        return tabGroups.compactMap { group in
-            let indices = group.tabIDs.compactMap { positions[$0] }
-            guard indices.count >= 2 else { return nil }
-            return WorkspaceGroupSnapshot(name: group.name, tabIndices: indices, isCollapsed: group.isCollapsed)
+    /// The recursive 页面 forest, for view code that renders nesting directly.
+    public var rootNodes: [TabNode] { root }
+
+    /// All groups at any depth (pre-order). Lookups by id work at any depth.
+    public var tabGroups: [TabGroup] { Self.allGroups(in: root) }
+
+    /// Recursive snapshot for persistence. Tab leaves reference `tabs` by index.
+    public var treeSnapshot: WorkspaceTreeSnapshot {
+        let indexByID = Dictionary(uniqueKeysWithValues: tabs.enumerated().map { ($0.element.id, $0.offset) })
+        func convert(_ nodes: [TabNode]) -> [WorkspaceTreeSnapshot.Node] {
+            nodes.compactMap { node in
+                switch node {
+                case .tab(let id):
+                    guard let i = indexByID[id] else { return nil }
+                    return .tab(i)
+                case .group(let g):
+                    return .group(.init(name: g.name, isCollapsed: g.isCollapsed, children: convert(g.children)))
+                }
+            }
         }
+        return WorkspaceTreeSnapshot(roots: convert(root))
     }
 
     private var activeIndex: Int { tabs.firstIndex { $0.id == activeID } ?? 0 }
 
+    /// The innermost group that directly contains `tabID`, if any.
     public func group(containing tabID: NavTab.ID) -> TabGroup? {
-        tabGroups.first { $0.tabIDs.contains(tabID) }
+        func search(_ nodes: [TabNode]) -> TabGroup? {
+            for n in nodes {
+                guard case .group(let g) = n else { continue }
+                if g.children.contains(where: { $0.tabID == tabID }) { return g }
+                if let inner = search(g.children) { return inner }
+            }
+            return nil
+        }
+        return search(root)
     }
 
+    public func group(_ id: TabGroup.ID) -> TabGroup? { Self.findGroup(id, in: root) }
+
+    /// True if `id` is `ancestor` or lives anywhere in `ancestor`'s subtree. Used to
+    /// reject nesting a group into its own descendant (cycle).
+    public func group(_ id: TabGroup.ID, isInsideSubtreeOf ancestor: TabGroup.ID) -> Bool {
+        Self.isDescendant(id, ofOrEqualTo: ancestor, in: root)
+    }
+
+    /// True if `tabID` is a leaf anywhere beneath `groupID`.
+    public func group(_ groupID: TabGroup.ID, containsTab tabID: NavTab.ID) -> Bool {
+        guard let g = Self.findGroup(groupID, in: root) else { return false }
+        return Self.leafIDs(g.children).contains(tabID)
+    }
+
+    /// Direct tab children of a group, in order.
     public func tabs(in groupID: TabGroup.ID) -> [NavTab] {
-        guard let group = tabGroups.first(where: { $0.id == groupID }) else { return [] }
+        guard let group = Self.findGroup(groupID, in: root) else { return [] }
         let byID = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
         return group.tabIDs.compactMap { byID[$0] }
+    }
+
+    /// The outermost collapsed group on the path to `tabID` — i.e. the row a hidden
+    /// active tab visually folds into. Nil if the tab is visible.
+    public func outermostCollapsedAncestor(of tabID: NavTab.ID) -> TabGroup.ID? {
+        func walk(_ nodes: [TabNode]) -> TabGroup.ID? {
+            for n in nodes {
+                guard case .group(let g) = n else { continue }
+                guard Self.leafIDs(g.children).contains(tabID) else { continue }
+                if g.isCollapsed { return g.id }
+                return walk(g.children)
+            }
+            return nil
+        }
+        return walk(root)
     }
 
     // MARK: navigation on the active tab
@@ -170,6 +289,7 @@ public struct Workspace: Sendable {
     public mutating func newTab(_ loc: NavLocation, activate: Bool = true) -> NavTab.ID {
         let t = NavTab(location: loc)
         tabs.append(t)
+        root.append(.tab(t.id))
         if activate { activeID = t.id }
         return t.id
     }
@@ -181,10 +301,10 @@ public struct Workspace: Sendable {
         guard let i = tabs.firstIndex(where: { $0.id == id }) else { return }
         let wasActive = (id == activeID)
         tabs.remove(at: i)
-        removeTabFromGroups(id)
-        normalizeGroups()
+        _ = Self.removeTab(id, from: &root)
+        normalize()
         guard !tabs.isEmpty else {
-            tabGroups = []
+            root = []
             return
         }
         if wasActive {
@@ -219,90 +339,134 @@ public struct Workspace: Sendable {
     }
 
     public mutating func renameGroup(_ id: TabGroup.ID, to name: String) {
-        guard let i = tabGroups.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        tabGroups[i].name = trimmed
+        Self.mutateGroup(id, in: &root) { $0.name = trimmed }
     }
 
+    // MARK: grouping
+
+    /// Drop `sourceID` onto `targetID` to form a new (sub)group in place. The new
+    /// group `[target, source]` replaces the target leaf at its current position,
+    /// inside whatever container the target lives in — root if the target is
+    /// ungrouped, the target's parent group otherwise (recursively, at any depth).
+    /// Same-parent drop with exactly two children is the degenerate case: the
+    /// gesture would just rename/reverse the wrapper, so we keep it a no-op and
+    /// preserve the outer group's name and id.
     public mutating func groupTab(_ sourceID: NavTab.ID, onto targetID: NavTab.ID) {
-        guard sourceID != targetID, tabExists(sourceID), tabExists(targetID) else { return }
-        if let sourceGroup = group(containing: sourceID),
-           let targetGroup = group(containing: targetID),
-           sourceGroup.id == targetGroup.id {
+        guard sourceID != targetID, hasTab(sourceID), hasTab(targetID) else { return }
+        let sourceGroup = group(containing: sourceID)
+        let targetGroup = group(containing: targetID)
+        if let sg = sourceGroup, let tg = targetGroup, sg.id == tg.id,
+           let g = group(tg.id), g.children.count == 2 {
             return
         }
-        if let targetGroup = group(containing: targetID) {
-            moveTab(sourceID, toGroup: targetGroup.id)
-            return
+
+        _ = Self.removeTab(sourceID, from: &root)
+        let groupName = nextTabGroupName()
+        let newGroup = TabGroup(name: groupName, children: [.tab(targetID), .tab(sourceID)])
+
+        if let tg = targetGroup {
+            // Replace the target leaf inside its parent group with the new subgroup.
+            Self.mutateGroup(tg.id, in: &root) { g in
+                guard let ti = g.children.firstIndex(where: { $0.tabID == targetID }) else { return }
+                g.children[ti] = .group(newGroup)
+            }
+        } else {
+            // Target is at root: replace its root leaf with the new top-level group.
+            guard let ti = root.firstIndex(where: { $0.tabID == targetID }) else { normalize(); return }
+            root[ti] = .group(newGroup)
         }
-        removeTabFromGroups(sourceID)
-        normalizeGroups()
-        moveTabInOrder(sourceID, after: targetID)
-        tabGroups.append(TabGroup(name: nextTabGroupName(), tabIDs: [targetID, sourceID]))
-        normalizeGroups()
+        normalize()
     }
 
     public mutating func moveTab(_ tabID: NavTab.ID, toGroup groupID: TabGroup.ID) {
         moveTab(tabID, toGroup: groupID, at: nil)
     }
 
+    /// Move `tabID` into `groupID` at a child index (or append). `childIndex` is
+    /// interpreted against the group's children after the tab is detached.
     public mutating func moveTab(_ tabID: NavTab.ID, toGroup groupID: TabGroup.ID, at childIndex: Int?) {
-        guard tabExists(tabID), tabGroups.contains(where: { $0.id == groupID }) else { return }
-        let currentGroupID = group(containing: tabID)?.id
-        if currentGroupID != groupID {
-            removeTabFromGroups(tabID)
-            normalizeGroups()
-        }
-        guard let idx = tabGroups.firstIndex(where: { $0.id == groupID }) else { return }
-        var ids = tabGroups[idx].tabIDs.filter { $0 != tabID }
-        let referenceIDs = ids
-        let insertAt = min(max(childIndex ?? ids.count, 0), ids.count)
-        ids.insert(tabID, at: insertAt)
-        tabGroups[idx].tabIDs = ids
-        placeTabs(ids, atEarliestPositionOf: referenceIDs.isEmpty ? ids : referenceIDs)
-        normalizeGroups()
+        guard hasTab(tabID), Self.findGroup(groupID, in: root) != nil else { return }
+        let adjusted = Self.adjustedIndex(childIndex, movingFrom: Self.locate(tab: tabID, in: root), toParent: groupID)
+        _ = Self.removeTab(tabID, from: &root)
+        let count = Self.findGroup(groupID, in: root)?.children.count ?? 0
+        let idx = adjusted.map { min(max($0, 0), count) } ?? count
+        _ = Self.insert(.tab(tabID), intoParent: groupID, at: idx, nodes: &root)
+        normalize()
     }
 
     public mutating func moveTabToRoot(_ tabID: NavTab.ID, beforeTab targetID: NavTab.ID?) {
-        guard tabExists(tabID), targetID == nil || tabExists(targetID!) else { return }
-        removeTabFromGroups(tabID)
-        normalizeGroups()
-        moveTabInOrder(tabID, before: targetID)
+        guard hasTab(tabID), targetID == nil || hasTab(targetID!) else { return }
+        _ = Self.removeTab(tabID, from: &root)
+        let index = targetID.flatMap { Self.rootIndexOfTopLevel(containing: $0, in: root) } ?? root.count
+        root.insert(.tab(tabID), at: min(max(index, 0), root.count))
+        normalize()
     }
 
+    /// Move `groupID` so it sits immediately before `targetID`, as a sibling within
+    /// the target tab's actual parent (root when the target is ungrouped). No-op if
+    /// the target is one of the group's own descendants.
     public mutating func moveGroup(_ groupID: TabGroup.ID, beforeTab targetID: NavTab.ID?) {
-        guard let group = tabGroups.first(where: { $0.id == groupID }) else { return }
-        if let targetID, group.tabIDs.contains(targetID) { return }
-        let target = targetID.flatMap { self.group(containing: $0)?.tabIDs.first ?? $0 }
-        moveTabsInOrder(group.tabIDs, before: target)
-        normalizeGroups()
+        if let targetID, group(groupID, containsTab: targetID) { return }
+        guard let g = Self.removeGroup(groupID, from: &root) else { return }
+        if let targetID, let (parentID, idx) = Self.locate(tab: targetID, in: root) {
+            _ = Self.insert(.group(g), intoParent: parentID, at: idx, nodes: &root)
+        } else {
+            root.insert(.group(g), at: root.count)
+        }
+        normalize()
     }
 
     public mutating func moveGroup(_ sourceGroupID: TabGroup.ID, beforeGroup targetGroupID: TabGroup.ID) {
         guard sourceGroupID != targetGroupID,
-              let target = tabGroups.first(where: { $0.id == targetGroupID })?.tabIDs.first else { return }
-        moveGroup(sourceGroupID, beforeTab: target)
+              !Self.isDescendant(targetGroupID, ofOrEqualTo: sourceGroupID, in: root) else { return }
+        guard let g = Self.removeGroup(sourceGroupID, from: &root) else { return }
+        guard let (parentID, idx) = Self.locate(group: targetGroupID, in: root) else {
+            root.append(.group(g)); normalize(); return
+        }
+        _ = Self.insert(.group(g), intoParent: parentID, at: idx, nodes: &root)
+        normalize()
+    }
+
+    /// Nest `groupID` into `parentID` at a child index (or append). No-op if it would
+    /// create a cycle (dropping a group into its own descendant or itself).
+    public mutating func moveGroup(_ groupID: TabGroup.ID, intoGroup parentID: TabGroup.ID, at childIndex: Int? = nil) {
+        guard groupID != parentID,
+              !Self.isDescendant(parentID, ofOrEqualTo: groupID, in: root) else { return }
+        let adjusted = Self.adjustedIndex(childIndex, movingFrom: Self.locate(group: groupID, in: root), toParent: parentID)
+        guard let g = Self.removeGroup(groupID, from: &root) else { return }
+        let count = Self.findGroup(parentID, in: root)?.children.count ?? 0
+        let idx = adjusted.map { min(max($0, 0), count) } ?? count
+        _ = Self.insert(.group(g), intoParent: parentID, at: idx, nodes: &root)
+        normalize()
+    }
+
+    public mutating func moveGroupToRoot(_ groupID: TabGroup.ID, at index: Int? = nil) {
+        let adjusted = Self.adjustedIndex(index, movingFrom: Self.locate(group: groupID, in: root), toParent: nil)
+        guard let g = Self.removeGroup(groupID, from: &root) else { return }
+        let idx = adjusted.map { min(max($0, 0), root.count) } ?? root.count
+        root.insert(.group(g), at: idx)
+        normalize()
     }
 
     public mutating func toggleGroupCollapsed(_ groupID: TabGroup.ID) {
-        guard let idx = tabGroups.firstIndex(where: { $0.id == groupID }) else { return }
-        tabGroups[idx].isCollapsed.toggle()
+        Self.mutateGroup(groupID, in: &root) { $0.isCollapsed.toggle() }
     }
 
     public mutating func setGroupCollapsed(_ groupID: TabGroup.ID, collapsed: Bool) {
-        guard let idx = tabGroups.firstIndex(where: { $0.id == groupID }) else { return }
-        tabGroups[idx].isCollapsed = collapsed
+        Self.mutateGroup(groupID, in: &root) { $0.isCollapsed = collapsed }
     }
 
-    /// Reorder the tabs to match `ids` (the order produced by a drag). `ids` must be
-    /// a permutation of the current tab ids — anything else (incomplete / unknown /
-    /// duplicate) is a no-op. The active tab is unchanged.
+    /// Reorder all tabs to match `ids` (the order produced by a strip drag). Tree
+    /// structure is preserved: every sibling list is re-sorted by the new rank of its
+    /// earliest descendant, keeping groups contiguous. `ids` must be a permutation of
+    /// the current tab ids — anything else is a no-op. The active tab is unchanged.
     public mutating func reorder(_ ids: [NavTab.ID]) {
         guard ids.count == tabs.count, Set(ids) == Set(tabs.map(\.id)) else { return }
-        let map = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
-        tabs = ids.compactMap { map[$0] }
-        normalizeGroups()
+        let rank = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
+        root = Self.sortByRank(root, rank: rank)
+        syncTabsToTree()
     }
 
     /// Null out the current open path of any tab whose open file is no longer in
@@ -316,51 +480,11 @@ public struct Workspace: Sendable {
         }
     }
 
-    private func tabExists(_ id: NavTab.ID) -> Bool {
-        tabs.contains { $0.id == id }
-    }
-
-    private func tabIDsInCurrentOrder(_ ids: Set<NavTab.ID>) -> [NavTab.ID] {
-        tabs.map(\.id).filter { ids.contains($0) }
-    }
-
-    private mutating func moveTabInOrder(_ tabID: NavTab.ID, after anchorID: NavTab.ID) {
-        guard let from = tabs.firstIndex(where: { $0.id == tabID }),
-              let anchor = tabs.firstIndex(where: { $0.id == anchorID }) else { return }
-        let tab = tabs.remove(at: from)
-        let anchorAfterRemoval = tabs.firstIndex(where: { $0.id == anchorID }) ?? max(0, anchor - 1)
-        tabs.insert(tab, at: min(anchorAfterRemoval + 1, tabs.count))
-    }
-
-    private mutating func moveTabInOrder(_ tabID: NavTab.ID, before targetID: NavTab.ID?) {
-        guard let from = tabs.firstIndex(where: { $0.id == tabID }) else { return }
-        let tab = tabs.remove(at: from)
-        let targetIndex = targetID.flatMap { target in tabs.firstIndex { $0.id == target } } ?? tabs.count
-        tabs.insert(tab, at: targetIndex)
-    }
-
-    private mutating func moveTabsInOrder(_ movingIDs: [NavTab.ID], before targetID: NavTab.ID?) {
-        let moving = Set(movingIDs)
-        let block = tabs.filter { moving.contains($0.id) }
-        guard !block.isEmpty else { return }
-        tabs.removeAll { moving.contains($0.id) }
-        let targetIndex = targetID.flatMap { target in tabs.firstIndex { $0.id == target } } ?? tabs.count
-        tabs.insert(contentsOf: block, at: targetIndex)
-    }
-
-    private mutating func placeTabs(_ ids: [NavTab.ID], atEarliestPositionOf referenceIDs: [NavTab.ID]) {
-        let moving = Set(ids)
-        let block = ids.compactMap { id in tabs.first { $0.id == id } }
-        guard !block.isEmpty else { return }
-        let referencePositions = referenceIDs.compactMap { id in tabs.firstIndex { $0.id == id } }
-        let insertion = referencePositions.min() ?? tabs.count
-        tabs.removeAll { moving.contains($0.id) }
-        tabs.insert(contentsOf: block, at: min(insertion, tabs.count))
-    }
+    private func hasTab(_ id: NavTab.ID) -> Bool { tabs.contains { $0.id == id } }
 
     private func nextTabGroupName() -> String {
         let prefix = "页面组 "
-        let used = Set(tabGroups.compactMap { group -> Int? in
+        let used = Set(Self.allGroups(in: root).compactMap { group -> Int? in
             let name = Self.migratedGroupName(group.name)
             guard name.hasPrefix(prefix) else { return nil }
             return Int(name.dropFirst(prefix.count))
@@ -378,23 +502,274 @@ public struct Workspace: Sendable {
         return "\(newPrefix)\(number)"
     }
 
-    private mutating func removeTabFromGroups(_ id: NavTab.ID) {
-        for i in tabGroups.indices {
-            tabGroups[i].tabIDs.removeAll { $0 == id }
+    // MARK: normalization
+
+    /// Reconcile structure with tab membership, then mirror the flat array to the
+    /// tree's depth-first leaf order. Idempotent.
+    private mutating func normalize() {
+        let valid = Set(tabs.map(\.id))
+        var seen: Set<NavTab.ID> = []
+        root = Self.prune(root, valid: valid, seen: &seen)
+        let missing = tabs.map(\.id).filter { !seen.contains($0) }
+        root.append(contentsOf: missing.map { TabNode.tab($0) })
+        root = Self.dissolveSmall(root)
+        syncTabsToTree()
+    }
+
+    /// Drop leaves with no backing tab and any duplicate occurrences (keeping the
+    /// first), enforcing "every live tab appears exactly once in root".
+    private static func prune(_ nodes: [TabNode], valid: Set<NavTab.ID>, seen: inout Set<NavTab.ID>) -> [TabNode] {
+        nodes.compactMap { node in
+            switch node {
+            case .tab(let id):
+                guard valid.contains(id), seen.insert(id).inserted else { return nil }
+                return node
+            case .group(var g):
+                g.children = prune(g.children, valid: valid, seen: &seen)
+                return .group(g)
+            }
         }
     }
 
-    private mutating func normalizeGroups() {
-        var seen: Set<NavTab.ID> = []
-        let orderedIDs = tabs.map(\.id)
-        for i in tabGroups.indices {
-            let wanted = Set(tabGroups[i].tabIDs)
-            tabGroups[i].tabIDs = orderedIDs.filter { wanted.contains($0) && seen.insert($0).inserted }
+    /// Bottom-up, dissolve any group with fewer than two children by promoting its
+    /// remaining children into the parent's position. Cascades naturally.
+    private static func dissolveSmall(_ nodes: [TabNode]) -> [TabNode] {
+        var out: [TabNode] = []
+        for node in nodes {
+            switch node {
+            case .tab:
+                out.append(node)
+            case .group(var g):
+                let resolved = dissolveSmall(g.children)
+                if resolved.count < 2 {
+                    out.append(contentsOf: resolved)
+                } else {
+                    g.children = resolved
+                    out.append(.group(g))
+                }
+            }
         }
-        tabGroups.removeAll { $0.tabIDs.count < 2 }
-        let positions = Dictionary(uniqueKeysWithValues: orderedIDs.enumerated().map { ($0.element, $0.offset) })
-        tabGroups.sort {
-            (positions[$0.tabIDs[0]] ?? Int.max) < (positions[$1.tabIDs[0]] ?? Int.max)
+        return out
+    }
+
+    private mutating func syncTabsToTree() {
+        let order = Self.leafIDs(root)
+        let byID = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
+        tabs = order.compactMap { byID[$0] }
+    }
+
+    // MARK: tree helpers
+
+    private static func allGroups(in nodes: [TabNode]) -> [TabGroup] {
+        var out: [TabGroup] = []
+        for n in nodes {
+            guard case .group(let g) = n else { continue }
+            out.append(g)
+            out.append(contentsOf: allGroups(in: g.children))
+        }
+        return out
+    }
+
+    private static func findGroup(_ id: TabGroup.ID, in nodes: [TabNode]) -> TabGroup? {
+        for n in nodes {
+            guard case .group(let g) = n else { continue }
+            if g.id == id { return g }
+            if let inner = findGroup(id, in: g.children) { return inner }
+        }
+        return nil
+    }
+
+    private static func leafIDs(_ nodes: [TabNode]) -> [NavTab.ID] {
+        var out: [NavTab.ID] = []
+        for n in nodes {
+            switch n {
+            case .tab(let id): out.append(id)
+            case .group(let g): out.append(contentsOf: leafIDs(g.children))
+            }
+        }
+        return out
+    }
+
+    @discardableResult
+    private static func removeTab(_ id: NavTab.ID, from nodes: inout [TabNode]) -> Bool {
+        var removed = false
+        nodes = nodes.compactMap { node in
+            switch node {
+            case .tab(let t):
+                if t == id { removed = true; return nil }
+                return node
+            case .group(var g):
+                if removeTab(id, from: &g.children) { removed = true }
+                return .group(g)
+            }
+        }
+        return removed
+    }
+
+    @discardableResult
+    private static func removeGroup(_ id: TabGroup.ID, from nodes: inout [TabNode]) -> TabGroup? {
+        var found: TabGroup?
+        nodes = nodes.compactMap { node in
+            switch node {
+            case .tab:
+                return node
+            case .group(var g):
+                if g.id == id { found = g; return nil }
+                if let inner = removeGroup(id, from: &g.children) { found = inner }
+                return .group(g)
+            }
+        }
+        return found
+    }
+
+    /// Insert `node` into `parentID`'s children at `index`, or at root when `parentID`
+    /// is nil. Returns whether the parent was found.
+    @discardableResult
+    private static func insert(_ node: TabNode, intoParent parentID: TabGroup.ID?, at index: Int,
+                               nodes: inout [TabNode]) -> Bool {
+        guard let parentID else {
+            nodes.insert(node, at: min(max(index, 0), nodes.count))
+            return true
+        }
+        var done = false
+        for i in nodes.indices {
+            guard case .group(var g) = nodes[i] else { continue }
+            if g.id == parentID {
+                g.children.insert(node, at: min(max(index, 0), g.children.count))
+                nodes[i] = .group(g)
+                return true
+            }
+            if insert(node, intoParent: parentID, at: index, nodes: &g.children) {
+                nodes[i] = .group(g)
+                done = true
+                break
+            }
+        }
+        return done
+    }
+
+    @discardableResult
+    private static func mutateGroup(_ id: TabGroup.ID, in nodes: inout [TabNode],
+                                    _ body: (inout TabGroup) -> Void) -> Bool {
+        for i in nodes.indices {
+            guard case .group(var g) = nodes[i] else { continue }
+            if g.id == id {
+                body(&g)
+                nodes[i] = .group(g)
+                return true
+            }
+            if mutateGroup(id, in: &g.children, body) {
+                nodes[i] = .group(g)
+                return true
+            }
+        }
+        return false
+    }
+
+    /// True if `candidate` is `ancestor` or lives anywhere in `ancestor`'s subtree.
+    private static func isDescendant(_ candidate: TabGroup.ID, ofOrEqualTo ancestor: TabGroup.ID,
+                                     in nodes: [TabNode]) -> Bool {
+        if candidate == ancestor { return true }
+        guard let g = findGroup(ancestor, in: nodes) else { return false }
+        return allGroups(in: g.children).contains { $0.id == candidate }
+    }
+
+    /// The root index of the top-level node whose subtree contains `tabID`.
+    private static func rootIndexOfTopLevel(containing tabID: NavTab.ID, in nodes: [TabNode]) -> Int? {
+        nodes.firstIndex { leafIDs([$0]).contains(tabID) }
+    }
+
+    /// The (parentID?, childIndex) location of a group.
+    private static func locate(group id: TabGroup.ID, in nodes: [TabNode],
+                               parent: TabGroup.ID? = nil) -> (TabGroup.ID?, Int)? {
+        for (i, node) in nodes.enumerated() {
+            guard case .group(let g) = node else { continue }
+            if g.id == id { return (parent, i) }
+            if let inner = locate(group: id, in: g.children, parent: g.id) { return inner }
+        }
+        return nil
+    }
+
+    /// The (parentID?, childIndex) location of a tab leaf.
+    private static func locate(tab id: NavTab.ID, in nodes: [TabNode],
+                               parent: TabGroup.ID? = nil) -> (TabGroup.ID?, Int)? {
+        for (i, node) in nodes.enumerated() {
+            switch node {
+            case .tab(let t):
+                if t == id { return (parent, i) }
+            case .group(let g):
+                if let inner = locate(tab: id, in: g.children, parent: g.id) { return inner }
+            }
+        }
+        return nil
+    }
+
+    /// When an item moves *within the same parent* to a later slot, the drop index
+    /// (computed before detaching) is one too high once the item is removed.
+    private static func adjustedIndex(_ childIndex: Int?, movingFrom source: (TabGroup.ID?, Int)?,
+                                      toParent parentID: TabGroup.ID?) -> Int? {
+        guard let childIndex, let (sourceParent, sourceIdx) = source,
+              sourceParent == parentID, sourceIdx < childIndex else { return childIndex }
+        return childIndex - 1
+    }
+
+    private static func minRank(_ node: TabNode, _ rank: [NavTab.ID: Int]) -> Int {
+        switch node {
+        case .tab(let id): return rank[id] ?? Int.max
+        case .group(let g): return g.children.map { minRank($0, rank) }.min() ?? Int.max
+        }
+    }
+
+    private static func sortByRank(_ nodes: [TabNode], rank: [NavTab.ID: Int]) -> [TabNode] {
+        let recursed = nodes.enumerated().map { offset, node -> (Int, TabNode) in
+            guard case .group(var g) = node else { return (offset, node) }
+            g.children = sortByRank(g.children, rank: rank)
+            return (offset, .group(g))
+        }
+        return recursed.sorted { lhs, rhs in
+            let a = minRank(lhs.1, rank), b = minRank(rhs.1, rank)
+            return a != b ? a < b : lhs.0 < rhs.0   // stable: keep original order on ties
+        }.map(\.1)
+    }
+
+    // MARK: restore builders
+
+    private static func buildRoot(legacyGroups groups: [WorkspaceGroupSnapshot], tabs: [NavTab]) -> [TabNode] {
+        var groupAtFirstIndex: [Int: TabGroup] = [:]
+        var grouped = Set<Int>()
+        for snap in groups {
+            var seen = Set<Int>()
+            let members = snap.tabIndices.filter { tabs.indices.contains($0) && seen.insert($0).inserted }
+            let fresh = members.filter { !grouped.contains($0) }
+            guard fresh.count >= 1, let first = fresh.min() else { continue }
+            for m in fresh { grouped.insert(m) }
+            let memberIDs = members.filter { fresh.contains($0) }.map { tabs[$0].id }
+            groupAtFirstIndex[first] = TabGroup(name: migratedGroupName(snap.name),
+                                                tabIDs: memberIDs,
+                                                isCollapsed: snap.isCollapsed)
+        }
+        var out: [TabNode] = []
+        for i in tabs.indices {
+            if let g = groupAtFirstIndex[i] {
+                out.append(.group(g))
+            } else if !grouped.contains(i) {
+                out.append(.tab(tabs[i].id))
+            }
+        }
+        return out
+    }
+
+    private static func buildRoot(treeNodes: [WorkspaceTreeSnapshot.Node], tabs: [NavTab]) -> [TabNode] {
+        treeNodes.compactMap { node in
+            switch node {
+            case .tab(let i):
+                guard tabs.indices.contains(i) else { return nil }
+                return .tab(tabs[i].id)
+            case .group(let g):
+                return .group(TabGroup(name: migratedGroupName(g.name),
+                                       children: buildRoot(treeNodes: g.children, tabs: tabs),
+                                       isCollapsed: g.isCollapsed))
+            }
         }
     }
 }

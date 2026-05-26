@@ -30,6 +30,7 @@ final class AppModel {
     var openPath: String? { isBrowsing ? nil : workspace?.activeTab.location.openPath }
     var tabs: [NavTab] { workspace?.tabs ?? [] }
     var tabGroups: [TabGroup] { workspace?.tabGroups ?? [] }
+    var tabRootNodes: [TabNode] { workspace?.rootNodes ?? [] }
     var activeTabID: NavTab.ID? { isBrowsing ? nil : workspace?.activeID }
     var canGoBack: Bool { !isBrowsing && (workspace?.activeTab.history.canGoBack ?? false) }
     var canGoForward: Bool { !isBrowsing && (workspace?.activeTab.history.canGoForward ?? false) }
@@ -142,7 +143,7 @@ final class AppModel {
             filterClauses: filterClauses,
             filterMatch: filterMatch,
             browseMode: browseMode.rawValue,
-            currentSpace: ws.map { PersistedWorkspaceSpace(groups: $0.groupSnapshots) }))
+            currentSpace: ws.map { PersistedWorkspaceSpace(tree: $0.treeSnapshot) }))
     }
 
     // MARK: type order persistence
@@ -533,6 +534,28 @@ final class AppModel {
 
     func moveGroup(_ sourceGroupID: TabGroup.ID, beforeGroup targetGroupID: TabGroup.ID) {
         mutateWorkspace { $0.moveGroup(sourceGroupID, beforeGroup: targetGroupID) }
+    }
+
+    func moveGroup(_ groupID: TabGroup.ID, intoGroup parentID: TabGroup.ID, at childIndex: Int? = nil) {
+        mutateWorkspace { $0.moveGroup(groupID, intoGroup: parentID, at: childIndex) }
+    }
+
+    func moveGroupToRoot(_ groupID: TabGroup.ID, at index: Int? = nil) {
+        mutateWorkspace { $0.moveGroupToRoot(groupID, at: index) }
+    }
+
+    /// False if nesting `source` into `target` would create a cycle (self or descendant).
+    func canNestGroup(_ source: TabGroup.ID, into target: TabGroup.ID) -> Bool {
+        guard source != target, let ws = workspace else { return false }
+        return !ws.group(target, isInsideSubtreeOf: source)
+    }
+
+    func groupContainsTab(_ groupID: TabGroup.ID, _ tabID: NavTab.ID) -> Bool {
+        workspace?.group(groupID, containsTab: tabID) ?? false
+    }
+
+    func outermostCollapsedTabGroup(of tabID: NavTab.ID) -> TabGroup.ID? {
+        workspace?.outermostCollapsedAncestor(of: tabID)
     }
 
     func toggleTabGroup(_ groupID: TabGroup.ID) {

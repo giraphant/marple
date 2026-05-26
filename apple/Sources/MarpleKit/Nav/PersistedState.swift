@@ -13,11 +13,28 @@ public struct PersistedTab: Codable, Sendable, Equatable {
 
 public struct PersistedWorkspaceSpace: Codable, Sendable, Equatable {
     public var name: String
+    /// Legacy (v1) flat groups. Still decoded from already-stored state; new saves
+    /// leave this empty and use `tree`.
     public var groups: [WorkspaceGroupSnapshot]
+    /// Recursive (v2) forest. Present in new saves; absent in legacy state.
+    public var tree: WorkspaceTreeSnapshot?
 
-    public init(name: String = "默认 Space", groups: [WorkspaceGroupSnapshot] = []) {
+    public init(name: String = "默认 Space", groups: [WorkspaceGroupSnapshot] = [],
+                tree: WorkspaceTreeSnapshot? = nil) {
         self.name = name
         self.groups = groups
+        self.tree = tree
+    }
+
+    enum CodingKeys: String, CodingKey { case name, groups, tree }
+
+    // Tolerant decode: a v2 blob may omit `groups`; a v1 blob omits `tree`. Neither
+    // should fail the whole persisted-state decode.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "默认 Space"
+        groups = try c.decodeIfPresent([WorkspaceGroupSnapshot].self, forKey: .groups) ?? []
+        tree = try c.decodeIfPresent(WorkspaceTreeSnapshot.self, forKey: .tree)
     }
 }
 
@@ -48,9 +65,11 @@ public struct PersistedState: Codable, Sendable, Equatable {
     }
 
     public func makeWorkspace() -> Workspace? {
-        Workspace(restoring: tabs.map { (location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) },
-                  activeIndex: activeIndex,
-                  groups: currentSpace?.groups ?? [])
+        let restoring = tabs.map { (location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) }
+        if let tree = currentSpace?.tree {
+            return Workspace(restoring: restoring, activeIndex: activeIndex, tree: tree)
+        }
+        return Workspace(restoring: restoring, activeIndex: activeIndex, groups: currentSpace?.groups ?? [])
     }
 }
 
