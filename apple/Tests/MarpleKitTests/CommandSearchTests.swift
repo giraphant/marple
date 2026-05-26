@@ -3,7 +3,7 @@ import Testing
 
 @Suite struct CommandSearchTests {
     func e(_ path: String, _ type: EntryType, score: Double = 1) -> (entry: Entry, score: Double) {
-        (Entry(path: path, type: type, title: path, author: nil, year: nil,
+        (Entry(path: path, type: type, title: path, author: [], year: nil,
                ratingScore: 0, themes: [], preview: "", hasPDF: false), score)
     }
 

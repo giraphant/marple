@@ -4,7 +4,7 @@ import Testing
 @Suite struct ListSortTests {
     func e(_ path: String, title: String? = nil, year: String? = nil,
            rating: Double = 0, mtime: Double? = nil, added: Double? = nil) -> Entry {
-        Entry(path: path, type: .paperAnalysis, title: title, author: nil, year: year,
+        Entry(path: path, type: .paperAnalysis, title: title, author: [], year: year,
               ratingScore: rating, themes: [], preview: "", hasPDF: false,
               mtime: mtime, added: added)
     }

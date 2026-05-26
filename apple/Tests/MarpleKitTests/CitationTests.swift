@@ -2,9 +2,12 @@ import Testing
 @testable import MarpleKit
 
 @Suite struct CitationTests {
+    /// Test factory — accepts a legacy joined-string `author` for terseness;
+    /// `splitAuthors` converts it to the canonical `[String]` on construction.
     private func entry(author: String? = nil, year: String? = nil, title: String? = nil,
                        source: String? = nil, doi: String? = nil) -> Entry {
-        Entry(path: "p.md", type: .paperAnalysis, title: title, author: author,
+        Entry(path: "p.md", type: .paperAnalysis, title: title,
+              author: splitAuthors(author),
               year: year, ratingScore: 0, themes: [], preview: "", hasPDF: false,
               source: source, doi: doi)
     }

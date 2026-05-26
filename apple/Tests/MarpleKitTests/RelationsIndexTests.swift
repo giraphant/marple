@@ -2,10 +2,13 @@ import Testing
 @testable import MarpleKit
 
 @Suite struct RelationsIndexTests {
+    /// Test factory — accepts a legacy joined-string `author` for terseness;
+    /// `splitAuthors` converts it to the canonical `[String]` on construction.
     func mk(_ path: String, _ type: String, title: String? = nil, author: String? = nil,
             themes: [String] = [], rating: Double = 0, book: String? = nil,
             annotates: String? = nil) -> Entry {
-        Entry(path: path, type: EntryType(rawValue: type), title: title, author: author,
+        Entry(path: path, type: EntryType(rawValue: type), title: title,
+              author: splitAuthors(author),
               year: nil, ratingScore: rating, themes: themes, preview: "", hasPDF: false,
               book: book, annotates: annotates)
     }

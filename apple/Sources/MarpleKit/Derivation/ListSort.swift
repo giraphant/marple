@@ -53,7 +53,10 @@ private func toNum(_ s: String?) -> Double? {
 private func comparator(_ field: SortField, _ dir: SortDir) -> (Entry, Entry) -> Int {
     switch field {
     case .title:   return { textCmp($0.title, $1.title, dir) }
-    case .author:  return { textCmp($0.author, $1.author, dir) }
+    // Sort by first author — matches the user's mental model of "show me
+    // entries grouped by primary author" while staying stable for multi-author
+    // entries.
+    case .author:  return { textCmp($0.author.first, $1.author.first, dir) }
     case .year:    return { numCmp(toNum($0.year), toNum($1.year), dir) }
     // ratingScore 0 means "unrated" → treat as empty so it sorts last either way.
     case .rating:  return { numCmp($0.ratingScore == 0 ? nil : $0.ratingScore,

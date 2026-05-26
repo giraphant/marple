@@ -357,7 +357,8 @@ public final class IndexDatabase: @unchecked Sendable {
         let path: String = row["path"]
         let typeRaw: String = row["type"]
         let title: String? = row["title"]
-        let author: String? = row["author"]
+        let authorJoined: String? = row["author"]
+        let author: [String] = splitAuthors(authorJoined)
         let preview: String = (row["preview"] as String?) ?? ""
         let source: String? = row["source"]
         let book: String? = row["book"]

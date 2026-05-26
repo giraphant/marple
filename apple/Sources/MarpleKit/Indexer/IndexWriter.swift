@@ -167,7 +167,10 @@ public enum IndexWriter {
                 entry.title,
                 entry.titleEn,
                 entry.titleCn,
-                entry.author,
+                // Author column is TEXT for FTS / sort compatibility — write
+                // the joined form; readers split back via `splitAuthors`.
+                // Empty list → NULL (column is nullable).
+                entry.author.isEmpty ? nil : entry.author.joined(separator: ", "),
                 entry.yearJSON,         // already-built JSON string or nil
                 entry.ratingJSON,       // already-built JSON string or nil
                 entry.ratingScore,

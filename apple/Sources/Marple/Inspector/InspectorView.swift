@@ -322,8 +322,18 @@ private struct InfoSection: View {
                             ScalarRow(model: model, label: "年份", value: e.year) { await model.setYear($0) }
                         }
                         if fields.contains("author") {
-                            ScalarRow(model: model, label: "作者", value: e.author) { await model.setAuthor($0) }
-                        } else if e.author?.isEmpty == false {
+                            // Image-type entries get a single-line scalar editor
+                            // (typical: one photo credit). The model layer still
+                            // stores it as `[String]`; we round-trip via
+                            // `splitAuthors` for comma-separated input.
+                            ScalarRow(
+                                model: model,
+                                label: "作者",
+                                value: e.author.first
+                            ) { newValue in
+                                await model.setAuthor(splitAuthors(newValue))
+                            }
+                        } else if !e.author.isEmpty {
                             AuthorRow(model: model, entry: e)
                         }
                         if fields.contains("source") {
@@ -429,16 +439,18 @@ private struct AuthorRow: View {
 
     var body: some View {
         FieldRow("作者") {
-            let names = splitAuthors(entry.author)
+            let names = entry.author
             if editingAll {
-                FullAuthorEditor(initial: entry.author ?? "") { newValue in
+                FullAuthorEditor(initial: names.joined(separator: ", ")) { newValue in
                     Task {
-                        await model.setAuthor(newValue.isEmpty ? nil : newValue)
+                        // FullAuthorEditor still takes a single string for legacy
+                        // typing flow; split into the canonical list on save.
+                        await model.setAuthor(splitAuthors(newValue))
                         editingAll = false
                     }
                 } onCancel: { editingAll = false }
             } else if names.isEmpty {
-                Text(entry.author ?? "")
+                Text("")
                     .font(Typo.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -504,9 +516,9 @@ private struct AuthorRow: View {
         }
     }
 
-    /// Splice the parsed names list (replace or delete at `index`), re-join with
-    /// ", " and commit via `setAuthor`. This is the scalar-string strategy noted
-    /// in QUA-109; once author becomes `[String]?` natively, drop the rejoin.
+    /// Splice the names list (replace or delete at `index`) and commit via
+    /// `setAuthor`. Lossless since QUA-109 — the model now stores `[String]`
+    /// directly, no string serialization in the middle.
     private func spliceAuthor(at index: Int, with newName: String?, names: [String]) async {
         var updated = names
         let trimmed = newName?.trimmingCharacters(in: .whitespaces)
@@ -515,7 +527,7 @@ private struct AuthorRow: View {
         } else {
             updated.remove(at: index)
         }
-        await model.setAuthor(updated.isEmpty ? nil : updated.joined(separator: ", "))
+        await model.setAuthor(updated)
     }
 }
 

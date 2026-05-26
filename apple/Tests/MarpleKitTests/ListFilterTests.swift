@@ -3,10 +3,13 @@ import Testing
 @testable import MarpleKit
 
 @Suite struct ListFilterTests {
+    /// Test factory — accepts a legacy joined-string `author` for terseness;
+    /// `splitAuthors` converts it to the canonical `[String]` on construction.
     func e(_ path: String, author: String? = nil, year: String? = nil, rating: Double = 0,
            themes: [String] = [], source: String? = nil, hasPDF: Bool = false,
            added: Double? = nil) -> Entry {
-        Entry(path: path, type: .paperAnalysis, title: nil, author: author, year: year,
+        Entry(path: path, type: .paperAnalysis, title: nil,
+              author: splitAuthors(author), year: year,
               ratingScore: rating, themes: themes, preview: "", hasPDF: hasPDF,
               mtime: nil, added: added, source: source)
     }
