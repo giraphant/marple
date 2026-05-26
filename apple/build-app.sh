@@ -54,6 +54,19 @@ mkdir -p "$APP/Resources"
 # Executable
 cp "$PKG_ROOT/Marple" "$APP/MacOS/Marple"
 
+# Ship MLX Metal kernels inside the bundle. `swift run` finds them via the
+# SwiftPM resource bundle that sits next to the .build binary, but once we
+# repackage as a .app that sibling bundle is gone and `open` launches with
+# CWD=/, so MLX's `METAL_PATH=default.metallib` fallback also misses. Drop a
+# copy next to the executable as `mlx.metallib` — MLX's first lookup is
+# `<binary_dir>/mlx.metallib` (load_colocated_library), so this resolves
+# before any of the bundle/CWD paths are tried.
+if [ -f default.metallib ]; then
+    cp default.metallib "$APP/MacOS/mlx.metallib"
+else
+    echo "WARNING: default.metallib missing — 深度 mode will crash in the bundled .app." >&2
+fi
+
 # Icon: iconset → icns (iconutil is the reliable way outside Xcode)
 iconutil -c icns "$ICONSET" -o "$APP/Resources/AppIcon.icns"
 
