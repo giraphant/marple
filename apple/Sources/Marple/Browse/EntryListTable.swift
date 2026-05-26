@@ -30,13 +30,13 @@ struct EntryListTable: NSViewRepresentable {
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
         table.headerView = nil
-        // The key knob SwiftUI never exposed. .sourceList style gives the
-        // Ulysses pale-blue selection PLUS the automatic emphasized /
-        // unemphasized cycle on first-responder change (window-key transitions,
-        // ⌘F focus moves, etc.). Apple deprecated the older
-        // `selectionHighlightStyle = .sourceList` knob in macOS 12 and points
-        // here instead.
-        table.style = .sourceList
+        // We draw selection ourselves via EntryListRowView.drawSelection so we
+        // can paint the Ulysses pale-blue tint (active) / gray (unemphasized)
+        // cycle. `style = .sourceList` looked promising but on a non-outline
+        // NSTableView it doesn't actually switch the selection paint — the row
+        // still draws default `.regular` solid dark-blue, swallowing the dark
+        // active-line cue inside the row. Custom rowView gives full control.
+        table.style = .inset
         table.backgroundColor = .clear
         // SwiftUI List(.inset) used ~8pt visible row separation; match that so
         // the pale-blue source-list selection has visible gutters between rows.
@@ -105,6 +105,7 @@ struct EntryListTable: NSViewRepresentable {
         private var measurementWidth: CGFloat = 0
         private var measurementController: NSHostingController<EntryListRowHost>?
         private static let cellIdentifier = NSUserInterfaceItemIdentifier("entry-row-cell")
+        private static let rowViewIdentifier = NSUserInterfaceItemIdentifier("entry-row-view")
         private static let minimumRowHeight: CGFloat = 60
         private static let rowHorizontalInset: CGFloat = 12
 
@@ -240,6 +241,31 @@ struct EntryListTable: NSViewRepresentable {
             return cell
         }
 
+        /// Two-class split for selection visuals (QUA-95):
+        ///   • **Non-search rows** → return `nil`; AppKit creates a default
+        ///     `NSTableRowView` and paints the standard emphasized selection
+        ///     (solid system blue, text auto-flipped to white). No custom code,
+        ///     no behaviour to maintain.
+        ///   • **Search-result rows** → return `EntryListSearchRowView`, which
+        ///     paints the Ulysses pale-blue tint and keeps `interiorBackgroundStyle`
+        ///     at `.normal` so the SwiftUI body's text stays dark on the light
+        ///     selection. The dark active-matched-line accent inside the row then
+        ///     reads cleanly against the pale tint.
+        ///
+        /// Single responsibility per class — no `if isSearchMode` branches scattered
+        /// across `drawSelection` / `interiorBackgroundStyle` / configure paths.
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+            guard row >= 0 && row < entries.count else { return nil }
+            guard model.searchMatches[entries[row].path] != nil else {
+                return nil  // default NSTableRowView, system selection
+            }
+            let view = tableView.makeView(withIdentifier: Self.rowViewIdentifier, owner: self) as? EntryListSearchRowView
+            if let view { return view }
+            let fresh = EntryListSearchRowView()
+            fresh.identifier = Self.rowViewIdentifier
+            return fresh
+        }
+
         /// Measure each row at the actual column width. `usesAutomaticRowHeights`
         /// fed NSHostingView's ideal (single-line) intrinsic size to the table,
         /// which collapsed multi-line preview and broke worse with search-expand.
@@ -351,6 +377,39 @@ struct EntryListTable: NSViewRepresentable {
             guard let path = sender.representedObject as? String else { return }
             Task { await model.moveToTrash(path) }
         }
+    }
+}
+
+/// Search-mode row visual (QUA-95): Ulysses two-layer selection.
+/// Only allocated for rows whose entry has search matches — non-search rows
+/// take the default NSTableRowView path (see `rowViewForRow`), so we never
+/// need to ask "am I a search row?" inside this class.
+///
+///   • **emphasized** (window key + table is first responder) → accent tint
+///     (pale blue at ~18% opacity, follows the user's macOS accent color)
+///   • **unemphasized** (focus lives elsewhere) → system unemphasized gray
+///
+/// `interiorBackgroundStyle` is pinned to `.normal` so NSTableCellView's
+/// auto-propagation doesn't flip SwiftUI `.primary`/`.secondary` text colors
+/// to their light variants — they'd be invisible on the pale tint.
+@MainActor
+private final class EntryListSearchRowView: NSTableRowView {
+    override var isEmphasized: Bool {
+        didSet { if oldValue != isEmphasized { needsDisplay = true } }
+    }
+
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard isSelected else { return }
+        let color: NSColor = isEmphasized
+            ? NSColor.controlAccentColor.withAlphaComponent(0.18)
+            : NSColor.unemphasizedSelectedContentBackgroundColor
+        color.setFill()
+        // Slight horizontal inset so selection reads as a "card on paper"
+        // rather than running flush to the column edges.
+        let rect = bounds.insetBy(dx: 4, dy: 0)
+        NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
     }
 }
 
