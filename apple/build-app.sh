@@ -12,6 +12,40 @@ VERSION="1.0"
 echo "Building..."
 swift build
 
+# MLX looks for `default.metallib` at the package root so 深度 (semantic) mode
+# can load its Metal kernels. The file is gitignored (~3 MB binary blob), so a
+# fresh worktree won't have one. Search in this preference order and copy in:
+#   1. The mlx-swift SPM resource bundle in `.build` (when MLX's metal pass
+#      actually ran in this checkout).
+#   2. Any sibling git worktree that already has it at its package root
+#      (typically `main`, which is where the file usually ends up first).
+# If neither exists, warn and keep going — 快速 / 平衡 modes don't need it.
+if [ ! -f default.metallib ]; then
+    candidates=(
+        "$PKG_ROOT/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib"
+        ".build/arm64-apple-macosx/release/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib"
+    )
+    # Fall back to any other worktree's package-root copy.
+    HERE_APPLE="$(pwd)"
+    while IFS= read -r wt; do
+        cand="$wt/apple/default.metallib"
+        if [ -f "$cand" ] && [ "$wt/apple" != "$HERE_APPLE" ]; then
+            candidates+=("$cand")
+        fi
+    done < <(git worktree list --porcelain 2>/dev/null | awk '/^worktree/ {print $2}')
+
+    for cand in "${candidates[@]}"; do
+        if [ -f "$cand" ]; then
+            echo "Bootstrapping default.metallib from $cand"
+            cp "$cand" default.metallib
+            break
+        fi
+    done
+    if [ ! -f default.metallib ]; then
+        echo "WARNING: no default.metallib located — 深度 mode will crash at first query." >&2
+    fi
+fi
+
 echo "Assembling .app bundle..."
 rm -rf Marple.app
 mkdir -p "$APP/MacOS"
