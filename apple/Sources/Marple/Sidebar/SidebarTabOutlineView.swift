@@ -111,7 +111,7 @@ struct SidebarOutlineView: NSViewRepresentable {
         outline.floatsGroupRows = false
         outline.indentationPerLevel = 14
         outline.backgroundColor = .clear
-        outline.allowsMultipleSelection = false
+        outline.allowsMultipleSelection = true
         outline.delegate = context.coordinator
         outline.dataSource = context.coordinator
         outline.target = context.coordinator
@@ -355,6 +355,14 @@ struct SidebarOutlineView: NSViewRepresentable {
             }
             let row = outline.row(forItem: target)
             guard row >= 0 else { return }
+            // Preserve a multi-selection across reloads as long as it still covers
+            // the active row. Re-collapsing to a single index would defeat the
+            // whole point of Shift/Cmd-click. Only nudge the selection when the
+            // active row isn't already part of it.
+            if outline.selectedRowIndexes.count > 1, outline.selectedRowIndexes.contains(row) {
+                outline.scrollRowToVisible(row)
+                return
+            }
             isUpdatingSelection = true
             outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             outline.scrollRowToVisible(row)
@@ -585,6 +593,10 @@ struct SidebarOutlineView: NSViewRepresentable {
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !isUpdatingSelection,
                   let outline = notification.object as? NSOutlineView else { return }
+            // Multi-select must not steal navigation: only a single-row selection
+            // drives the active tab/pane. Shift/Cmd-click leaves the active tab
+            // untouched — matches CodeEdit's ProjectNavigator behavior.
+            guard outline.selectedRowIndexes.count == 1 else { return }
             let row = outline.selectedRow
             guard row >= 0, let node = outline.item(atRow: row) as? SidebarOutlineNode else { return }
             switch node.kind {
