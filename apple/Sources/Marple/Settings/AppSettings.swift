@@ -100,10 +100,10 @@ enum ReadingFontFamily: String, CaseIterable {
 
 /// Discrete option sets for the reading-typography controls.
 enum ReadingDefaults {
-    static let fontSize: Double = 17
-    static let lineHeight: Double = 1.6
+    static let fontSize: Double = 15
+    static let lineHeight: Double = 1.62
     static let fontSizeOptions: [Double] = [15, 16, 17, 18, 19]
-    static let lineHeightOptions: [Double] = [1.6, 1.78, 1.9]
+    static let lineHeightOptions: [Double] = [1.62, 1.78, 1.9]
 }
 
 /// Resolved reading-typography config, injected through the environment so the
