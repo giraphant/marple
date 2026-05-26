@@ -198,16 +198,55 @@ final class AppModel {
 
     // MARK: derived recompute
 
-    /// Rebuild the index-wide caches (counts + theme index). O(n) over all entries;
-    /// runs once per index load, not per render.
+    /// Rebuild the index-wide caches. Split into two phases:
+    /// - immediate: counts + themeIndex (cheap; the sidebar needs them right away)
+    /// - deferred: authorIndex/annotationIndex/searchIndex (heavy; only needed by
+    ///   the reading view's relations panel and the Cmd-K palette, neither of
+    ///   which is exercised in the first few hundred ms after launch)
     private func rebuildIndexDerived() {
         var c: [EntryType: Int] = [:]
         for e in entries { c[e.type, default: 0] += 1 }
         counts = c
         themeIndex = themeCounts(entries)
-        authorIndex = buildAuthorIndex(entries)
-        annotationIndex = buildAnnotationIndex(entries)
-        searchIndex = buildSearchIndex(entries)
+        scheduleDeferredDerivedRebuild()
+    }
+
+    /// Build the heavy derived caches (authors, annotations, search index) on a
+    /// background task and publish them on the main actor when done. If
+    /// `entries` changes again before this task completes, the in-flight task
+    /// is cancelled and stale dispatch blocks are vetoed by generation counter
+    /// — only the latest snapshot wins.
+    private var deferredDerivedTask: Task<Void, Never>?
+    private var derivedGeneration: Int = 0
+    private func scheduleDeferredDerivedRebuild() {
+        deferredDerivedTask?.cancel()
+        derivedGeneration &+= 1
+        let generation = derivedGeneration
+        let snapshot = entries
+        deferredDerivedTask = Task { [weak self] in
+            let result = await Task.detached(priority: .utility) {
+                let authors = buildAuthorIndex(snapshot)
+                let annot = buildAnnotationIndex(snapshot)
+                let search = buildSearchIndex(snapshot)
+                return (authors, annot, search)
+            }.value
+            if Task.isCancelled { return }
+            // Hop to the next main-runloop tick (not MainActor.run, which can
+            // run synchronously inside the current render pass and triggered an
+            // NSTableView reentrant-delegate warning when @Observable
+            // invalidation cascaded back into the table mid-render).
+            //
+            // DispatchQueue.main.async can't be cancelled, so guard the
+            // assignment with the generation counter: any newer rebuild bumps
+            // `derivedGeneration` and this stale block becomes a no-op.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.derivedGeneration == generation else { return }
+                self.authorIndex = result.0
+                self.annotationIndex = result.1
+                self.searchIndex = result.2
+                if self.openEntry != nil { self.recomputeOpenDerived() }
+            }
+        }
     }
 
     /// Recompute the open document's outline / stats / entry / relations. O(n) over
