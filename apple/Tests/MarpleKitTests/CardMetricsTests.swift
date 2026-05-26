@@ -4,7 +4,7 @@ import Foundation
 
 @Suite struct CardMetricsTests {
     private func entry(preview: String, title: String = "Title", themes: [String] = []) -> Entry {
-        Entry(path: "p.md", type: .paperAnalysis, title: title, author: "A", year: "2020",
+        Entry(path: "p.md", type: .paperAnalysis, title: title, author: ["A"], year: "2020",
               ratingScore: 5, themes: themes, preview: preview, hasPDF: false)
     }
 
@@ -25,7 +25,7 @@ import Foundation
 
     @Test func imageEntriesReserveThumbnailHeight() {
         let image = Entry(path: "vault/images/loop/image.md", type: .image, title: "Loop",
-                          author: nil, year: nil, ratingScore: 0, themes: [],
+                          author: [], year: nil, ratingScore: 0, themes: [],
                           preview: "", hasPDF: false)
         #expect(CardMetrics.estimatedHeight(for: image) >= 280)
     }

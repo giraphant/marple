@@ -43,7 +43,7 @@ struct IndexWriterTests {
             title: "Dogs and Their Owners",
             titleEn: "Dogs and Their Owners",
             titleCn: nil,
-            author: "Smith, John",
+            author: ["Smith, John"],
             yearJSON: "2019",           // numeric scalar → "2019"
             ratingJSON: "\"★★★\"",
             ratingScore: 3.0,
@@ -79,7 +79,7 @@ struct IndexWriterTests {
             title: "猫の哲学",
             titleEn: "Philosophy of Cats",
             titleCn: "猫的哲学",
-            author: "Tanaka, Yuki",
+            author: ["Tanaka, Yuki"],
             yearJSON: "[2010,2015]",
             ratingJSON: nil,
             ratingScore: 0.0,
@@ -114,7 +114,7 @@ struct IndexWriterTests {
             title: "Quick Note on Cats",
             titleEn: nil,
             titleCn: nil,
-            author: nil,
+            author: [],
             yearJSON: nil,
             ratingJSON: nil,
             ratingScore: 0.0,
@@ -217,7 +217,10 @@ struct IndexWriterTests {
         #expect(e.path == "vault/papers/smith-dogs-2019.md")
         #expect(e.type == .paperAnalysis)
         #expect(e.title == "Dogs and Their Owners")
-        #expect(e.author == "Smith, John")
+        // SQLite round-trip is lossy on commas (single author "Smith, John"
+        // stores as joined text and splits back into two names). Accepted
+        // QUA-109 behavior — see Entry.author docs.
+        #expect(e.author == ["Smith", "John"])
         #expect(e.year == "2019")
         #expect(e.ratingScore == 3.0)
         #expect(e.hasPDF == true)

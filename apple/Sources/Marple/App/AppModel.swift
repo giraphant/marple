@@ -865,12 +865,12 @@ final class AppModel {
     }
 
     private func ideaEntry(from draft: NoteDraft) -> Entry {
-        Entry(path: draft.path, type: .note, title: draft.title, author: nil, year: nil,
+        Entry(path: draft.path, type: .note, title: draft.title, author: [], year: nil,
               ratingScore: 0, themes: [], preview: "", hasPDF: false)
     }
 
     private func annotationEntry(from draft: NoteDraft, target: Entry) -> Entry {
-        Entry(path: draft.path, type: .note, title: draft.title, author: nil, year: nil,
+        Entry(path: draft.path, type: .note, title: draft.title, author: [], year: nil,
               ratingScore: 0, themes: [], preview: "", hasPDF: false, annotates: target.path)
     }
 
@@ -978,11 +978,31 @@ final class AppModel {
             local: { $0.with(title: .some(val)) })
     }
 
-    func setAuthor(_ text: String?) async {
-        let val = normalize(text)
-        await applyPatch(field: "author",
-            { FrontmatterPatch.setScalar($0, key: "author", value: val) },
-            local: { $0.with(author: .some(val)) })
+    /// Set the author list. Empty list → clear both `author:` and `authors:`
+    /// (legacy alias) frontmatter keys; non-empty → write canonical block
+    /// list under `author:` per SPEC §5.2.
+    func setAuthor(_ authors: [String]) async {
+        let cleaned = authors
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        await applyPatch(
+            field: "author",
+            { raw in
+                if cleaned.isEmpty {
+                    // Double-clear: vault has both `author:` and `authors:`
+                    // historic spellings; drop both to guarantee absence.
+                    return FrontmatterPatch.removeKey(
+                        FrontmatterPatch.removeKey(raw, key: "author"),
+                        key: "authors"
+                    )
+                }
+                // Also drop the alias key so the canonical `author:` is the
+                // only one present after the write.
+                let withoutAlias = FrontmatterPatch.removeKey(raw, key: "authors")
+                return FrontmatterPatch.setSequence(withoutAlias, key: "author", values: cleaned)
+            },
+            local: { $0.with(author: cleaned) }
+        )
     }
 
     /// Author-profile entry whose title matches `name` (case-insensitive). Used

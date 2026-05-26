@@ -99,8 +99,8 @@ private struct ImageObjectDetailView: View {
                             .font(.title2.weight(.semibold))
                             .textSelection(.enabled)
 
-                        if let author = entry.author, !author.isEmpty {
-                            Label(author, systemImage: "person")
+                        if !entry.author.isEmpty {
+                            Label(entry.author.joined(separator: ", "), systemImage: "person")
                                 .font(Typo.callout)
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)

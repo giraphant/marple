@@ -114,7 +114,10 @@ struct IndexedEntryTests {
         }
         #expect(entry.entryType == "paper-analysis")
         #expect(entry.title == "Dogs and Cats in the Wild")
-        #expect(entry.author == "Smith, John")
+        // Scalar `author: Smith, John` is QUA-109 lossy-split into two names
+        // by `splitAuthors` (the comma is the separator). Users who genuinely
+        // want a single "Last, First" author must use sequence form.
+        #expect(entry.author == ["Smith", "John"])
         #expect(entry.ratingScore == 3.0)
         #expect(entry.yearJSON == "2019")
         #expect(entry.themes == ["ai", "ethics"])
@@ -365,7 +368,7 @@ struct IndexedEntryTests {
         guard case .indexed(let entry) = outcome else {
             Issue.record("Expected .indexed"); return
         }
-        #expect(entry.author == "Alice Smith, Bob Jones")
+        #expect(entry.author == ["Alice Smith", "Bob Jones"])
     }
 
     @Test("author field takes priority over authors")
@@ -384,7 +387,7 @@ struct IndexedEntryTests {
         guard case .indexed(let entry) = outcome else {
             Issue.record("Expected .indexed"); return
         }
-        #expect(entry.author == "Solo Author")
+        #expect(entry.author == ["Solo Author"])
     }
 
     // MARK: - Image entries
@@ -415,7 +418,7 @@ struct IndexedEntryTests {
         #expect(entry.entryType == "image")
         #expect(entry.path == "vault/images/ai-agent-loop-diagram/image.md")
         #expect(entry.title == "AI Agent Loop Diagram")
-        #expect(entry.author == "Alice Example")
+        #expect(entry.author == ["Alice Example"])
         #expect(entry.source == "https://example.com/agent-loop")
         #expect(entry.themes == ["AI", "architecture"])
         #expect(entry.hasPDF == false)

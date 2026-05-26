@@ -76,7 +76,11 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public let path: String
     public let type: EntryType
     public let title: String?
-    public let author: String?
+    /// Authors as a list. Empty means no author. Per QUA-109, the canonical
+    /// shape is always a list (single-author = 1-element list) — no scalar
+    /// branch on consumers. Legacy cache rows that stored a joined string
+    /// are split via `splitAuthors` on decode.
+    public let author: [String]
     public let year: String?
     public let ratingScore: Double
     public let themes: [String]
@@ -105,7 +109,15 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         path = try c.decode(String.self, forKey: .path)
         type = try c.decode(EntryType.self, forKey: .type)
         title = try c.decodeIfPresent(String.self, forKey: .title)
-        author = try c.decodeIfPresent(String.self, forKey: .author)
+        // Author: prefer new array shape; fall back to legacy joined-string for
+        // caches written before QUA-109. Missing or unknown shape → empty.
+        if let list = try? c.decode([String].self, forKey: .author) {
+            author = list
+        } else if let scalar = try? c.decode(String.self, forKey: .author) {
+            author = splitAuthors(scalar)
+        } else {
+            author = []
+        }
         preview = (try? c.decodeIfPresent(String.self, forKey: .preview)) ?? ""
         ratingScore = (try? c.decodeIfPresent(Double.self, forKey: .ratingScore)) ?? 0
         themes = (try? c.decodeIfPresent([String].self, forKey: .themes)) ?? []
@@ -129,7 +141,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         annotates = (try? c.decodeIfPresent(String.self, forKey: .annotates)) ?? nil
     }
 
-    public init(path: String, type: EntryType, title: String?, author: String?,
+    public init(path: String, type: EntryType, title: String?, author: [String],
                 year: String?, ratingScore: Double, themes: [String],
                 preview: String, hasPDF: Bool, pdfSlug: String? = nil,
                 mtime: Double? = nil, added: Double? = nil, source: String? = nil,
@@ -158,10 +170,13 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
 public extension Entry {
     /// Copy with selected metadata fields replaced. Double-optional params let a
     /// caller clear a field (`.some(nil)`) vs leave it unchanged (omit).
-    func with(title: String?? = nil, author: String?? = nil,
+    /// `author` uses single-optional because the value type itself
+    /// (`[String]`) already encodes "empty" — pass `[]` to clear.
+    func with(title: String?? = nil, author: [String]? = nil,
               ratingScore: Double? = nil, year: String?? = nil, source: String?? = nil,
               topic: String?? = nil, doi: String?? = nil, themes: [String]? = nil) -> Entry {
-        Entry(path: path, type: type, title: title ?? self.title, author: author ?? self.author,
+        Entry(path: path, type: type, title: title ?? self.title,
+              author: author ?? self.author,
               year: year ?? self.year, ratingScore: ratingScore ?? self.ratingScore,
               themes: themes ?? self.themes, preview: preview, hasPDF: hasPDF,
               pdfSlug: pdfSlug, mtime: mtime, added: added, source: source ?? self.source,

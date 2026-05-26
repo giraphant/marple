@@ -97,11 +97,11 @@ import Testing
 
     @Test func testEntryWithUpdatesImageEditableMetadata() {
         let entry = Entry(path: "vault/images/loop/image.md", type: .image, title: "Old",
-                          author: "Alice", year: nil, ratingScore: 0, themes: [],
+                          author: ["Alice"], year: nil, ratingScore: 0, themes: [],
                           preview: "", hasPDF: false)
-        let updated = entry.with(title: .some("New"), author: .some("Bob"))
+        let updated = entry.with(title: .some("New"), author: ["Bob"])
         #expect(updated.title == "New")
-        #expect(updated.author == "Bob")
+        #expect(updated.author == ["Bob"])
     }
 
     @Test func testModeledTypesOrderAndLabels() {

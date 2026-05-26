@@ -57,8 +57,9 @@ func isAllCJK(_ s: String) -> Bool {
 enum InlineStyle { case en, zh }
 
 /// "Author / A & B / A et al." (zh: "A、B / A 等") for inline use.
-func authorsInline(_ rawAuthor: String?, style: InlineStyle) -> String {
-    let list = splitAuthors(rawAuthor).map(lastname).filter { !$0.isEmpty }
+/// Takes the parsed authors list directly (QUA-109 — no scalar splitting needed).
+func authorsInline(_ authors: [String], style: InlineStyle) -> String {
+    let list = authors.map(lastname).filter { !$0.isEmpty }
     if list.isEmpty { return "" }
     if list.count == 1 { return list[0] }
     if list.count == 2 {
@@ -70,7 +71,7 @@ func authorsInline(_ rawAuthor: String?, style: InlineStyle) -> String {
 /// Render `entry` as a citation string per `format`. Returns "" when the required
 /// fields are missing (callers decide whether to surface that).
 public func buildCitation(_ entry: Entry, format: CitationFormat) -> String {
-    let author = entry.author?.trimmingCharacters(in: .whitespaces) ?? ""
+    let authors = entry.author.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     let year = entry.year?.trimmingCharacters(in: .whitespaces) ?? ""
     let title = entry.title?.trimmingCharacters(in: .whitespaces) ?? ""
     let source = entry.source?.trimmingCharacters(in: .whitespaces) ?? ""
@@ -78,13 +79,13 @@ public func buildCitation(_ entry: Entry, format: CitationFormat) -> String {
 
     switch format {
     case .inlineEN:
-        let a = authorsInline(author, style: .en)
+        let a = authorsInline(authors, style: .en)
         if a.isEmpty && year.isEmpty { return "" }
         if !a.isEmpty && !year.isEmpty { return "(\(a), \(year))" }
         if !a.isEmpty { return "(\(a))" }
         return "(\(year))"
     case .inlineZH:
-        let a = authorsInline(author, style: .zh)
+        let a = authorsInline(authors, style: .zh)
         if a.isEmpty && year.isEmpty { return "" }
         if !a.isEmpty && !year.isEmpty { return "（\(a)，\(year)）" }
         if !a.isEmpty { return "（\(a)）" }
@@ -92,9 +93,10 @@ public func buildCitation(_ entry: Entry, format: CitationFormat) -> String {
     case .title:
         return title
     case .markdown:
+        let authorJoined = authors.joined(separator: ", ")
         var parts: [String] = []
-        if !author.isEmpty && !year.isEmpty { parts.append("\(author) (\(year)).") }
-        else if !author.isEmpty { parts.append("\(author).") }
+        if !authorJoined.isEmpty && !year.isEmpty { parts.append("\(authorJoined) (\(year)).") }
+        else if !authorJoined.isEmpty { parts.append("\(authorJoined).") }
         else if !year.isEmpty { parts.append("(\(year)).") }
         if !title.isEmpty { parts.append("*\(title)*.") }
         if !source.isEmpty { parts.append("\(source).") }

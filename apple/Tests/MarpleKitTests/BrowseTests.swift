@@ -3,7 +3,7 @@ import Testing
 
 @Suite struct BrowseTests {
     func e(_ path: String, _ type: EntryType, themes: [String] = []) -> Entry {
-        Entry(path: path, type: type, title: nil, author: nil, year: nil,
+        Entry(path: path, type: type, title: nil, author: [], year: nil,
               ratingScore: 0, themes: themes, preview: "", hasPDF: false)
     }
 
