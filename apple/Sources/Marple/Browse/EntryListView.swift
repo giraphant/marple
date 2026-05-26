@@ -8,40 +8,13 @@ struct EntryListView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            List(model.visibleEntries, selection: Binding(
-                get: { model.openPath },
-                set: { if let p = $0 { Task { await model.open(p) } } }
-            )) { entry in
-                row(for: entry)
-            }
-            .listStyle(.inset)
+            // Why not SwiftUI `List`: see EntryListTable header. tl;dr — Ulysses
+            // pale-blue sourceList selection needs `NSTableView` directly, and
+            // SwiftUI List's internal table triggers the QUA-103 reentrant
+            // delegate warning that we can't silence from outside.
+            EntryListTable(model: model)
         }
         .navigationTitle(title)
-    }
-
-    @ViewBuilder
-    private func row(for entry: Entry) -> some View {
-        EntryRow(
-            entry: entry,
-            matches: searching ? model.searchMatches[entry.path] : nil,
-            expanded: model.matchExpanded.contains(entry.path),
-            onToggleExpand: { model.toggleMatchExpanded(entry.path) },
-            onMatchTap: { line in
-                Task {
-                    await model.openMatchedLine(
-                        path: entry.path, query: model.searchMatchQuery,
-                        ordinal: line.matchOrdinal, anchor: line.anchor)
-                }
-            }
-        )
-        .contextMenu {
-            Button("在新页面页打开") { Task { await model.openInNewTab(entry.path) } }
-            Button("新建批注") { Task { await model.newAnnotation(for: entry) } }
-            Divider()
-            Button("移到回收站", role: .destructive) {
-                Task { await model.moveToTrash(entry.path) }
-            }
-        }
     }
 
     private var title: String {
@@ -65,8 +38,6 @@ struct EntryListView: View {
     }
 
     private var isThemesIndex: Bool { if case .themesIndex = model.pane { return true } else { return false } }
-
-    private var searching: Bool { !model.searchText.trimmingCharacters(in: .whitespaces).isEmpty }
 
     private var sortMenu: some View {
         Menu {
