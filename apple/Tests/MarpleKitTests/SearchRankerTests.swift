@@ -68,6 +68,32 @@ import Testing
         #expect(paths([a, b], "10.1000/xyz123") == ["a"])
     }
 
+    @Test func fuzzy5ByteAllTrigramsDifferStillMatches() {
+        // QUA-96 trigram filter edge case (caught in Codex audit). A 5-byte
+        // ASCII token has 3 trigrams, and a 1-edit fuzzy match can wipe ALL
+        // three trigrams ("abxde" vs "abcde" → abx/bxd/xde share nothing with
+        // abc/bcd/cde). The trigram pre-filter must not drop these.
+        let a = e("a", title: "abcde paper")
+        #expect(paths([a], "abxde") == ["a"])
+    }
+
+    @Test func fuzzy8ByteAllTrigramsDifferStillMatches() {
+        // Same edge case at the 8-byte / 2-edit boundary: "abxdeygh" vs
+        // "abcdefgh" with edits at positions 2 and 5 — every one of the
+        // token's 6 trigrams differs from every one of the word's 6 trigrams,
+        // but Levenshtein distance is 2 (within budget).
+        let a = e("a", title: "abcdefgh study")
+        #expect(paths([a], "abxdeygh") == ["a"])
+    }
+
+    @Test func nonFuzzyTokenWithNoTrigramHitReturnsEmptyFast() {
+        // Performance regression guard: a non-fuzzy token whose trigrams are
+        // absent from every doc must bail out without full-scanning the corpus.
+        // CJK is non-fuzzy (canFuzzyBytes requires all-ASCII-alnum).
+        let a = e("a", title: "完全无关")
+        #expect(searchEntries([a], "钦差大臣").isEmpty)
+    }
+
     @Test func resultsSortedByScoreDescending() {
         let strong = e("strong", title: "alpha beta", themes: ["alpha"])
         let weak = e("weak", preview: "alpha appears once here")

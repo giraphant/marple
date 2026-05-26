@@ -256,9 +256,13 @@ struct CommandPalette: View {
         loading = true
         let currentMode = mode
         let promote = promoteType
+        // After QUA-96 the fast ranker is ~5 ms median, so debouncing fast-mode
+        // keystrokes just adds visible drag. FTS / vector still cost real time
+        // (network + embed compute) — keep their tail-debounce.
+        let debounceNs: UInt64 = !debounce ? 0 : (currentMode == .fast ? 0 : 140_000_000)
         searchTask = Task {
-            if debounce {
-                try? await Task.sleep(nanoseconds: 140_000_000)
+            if debounceNs > 0 {
+                try? await Task.sleep(nanoseconds: debounceNs)
                 if Task.isCancelled { return }
             }
             let result = await model.commandSearch(q, mode: currentMode)
