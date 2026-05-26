@@ -73,8 +73,10 @@ final class AppModel {
     private(set) var authorIndex: [String: [Entry]] = [:]
     private(set) var annotationIndex: [String: [Entry]] = [:]
     /// Prebuilt field-weighted index for the command palette's 快速 mode (rebuilt
-    /// whenever `entries` changes, like the other derived caches).
-    private(set) var searchDocs: [SearchDocument] = []
+    /// whenever `entries` changes, like the other derived caches). Carries a
+    /// trigram inverted index so per-keystroke ranking only scores hundreds of
+    /// candidate docs instead of 15k full-scans.
+    private(set) var searchIndex: SearchIndex = .empty
 
     // Trash list (loaded lazily; sidebar badge reads .count).
     private(set) var trashItems: [TrashItem] = []
@@ -205,7 +207,7 @@ final class AppModel {
         themeIndex = themeCounts(entries)
         authorIndex = buildAuthorIndex(entries)
         annotationIndex = buildAnnotationIndex(entries)
-        searchDocs = buildSearchIndex(entries)
+        searchIndex = buildSearchIndex(entries)
     }
 
     /// Recompute the open document's outline / stats / entry / relations. O(n) over
@@ -490,10 +492,12 @@ final class AppModel {
         guard !q.isEmpty else { return [] }
         switch mode {
         case .fast:
-            // Rank ~15k docs OFF the main actor so typing never hitches.
-            let docs = searchDocs
+            // Rank ~15k docs OFF the main actor so typing never hitches. Trigram
+            // prefilter inside `searchDocuments` typically narrows to <300 docs
+            // before scoring (QUA-96).
+            let index = searchIndex
             let ranked = await Task.detached(priority: .userInitiated) {
-                searchDocuments(docs, q)
+                searchDocuments(index, q)
             }.value
             return ranked.map { PaletteResult(entry: $0.entry, score: $0.score, source: nil) }
         case .balanced:
