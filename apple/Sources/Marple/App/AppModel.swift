@@ -212,10 +212,14 @@ final class AppModel {
     /// Build the heavy derived caches (authors, annotations, search docs) on a
     /// background task and publish them on the main actor when done. If
     /// `entries` changes again before this task completes, the in-flight task
-    /// is cancelled — only the latest snapshot wins.
+    /// is cancelled and stale dispatch blocks are vetoed by generation counter
+    /// — only the latest snapshot wins.
     private var deferredDerivedTask: Task<Void, Never>?
+    private var derivedGeneration: Int = 0
     private func scheduleDeferredDerivedRebuild() {
         deferredDerivedTask?.cancel()
+        derivedGeneration &+= 1
+        let generation = derivedGeneration
         let snapshot = entries
         deferredDerivedTask = Task { [weak self] in
             let result = await Task.detached(priority: .utility) {
@@ -229,8 +233,12 @@ final class AppModel {
             // run synchronously inside the current render pass and triggered an
             // NSTableView reentrant-delegate warning when @Observable
             // invalidation cascaded back into the table mid-render).
+            //
+            // DispatchQueue.main.async can't be cancelled, so guard the
+            // assignment with the generation counter: any newer rebuild bumps
+            // `derivedGeneration` and this stale block becomes a no-op.
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, self.derivedGeneration == generation else { return }
                 self.authorIndex = result.0
                 self.annotationIndex = result.1
                 self.searchDocs = result.2
