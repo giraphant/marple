@@ -5,8 +5,8 @@ import Testing
     @Test func extractsHeadingsWithLevelsAndIndex() {
         let blocks = MarkdownModel.blocks(from: "# A\n\npara\n\n## B\n\n### C")
         let items = outline(from: blocks)
-        #expect(items.map(\.level) == [1, 2, 3])
-        #expect(items.map(\.text) == ["A", "B", "C"])
+        #expect(items.map(\.level) == [2, 3])
+        #expect(items.map(\.text) == ["B", "C"])
         for it in items {
             guard case .heading = blocks[it.blockIndex] else {
                 Issue.record("blockIndex \(it.blockIndex) is not a heading"); continue
@@ -22,7 +22,7 @@ import Testing
         #expect(outline(from: blocks).isEmpty)
     }
     @Test func wikilinkHeadingUsesLabelText() {
-        let blocks = MarkdownModel.blocks(from: "# [[target|Shown]]")
+        let blocks = MarkdownModel.blocks(from: "# Title\n\n## [[target|Shown]]")
         #expect(outline(from: blocks).map(\.text) == ["Shown"])
     }
 }
