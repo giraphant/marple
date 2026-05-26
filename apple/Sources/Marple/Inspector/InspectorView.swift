@@ -422,18 +422,306 @@ private struct ScalarRow: View {
 private struct AuthorRow: View {
     @Bindable var model: AppModel
     let entry: Entry
+    @State private var droppedCount = 0
+    @State private var listOpen = false
+    @State private var editingIndex: Int? = nil
+    @State private var editingAll = false
+
     var body: some View {
         FieldRow("作者") {
-            if let prof = model.openRelations?.authorProfile {
-                Button { Task { await model.open(prof.path) } } label: {
-                    Text(entry.author ?? "").lineLimit(1)
-                }
-                .buttonStyle(.link)
-            } else {
+            let names = splitAuthors(entry.author)
+            if editingAll {
+                FullAuthorEditor(initial: entry.author ?? "") { newValue in
+                    Task {
+                        await model.setAuthor(newValue.isEmpty ? nil : newValue)
+                        editingAll = false
+                    }
+                } onCancel: { editingAll = false }
+            } else if names.isEmpty {
                 Text(entry.author ?? "")
                     .font(Typo.callout)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
+            } else if names.count == 1, let name = names.first {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    chip(name: name, index: 0, names: names)
+                }
+            } else {
+                SingleLineOverflowLayout(droppedCount: $droppedCount, spacing: Space.s2) {
+                    ForEach(Array(names.enumerated()), id: \.offset) { i, name in
+                        chip(name: name, index: i, names: names)
+                    }
+                    Button("+\(droppedCount > 0 ? droppedCount : max(1, names.count - 1))") {
+                        listOpen = true
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(.quaternary, in: Capsule())
+                    .popover(isPresented: $listOpen, arrowEdge: .top) {
+                        AuthorListPopover(
+                            names: names,
+                            profile: { model.authorProfile(for: $0) },
+                            onTap: { e in
+                                listOpen = false
+                                Task { await model.open(e.path) }
+                            }
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity)
             }
+        }
+        .id(entry.path)
+    }
+
+    @ViewBuilder
+    private func chip(name: String, index: Int, names: [String]) -> some View {
+        AuthorChip(
+            name: name,
+            profile: model.authorProfile(for: name),
+            onTap: { e in Task { await model.open(e.path) } },
+            onEdit: { editingIndex = index },
+            onRemove: { Task { await spliceAuthor(at: index, with: nil, names: names) } },
+            onEditAll: { editingAll = true }
+        )
+        .popover(
+            isPresented: Binding(
+                get: { editingIndex == index },
+                set: { if !$0 { editingIndex = nil } }
+            ),
+            arrowEdge: .top
+        ) {
+            ChipEditor(initial: name) { newName in
+                Task {
+                    await spliceAuthor(at: index, with: newName, names: names)
+                    editingIndex = nil
+                }
+            } onCancel: { editingIndex = nil }
+        }
+    }
+
+    /// Splice the parsed names list (replace or delete at `index`), re-join with
+    /// ", " and commit via `setAuthor`. This is the scalar-string strategy noted
+    /// in QUA-109; once author becomes `[String]?` natively, drop the rejoin.
+    private func spliceAuthor(at index: Int, with newName: String?, names: [String]) async {
+        var updated = names
+        let trimmed = newName?.trimmingCharacters(in: .whitespaces)
+        if let trimmed, !trimmed.isEmpty {
+            updated[index] = trimmed
+        } else {
+            updated.remove(at: index)
+        }
+        await model.setAuthor(updated.isEmpty ? nil : updated.joined(separator: ", "))
+    }
+}
+
+private struct AuthorChip: View {
+    let name: String
+    let profile: Entry?
+    let onTap: (Entry) -> Void
+    let onEdit: () -> Void
+    let onRemove: () -> Void
+    let onEditAll: () -> Void
+
+    var body: some View {
+        Group {
+            if let p = profile {
+                Button(name) { onTap(p) }.buttonStyle(.plain)
+            } else {
+                Text(name)
+            }
+        }
+        .font(.system(size: 11.5, weight: .medium))
+        .lineLimit(1)
+        .truncationMode(.head)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(.quaternary, in: Capsule())
+        .contextMenu {
+            if let p = profile {
+                Button("跳转到 \(name)") { onTap(p) }
+            }
+            Button("编辑此作者名…") { onEdit() }
+            Button("从此条目移除", role: .destructive) { onRemove() }
+            Button("复制") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(name, forType: .string)
+            }
+            Divider()
+            Button("编辑全部作者…") { onEditAll() }
+        }
+    }
+}
+
+private struct AuthorListPopover: View {
+    let names: [String]
+    let profile: (String) -> Entry?
+    let onTap: (Entry) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(names, id: \.self) { name in
+                let p = profile(name)
+                Button { if let p { onTap(p) } } label: {
+                    HStack(spacing: 8) {
+                        Text(name)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                        Spacer(minLength: 8)
+                        if p != nil {
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .frame(minWidth: 180, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(p == nil)
+            }
+        }
+        .padding(4)
+    }
+}
+
+private struct ChipEditor: View {
+    let initial: String
+    let onCommit: (String) -> Void
+    let onCancel: () -> Void
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            TextField("作者姓名", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 220)
+                .focused($focused)
+                .onSubmit { onCommit(draft) }
+                .onExitCommand { onCancel() }
+            HStack(spacing: 8) {
+                Button("取消") { onCancel() }
+                Button("保存") { onCommit(draft) }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(12)
+        .onAppear { draft = initial; focused = true }
+    }
+}
+
+private struct FullAuthorEditor: View {
+    let initial: String
+    let onCommit: (String) -> Void
+    let onCancel: () -> Void
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("A, B & C", text: $draft)
+            .textFieldStyle(.roundedBorder)
+            .frame(maxWidth: 170, alignment: .trailing)
+            .focused($focused)
+            .onSubmit { onCommit(draft) }
+            .onExitCommand { onCancel() }
+            .onAppear { draft = initial; focused = true }
+    }
+}
+
+/// Lays subviews on a single line; the *last* subview is the overflow indicator
+/// and is only placed when earlier subviews don't all fit. We reserve a fixed
+/// 36 pt slot for it so its text width (which depends on the dropped count) does
+/// not feed back into the layout and cause oscillation.
+private struct SingleLineOverflowLayout: Layout {
+    @Binding var droppedCount: Int
+    var spacing: CGFloat = Space.s2
+    private let moreReserveWidth: CGFloat = 36
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        // We deliberately do NOT report dropped from here: SwiftUI calls
+        // sizeThatFits speculatively with proposal.width == .infinity, which
+        // would race with the real placement pass and oscillate the state.
+        let width = proposal.width ?? .infinity
+        let plan = compute(width: width, subviews: subviews)
+        return CGSize(width: width.isFinite ? width : plan.usedWidth, height: plan.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        let plan = compute(width: bounds.width, subviews: subviews)
+        report(dropped: plan.dropped)
+        let placed = Set(plan.placements.map(\.idx))
+        // Right-align the chip block within bounds, matching how other
+        // FieldRow values (year, source) sit on the trailing edge.
+        let shift = bounds.width - plan.usedWidth
+        for p in plan.placements {
+            let s = subviews[p.idx].sizeThatFits(.unspecified)
+            let y = bounds.minY + (bounds.height - s.height) / 2
+            subviews[p.idx].place(at: CGPoint(x: bounds.minX + shift + p.x, y: y),
+                                  anchor: .topLeading,
+                                  proposal: ProposedViewSize(s))
+        }
+        for i in 0..<subviews.count where !placed.contains(i) {
+            subviews[i].place(at: CGPoint(x: bounds.minX - 10_000, y: bounds.minY),
+                              anchor: .topLeading,
+                              proposal: .zero)
+        }
+    }
+
+    private struct Plan {
+        var placements: [(idx: Int, x: CGFloat)] = []
+        var usedWidth: CGFloat = 0
+        var height: CGFloat = 0
+        var dropped: Int = 0
+    }
+
+    private func compute(width: CGFloat, subviews: Subviews) -> Plan {
+        let moreIdx = subviews.count - 1
+        let chipCount = moreIdx
+        guard chipCount > 0 else { return Plan() }
+
+        var plan = Plan()
+        var x: CGFloat = 0
+        var visible = 0
+
+        for i in 0..<chipCount {
+            let s = subviews[i].sizeThatFits(.unspecified)
+            let advanceX = visible == 0 ? s.width : x + spacing + s.width
+            let needsMoreAfter = (i < chipCount - 1)
+            let reserve = needsMoreAfter ? (spacing + moreReserveWidth) : 0
+            // Always place the first chip — a row showing only "+N" with no
+            // visible author tells the user nothing useful.
+            if visible > 0, advanceX + reserve > width { break }
+            let placeAt = visible == 0 ? 0 : x + spacing
+            plan.placements.append((i, placeAt))
+            plan.height = max(plan.height, s.height)
+            x = advanceX
+            visible += 1
+        }
+
+        let dropped = chipCount - visible
+        if dropped > 0 {
+            let moreSize = subviews[moreIdx].sizeThatFits(.unspecified)
+            let placeAt = visible == 0 ? 0 : x + spacing
+            plan.placements.append((moreIdx, placeAt))
+            plan.usedWidth = placeAt + moreSize.width
+            plan.height = max(plan.height, moreSize.height)
+        } else {
+            plan.usedWidth = x
+        }
+        plan.dropped = dropped
+        return plan
+    }
+
+    private func report(dropped: Int) {
+        guard dropped != droppedCount else { return }
+        Task { @MainActor in
+            if dropped != droppedCount { droppedCount = dropped }
         }
     }
 }

@@ -985,6 +985,17 @@ final class AppModel {
             local: { $0.with(author: .some(val)) })
     }
 
+    /// Author-profile entry whose title matches `name` (case-insensitive). Used
+    /// by the Inspector so each chip in a multi-author row can navigate to its
+    /// own profile. Linear scan — call frequency is bounded by inspector renders.
+    func authorProfile(for name: String) -> Entry? {
+        let key = name.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !key.isEmpty else { return nil }
+        return entries.first {
+            $0.type == .authorProfile && ($0.title ?? "").lowercased() == key
+        }
+    }
+
     func setSource(_ text: String?) async {
         let val = normalize(text)
         await applyPatch(field: "source",
