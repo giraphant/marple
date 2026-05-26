@@ -44,7 +44,6 @@ public final class IndexDatabase: @unchecked Sendable {
         guard let queue = try openQueue() else { return [] }
         return try queue.read { db in
             guard try db.tableExists("entries") else { return [] }
-            let t0 = Date()
             // Stream rows via cursor + decode inline. Avoids the giant [Row]
             // allocation that fetchAll builds before we ever look at row #1 —
             // on a 15k-row * 17-col query that allocation alone is hundreds of
@@ -62,9 +61,6 @@ public final class IndexDatabase: @unchecked Sendable {
             while let row = try cursor.next() {
                 result.append(Self.entry(from: row))
             }
-            let t1 = Date()
-            print(String(format: "[loadEntries] cursor+decode=%.3fs  rows=%d",
-                t1.timeIntervalSince(t0), result.count))
             return result
         }
     }
