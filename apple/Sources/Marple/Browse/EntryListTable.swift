@@ -90,8 +90,6 @@ struct EntryListTable: NSViewRepresentable {
         weak var tableView: NSTableView?
 
         private var items: [RowItem] = []
-        private var lastOpenPath: String?
-        private var lastMatchJumpKey: String?
         private var lastSearchMode = false
         private var isUpdatingSelection = false
         private var pendingReload = false
@@ -151,8 +149,6 @@ struct EntryListTable: NSViewRepresentable {
         func reload(_ table: NSTableView) {
             let newItems = buildItems()
             let newSearchMode = isInSearchMode
-            let newOpenPath = model.openPath
-            let newMatchJumpKey = matchJumpFingerprint()
 
             let itemsChanged = items != newItems
             // search-mode flip swaps row-view classes (default ↔ group),
@@ -163,8 +159,6 @@ struct EntryListTable: NSViewRepresentable {
                 let wasSearchMode = lastSearchMode
                 items = newItems
                 lastSearchMode = newSearchMode
-                lastOpenPath = newOpenPath
-                lastMatchJumpKey = newMatchJumpKey
                 NSAnimationContext.beginGrouping()
                 NSAnimationContext.current.duration = 0
                 table.reloadData()
@@ -176,14 +170,9 @@ struct EntryListTable: NSViewRepresentable {
                 return
             }
 
-            // Items unchanged. Only thing that can have moved is which row is
-            // selected (openPath / matchJump). Update group-highlight on
-            // visible rows and sync selection — no reloadData, no jitter.
-            if newOpenPath != lastOpenPath || newMatchJumpKey != lastMatchJumpKey {
-                lastOpenPath = newOpenPath
-                lastMatchJumpKey = newMatchJumpKey
-                refreshGroupHighlight(in: table)
-            }
+            // Items unchanged. Just sync selection — that triggers
+            // tableViewSelectionDidChange → refreshGroupHighlight if the
+            // selection target actually moves.
             syncSelection(in: table)
         }
 
@@ -214,11 +203,6 @@ struct EntryListTable: NSViewRepresentable {
             return result
         }
 
-        private func matchJumpFingerprint() -> String {
-            guard let jump = model.matchJump else { return "" }
-            return "\(jump.query)|\(jump.ordinal)|\(jump.anchor)"
-        }
-
         private func ownerEntryPath(of item: RowItem) -> String? {
             switch item {
             case .entryHeader(let entry): return entry.path
@@ -228,17 +212,34 @@ struct EntryListTable: NSViewRepresentable {
             }
         }
 
-        /// Update group highlight on all visible rows (no reloadData).
+        /// Group highlight tracks the **table's current selection owner**, not
+        /// `model.openPath`. Selection changes are synchronous in AppKit (the
+        /// `tableViewSelectionDidChange` notification fires right after
+        /// `selectRowIndexes` or a user click), whereas `model.openPath`
+        /// propagation has to round-trip through async `model.open` →
+        /// observation → scheduled reload — one runloop hop of lag. Tying the
+        /// highlight to selection instead of openPath kills the "上面残留下面
+        /// 晚变色" flicker on card-to-card switches.
+        private func currentSelectionOwner(in table: NSTableView) -> String? {
+            let sel = table.selectedRow
+            guard sel >= 0 && sel < items.count else { return nil }
+            return ownerEntryPath(of: items[sel])
+        }
+
+        /// Refresh `isOpenEntry` across visible rows (no reloadData). Called
+        /// from `tableViewSelectionDidChange` so the swap is synchronous with
+        /// the selection notification — group bg snaps from old → new card in
+        /// the same frame the system selection paint moves.
         private func refreshGroupHighlight(in table: NSTableView) {
             let visibleRange = table.rows(in: table.visibleRect)
             guard visibleRange.length > 0 else { return }
-            let openPath = model.openPath
+            let selectedOwner = currentSelectionOwner(in: table)
             for rowIndex in visibleRange.location..<(visibleRange.location + visibleRange.length) {
                 guard rowIndex >= 0 && rowIndex < items.count,
                       let rowView = table.rowView(atRow: rowIndex, makeIfNecessary: false) as? EntryGroupRowView
                 else { continue }
                 let owner = ownerEntryPath(of: items[rowIndex])
-                rowView.isOpenEntry = (owner != nil && owner == openPath)
+                rowView.isOpenEntry = (owner != nil && owner == selectedOwner)
             }
         }
 
@@ -323,7 +324,10 @@ struct EntryListTable: NSViewRepresentable {
             view.identifier = Self.groupRowID
             let owner = ownerEntryPath(of: items[row])
             view.ownerEntryPath = owner
-            view.isOpenEntry = (owner != nil && owner == model.openPath)
+            // Highlight tracks table selection (synchronous) not openPath
+            // (one-runloop-hop async). See refreshGroupHighlight for rationale.
+            let selectedOwner = currentSelectionOwner(in: tableView)
+            view.isOpenEntry = (owner != nil && owner == selectedOwner)
             view.isFirstInGroup = isFirstInGroup(row: row)
             view.isLastInGroup = isLastInGroup(row: row)
             return view
@@ -373,8 +377,15 @@ struct EntryListTable: NSViewRepresentable {
         }
 
         func tableViewSelectionDidChange(_ notification: Notification) {
-            guard !isUpdatingSelection,
-                  let table = notification.object as? NSTableView else { return }
+            guard let table = notification.object as? NSTableView else { return }
+            // Group highlight tracks selection — refresh on EVERY selection
+            // change (user-driven AND programmatic) so the new card's pale
+            // bg paints in the same frame the system selection moves there.
+            refreshGroupHighlight(in: table)
+
+            // Programmatic selection (syncSelection) shouldn't re-trigger
+            // model.open / openMatchedLine — that would be a feedback loop.
+            guard !isUpdatingSelection else { return }
             let row = table.selectedRow
             guard row >= 0 && row < items.count else { return }
             switch items[row] {
