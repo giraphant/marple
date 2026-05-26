@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 PKG_ROOT=.build/arm64-apple-macosx/debug
 APP="Marple.app/Contents"
-ICONSET="Artwork/FinalIcon/Marple.iconset"
+APPICONSET="Sources/Marple/Resources/Assets.xcassets/AppIcon.appiconset"
 BUNDLE_ID="com.marple.app"
 VERSION="1.0"
 
@@ -54,6 +54,10 @@ mkdir -p "$APP/Resources"
 # Executable
 cp "$PKG_ROOT/Marple" "$APP/MacOS/Marple"
 
+# QUA-107: ship marple-cli inside the bundle so it always tracks the GUI build.
+# A symlink under /usr/local/bin (created below) points at this copy.
+cp "$PKG_ROOT/marple-cli" "$APP/MacOS/marple-cli"
+
 # Ship MLX Metal kernels inside the bundle. `swift run` finds them via the
 # SwiftPM resource bundle that sits next to the .build binary, but once we
 # repackage as a .app that sibling bundle is gone and `open` launches with
@@ -67,8 +71,23 @@ else
     echo "WARNING: default.metallib missing — 深度 mode will crash in the bundled .app." >&2
 fi
 
-# Icon: iconset → icns (iconutil is the reliable way outside Xcode)
-iconutil -c icns "$ICONSET" -o "$APP/Resources/AppIcon.icns"
+# Icon: build a .iconset from the appiconset PNGs in xcassets, then run
+# iconutil. The legacy Artwork/ tree was retired; we now own the renamed
+# copies inside the xcassets and apply Apple's @2x naming for iconutil.
+TMP_ICONSET="$(mktemp -d)/AppIcon.iconset"
+mkdir -p "$TMP_ICONSET"
+cp "$APPICONSET/icon_16x16.png"     "$TMP_ICONSET/icon_16x16.png"
+cp "$APPICONSET/icon_32x32.png"     "$TMP_ICONSET/icon_16x16@2x.png"
+cp "$APPICONSET/icon_32x32.png"     "$TMP_ICONSET/icon_32x32.png"
+cp "$APPICONSET/icon_64x64.png"     "$TMP_ICONSET/icon_32x32@2x.png"
+cp "$APPICONSET/icon_128x128.png"   "$TMP_ICONSET/icon_128x128.png"
+cp "$APPICONSET/icon_256x256.png"   "$TMP_ICONSET/icon_128x128@2x.png"
+cp "$APPICONSET/icon_256x256.png"   "$TMP_ICONSET/icon_256x256.png"
+cp "$APPICONSET/icon_512x512.png"   "$TMP_ICONSET/icon_256x256@2x.png"
+cp "$APPICONSET/icon_512x512.png"   "$TMP_ICONSET/icon_512x512.png"
+cp "$APPICONSET/icon_1024x1024.png" "$TMP_ICONSET/icon_512x512@2x.png"
+iconutil -c icns "$TMP_ICONSET" -o "$APP/Resources/AppIcon.icns"
+rm -rf "$(dirname "$TMP_ICONSET")"
 
 # Info.plist
 cat > "$APP/Info.plist" <<PLIST
@@ -89,9 +108,39 @@ cat > "$APP/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticTermination</key><true/>
   <key>NSSupportsSuddenTermination</key><true/>
+  <!-- QUA-107: marple-cli falls back to this URL scheme to cold-start the app
+       when its Unix socket isn't reachable yet. -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>com.marple.cli</string>
+      <key>CFBundleURLSchemes</key>
+      <array><string>marple</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST
 
 echo "Done: Marple.app"
 echo "Run with:  open Marple.app"
+
+# QUA-107: install / refresh the marple-cli symlink so AI agents can call it
+# by bare name. We symlink into the bundle so every rebuild stays current.
+# Try a user-writable PATH dir first (no sudo); fall back to printing a manual
+# install command if nothing on PATH is writable.
+CLI_SRC="$(pwd)/$APP/MacOS/marple-cli"
+CLI_INSTALLED=0
+for d in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin" "$HOME/bin"; do
+    if [ -d "$d" ] && [ -w "$d" ]; then
+        ln -sf "$CLI_SRC" "$d/marple-cli"
+        echo "Linked: $d/marple-cli -> $CLI_SRC"
+        CLI_INSTALLED=1
+        break
+    fi
+done
+if [ "$CLI_INSTALLED" -eq 0 ]; then
+    echo ""
+    echo "marple-cli built but not linked to PATH. To install:"
+    echo "  sudo ln -sf \"$CLI_SRC\" /usr/local/bin/marple-cli"
+fi
