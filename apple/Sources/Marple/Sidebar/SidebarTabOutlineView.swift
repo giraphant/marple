@@ -398,12 +398,17 @@ struct SidebarOutlineView: NSViewRepresentable {
             }
             let row = outline.row(forItem: target)
             guard row >= 0 else { return }
-            // Preserve a multi-selection across reloads as long as it still covers
-            // the active row. Re-collapsing to a single index would defeat the
-            // whole point of Shift/Cmd-click. Only nudge the selection when the
-            // active row isn't already part of it.
-            if outline.selectedRowIndexes.count > 1, outline.selectedRowIndexes.contains(row) {
-                outline.scrollRowToVisible(row)
+            // Any multi-row selection (>=2 rows) wins over the single-active
+            // default. This covers both the no-op-reload case (selection
+            // already on screen) and the structural-reload case where
+            // `restoreMultiSelection` just rebuilt the selection from a
+            // pre-reload snapshot. Scroll the active row in only if it's
+            // already a member of the multi-selection — otherwise nudging
+            // the viewport to a non-selected row is a surprise.
+            if outline.selectedRowIndexes.count > 1 {
+                if outline.selectedRowIndexes.contains(row) {
+                    outline.scrollRowToVisible(row)
+                }
                 return
             }
             isUpdatingSelection = true
@@ -774,6 +779,12 @@ struct SidebarOutlineView: NSViewRepresentable {
         /// All `SidebarTabPayload`s carried by the current drag. AppKit packs one
         /// pasteboard item per dragged row; this reads each one rather than the
         /// implicit `string(forType:)` shortcut that only sees the first.
+        ///
+        /// Ordering: NSOutlineView invokes `pasteboardWriterForItem` for each
+        /// selected row in ascending row index (visual top-to-bottom) order, and
+        /// items are appended to the pasteboard in that order. QUA-100 relies on
+        /// that — if Apple ever changes it, we'd need to re-sort by current row
+        /// index at drop time. Behavior is stable as of macOS 14/15.
         private func payloads(from info: NSDraggingInfo) -> [SidebarTabPayload] {
             guard let items = info.draggingPasteboard.pasteboardItems else { return [] }
             return items.compactMap { item in
