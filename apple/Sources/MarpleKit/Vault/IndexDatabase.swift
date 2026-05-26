@@ -11,12 +11,40 @@ import GRDB
 /// every call costs ~1.5 s on a 1.5 GB index (the WAL connection has to attach
 /// to the -shm file and warm its page cache). Subsequent reads through the
 /// cached queue see the warm cache and finish in tens of milliseconds.
+///
+/// QUA-104: `loadEntries` consults a sibling `.marple/entries.cache` (a binary
+/// plist snapshot of [Entry]) before running the 17-col × 15k-row SELECT.
+/// A monotonic `meta.entries_revision` counter in SQLite arbitrates freshness:
+/// match → cache hit, mismatch → SQL path + async cache rewrite. The cache is
+/// nuked by VaultIndexer.buildFull and bumped by reconcile, so it self-heals.
 public final class IndexDatabase: @unchecked Sendable {
     public let indexDBPath: String
     private let lock = NSLock()
     private var cachedQueue: DatabaseQueue?
 
+    /// Serialises cache rewrites so two concurrent loadEntries that both saw
+    /// a miss don't race on the temp-rename target. Concurrent reads are fine —
+    /// only the write path needs single-flight.
+    private let cacheWriteLock = NSLock()
+
     public init(indexDBPath: String) { self.indexDBPath = indexDBPath }
+
+    /// Sidecar binary plist of `[Entry]`, kept in sync with `entries_revision`.
+    private var entriesCachePath: String {
+        // .marple/index.sqlite → .marple/entries.cache
+        (indexDBPath as NSString).deletingLastPathComponent + "/entries.cache"
+    }
+
+    /// Bump this when the on-disk cache format (header layout, encoder choice,
+    /// Entry's required Codable shape) changes incompatibly with prior builds.
+    /// Optional Entry fields added with safe `decodeIfPresent` do NOT require a
+    /// bump — old caches still decode, missing fields default to nil/empty.
+    /// Required new fields, encoder swaps, or header rearrangement DO require a bump.
+    private static let cacheFormatVersion: UInt32 = 1
+
+    /// 8-byte ASCII magic "MARPLE\0C" — guards against decoding a foreign file
+    /// that happened to land at this path.
+    private static let cacheMagic: [UInt8] = [0x4D, 0x41, 0x52, 0x50, 0x4C, 0x45, 0x00, 0x43]
 
     /// Shared decoder for row mapping. `loadEntries` maps up to ~15k rows, so reuse
     /// one instance instead of allocating a `JSONDecoder` per row/field.
@@ -42,7 +70,31 @@ public final class IndexDatabase: @unchecked Sendable {
 
     public func loadEntries() throws -> [Entry] {
         guard let queue = try openQueue() else { return [] }
-        return try queue.read { db in
+
+        // 1. Read the current revision via the cached queue. The WAL snapshot
+        //    inside the `read` block guarantees this number describes the
+        //    `entries` rows we would observe in this same transaction.
+        let revision: Int64 = try queue.read { db in
+            guard try db.tableExists("entries") else { return Int64(-1) }
+            return try IndexWriter.entriesRevision(db)
+        }
+        // entries table absent → empty result, no cache work needed.
+        if revision < 0 { return [] }
+
+        // 2. Try cache hit. On any failure (missing, wrong magic, version
+        //    mismatch, revision mismatch, decode error), fall through to SQL.
+        let cacheStart = Date()
+        if let cached = try? readCache(expectedRevision: revision) {
+            let ms = Int(Date().timeIntervalSince(cacheStart) * 1000)
+            print("[marple] loadEntries: cache HIT (\(cached.count) entries, rev=\(revision), \(ms) ms)")
+            return cached
+        }
+
+        // 3. SQL path. ORDER BY path keeps cache order stable across
+        //    rebuilds — without it SQLite's row order is whatever the
+        //    underlying b-tree happens to hand back.
+        let sqlStart = Date()
+        let entries = try queue.read { db -> [Entry] in
             guard try db.tableExists("entries") else { return [] }
             // Stream rows via cursor + decode inline. Avoids the giant [Row]
             // allocation that fetchAll builds before we ever look at row #1 —
@@ -57,11 +109,130 @@ public final class IndexDatabase: @unchecked Sendable {
                        themes_json, topic, source, doi, annotates, has_pdf, pdf_slug,
                        mtime, preview, added
                 FROM entries
+                ORDER BY path
                 """)
             while let row = try cursor.next() {
                 result.append(Self.entry(from: row))
             }
             return result
+        }
+
+        let sqlMs = Int(Date().timeIntervalSince(sqlStart) * 1000)
+        print("[marple] loadEntries: cache MISS → SQL (\(entries.count) entries, rev=\(revision), \(sqlMs) ms) — rewriting cache async")
+
+        // 4. Schedule async cache write. We don't block the caller — even a
+        //    slow encode (~50 ms for 15k entries) is amortized away from boot.
+        let cachePath = entriesCachePath
+        let revisionForWrite = revision
+        let entriesForWrite = entries
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.writeCacheBestEffort(entries: entriesForWrite,
+                                       revision: revisionForWrite,
+                                       cachePath: cachePath)
+        }
+        return entries
+    }
+
+    // MARK: - Cache I/O
+
+    /// Read and validate the cache file. Throws on any structural issue so
+    /// callers can `try?` and fall through to SQL. Also deletes a broken file
+    /// so the next loadEntries doesn't keep replaying the failure.
+    private func readCache(expectedRevision: Int64) throws -> [Entry] {
+        let path = entriesCachePath
+        let data: Data
+        do {
+            data = try Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe)
+        } catch {
+            // Not existing is the normal first-boot case — propagate up so
+            // the caller falls back. Don't delete a file that wasn't there.
+            throw error
+        }
+        do {
+            let entries = try Self.decodeCachePayload(data, expectedRevision: expectedRevision)
+            return entries
+        } catch {
+            // Corrupt / version mismatch / revision mismatch. Wipe so future
+            // boots take the fresh SQL path until the next write succeeds.
+            try? FileManager.default.removeItem(atPath: path)
+            throw error
+        }
+    }
+
+    enum CacheReadError: Error, Equatable {
+        case shortHeader
+        case badMagic
+        case versionMismatch(expected: UInt32, got: UInt32)
+        case revisionMismatch(expected: Int64, got: Int64)
+        case payloadDecode
+    }
+
+    static func decodeCachePayload(_ data: Data, expectedRevision: Int64) throws -> [Entry] {
+        let headerLen = cacheMagic.count + 4 /* version */ + 8 /* revision */ + 4 /* payload count */
+        guard data.count >= headerLen else { throw CacheReadError.shortHeader }
+        var cursor = 0
+        for b in cacheMagic {
+            if data[data.startIndex + cursor] != b { throw CacheReadError.badMagic }
+            cursor += 1
+        }
+        let version = data.withUnsafeBytes { raw -> UInt32 in
+            raw.loadUnaligned(fromByteOffset: cursor, as: UInt32.self).littleEndian
+        }
+        cursor += 4
+        guard version == cacheFormatVersion else {
+            throw CacheReadError.versionMismatch(expected: cacheFormatVersion, got: version)
+        }
+        let revision = data.withUnsafeBytes { raw -> Int64 in
+            Int64(bitPattern: raw.loadUnaligned(fromByteOffset: cursor, as: UInt64.self).littleEndian)
+        }
+        cursor += 8
+        guard revision == expectedRevision else {
+            throw CacheReadError.revisionMismatch(expected: expectedRevision, got: revision)
+        }
+        let payloadLen = data.withUnsafeBytes { raw -> UInt32 in
+            raw.loadUnaligned(fromByteOffset: cursor, as: UInt32.self).littleEndian
+        }
+        cursor += 4
+        guard data.count >= cursor + Int(payloadLen) else { throw CacheReadError.shortHeader }
+        let payload = data.subdata(in: cursor..<(cursor + Int(payloadLen)))
+        do {
+            return try PropertyListDecoder().decode([Entry].self, from: payload)
+        } catch {
+            throw CacheReadError.payloadDecode
+        }
+    }
+
+    /// Encode `[Entry]` to the on-disk format and atomically replace the cache
+    /// file. Best-effort: failures are swallowed (logged) — next boot will pay
+    /// the SQL cost again and retry. UUID-suffixed temp file so two concurrent
+    /// rebuilds don't clobber each other.
+    private func writeCacheBestEffort(entries: [Entry], revision: Int64, cachePath: String) {
+        cacheWriteLock.lock(); defer { cacheWriteLock.unlock() }
+        do {
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
+            let payload = try encoder.encode(entries)
+
+            var blob = Data()
+            blob.reserveCapacity(Self.cacheMagic.count + 16 + payload.count)
+            blob.append(contentsOf: Self.cacheMagic)
+            var v = Self.cacheFormatVersion.littleEndian
+            withUnsafeBytes(of: &v) { blob.append(contentsOf: $0) }
+            var r = UInt64(bitPattern: revision).littleEndian
+            withUnsafeBytes(of: &r) { blob.append(contentsOf: $0) }
+            var len = UInt32(payload.count).littleEndian
+            withUnsafeBytes(of: &len) { blob.append(contentsOf: $0) }
+            blob.append(payload)
+
+            let tmp = cachePath + ".\(UUID().uuidString).tmp"
+            try blob.write(to: URL(fileURLWithPath: tmp), options: .atomic)
+            // Atomic rename on top of the live file (POSIX rename semantics).
+            if FileManager.default.fileExists(atPath: cachePath) {
+                try? FileManager.default.removeItem(atPath: cachePath)
+            }
+            try FileManager.default.moveItem(atPath: tmp, toPath: cachePath)
+        } catch {
+            print("[marple] entries cache write failed (non-fatal): \(error)")
         }
     }
 

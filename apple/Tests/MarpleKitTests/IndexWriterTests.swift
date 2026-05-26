@@ -142,19 +142,22 @@ struct IndexWriterTests {
 
     // MARK: - Schema creation
 
-    @Test("createSchema creates all required tables")
+    @Test("createSchema creates the surviving tables and drops the retired ones")
     func createSchemaAllTables() throws {
         let path = try tempDBPath()
         let queue = try openAndCreateSchema(at: path)
         try queue.read { db in
             #expect(try db.tableExists("entries"))
-            #expect(try db.tableExists("entry_text"))
             #expect(try db.tableExists("entry_themes"))
-            // FTS5 virtual tables show up via sqlite_master
-            let fts = try String.fetchAll(db, sql:
-                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('entry_search','entry_trigram') ORDER BY name")
-            #expect(fts.sorted() == ["entry_search", "entry_trigram"])
             #expect(try db.tableExists("meta"))
+            // entry_trigram is an FTS5 virtual table — visible in sqlite_master.
+            let fts = try String.fetchAll(db, sql:
+                "SELECT name FROM sqlite_master WHERE type='table' AND name = 'entry_trigram'")
+            #expect(fts == ["entry_trigram"])
+            // QUA-102: entry_search / entry_text are write-only legacy tables
+            // that no Swift read path queries. createSchema must NOT create them.
+            #expect(try !db.tableExists("entry_search"))
+            #expect(try !db.tableExists("entry_text"))
         }
     }
 
@@ -267,25 +270,6 @@ struct IndexWriterTests {
         ])
     }
 
-    // MARK: - entry_text table
-
-    @Test("entry_text stores search_text verbatim")
-    func entryTextStoresSearchText() throws {
-        let path = try tempDBPath()
-        let queue = try openAndCreateSchema(at: path)
-        let entry = makePaperEntry()
-        try queue.write { db in try IndexWriter.insert(db, entry) }
-
-        try queue.read { db in
-            let rows = try Row.fetchAll(db, sql:
-                "SELECT path, search_text FROM entry_text WHERE path = ?",
-                arguments: [entry.path])
-            #expect(rows.count == 1)
-            let storedText: String = rows[0]["search_text"]
-            #expect(storedText == entry.searchText)
-        }
-    }
-
     // MARK: - entry_themes table
 
     @Test("entry_themes has one row per non-empty theme")
@@ -357,65 +341,6 @@ struct IndexWriterTests {
         #expect(hits[0].entry.path == book.path)
     }
 
-    // MARK: - entry_search FTS
-
-    @Test("entry_search year column stores fts_json flattened form of year_json array")
-    func entrySearchYearFlattened() throws {
-        // book entry has yearJSON = "[2010,2015]"
-        // fts_json should flatten the JSON array to "2010 2015"
-        // So an FTS match on "2015" in entry_search should return the book.
-        let path = try tempDBPath()
-        let queue = try openAndCreateSchema(at: path)
-        let book = makeBookEntry()
-        try queue.write { db in try IndexWriter.insert(db, book) }
-
-        try queue.read { db in
-            let rows = try Row.fetchAll(db, sql:
-                "SELECT path, year FROM entry_search WHERE entry_search MATCH 'year:\"2015\"'")
-            #expect(rows.count == 1)
-            let p: String = rows[0]["path"]
-            #expect(p == book.path)
-            let yearCol: String? = rows[0]["year"]
-            #expect(yearCol == "2010 2015")
-        }
-    }
-
-    @Test("entry_search title column contains searchText of 4 title variants")
-    func entrySearchTitleColumn() throws {
-        let path = try tempDBPath()
-        let queue = try openAndCreateSchema(at: path)
-        let book = makeBookEntry()
-        try queue.write { db in try IndexWriter.insert(db, book) }
-
-        try queue.read { db in
-            // The book has title="猫の哲学", titleEn="Philosophy of Cats",
-            // titleCn="猫的哲学", translationTitleCn="猫の哲学（中文版）"
-            // entry_search.title = searchText([t,tEn,tCn,ttCn])
-            // Should be queryable by any of those.
-            let rows = try Row.fetchAll(db, sql:
-                "SELECT path FROM entry_search WHERE entry_search MATCH 'title:Philosophy'")
-            #expect(rows.count == 1)
-            let p: String = rows[0]["path"]
-            #expect(p == book.path)
-        }
-    }
-
-    @Test("entry_search themes column is space-joined theme strings")
-    func entrySearchThemesColumn() throws {
-        let path = try tempDBPath()
-        let queue = try openAndCreateSchema(at: path)
-        let paper = makePaperEntry()
-        try queue.write { db in try IndexWriter.insert(db, paper) }
-
-        try queue.read { db in
-            let rows = try Row.fetchAll(db, sql:
-                "SELECT path, themes FROM entry_search WHERE entry_search MATCH 'themes:psychology'")
-            #expect(rows.count == 1)
-            let p: String = rows[0]["path"]
-            #expect(p == paper.path)
-        }
-    }
-
     // MARK: - entries columns (has_pdf stored as 0/1)
 
     @Test("has_pdf stored as 1 for true, 0 for false")
@@ -440,41 +365,4 @@ struct IndexWriterTests {
         }
     }
 
-    // MARK: - fts_json scalar year (non-array) passthrough
-
-    @Test("fts_json of a scalar year_json string passes through the number as text")
-    func ftsJsonScalarYear() throws {
-        let path = try tempDBPath()
-        let queue = try openAndCreateSchema(at: path)
-        let paper = makePaperEntry()  // yearJSON = "2019" (bare number JSON)
-        try queue.write { db in try IndexWriter.insert(db, paper) }
-
-        try queue.read { db in
-            let rows = try Row.fetchAll(db, sql:
-                "SELECT year FROM entry_search WHERE path = ?",
-                arguments: [paper.path])
-            #expect(rows.count == 1)
-            let yearCol: String? = rows[0]["year"]
-            // fts_json of Number(2019) → "2019"
-            #expect(yearCol == "2019")
-        }
-    }
-
-    @Test("fts_json of nil year_json stores empty string")
-    func ftsJsonNilYear() throws {
-        let path = try tempDBPath()
-        let queue = try openAndCreateSchema(at: path)
-        let note = makeNoteEntry()  // yearJSON = nil
-        try queue.write { db in try IndexWriter.insert(db, note) }
-
-        try queue.read { db in
-            let rows = try Row.fetchAll(db, sql:
-                "SELECT year FROM entry_search WHERE path = ?",
-                arguments: [note.path])
-            #expect(rows.count == 1)
-            let yearCol: String? = rows[0]["year"]
-            // fts_json of nil → "" (empty string)
-            #expect(yearCol == "")
-        }
-    }
 }

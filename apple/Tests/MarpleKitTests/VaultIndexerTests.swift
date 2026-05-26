@@ -264,6 +264,115 @@ struct VaultIndexerTests {
 
     // MARK: - reconcile when schema is stale
 
+    /// QUA-102 migration: a DB built by the older marple has all required
+    /// `entries` columns but still carries `entry_search` (the retired 12-col
+    /// FTS5 table). `canSkipFullBuild` must return false so boot rebuilds the
+    /// DB instead of opening 1.4 GB of bloat.
+    @Test("canSkipFullBuild is false when retired entry_search table is present")
+    func canSkipFullBuildFalseOnRetiredEntrySearch() throws {
+        let ws = try makeTempWorkspace()
+        let marpleDir = ws + "/.marple"
+        try FileManager.default.createDirectory(atPath: marpleDir, withIntermediateDirectories: true)
+        let indexPath = marpleDir + "/index.sqlite"
+        let queue = try DatabaseQueue(path: indexPath)
+        // Plant a DB with all required `entries` columns AND a stub entry_search
+        // — the smoking gun for "built by an older marple".
+        try queue.write { db in
+            try db.execute(sql: """
+                CREATE TABLE entries (
+                  path TEXT PRIMARY KEY, type TEXT NOT NULL, book TEXT, title TEXT,
+                  title_en TEXT, title_cn TEXT, author TEXT, year_json TEXT, rating_json TEXT,
+                  rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topic TEXT, source TEXT,
+                  doi TEXT, publisher TEXT, isbn TEXT, translation_title_cn TEXT,
+                  translation_douban_url TEXT, chapters_analyzed INTEGER, annotates TEXT,
+                  created TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
+                  preview TEXT NOT NULL DEFAULT '', body_len INTEGER NOT NULL DEFAULT 0,
+                  added INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE VIRTUAL TABLE entry_search USING fts5(
+                  path UNINDEXED, type UNINDEXED, title, author, book, themes,
+                  topic, source, year, preview, doi, body
+                );
+                """)
+        }
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        #expect(indexer.canSkipFullBuild() == false)
+    }
+
+    // MARK: - QUA-104: entries_revision + cache invalidation
+
+    @Test("buildFull bumps entries_revision and removes a stale entries.cache")
+    func buildFullBumpsRevisionAndNukesCache() throws {
+        let ws = try makeTempWorkspace()
+        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+
+        // Plant a stale cache before any build runs — buildFull must delete it.
+        let marpleDir = ws + "/.marple"
+        try FileManager.default.createDirectory(atPath: marpleDir, withIntermediateDirectories: true)
+        let cachePath = marpleDir + "/entries.cache"
+        try Data("stale-cache-bytes".utf8).write(to: URL(fileURLWithPath: cachePath))
+        #expect(FileManager.default.fileExists(atPath: cachePath))
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+
+        // Cache file is gone — next loadEntries will rebuild it from the new DB.
+        #expect(!FileManager.default.fileExists(atPath: cachePath))
+
+        // entries_revision is non-zero after a successful build.
+        let queue = try DatabaseQueue(path: ws + "/.marple/index.sqlite")
+        let rev = try queue.read { db in try IndexWriter.entriesRevision(db) }
+        #expect(rev > 0)
+    }
+
+    @Test("reconcile bumps entries_revision when there are changes")
+    func reconcileBumpsRevisionOnChange() throws {
+        let ws = try makeTempWorkspace()
+        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+
+        let indexPath = ws + "/.marple/index.sqlite"
+        let revBefore = try DatabaseQueue(path: indexPath).read { db in
+            try IndexWriter.entriesRevision(db)
+        }
+
+        // Add a new file → reconcile upserts it → revision should bump.
+        try write(at: ws + "/vault/papers/b.md", type: "paper-analysis", title: "Paper B")
+        let stats = try indexer.reconcile()
+        #expect(stats.upserted >= 1)
+
+        let revAfter = try DatabaseQueue(path: indexPath).read { db in
+            try IndexWriter.entriesRevision(db)
+        }
+        #expect(revAfter > revBefore)
+    }
+
+    @Test("reconcile does NOT bump entries_revision when nothing changed")
+    func reconcileNoBumpWhenUnchanged() throws {
+        let ws = try makeTempWorkspace()
+        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+
+        let indexPath = ws + "/.marple/index.sqlite"
+        let revBefore = try DatabaseQueue(path: indexPath).read { db in
+            try IndexWriter.entriesRevision(db)
+        }
+
+        // No file changes → reconcile finds everything unchanged → revision stays.
+        let stats = try indexer.reconcile()
+        #expect(stats.upserted == 0)
+        #expect(stats.removed == 0)
+
+        let revAfter = try DatabaseQueue(path: indexPath).read { db in
+            try IndexWriter.entriesRevision(db)
+        }
+        #expect(revAfter == revBefore)
+    }
+
     @Test("reconcile triggers full build when schema is stale")
     func reconcileFullBuildOnStaleSchema() throws {
         let ws = try makeTempWorkspace()
