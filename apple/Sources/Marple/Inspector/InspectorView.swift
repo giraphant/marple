@@ -64,6 +64,8 @@ private enum InspectorStyle {
     static let fieldLabelWidth: CGFloat = 62
     static let rowHeight: CGFloat = 26
     static let rowCorner: CGFloat = 7
+    static let markerSize: CGFloat = 9
+    static let outlineIndent: CGFloat = 16
 
     static let sectionTitle = Font.system(size: 11.5, weight: .bold)
     static let sectionTitleColor = Color(nsColor: .tertiaryLabelColor)
@@ -98,6 +100,24 @@ private struct FieldRow<Value: View>: View {
                 .frame(width: InspectorStyle.fieldLabelWidth, alignment: .leading)
             Spacer(minLength: 0)
             value
+        }
+        .frame(minHeight: InspectorStyle.rowHeight)
+    }
+}
+
+private struct MarkerRow<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+            Image(systemName: "circle")
+                .font(.system(size: InspectorStyle.markerSize, weight: .medium))
+                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+            content
         }
         .frame(minHeight: InspectorStyle.rowHeight)
     }
@@ -226,10 +246,12 @@ private struct PageOutlineGroup: View {
             if model.openOutline.isEmpty {
                 Text("无标题").foregroundStyle(.secondary).font(.callout)
             } else {
-                let baseLevel = model.openOutline.map(\.level).min() ?? 1
+                let minLevel = model.openOutline.map(\.level).min() ?? 1
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(model.openOutline) { item in
-                        PageOutlineRow(item: item, baseLevel: baseLevel) { model.scrollTarget = item.blockIndex }
+                        PageOutlineRow(item: item, depth: item.level - minLevel) {
+                            model.scrollTarget = item.blockIndex
+                        }
                     }
                 }
             }
@@ -239,32 +261,28 @@ private struct PageOutlineGroup: View {
 
 private struct PageOutlineRow: View {
     let item: OutlineItem
-    let baseLevel: Int
+    let depth: Int
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: Space.s3) {
-                Circle()
-                    .stroke(Color(nsColor: .tertiaryLabelColor), lineWidth: 1.5)
-                    .frame(width: 9, height: 9)
+            MarkerRow {
                 Text(item.text)
                     .font(Typo.callout)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.leading, CGFloat(max(item.level - baseLevel, 0) * 14))
-            .padding(.horizontal, Space.s4)
-            .frame(minHeight: InspectorStyle.rowHeight)
         }
         .buttonStyle(.plain)
         .background {
             RoundedRectangle(cornerRadius: InspectorStyle.rowCorner)
                 .fill(.quaternary)
+                .padding(.horizontal, -Space.s4)
                 .opacity(hovering ? 1 : 0)
         }
         .onHover { hovering = $0 }
+        .padding(.leading, CGFloat(depth) * InspectorStyle.outlineIndent)
     }
 }
 
@@ -570,7 +588,10 @@ private struct RelationsView: View {
                     relGroup("图书", books)
                     relGroup("论文", papers)
                 }
-                relGroup("同作者", r.siblings)
+                let siblingBooks = r.siblings.filter { $0.type == .bookOverview }
+                let siblingPapers = r.siblings.filter { $0.type == .paperAnalysis }
+                relGroup("同作者专著", siblingBooks)
+                relGroup("同作者论文", siblingPapers)
                 relGroup("同主题相似", r.similar)
             }
         }
@@ -598,17 +619,18 @@ private struct RelationRow: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(Typo.callout)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Space.s4)
-                .frame(minHeight: InspectorStyle.rowHeight)
+            MarkerRow {
+                Text(title)
+                    .font(Typo.callout)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .buttonStyle(.plain)
         .background {
             RoundedRectangle(cornerRadius: InspectorStyle.rowCorner)
                 .fill(.quaternary)
+                .padding(.horizontal, -Space.s4)
                 .opacity(hovering ? 1 : 0)
         }
         .onHover { hovering = $0 }
