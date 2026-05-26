@@ -52,7 +52,18 @@ final class AppModel {
     private(set) var searchText: String = ""
     private var searchHits: [SearchHit] = []
     private var searchTask: Task<Void, Never>?
+    private var matchTask: Task<Void, Never>?
     private var recomputeTask: Task<Void, Never>?
+
+    /// Per-result matched body lines for the current list search (keyed by path).
+    /// Populated off-main after the search settles; rows read from it.
+    private(set) var searchMatches: [String: BodyMatches] = [:]
+    /// The query `searchMatches` was computed for. A matched-line tap uses THIS
+    /// (not the live `searchText`) so a tap during the debounce window stays
+    /// self-consistent — anchor/ordinal/query always describe the same search.
+    private(set) var searchMatchQuery: String = ""
+    /// Result rows whose "再显示 N 个匹配项" expander has been opened.
+    var matchExpanded: Set<String> = []
 
     // Derived caches — recomputed only when their inputs change, never in a view body.
     private(set) var counts: [EntryType: Int] = [:]
@@ -80,6 +91,21 @@ final class AppModel {
 
     // Inspector → reader scroll channel; an outline tap sets this, DocView observes.
     var scrollTarget: Int?
+
+    /// Query whose matches are highlighted in the open document. Set when a search
+    /// matched-line is clicked; cleared on any other navigation.
+    private(set) var openSearchQuery: String?
+
+    /// One-shot "scroll to this match" request for the reader. `anchor` (the line's
+    /// plain text) locates the exact spot in the rendered text; `ordinal` is the
+    /// fallback; `id` lets re-clicking the same line re-fire the scroll.
+    struct MatchJump: Equatable {
+        let id = UUID()
+        let query: String
+        let anchor: String
+        let ordinal: Int
+    }
+    private(set) var matchJump: MatchJump?
 
     /// Right inspector visibility. Lives here (not as view @State) so the AppKit
     /// toolbar's far-right toggle can drive it while SwiftUI's `.inspector` observes.
@@ -250,7 +276,8 @@ final class AppModel {
         // open document tabs (browser-style: the top is navigation, tabs are pages).
         browsePane = newPane
         isBrowsing = true
-        searchText = ""; searchHits = []
+        searchText = ""; searchHits = []; searchTask?.cancel()
+        clearSearchMatches(); clearReaderHighlight()
         recomputeVisible()
         if case .trash = newPane { Task { await loadTrash() } }
         print("[marple] browse -> \(newPane)")
@@ -276,7 +303,7 @@ final class AppModel {
     private func runSearch() {
         searchTask?.cancel()
         let q = searchText.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { searchHits = []; recomputeVisible(); return }
+        guard !q.isEmpty else { searchHits = []; clearSearchMatches(); recomputeVisible(); return }
         let type: EntryType? = { if case .type(let t) = pane { return t } else { return nil } }()
         searchTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 200_000_000)
@@ -286,6 +313,7 @@ final class AppModel {
                 if Task.isCancelled { return }
                 self?.searchHits = hits
                 self?.recomputeVisible()
+                self?.computeSearchMatches(query: q, paths: hits.map(\.entry.path))
                 print("[marple] search '\(q)' -> \(hits.count) hits")
             } catch {
                 self?.status = "search failed: \(error)"
@@ -294,11 +322,65 @@ final class AppModel {
         }
     }
 
+    private func clearSearchMatches() {
+        matchTask?.cancel()
+        searchMatches = [:]
+        searchMatchQuery = ""
+        matchExpanded = []
+    }
+
+    /// Load each result's stripped body off-main and compute its matched lines.
+    /// Bounded to the hit set (≤ search limit); cancellable and query-versioned so a
+    /// stale load can never attach excerpts to a newer query's rows. Matches the
+    /// stripped body (not the raw file) so frontmatter can't create phantom matches.
+    private func computeSearchMatches(query: String, paths: [String]) {
+        matchTask?.cancel()
+        matchExpanded = []
+        searchMatches = [:]
+        let client = self.client
+        matchTask = Task { [weak self] in
+            var result: [String: BodyMatches] = [:]
+            for path in paths {
+                if Task.isCancelled { return }
+                guard let raw = try? await client.entryText(path: path) else { continue }
+                let body = Frontmatter.split(raw).body
+                let m = bodyLineMatches(body: body, query: query)
+                if !m.lines.isEmpty { result[path] = m }
+            }
+            if Task.isCancelled { return }
+            guard let self,
+                  self.searchText.trimmingCharacters(in: .whitespaces) == query else { return }
+            self.searchMatches = result
+            self.searchMatchQuery = query
+        }
+    }
+
+    /// Toggle a result row's "再显示 N 个匹配项" expander.
+    func toggleMatchExpanded(_ path: String) {
+        if matchExpanded.contains(path) { matchExpanded.remove(path) }
+        else { matchExpanded.insert(path) }
+    }
+
+    /// Open `path` from a clicked search matched-line: opens browser-style (in-place
+    /// while reading, new tab while browsing) and tells the reader to highlight the
+    /// query + scroll to the clicked line.
+    func openMatchedLine(path: String, query: String, ordinal: Int, anchor: String) async {
+        await open(path)
+        openSearchQuery = query
+        matchJump = MatchJump(query: query, anchor: anchor, ordinal: ordinal)
+    }
+
+    private func clearReaderHighlight() {
+        openSearchQuery = nil
+        matchJump = nil
+    }
+
     /// Open `path`. Context-dependent (browser-style): from the browse list (browsing)
     /// it spawns a NEW document tab; while reading it switches the current tab IN-PLACE
     /// (pushes history, so ◀ returns) instead of piling up tabs. Explicit "open in new
     /// tab" always spawns one.
     func open(_ path: String) async {
+        clearReaderHighlight()
         if isBrowsing || workspace == nil {
             await openNewTab(path)
         } else {
@@ -347,7 +429,8 @@ final class AppModel {
     /// Used after history nav, tab switch, new/close tab. Reloads the doc only when
     /// it differs from what's already loaded.
     private func syncToActiveLocation() async {
-        searchText = ""; searchHits = []
+        searchText = ""; searchHits = []; searchTask?.cancel()
+        clearSearchMatches(); clearReaderHighlight()
         recomputeVisible()
         if openPath != loadedDocPath { await loadDoc(openPath) }
     }
@@ -363,6 +446,7 @@ final class AppModel {
             return
         }
         print("[marple] follow [[\(target)]] -> \(hit.path)")
+        clearReaderHighlight()
         // Wikilink follow stays WITHIN the current tab (per-tab history); if we're
         // browsing (no active tab), open it as a new tab instead.
         if !isBrowsing, workspace != nil {
