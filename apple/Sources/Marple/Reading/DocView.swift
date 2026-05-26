@@ -34,6 +34,8 @@ struct DocView: View {
                     markdown: Wikilink.preprocessForRendering(model.openBody),
                     style: renderStyle,
                     scrollTarget: resolvedScrollTarget,
+                    highlightQuery: model.openSearchQuery,
+                    jump: model.matchJump,
                     onLinkClick: { url in
                         if let target = WikiURL.target(from: url) {
                             Task { await model.follow(target) }
