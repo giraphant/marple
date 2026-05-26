@@ -643,4 +643,80 @@ import Foundation
         let order = w.tabs(in: g).map(\.id)
         #expect(order == [ids[1], ids[2], ids[0], ids[4], ids[3]])
     }
+
+    // MARK: phase 3 — multi-item drag
+
+    @Test func moveTabsToRootDissolvesEmptiedSourceGroup() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1] at root[0]
+        // Lift both group members back to root at index 1. G empties and
+        // dissolves; the new tabs occupy the positions where G used to sit.
+        w.moveTabsToRoot([ids[0], ids[1]], at: 1)
+        #expect(w.tabGroups.isEmpty)
+        #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[2], ids[3]])
+    }
+
+    @Test func moveTabsToRootKeepsPartiallyEmptiedGroupAlive() throws {
+        var (w, ids) = workspace(6)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1]
+        let g = try #require(w.tabGroups.first?.id)
+        w.moveTab(ids[2], toGroup: g)
+        w.moveTab(ids[3], toGroup: g)                    // G = [ids0, ids1, ids2, ids3]
+        // Root before move: [G, ids4, ids5]. Lift ids0 + ids1 to root index 1.
+        // G keeps [ids2, ids3] → survives. Inserted at root[1] (after G).
+        w.moveTabsToRoot([ids[0], ids[1]], at: 1)
+        #expect(w.group(g) != nil)
+        #expect(w.tabs(in: g).map(\.id) == [ids[2], ids[3]])
+        #expect(w.tabs.map(\.id) == [ids[2], ids[3], ids[0], ids[1], ids[4], ids[5]])
+    }
+
+    @Test func moveTabsToRootAppendsWhenIndexIsNil() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1]
+        w.moveTabsToRoot([ids[0], ids[1]], at: nil)      // append at end
+        #expect(w.tabs.map(\.id) == [ids[2], ids[3], ids[0], ids[1]])
+    }
+
+    @Test func moveGroupsToRootHoistsNestedGroupBack() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G1 = [ids0, ids1]
+        w.groupTab(ids[3], onto: ids[2])                 // G2 = [ids2, ids3]
+        let g1 = try #require(w.tabGroups.first?.id)
+        let g2 = try #require(w.tabGroups.last?.id)
+        w.moveGroup(g2, intoGroup: g1)                   // G1 = [ids0, ids1, G2]
+        w.moveGroupsToRoot([g2], at: 0)                  // hoist G2 back, at root[0]
+        // Now G1 has 2 children left; should not dissolve.
+        #expect(w.group(g2) != nil)
+        #expect(w.group(g1) != nil)
+        // Root order: G2 first, then G1.
+        let roots = w.rootNodes.compactMap(\.group?.id)
+        #expect(roots == [g2, g1])
+        // Tabs DFS: ids2, ids3 (from G2), then ids0, ids1 (from G1).
+        #expect(w.tabs.map(\.id) == [ids[2], ids[3], ids[0], ids[1]])
+    }
+
+    @Test func payloadAncestorFilterDropsDescendantsOfSelectedGroups() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1]
+        let g = try #require(w.tabGroups.first?.id)
+        // Selection: G + ids0 (descendant) + ids2 (independent).
+        // ids0 must be dropped (G already moves it); G + ids2 remain.
+        let result = w.payloadAncestorFilter(tabIDs: [ids[0], ids[2]], groupIDs: [g])
+        #expect(result.tabs == [ids[2]])
+        #expect(result.groups == [g])
+    }
+
+    @Test func payloadAncestorFilterDropsNestedGroupOfSelectedGroup() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G1
+        w.groupTab(ids[3], onto: ids[2])                 // G2
+        let g1 = try #require(w.tabGroups[0].id)
+        let g2 = try #require(w.tabGroups[1].id)
+        w.moveGroup(g2, intoGroup: g1)                   // G2 nested in G1
+        // Selecting both G1 and G2: G2 is a descendant → drop.
+        let result = w.payloadAncestorFilter(tabIDs: [], groupIDs: [g1, g2])
+        #expect(result.tabs.isEmpty)
+        #expect(result.groups == [g1])
+        _ = ids
+    }
 }
