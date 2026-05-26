@@ -3,14 +3,18 @@ import AppKit
 import MarpleKit
 import MarpleEmbeddings
 
+@MainActor
 final class AppState: ObservableObject {
     @Published var model: AppModel?
     @Published var booting = false
     @Published var bootError: String?
     private var indexer: VaultIndexer?
     private var watcher: VaultWatcher?
+    // QUA-107: local CLI socket. Lifetime gated by the "允许 CLI 接入" setting;
+    // see `applyCLISetting` for the toggle path.
+    private var cliServer: CLIServer?
+    private var cliSettingObserver: NSObjectProtocol?
 
-    @MainActor
     func boot(paths: VaultPaths) async {
         guard model == nil, !booting else { return }
         booting = true; bootError = nil
@@ -78,6 +82,40 @@ final class AppState: ObservableObject {
         }
         watcher.start()
         self.watcher = watcher
+
+        // QUA-107: wire the local CLI socket once everything else is up. The
+        // server is opt-in (off by default); we install a UserDefaults observer
+        // so flipping the toggle in 设置 → AI 接入 takes effect immediately.
+        self.cliServer = CLIServer()
+        applyCLISetting()
+        cliSettingObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.applyCLISetting() }
+        }
+    }
+
+    private func applyCLISetting() {
+        guard let cliServer, let model, let indexer else { return }
+        let wanted = UserDefaults.standard.bool(forKey: SettingsKeys.cliServerEnabled)
+        if wanted {
+            do {
+                try cliServer.start(model: model, indexer: indexer)
+            } catch {
+                print("[marple] CLI server start failed: \(error)")
+            }
+        } else {
+            cliServer.stop()
+        }
+    }
+
+    func shutdownCLIBridge() {
+        if let o = cliSettingObserver {
+            NotificationCenter.default.removeObserver(o)
+            cliSettingObserver = nil
+        }
+        cliServer?.stop()
     }
 }
 
@@ -112,4 +150,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// QUA-107: cold-start handler for marple:// URLs. The primary IPC path is
+    /// the Unix socket served by CLIServer; this URL scheme exists so
+    /// `marple-cli open <path>` can launch Marple and open a document page.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            Task { @MainActor in await Self.handle(url: url) }
+        }
+    }
+
+    private static func handle(url: URL) async {
+        // Cold-start race: the URL can arrive before AppModel is ready.
+        // Poll briefly (≤ 5s) and bail rather than queue indefinitely.
+        let deadline = Date().addingTimeInterval(5.0)
+        while ActiveModel.current == nil, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        guard let model = ActiveModel.current else { return }
+
+        let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let host = url.host(percentEncoded: false) ?? ""
+        let items = comps?.queryItems ?? []
+        let params = Dictionary(uniqueKeysWithValues: items.compactMap { item -> (String, String)? in
+            item.value.map { (item.name, $0) }
+        })
+
+        switch host {
+        case "open":
+            if let path = params["path"], !path.isEmpty {
+                try? await model.cliOpenDocument(path: path)
+            }
+        default:
+            print("[marple] ignored marple:// host: \(host)")
+        }
+    }
 }

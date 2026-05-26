@@ -12,6 +12,8 @@ enum SettingsKeys {
     static let citationFormat = "marple.citationFormat"
     static let citationClickAction = "marple.citationClickAction"
     static let originalClickAction = "marple.originalClickAction"
+    // QUA-107: opt-in switch for the local CLI socket server (off by default).
+    static let cliServerEnabled = "marple.cliServerEnabled"
 }
 
 /// What a single click on the 引用 toolbar button does. Right-click always shows

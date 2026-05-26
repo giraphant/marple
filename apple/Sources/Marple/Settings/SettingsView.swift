@@ -13,8 +13,10 @@ struct SettingsView: View {
                 .tabItem { Label("阅读", systemImage: "textformat") }
             ToolbarSettings()
                 .tabItem { Label("工具栏", systemImage: "hand.tap") }
+            AIBridgeSettings()
+                .tabItem { Label("AI 接入", systemImage: "terminal") }
         }
-        .frame(width: 480, height: 340)
+        .frame(width: 480, height: 380)
     }
 }
 
@@ -134,6 +136,26 @@ private struct ToolbarSettings: View {
                 }
                 .pickerStyle(.inline)
                 Text("示例：\(format.example)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: - AI 接入
+
+/// QUA-107: opt-in switch for the local CLI socket server. Off by default so
+/// nothing runs unless the user explicitly turns it on; toggling here flips
+/// the listener live (no relaunch needed).
+private struct AIBridgeSettings: View {
+    @AppStorage(SettingsKeys.cliServerEnabled) private var enabled = false
+
+    var body: some View {
+        Form {
+            Section("命令行接入") {
+                Toggle("允许 marple-cli 接入", isOn: $enabled)
+                Text("打开后,Marple 会在 ~/Library/Application Support/Marple/cli.sock 监听本机 AI 客户端。关闭时监听器不存在,资源占用为零。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
