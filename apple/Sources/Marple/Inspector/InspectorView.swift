@@ -288,6 +288,20 @@ private struct PageOutlineRow: View {
 
 // MARK: - 信息
 
+/// Whether the chip-based author row should be visible for this entry — true
+/// for the modeled "has author" types regardless of whether the current entry
+/// has any authors yet (so the user can always re-add). For other types we
+/// only show the row when authors are already present (avoid surfacing an
+/// edit affordance for entries that conceptually shouldn't carry an author).
+private func authorRowApplies(to entry: Entry) -> Bool {
+    switch entry.type {
+    case .paperAnalysis, .bookOverview, .chapterSummary:
+        return true
+    default:
+        return !entry.author.isEmpty
+    }
+}
+
 // Mirror FIELDS_BY_TYPE (PropertyPanel.tsx); themes handled separately.
 private func editableFields(for type: EntryType) -> Set<String> {
     switch type {
@@ -333,7 +347,10 @@ private struct InfoSection: View {
                             ) { newValue in
                                 await model.setAuthor(splitAuthors(newValue))
                             }
-                        } else if !e.author.isEmpty {
+                        } else if authorRowApplies(to: e) {
+                            // Keep the row visible even when empty so the user
+                            // can re-add authors via the empty-state "+ 添加"
+                            // affordance inside AuthorRow.
                             AuthorRow(model: model, entry: e)
                         }
                         if fields.contains("source") {
@@ -440,25 +457,21 @@ private struct AuthorRow: View {
     var body: some View {
         FieldRow("作者") {
             let names = entry.author
-            if editingAll {
-                // One author per line — keeps multi-word last-first names
-                // ("Smith, John Jr.") intact. The chip editor handles per-name
-                // edits; this is for bulk add / reorder / replace.
-                FullAuthorEditor(initial: names.joined(separator: "\n")) { newValue in
-                    Task {
-                        let parsed: [String] = newValue
-                            .split(separator: "\n", omittingEmptySubsequences: true)
-                            .map { $0.trimmingCharacters(in: .whitespaces) }
-                            .filter { !$0.isEmpty }
-                        await model.setAuthor(parsed)
-                        editingAll = false
-                    }
-                } onCancel: { editingAll = false }
-            } else if names.isEmpty {
-                Text("")
-                    .font(Typo.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            if names.isEmpty {
+                // Empty-state affordance so the user can re-add authors after
+                // clearing all chips. Without this, the row would render empty
+                // and the bulk editor (popover below) would have no anchor.
+                Button {
+                    editingAll = true
+                } label: {
+                    Label("添加作者", systemImage: "plus")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(.quaternary, in: Capsule())
+                }
+                .buttonStyle(.plain)
             } else if names.count == 1, let name = names.first {
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
@@ -491,6 +504,20 @@ private struct AuthorRow: View {
                 }
                 .frame(maxWidth: .infinity)
             }
+        }
+        // Bulk editor lives in a popover (not inline) so the multi-line
+        // TextEditor doesn't blow out the inspector's narrow column.
+        .popover(isPresented: $editingAll, arrowEdge: .top) {
+            FullAuthorEditor(initial: entry.author.joined(separator: "\n")) { newValue in
+                Task {
+                    let parsed: [String] = newValue
+                        .split(separator: "\n", omittingEmptySubsequences: true)
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    await model.setAuthor(parsed)
+                    editingAll = false
+                }
+            } onCancel: { editingAll = false }
         }
         .id(entry.path)
     }
@@ -633,10 +660,12 @@ private struct ChipEditor: View {
     }
 }
 
-/// Multi-line editor for the author list — one name per line. Replaces the
-/// previous single-line text field with comma-separated parsing, which would
-/// silently corrupt names like "Smith, John Jr." (Last, First convention) by
-/// splitting them on the comma.
+/// Bulk editor for the author list — one name per line. Renders inside a
+/// popover (anchored to the AuthorRow) with a fixed width so the multi-line
+/// TextEditor doesn't disturb the inspector's narrow trailing column.
+///
+/// Comma-bearing names like "Smith, John Jr." (Last, First) stay one author
+/// because the only line-delimiter is `\n`.
 private struct FullAuthorEditor: View {
     let initial: String
     let onCommit: (String) -> Void
@@ -645,10 +674,10 @@ private struct FullAuthorEditor: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 6) {
+        VStack(alignment: .trailing, spacing: 8) {
             TextEditor(text: $draft)
                 .font(Typo.callout)
-                .frame(minWidth: 220, minHeight: 80, maxHeight: 140)
+                .frame(width: 240, height: 110)
                 .padding(4)
                 .background(.background)
                 .overlay(
@@ -668,7 +697,8 @@ private struct FullAuthorEditor: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(8)
+        .padding(12)
+        .frame(width: 280)
     }
 }
 
