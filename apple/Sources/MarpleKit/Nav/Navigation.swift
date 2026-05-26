@@ -40,16 +40,18 @@ public struct NavHistory: Hashable, Sendable {
     public mutating func replaceCurrent(with loc: NavLocation) { entries[index] = loc }
 }
 
-/// One tab: an identity, its own history, and a pinned flag.
+/// One tab: an identity, its own history, a pinned flag, and an optional user title.
 public struct NavTab: Identifiable, Hashable, Sendable {
     public let id: UUID
     public var history: NavHistory
     public var pinned: Bool
+    public var customTitle: String?
 
-    public init(id: UUID = UUID(), location: NavLocation, pinned: Bool = false) {
+    public init(id: UUID = UUID(), location: NavLocation, pinned: Bool = false, customTitle: String? = nil) {
         self.id = id
         self.history = NavHistory(location)
         self.pinned = pinned
+        self.customTitle = customTitle
     }
 
     public var location: NavLocation { history.current }
@@ -109,18 +111,25 @@ public struct Workspace: Sendable {
 
     /// Rebuild a workspace from persisted tab snapshots. Each tab starts with a
     /// fresh single-entry history at its saved location. Returns nil if empty.
-    public init?(restoring tabs: [(location: NavLocation, pinned: Bool)], activeIndex: Int,
+    public init?(restoring tabs: [(location: NavLocation, pinned: Bool, customTitle: String?)], activeIndex: Int,
                  groups: [WorkspaceGroupSnapshot] = []) {
         guard !tabs.isEmpty else { return nil }
-        let built = tabs.map { NavTab(location: $0.location, pinned: $0.pinned) }
+        let built = tabs.map { NavTab(location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) }
         self.tabs = built
         let idx = built.indices.contains(activeIndex) ? activeIndex : 0
         self.activeID = built[idx].id
         self.tabGroups = groups.map { snapshot in
             let ids = snapshot.tabIndices.compactMap { built.indices.contains($0) ? built[$0].id : nil }
-            return TabGroup(name: snapshot.name, tabIDs: ids, isCollapsed: snapshot.isCollapsed)
+            return TabGroup(name: Self.migratedGroupName(snapshot.name), tabIDs: ids, isCollapsed: snapshot.isCollapsed)
         }
         normalizeGroups()
+    }
+
+    public init?(restoring tabs: [(location: NavLocation, pinned: Bool)], activeIndex: Int,
+                 groups: [WorkspaceGroupSnapshot] = []) {
+        self.init(restoring: tabs.map { (location: $0.location, pinned: $0.pinned, customTitle: nil) },
+                  activeIndex: activeIndex,
+                  groups: groups)
     }
 
     public var activeTab: NavTab { tabs.first { $0.id == activeID } ?? tabs[0] }
@@ -201,6 +210,19 @@ public struct Workspace: Sendable {
     public mutating func togglePin(_ id: NavTab.ID) {
         guard let i = tabs.firstIndex(where: { $0.id == id }) else { return }
         tabs[i].pinned.toggle()
+    }
+
+    public mutating func renameTab(_ id: NavTab.ID, to title: String?) {
+        guard let i = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        tabs[i].customTitle = trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    public mutating func renameGroup(_ id: TabGroup.ID, to name: String) {
+        guard let i = tabGroups.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        tabGroups[i].name = trimmed
     }
 
     public mutating func groupTab(_ sourceID: NavTab.ID, onto targetID: NavTab.ID) {
@@ -337,14 +359,23 @@ public struct Workspace: Sendable {
     }
 
     private func nextTabGroupName() -> String {
-        let prefix = "标签组 "
+        let prefix = "页面组 "
         let used = Set(tabGroups.compactMap { group -> Int? in
-            guard group.name.hasPrefix(prefix) else { return nil }
-            return Int(group.name.dropFirst(prefix.count))
+            let name = Self.migratedGroupName(group.name)
+            guard name.hasPrefix(prefix) else { return nil }
+            return Int(name.dropFirst(prefix.count))
         })
         var n = 1
         while used.contains(n) { n += 1 }
         return "\(prefix)\(n)"
+    }
+
+    private static func migratedGroupName(_ name: String) -> String {
+        let oldPrefix = "标签组 "
+        let newPrefix = "页面组 "
+        guard name.hasPrefix(oldPrefix),
+              let number = Int(name.dropFirst(oldPrefix.count)) else { return name }
+        return "\(newPrefix)\(number)"
     }
 
     private mutating func removeTabFromGroups(_ id: NavTab.ID) {

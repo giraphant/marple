@@ -131,7 +131,7 @@ final class AppModel {
     private func persist() {
         guard let stateStore else { return }
         let ws = workspace
-        let savedTabs = ws?.tabs.map { PersistedTab(location: $0.location, pinned: $0.pinned) } ?? []
+        let savedTabs = ws?.tabs.map { PersistedTab(location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) } ?? []
         let idx = ws.flatMap { w in w.tabs.firstIndex { $0.id == w.activeID } } ?? 0
         stateStore.save(PersistedState(
             browsePane: browsePane,
@@ -497,6 +497,14 @@ final class AppModel {
 
     func togglePin(_ id: NavTab.ID) { mutateWorkspace { $0.togglePin(id) } }
 
+    func renameTab(_ id: NavTab.ID, to title: String?) {
+        mutateWorkspace { $0.renameTab(id, to: title) }
+    }
+
+    func renameTabGroup(_ id: TabGroup.ID, to name: String) {
+        mutateWorkspace { $0.renameGroup(id, to: name) }
+    }
+
     func setTabOrder(_ ids: [NavTab.ID]) { mutateWorkspace { $0.reorder(ids) } }
 
     func tabGroup(containing tabID: NavTab.ID) -> TabGroup? {
@@ -538,6 +546,7 @@ final class AppModel {
     // MARK: tab labels
 
     func tabTitle(_ tab: NavTab) -> String {
+        if let customTitle = tab.customTitle { return customTitle }
         let loc = tab.location
         if let p = loc.openPath {
             return entries.first { $0.path == p }?.title ?? (p as NSString).lastPathComponent
