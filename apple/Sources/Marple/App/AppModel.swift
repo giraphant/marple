@@ -336,7 +336,16 @@ final class AppModel {
         recomputeVisible()
     }
 
+    /// SwiftUI's TextField with a custom Binding can echo the current value
+    /// back through its setter whenever the parent view re-evaluates (the
+    /// `SearchField` here re-renders on any @Observable AppModel mutation
+    /// because it holds `@Bindable model`). Without this guard, every click
+    /// on a card → openPath change → SearchField body re-eval → TextField
+    /// setter calls `setSearchText('go')` with the SAME 'go' → runSearch
+    /// pumps a redundant network search → searchMatches clears+repopulates
+    /// → two full reloadData passes (visible "list rebuilds and settles").
     func setSearchText(_ text: String) {
+        guard text != searchText else { return }
         searchText = text
         runSearch()
     }
