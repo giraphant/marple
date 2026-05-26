@@ -520,12 +520,106 @@ struct SidebarOutlineView: NSViewRepresentable {
         func menuNeedsUpdate(_ contextMenu: NSMenu) {
             contextMenu.removeAllItems()
             guard let outline = outlineView else { return }
-            let row = outline.clickedRow
-            guard row >= 0,
-                  let node = outline.item(atRow: row) as? SidebarOutlineNode else { return }
-            for item in menuItems(for: node) {
-                contextMenu.addItem(item)
+            // Right-click on a section header (non-selectable) shouldn't pop a
+            // menu over the current selection, which sits elsewhere.
+            let clicked = outline.clickedRow
+            if clicked >= 0, let clickedNode = outline.item(atRow: clicked) as? SidebarOutlineNode,
+               case .section = clickedNode.kind { return }
+            // AppKit auto-collapses selection to the clicked row when the clicked
+            // row isn't already selected, so `selectedRowIndexes` is the truth.
+            let nodes = outline.selectedRowIndexes
+                .compactMap { outline.item(atRow: $0) as? SidebarOutlineNode }
+                .filter { node in
+                    switch node.kind {
+                    case .section, .pane: return false
+                    case .tab, .group: return true
+                    }
+                }
+            guard !nodes.isEmpty else { return }
+            let items: [NSMenuItem] = nodes.count == 1
+                ? menuItems(for: nodes[0])
+                : batchMenuItems(for: nodes)
+            for item in items { contextMenu.addItem(item) }
+        }
+
+        /// Build the multi-selection context menu. Always offers "关闭这 N 个";
+        /// the new-group action is only shown for a pure-tab selection because the
+        /// semantics of grouping a mixed tab/group selection are ambiguous (see
+        /// QUA-94 拍板项).
+        fileprivate func batchMenuItems(for nodes: [SidebarOutlineNode]) -> [NSMenuItem] {
+            let n = nodes.count
+            let allTabs = nodes.allSatisfy { if case .tab = $0.kind { return true } else { return false } }
+            let tabIDs = collectTabIDs(in: nodes)
+            var items: [NSMenuItem] = []
+
+            let closeItem = NSMenuItem(title: "关闭这 \(n) 个", action: #selector(closeBatchFromMenu(_:)), keyEquivalent: "")
+            closeItem.target = self
+            closeItem.representedObject = Array(tabIDs) as NSArray
+            // Pin-only selection has no actionable closes; reflect that visually.
+            let pinned = Set(model.tabs.filter(\.pinned).map(\.id))
+            closeItem.isEnabled = !tabIDs.allSatisfy { pinned.contains($0) }
+            items.append(closeItem)
+
+            if allTabs {
+                let groupItem = NSMenuItem(title: "把这 \(n) 个合成一个新组",
+                                           action: #selector(groupBatchFromMenu(_:)), keyEquivalent: "")
+                groupItem.target = self
+                let pureTabIDs = nodes.compactMap { node -> NavTab.ID? in
+                    if case .tab(let id) = node.kind { return id }
+                    return nil
+                }
+                groupItem.representedObject = pureTabIDs as NSArray
+                items.append(groupItem)
             }
+            return items
+        }
+
+        /// Flatten a selection into tab ids: tabs contribute themselves, groups
+        /// contribute every descendant tab leaf. Used by batch close.
+        private func collectTabIDs(in nodes: [SidebarOutlineNode]) -> [NavTab.ID] {
+            var out: [NavTab.ID] = []
+            var seen: Set<NavTab.ID> = []
+            func append(_ id: NavTab.ID) {
+                if seen.insert(id).inserted { out.append(id) }
+            }
+            for node in nodes {
+                switch node.kind {
+                case .tab(let id):
+                    append(id)
+                case .group(let gid):
+                    if let group = model.tabGroups.first(where: { $0.id == gid }) {
+                        for id in descendantTabIDs(of: group) { append(id) }
+                    }
+                case .section, .pane:
+                    break
+                }
+            }
+            return out
+        }
+
+        private func descendantTabIDs(of group: TabGroup) -> [NavTab.ID] {
+            var out: [NavTab.ID] = []
+            for child in group.children {
+                switch child {
+                case .tab(let id): out.append(id)
+                case .group(let g): out.append(contentsOf: descendantTabIDs(of: g))
+                }
+            }
+            return out
+        }
+
+        @objc private func closeBatchFromMenu(_ sender: NSMenuItem) {
+            guard let raw = sender.representedObject as? [Any] else { return }
+            let ids = raw.compactMap { $0 as? NavTab.ID }
+            guard !ids.isEmpty else { return }
+            Task { await model.closeTabs(Set(ids)) }
+        }
+
+        @objc private func groupBatchFromMenu(_ sender: NSMenuItem) {
+            guard let raw = sender.representedObject as? [Any] else { return }
+            let ids = raw.compactMap { $0 as? NavTab.ID }
+            guard ids.count >= 2 else { return }
+            model.groupTabs(ids)
         }
 
         fileprivate func menuItems(for node: SidebarOutlineNode) -> [NSMenuItem] {

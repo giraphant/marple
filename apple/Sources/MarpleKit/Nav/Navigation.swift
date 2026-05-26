@@ -442,6 +442,87 @@ public struct Workspace: Sendable {
         normalize()
     }
 
+    // MARK: batch operations (multi-select)
+
+    /// Close every tab in `ids` that is not pinned. Each removal goes through the
+    /// single-tab path so neighbor-activation and small-group dissolution behave
+    /// the same as user-driven close. No-op for pinned/unknown ids.
+    public mutating func closeTabs(_ ids: Set<NavTab.ID>) {
+        let toClose = tabs.filter { ids.contains($0.id) && !$0.pinned }.map(\.id)
+        for id in toClose { closeTab(id) }
+    }
+
+    /// Lift every selected tab in DFS order into a single new group. When the
+    /// sources share a direct parent, anchor the new group at the earliest's slot
+    /// inside that parent. When sources span parents, anchor at root at the slot
+    /// of the root-level ancestor of the earliest tab — selecting cross-parent
+    /// should not silently nest the result inside one of the source parents.
+    /// Emptied parents dissolve via the normal `normalize` path. No-op unless
+    /// at least two distinct tabs in `ids` exist.
+    public mutating func groupTabs(_ ids: [NavTab.ID]) {
+        let unique = Self.uniqued(ids).filter { hasTab($0) }
+        guard unique.count >= 2 else { return }
+        let position = Dictionary(uniqueKeysWithValues: Self.leafIDs(root).enumerated().map { ($0.element, $0.offset) })
+        let sorted = unique.sorted { (position[$0] ?? .max) < (position[$1] ?? .max) }
+        guard let earliest = sorted.first else { return }
+        // Explicit double-optional collection: `compactMap { locate(...)?.0 }`
+        // collapses nil parents (root-level tabs) into "no element", which would
+        // make a cross-parent selection look same-parent.
+        var parents: Set<TabGroup.ID?> = []
+        for id in sorted {
+            if let (parent, _) = Self.locate(tab: id, in: root) {
+                parents.insert(parent)
+            }
+        }
+        let placementParent: TabGroup.ID?
+        let placementIdx: Int
+        if parents.count == 1, let (parent, idx) = Self.locate(tab: earliest, in: root) {
+            placementParent = parent
+            placementIdx = idx
+        } else if let topIdx = Self.rootIndexOfTopLevel(containing: earliest, in: root) {
+            placementParent = nil
+            placementIdx = topIdx
+        } else {
+            return
+        }
+        for id in sorted { _ = Self.removeTab(id, from: &root) }
+        let newGroup = TabGroup(name: nextTabGroupName(), children: sorted.map { .tab($0) })
+        _ = Self.insert(.group(newGroup), intoParent: placementParent, at: placementIdx, nodes: &root)
+        normalize()
+    }
+
+    /// Move every tab in `ids` (in input order) into `groupID`, anchoring the run
+    /// at `childIndex` (or the end). Detach-then-insert in one pass so callers
+    /// don't see intermediate single-tab states.
+    public mutating func moveTabs(_ ids: [NavTab.ID], toGroup groupID: TabGroup.ID, at childIndex: Int?) {
+        let unique = Self.uniqued(ids).filter { hasTab($0) }
+        guard !unique.isEmpty, Self.findGroup(groupID, in: root) != nil else { return }
+        // Match `moveTab`'s adjustedIndex semantics: when a source sat in the
+        // target parent at an index < childIndex, detaching it shifts the slot.
+        let originalLocations = unique.map { Self.locate(tab: $0, in: root) }
+        for id in unique { _ = Self.removeTab(id, from: &root) }
+        let count = Self.findGroup(groupID, in: root)?.children.count ?? 0
+        let baseTarget: Int = {
+            guard let raw = childIndex else { return count }
+            let sameParentBefore = originalLocations
+                .compactMap { $0 }
+                .filter { $0.0 == groupID && $0.1 < raw }
+                .count
+            return min(max(raw - sameParentBefore, 0), count)
+        }()
+        var insertAt = baseTarget
+        for id in unique {
+            _ = Self.insert(.tab(id), intoParent: groupID, at: insertAt, nodes: &root)
+            insertAt += 1
+        }
+        normalize()
+    }
+
+    private static func uniqued(_ ids: [NavTab.ID]) -> [NavTab.ID] {
+        var seen: Set<NavTab.ID> = []
+        return ids.filter { seen.insert($0).inserted }
+    }
+
     public mutating func moveGroupToRoot(_ groupID: TabGroup.ID, at index: Int? = nil) {
         let adjusted = Self.adjustedIndex(index, movingFrom: Self.locate(group: groupID, in: root), toParent: nil)
         guard let g = Self.removeGroup(groupID, from: &root) else { return }

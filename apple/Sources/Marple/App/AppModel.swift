@@ -580,6 +580,29 @@ final class AppModel {
         await syncToActiveLocation()
     }
 
+    /// Close every tab in `ids` skipping pinned. Empties drop back to browse mode
+    /// the same way the single-tab close does.
+    func closeTabs(_ ids: Set<NavTab.ID>) async {
+        guard var ws = workspace else { return }
+        ws.closeTabs(ids)
+        if ws.tabs.isEmpty {
+            workspace = nil
+            isBrowsing = true
+        } else {
+            workspace = ws
+        }
+        await syncToActiveLocation()
+    }
+
+    /// Form one new group at the earliest selected tab's position, containing all
+    /// `ids` in DFS order. No-op if fewer than two valid tabs.
+    func groupTabs(_ ids: [NavTab.ID]) { mutateWorkspace { $0.groupTabs(ids) } }
+
+    /// Bulk move `ids` into `groupID` at `childIndex` (or append) preserving order.
+    func moveTabs(_ ids: [NavTab.ID], toGroup groupID: TabGroup.ID, at childIndex: Int? = nil) {
+        mutateWorkspace { $0.moveTabs(ids, toGroup: groupID, at: childIndex) }
+    }
+
     func togglePin(_ id: NavTab.ID) { mutateWorkspace { $0.togglePin(id) } }
 
     func renameTab(_ id: NavTab.ID, to title: String?) {
