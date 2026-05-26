@@ -247,6 +247,24 @@
    * 西文 glyph 出真 italic。两端都能识别 emphasis。 */
   .prose-body em { color: rgb(var(--reader-em)); font-style: normal; font-weight: 600; }
   .prose-body hr { border: none; border-top: 1px solid rgb(var(--border-base)); margin: 1.4em 0; }
+  /* Tables — following GitHub-markdown-css / FSNotes pattern:
+   * display:block + overflow:auto on <table> for horizontal scrolling,
+   * per-cell borders, 6px 13px padding, zebra stripes. */
+  .prose-body table {
+    border-spacing: 0;
+    border-collapse: collapse;
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow: auto;
+    margin: 0 0 1em;
+  }
+  .prose-body th { font-weight: 700; text-align: left; padding: 6px 13px; border: 1px solid rgb(var(--border-strong)); color: rgb(var(--reader-heading)); }
+  .prose-body td { padding: 6px 13px; border: 1px solid rgb(var(--border-base)); }
+  .prose-body tr { border-top: 1px solid rgb(var(--border-base)); }
+  .prose-body tr:nth-child(2n) { background-color: rgb(var(--bg-surface-2) / 0.5); }
+  /* Long words / URLs don't overflow the container */
+  .overflow-wrap-anywhere { overflow-wrap: anywhere; word-break: break-word; }
 
   .cm-list-rendered-marker {
     display: inline-flex;

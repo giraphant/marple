@@ -2,6 +2,14 @@ node_modules
 dist
 .vite
 *.log
+.DS_Store
+
+# Local launcher config
+.superset/
+
+# Native build artifacts (regenerable via apple/build-app.sh)
+apple/Artwork/
+apple/Marple.app/
 
 # Rust build output (legacy)
 legacy/rust/target/

@@ -50,7 +50,7 @@ export function BodyView({ entry, body, wikiIndex, onWikiClick }: Props) {
 
   return (
     <article
-      class="prose-body text-primary px-8 py-9 mx-auto max-w-[46rem]"
+      class="prose-body text-primary px-8 py-9 mx-auto max-w-[46rem] min-w-0 overflow-wrap-anywhere"
       onClick={onClickAnchor as unknown as JSX.MouseEventHandler<HTMLElement>}
     >
       {segments.map((seg, i) => (

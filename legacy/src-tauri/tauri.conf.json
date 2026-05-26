@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "qua-reader",
+  "productName": "Marple",
   "version": "0.9.0",
   "identifier": "app.qua.reader",
   "build": {
@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [
-      { "label": "main", "title": "qua reader", "width": 1280, "height": 860 }
+      { "label": "main", "title": "Marple", "width": 1280, "height": 860 }
     ],
     "security": { "csp": null }
   },
