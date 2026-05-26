@@ -157,8 +157,11 @@ struct SidebarOutlineView: NSViewRepresentable {
         private var pendingReload = false
         private var lastReloadSignature: String?
         private var stickyRowDropTarget: SidebarOutlineNode?
-        private let rowDropEnterEdgeRatio: CGFloat = 0.40
-        private let rowDropReleaseEdgeRatio: CGFloat = 0.40
+        // Row split for tab-on-tab grouping: top/bottom edge bands reorder, the
+        // narrow center band triggers grouping. Exit ratio is the hysteresis that
+        // keeps a sticky target latched while the cursor jitters.
+        private let rowDropEnterEdgeRatio: CGFloat = 0.43
+        private let rowDropReleaseEdgeRatio: CGFloat = 0.43
         private let rowDropExitEdgeRatio: CGFloat = 0.12
         private let dndLogging = ProcessInfo.processInfo.environment["MARPLE_DND_LOG"] == "1"
 
@@ -191,7 +194,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 _ = model.typeOrder
                 _ = model.counts
                 _ = model.tabs
-                _ = model.tabGroups
+                _ = model.tabRootNodes
             } onChange: { [weak self] in
                 Task { @MainActor in
                     guard let self else { return }
@@ -224,8 +227,19 @@ struct SidebarOutlineView: NSViewRepresentable {
             parts.append("types:\(model.typeOrder.map(String.init(describing:)).joined(separator: ","))")
             parts.append("counts:\(model.typeOrder.map { "\($0)=\(model.counts[$0] ?? 0)" }.joined(separator: ","))")
             parts.append("tabs:\(model.tabs.map { "\($0.id.uuidString):\($0.location):\($0.pinned):\($0.customTitle ?? "")" }.joined(separator: ","))")
-            parts.append("groups:\(model.tabGroups.map { "\($0.id.uuidString):\($0.name):\($0.isCollapsed):\($0.tabIDs.map(\.uuidString).joined(separator: "."))" }.joined(separator: ","))")
+            parts.append("tree:\(Self.treeSignature(model.tabRootNodes))")
             return parts.joined(separator: "|")
+        }
+
+        private static func treeSignature(_ nodes: [TabNode]) -> String {
+            nodes.map { node -> String in
+                switch node {
+                case .tab(let id):
+                    return "t\(id.uuidString)"
+                case .group(let g):
+                    return "g\(g.id.uuidString):\(g.name):\(g.isCollapsed)[\(treeSignature(g.children))]"
+                }
+            }.joined(separator: ",")
         }
 
         private func makeRootItems() -> [SidebarOutlineNode] {
@@ -248,17 +262,20 @@ struct SidebarOutlineView: NSViewRepresentable {
         }
 
         private func makeTabRootItems(entryByPath: [String: Entry]) -> [SidebarOutlineNode] {
-            var seenGroups: Set<TabGroup.ID> = []
-            return model.tabs.compactMap { tab in
-                if let group = model.tabGroup(containing: tab.id) {
-                    guard seenGroups.insert(group.id).inserted else { return nil }
-                    return SidebarOutlineNode(kind: .group(group.id),
-                                              title: group.name,
-                                              count: nil,
-                                              iconName: "folder",
-                                              children: model.tabs(in: group.id).map { tabNode($0, entryByPath: entryByPath) })
-                }
+            model.tabRootNodes.compactMap { outlineNode($0, entryByPath: entryByPath) }
+        }
+
+        private func outlineNode(_ node: TabNode, entryByPath: [String: Entry]) -> SidebarOutlineNode? {
+            switch node {
+            case .tab(let id):
+                guard let tab = model.tabs.first(where: { $0.id == id }) else { return nil }
                 return tabNode(tab, entryByPath: entryByPath)
+            case .group(let group):
+                return SidebarOutlineNode(kind: .group(group.id),
+                                          title: group.name,
+                                          count: nil,
+                                          iconName: "folder",
+                                          children: group.children.compactMap { outlineNode($0, entryByPath: entryByPath) })
             }
         }
 
@@ -291,14 +308,21 @@ struct SidebarOutlineView: NSViewRepresentable {
             for section in rootItems {
                 outline.expandItem(section)
             }
-            for item in tabRootItems {
-                if case .group(let id) = item.kind {
-                    let collapsed = model.tabGroups.first { $0.id == id }?.isCollapsed ?? false
-                    if collapsed {
-                        outline.collapseItem(item)
-                    } else {
-                        outline.expandItem(item)
-                    }
+            applyExpansion(to: tabRootItems, in: outline)
+        }
+
+        /// Recursively restore each group's expanded/collapsed state. Children rows
+        /// only exist once their parent is expanded, so recurse only into expanded
+        /// groups.
+        private func applyExpansion(to nodes: [SidebarOutlineNode], in outline: NSOutlineView) {
+            for node in nodes {
+                guard case .group(let id) = node.kind else { continue }
+                let collapsed = model.tabGroups.first { $0.id == id }?.isCollapsed ?? false
+                if collapsed {
+                    outline.collapseItem(node)
+                } else {
+                    outline.expandItem(node)
+                    applyExpansion(to: node.children, in: outline)
                 }
             }
         }
@@ -320,8 +344,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                     return findPaneNode(model.pane, in: rootItems)
                 }
                 guard let active = model.activeTabID else { return nil }
-                if let group = model.tabGroup(containing: active), group.isCollapsed {
-                    return findGroupNode(group.id, in: rootItems)
+                if let collapsed = model.outermostCollapsedTabGroup(of: active) {
+                    return findGroupNode(collapsed, in: rootItems)
                 }
                 return findTabNode(active, in: rootItems)
             }()
@@ -614,11 +638,19 @@ struct SidebarOutlineView: NSViewRepresentable {
             switch node.kind {
             case .section(.tabs):
                 return .move
-            case .group:
-                if case .group = payload, index >= 0 { return [] }
+            case .group(let targetGroupID):
+                // drop-on (center) nests; drop-between reorders/nests at an index.
+                // Reject group payloads that would form a cycle (self / descendant).
+                if case .group(let sourceID) = payload {
+                    return model.canNestGroup(sourceID, into: targetGroupID) ? .move : []
+                }
                 return .move
-            case .tab:
-                if index != NSOutlineViewDropOnItemIndex {
+            case .tab(let targetID):
+                if case .group(let sourceID) = payload, model.groupContainsTab(sourceID, targetID) { return [] }
+                // Coerce to drop-on only for tab payloads (the tab-on-tab grouping
+                // gesture). Group payloads keep AppKit's between proposal so an edge
+                // drop reorders beside the tab instead of grouping onto it.
+                if case .tab = payload, index != NSOutlineViewDropOnItemIndex {
                     outlineView.setDropItem(node, dropChildIndex: NSOutlineViewDropOnItemIndex)
                 }
                 return .move
@@ -737,9 +769,9 @@ struct SidebarOutlineView: NSViewRepresentable {
             case (.tab, .group):
                 return true
             case (.group(let sourceID), .group(let targetID)) where sourceID != targetID:
-                return true
-            case (.group, .tab):
-                return true
+                return model.canNestGroup(sourceID, into: targetID)
+            case (.group(let sourceID), .tab(let targetID)):
+                return !model.groupContainsTab(sourceID, targetID)
             default:
                 return false
             }
@@ -841,16 +873,22 @@ struct SidebarOutlineView: NSViewRepresentable {
         private func acceptGroup(_ groupID: TabGroup.ID, into node: SidebarOutlineNode?, childIndex: Int) -> Bool {
             guard model.tabGroups.contains(where: { $0.id == groupID }) else { return false }
             guard let node else {
-                model.moveGroup(groupID, beforeTab: tabRootItem(at: childIndex)?.firstTabID)
+                // Root-section drop between rows: place at root by index (never nest).
+                model.moveGroupToRoot(groupID, at: childIndex >= 0 ? childIndex : nil)
                 return true
             }
             switch node.kind {
             case .tab(let targetID):
+                guard !model.groupContainsTab(groupID, targetID) else { return false }
                 model.moveGroup(groupID, beforeTab: targetID)
                 return true
             case .group(let targetGroupID):
-                guard childIndex < 0, groupID != targetGroupID else { return false }
-                model.moveGroup(groupID, beforeGroup: targetGroupID)
+                guard groupID != targetGroupID, model.canNestGroup(groupID, into: targetGroupID) else { return false }
+                if childIndex < 0 {
+                    model.moveGroup(groupID, intoGroup: targetGroupID)   // drop-on: nest at end
+                } else {
+                    model.moveGroup(groupID, intoGroup: targetGroupID, at: childIndex)
+                }
                 return true
             case .section, .pane:
                 return false
