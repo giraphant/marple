@@ -14,7 +14,7 @@ struct EntryListView: View {
             )) { entry in
                 EntryRow(entry: entry)
                     .contextMenu {
-                        Button("在新标签页打开") { Task { await model.openInNewTab(entry.path) } }
+                        Button("在新页面页打开") { Task { await model.openInNewTab(entry.path) } }
                         Button("新建批注") { Task { await model.newAnnotation(for: entry) } }
                         Divider()
                         Button("移到回收站", role: .destructive) {

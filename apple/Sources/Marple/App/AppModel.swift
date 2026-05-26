@@ -29,6 +29,7 @@ final class AppModel {
     var pane: Pane { browsePane }
     var openPath: String? { isBrowsing ? nil : workspace?.activeTab.location.openPath }
     var tabs: [NavTab] { workspace?.tabs ?? [] }
+    var tabGroups: [TabGroup] { workspace?.tabGroups ?? [] }
     var activeTabID: NavTab.ID? { isBrowsing ? nil : workspace?.activeID }
     var canGoBack: Bool { !isBrowsing && (workspace?.activeTab.history.canGoBack ?? false) }
     var canGoForward: Bool { !isBrowsing && (workspace?.activeTab.history.canGoForward ?? false) }
@@ -130,7 +131,7 @@ final class AppModel {
     private func persist() {
         guard let stateStore else { return }
         let ws = workspace
-        let savedTabs = ws?.tabs.map { PersistedTab(location: $0.location, pinned: $0.pinned) } ?? []
+        let savedTabs = ws?.tabs.map { PersistedTab(location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) } ?? []
         let idx = ws.flatMap { w in w.tabs.firstIndex { $0.id == w.activeID } } ?? 0
         stateStore.save(PersistedState(
             browsePane: browsePane,
@@ -140,7 +141,8 @@ final class AppModel {
             sortClauses: sortClauses,
             filterClauses: filterClauses,
             filterMatch: filterMatch,
-            browseMode: browseMode.rawValue))
+            browseMode: browseMode.rawValue,
+            currentSpace: ws.map { PersistedWorkspaceSpace(groups: $0.groupSnapshots) }))
     }
 
     // MARK: type order persistence
@@ -495,11 +497,56 @@ final class AppModel {
 
     func togglePin(_ id: NavTab.ID) { mutateWorkspace { $0.togglePin(id) } }
 
+    func renameTab(_ id: NavTab.ID, to title: String?) {
+        mutateWorkspace { $0.renameTab(id, to: title) }
+    }
+
+    func renameTabGroup(_ id: TabGroup.ID, to name: String) {
+        mutateWorkspace { $0.renameGroup(id, to: name) }
+    }
+
     func setTabOrder(_ ids: [NavTab.ID]) { mutateWorkspace { $0.reorder(ids) } }
+
+    func tabGroup(containing tabID: NavTab.ID) -> TabGroup? {
+        workspace?.group(containing: tabID)
+    }
+
+    func tabs(in groupID: TabGroup.ID) -> [NavTab] {
+        workspace?.tabs(in: groupID) ?? []
+    }
+
+    func groupTab(_ sourceID: NavTab.ID, onto targetID: NavTab.ID) {
+        mutateWorkspace { $0.groupTab(sourceID, onto: targetID) }
+    }
+
+    func moveTab(_ tabID: NavTab.ID, toGroup groupID: TabGroup.ID, at childIndex: Int? = nil) {
+        mutateWorkspace { $0.moveTab(tabID, toGroup: groupID, at: childIndex) }
+    }
+
+    func moveTabToRoot(_ tabID: NavTab.ID, beforeTab targetID: NavTab.ID?) {
+        mutateWorkspace { $0.moveTabToRoot(tabID, beforeTab: targetID) }
+    }
+
+    func moveGroup(_ groupID: TabGroup.ID, beforeTab targetID: NavTab.ID?) {
+        mutateWorkspace { $0.moveGroup(groupID, beforeTab: targetID) }
+    }
+
+    func moveGroup(_ sourceGroupID: TabGroup.ID, beforeGroup targetGroupID: TabGroup.ID) {
+        mutateWorkspace { $0.moveGroup(sourceGroupID, beforeGroup: targetGroupID) }
+    }
+
+    func toggleTabGroup(_ groupID: TabGroup.ID) {
+        mutateWorkspace { $0.toggleGroupCollapsed(groupID) }
+    }
+
+    func setTabGroup(_ groupID: TabGroup.ID, collapsed: Bool) {
+        mutateWorkspace { $0.setGroupCollapsed(groupID, collapsed: collapsed) }
+    }
 
     // MARK: tab labels
 
     func tabTitle(_ tab: NavTab) -> String {
+        if let customTitle = tab.customTitle { return customTitle }
         let loc = tab.location
         if let p = loc.openPath {
             return entries.first { $0.path == p }?.title ?? (p as NSString).lastPathComponent
