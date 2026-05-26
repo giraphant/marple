@@ -196,16 +196,55 @@ final class AppModel {
 
     // MARK: derived recompute
 
-    /// Rebuild the index-wide caches (counts + theme index). O(n) over all entries;
-    /// runs once per index load, not per render.
+    /// Rebuild the index-wide caches. Split into two phases:
+    /// - immediate: counts + themeIndex (cheap; the sidebar needs them right away)
+    /// - deferred: authorIndex/annotationIndex/searchDocs (heavy; only needed by
+    ///   the reading view's relations panel and the Cmd-K palette, neither of
+    ///   which is exercised in the first few hundred ms after launch)
     private func rebuildIndexDerived() {
+        let t0 = Date()
         var c: [EntryType: Int] = [:]
         for e in entries { c[e.type, default: 0] += 1 }
         counts = c
+        let t1 = Date()
         themeIndex = themeCounts(entries)
-        authorIndex = buildAuthorIndex(entries)
-        annotationIndex = buildAnnotationIndex(entries)
-        searchDocs = buildSearchIndex(entries)
+        let t2 = Date()
+        print(String(format: "[derived] counts=%.3f themes=%.3f (immediate)",
+            t1.timeIntervalSince(t0), t2.timeIntervalSince(t1)))
+        scheduleDeferredDerivedRebuild()
+    }
+
+    /// Build the heavy derived caches (authors, annotations, search docs) on a
+    /// background task and publish them on the main actor when done. If
+    /// `entries` changes again before this task completes, the in-flight task
+    /// is cancelled — only the latest snapshot wins.
+    private var deferredDerivedTask: Task<Void, Never>?
+    private func scheduleDeferredDerivedRebuild() {
+        deferredDerivedTask?.cancel()
+        let snapshot = entries
+        deferredDerivedTask = Task { [weak self] in
+            let t0 = Date()
+            let result = await Task.detached(priority: .utility) {
+                let authors = buildAuthorIndex(snapshot)
+                let annot = buildAnnotationIndex(snapshot)
+                let search = buildSearchIndex(snapshot)
+                return (authors, annot, search)
+            }.value
+            if Task.isCancelled { return }
+            let dt = Date().timeIntervalSince(t0)
+            // Hop to the next main-runloop tick (not MainActor.run, which can
+            // run synchronously inside the current render pass and triggered an
+            // NSTableView reentrant-delegate warning when @Observable
+            // invalidation cascaded back into the table mid-render).
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.authorIndex = result.0
+                self.annotationIndex = result.1
+                self.searchDocs = result.2
+                if self.openEntry != nil { self.recomputeOpenDerived() }
+                print(String(format: "[derived] authors+annot+search=%.3f (deferred, published)", dt))
+            }
+        }
     }
 
     /// Recompute the open document's outline / stats / entry / relations. O(n) over
@@ -258,13 +297,24 @@ final class AppModel {
     // MARK: actions
 
     func loadIndex() async {
+        let t0 = Date()
+        func lap(_ tag: String, _ since: Date) -> Date {
+            let now = Date()
+            print(String(format: "[loadIndex] %.3fs  %@", now.timeIntervalSince(since), tag))
+            return now
+        }
         do {
             entries = try await client.index()
+            var t = lap("client.index() (SELECT + decode \(entries.count) rows)", t0)
             status = "\(entries.count) entries"
             rebuildIndexDerived()
+            t = lap("rebuildIndexDerived (themes/authors/annotations/search)", t)
             recomputeVisible()
+            t = lap("recomputeVisible (kicks off background sort+filter)", t)
             if openPath != loadedDocPath { await loadDoc(openPath) }
+            t = lap("loadDoc(openPath)", t)
             await loadTrash()
+            t = lap("loadTrash", t)
             print("[marple] index loaded: \(entries.count) entries")
         } catch {
             status = "index failed: \(error)"

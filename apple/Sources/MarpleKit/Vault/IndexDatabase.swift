@@ -6,8 +6,16 @@ import GRDB
 /// reads never collide with the indexer's WAL writes. Best-effort: a missing file
 /// or table yields empty results rather than throwing, so the app degrades to
 /// "no metadata yet" on first run instead of crashing.
-public struct IndexDatabase: Sendable {
+///
+/// Holds ONE shared `DatabaseQueue` for the lifetime of the value: reopening on
+/// every call costs ~1.5 s on a 1.5 GB index (the WAL connection has to attach
+/// to the -shm file and warm its page cache). Subsequent reads through the
+/// cached queue see the warm cache and finish in tens of milliseconds.
+public final class IndexDatabase: @unchecked Sendable {
     public let indexDBPath: String
+    private let lock = NSLock()
+    private var cachedQueue: DatabaseQueue?
+
     public init(indexDBPath: String) { self.indexDBPath = indexDBPath }
 
     /// Shared decoder for row mapping. `loadEntries` maps up to ~15k rows, so reuse
@@ -15,6 +23,11 @@ public struct IndexDatabase: Sendable {
     private static let decoder = JSONDecoder()
 
     private func openQueue() throws -> DatabaseQueue? {
+        lock.lock(); defer { lock.unlock() }
+        if let q = cachedQueue { return q }
+        // Don't cache negative results: the DB file may not exist yet at the time
+        // of the first read (boot may construct IndexDatabase before reconcile
+        // has finished), and we want a later read to pick it up.
         guard FileManager.default.fileExists(atPath: indexDBPath) else { return nil }
         var config = Configuration()
         // NOT read-only: the index is a WAL database written by the indexer, and a
@@ -22,20 +35,37 @@ public struct IndexDatabase: Sendable {
         // "unable to open database file"). A normal read-write connection attaches
         // to the shm and reads concurrently; we only ever issue reads.
         config.busyMode = .timeout(5)
-        return try DatabaseQueue(path: indexDBPath, configuration: config)
+        let q = try DatabaseQueue(path: indexDBPath, configuration: config)
+        cachedQueue = q
+        return q
     }
 
     public func loadEntries() throws -> [Entry] {
         guard let queue = try openQueue() else { return [] }
         return try queue.read { db in
             guard try db.tableExists("entries") else { return [] }
-            let rows = try Row.fetchAll(db, sql: """
+            let t0 = Date()
+            // Stream rows via cursor + decode inline. Avoids the giant [Row]
+            // allocation that fetchAll builds before we ever look at row #1 —
+            // on a 15k-row * 17-col query that allocation alone is hundreds of
+            // ms. Pre-reserve the result so it never reallocates as we append.
+            let countRow = try Row.fetchOne(db, sql: "SELECT COUNT(*) AS c FROM entries")
+            let expected = (countRow?["c"] as Int?) ?? 0
+            var result: [Entry] = []
+            result.reserveCapacity(expected)
+            let cursor = try Row.fetchCursor(db, sql: """
                 SELECT path, type, book, title, author, year_json, rating_score,
                        themes_json, topic, source, doi, annotates, has_pdf, pdf_slug,
                        mtime, preview, added
                 FROM entries
                 """)
-            return rows.map(Self.entry(from:))
+            while let row = try cursor.next() {
+                result.append(Self.entry(from: row))
+            }
+            let t1 = Date()
+            print(String(format: "[loadEntries] cursor+decode=%.3fs  rows=%d",
+                t1.timeIntervalSince(t0), result.count))
+            return result
         }
     }
 
