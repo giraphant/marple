@@ -559,3 +559,88 @@ import Foundation
         _ = (ids, g1)
     }
 }
+
+@Suite struct BatchTabActionsTests {
+    private func loc(_ i: Int) -> NavLocation { NavLocation(pane: .type(.note), openPath: "t\(i).md") }
+
+    private func workspace(_ n: Int) -> (Workspace, [NavTab.ID]) {
+        var w = Workspace(initial: loc(0))
+        for i in 1..<n { w.newTab(loc(i)) }
+        return (w, w.tabs.map(\.id))
+    }
+
+    @Test func closeTabsRemovesNonPinnedAndSkipsPinned() throws {
+        var (w, ids) = workspace(4)
+        w.togglePin(ids[1])                              // pin id 1
+        w.closeTabs(Set([ids[0], ids[1], ids[3]]))       // ask to close 0, 1 (pinned), 3
+        #expect(w.tabs.map(\.id) == [ids[1], ids[2]])    // only 0 and 3 close; 1 stays
+    }
+
+    @Test func closeTabsActivatesNeighborWhenActiveIsClosed() throws {
+        var (w, ids) = workspace(4)
+        w.select(ids[1])
+        w.closeTabs(Set([ids[1], ids[2]]))
+        #expect(w.tabs.map(\.id) == [ids[0], ids[3]])
+        #expect(w.activeID == ids[3])                    // neighbor reactivation followed each removal
+    }
+
+    @Test func groupTabsPlacesNewGroupAtEarliestTabsPositionAndFlatOrder() throws {
+        var (w, ids) = workspace(4)
+        // group 0 + 2 → new group should sit where ids[0] was (root index 0)
+        w.groupTabs([ids[2], ids[0]])                    // input order reversed; DFS order should win
+        let group = try #require(w.tabGroups.first)
+        #expect(w.rootNodes.first?.group?.id == group.id)
+        #expect(group.tabIDs == [ids[0], ids[2]])        // DFS order = visual order
+        // remaining root nodes: ids[1], ids[3] follow
+        #expect(w.tabs.map(\.id) == [ids[0], ids[2], ids[1], ids[3]])
+    }
+
+    @Test func groupTabsAcrossParentsAnchorsAtRoot() throws {
+        var (w, ids) = workspace(4)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1] at root[0]
+        let g = try #require(w.tabGroups.first?.id)
+        // ids[0] is in G, ids[2] is at root → mixed parents; new group anchors at
+        // root[0] (root-level slot of the earliest's ancestor G). G keeps ids[1]
+        // alone, dissolves.
+        w.groupTabs([ids[0], ids[2]])
+        #expect(w.group(g) == nil)                       // G dissolved (1 child left)
+        #expect(w.tabGroups.count == 1)
+        let new = try #require(w.tabGroups.first)
+        #expect(new.tabIDs == [ids[0], ids[2]])
+        // root order: new group, then orphaned ids[1], then ids[3]
+        #expect(w.tabs.map(\.id) == [ids[0], ids[2], ids[1], ids[3]])
+    }
+
+    @Test func groupTabsIgnoresLessThanTwoIDs() throws {
+        var (w, ids) = workspace(3)
+        let before = w.rootNodes
+        w.groupTabs([ids[0]])                            // <2 → no-op
+        #expect(w.rootNodes == before)
+        w.groupTabs([ids[0], ids[0]])                    // duplicates collapse to <2 → no-op
+        #expect(w.rootNodes == before)
+    }
+
+    @Test func moveTabsBulkIntoGroupPreservesInputOrder() throws {
+        var (w, ids) = workspace(5)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1]
+        let g = try #require(w.tabGroups.first?.id)
+        // append ids[4], ids[2] to G in that order at the end
+        w.moveTabs([ids[4], ids[2]], toGroup: g, at: nil)
+        #expect(w.tabs(in: g).map(\.id) == [ids[0], ids[1], ids[4], ids[2]])
+        // depth-first ordering of remaining root: ids[3] before nothing else
+        #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[4], ids[2], ids[3]])
+    }
+
+    @Test func moveTabsAdjustsIndexForInGroupSources() throws {
+        var (w, ids) = workspace(5)
+        w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1]
+        let g = try #require(w.tabGroups.first?.id)
+        w.moveTab(ids[2], toGroup: g)                    // G = [ids0, ids1, ids2]
+        w.moveTab(ids[3], toGroup: g)                    // G = [ids0, ids1, ids2, ids3]
+        // ids4 is still at root; move (ids0, ids4) so they land between ids2 and ids3
+        // childIndex = 3 (the slot of ids3 in G). ids0 lives at G[0] < 3, so it shifts.
+        w.moveTabs([ids[0], ids[4]], toGroup: g, at: 3)
+        let order = w.tabs(in: g).map(\.id)
+        #expect(order == [ids[1], ids[2], ids[0], ids[4], ids[3]])
+    }
+}
