@@ -68,6 +68,14 @@ public indirect enum TabNode: Hashable, Sendable {
     public var group: TabGroup? { if case .group(let g) = self { return g } else { return nil } }
 }
 
+/// A typed reference to one sidebar payload, used by the multi-item drag path so
+/// callers can hand the model a single ordered sequence and have it preserve the
+/// interleaving (Finder-style).
+public enum WorkspaceItem: Hashable, Sendable {
+    case tab(NavTab.ID)
+    case group(TabGroup.ID)
+}
+
 /// A named, collapsible group. `children` may interleave tabs and sub-groups to any
 /// depth. `tabIDs` exposes only the *direct* tab children for callers that predate
 /// nesting.
@@ -452,35 +460,32 @@ public struct Workspace: Sendable {
         for id in toClose { closeTab(id) }
     }
 
-    /// Lift every selected tab in DFS order into a single new group. When the
-    /// sources share a direct parent, anchor the new group at the earliest's slot
-    /// inside that parent. When sources span parents, anchor at root at the slot
-    /// of the root-level ancestor of the earliest tab — selecting cross-parent
-    /// should not silently nest the result inside one of the source parents.
-    /// Emptied parents dissolve via the normal `normalize` path. No-op unless
-    /// at least two distinct tabs in `ids` exist.
+    /// Lift every selected tab in DFS order into a single new group. The new
+    /// group is anchored at the **deepest common ancestor** of the selection's
+    /// parents: same direct parent → that parent's slot of the earliest tab;
+    /// cross-parent under some non-root group G → inside G at the slot of G's
+    /// direct child that contains the earliest tab; no common group → root at
+    /// the slot of the root-level ancestor of the earliest tab. Emptied parents
+    /// dissolve via the normal `normalize` path. No-op unless at least two
+    /// distinct tabs in `ids` exist.
     public mutating func groupTabs(_ ids: [NavTab.ID]) {
         let unique = Self.uniqued(ids).filter { hasTab($0) }
         guard unique.count >= 2 else { return }
         let position = Dictionary(uniqueKeysWithValues: Self.leafIDs(root).enumerated().map { ($0.element, $0.offset) })
         let sorted = unique.sorted { (position[$0] ?? .max) < (position[$1] ?? .max) }
         guard let earliest = sorted.first else { return }
-        // Explicit double-optional collection: `compactMap { locate(...)?.0 }`
-        // collapses nil parents (root-level tabs) into "no element", which would
-        // make a cross-parent selection look same-parent.
-        var parents: Set<TabGroup.ID?> = []
-        for id in sorted {
-            if let (parent, _) = Self.locate(tab: id, in: root) {
-                parents.insert(parent)
-            }
-        }
-        let placementParent: TabGroup.ID?
+        let lca = Self.longestCommonAncestorPath(forTabs: sorted, in: root)
+        let placementParent: TabGroup.ID? = lca.last
         let placementIdx: Int
-        if parents.count == 1, let (parent, idx) = Self.locate(tab: earliest, in: root) {
-            placementParent = parent
+        if let parent = placementParent {
+            // Find the index inside the LCA group of the direct child whose
+            // subtree contains the earliest tab. For a same-parent selection
+            // that's the earliest tab itself; for a cross-parent selection
+            // sharing LCA G, it's the slot of G's child group that owns earliest.
+            guard let g = Self.findGroup(parent, in: root),
+                  let idx = Self.indexInChildren(of: g, containingTab: earliest) else { return }
             placementIdx = idx
         } else if let topIdx = Self.rootIndexOfTopLevel(containing: earliest, in: root) {
-            placementParent = nil
             placementIdx = topIdx
         } else {
             return
@@ -516,6 +521,85 @@ public struct Workspace: Sendable {
             insertAt += 1
         }
         normalize()
+    }
+
+    /// Move a heterogeneous, visual-order sequence of items into `groupID`. Tabs
+    /// and groups stay interleaved exactly as supplied — Finder-style preservation
+    /// of mixed selection order during a multi-drag (QUA-100). Items that would
+    /// cycle (a group dropped into its own descendant) are skipped silently.
+    public mutating func moveItems(_ items: [WorkspaceItem], toGroup groupID: TabGroup.ID, at childIndex: Int?) {
+        let unique = Self.uniquedItems(items).filter { existsItem($0) }
+        guard !unique.isEmpty, Self.findGroup(groupID, in: root) != nil else { return }
+        let originalLocs = unique.map { Self.locateItem($0, in: root) }
+        var detached: [TabNode] = []
+        for item in unique {
+            switch item {
+            case .tab(let id):
+                if Self.removeTab(id, from: &root) { detached.append(.tab(id)) }
+            case .group(let id):
+                guard !Self.isDescendant(groupID, ofOrEqualTo: id, in: root) else { continue }
+                if let g = Self.removeGroup(id, from: &root) { detached.append(.group(g)) }
+            }
+        }
+        let count = Self.findGroup(groupID, in: root)?.children.count ?? 0
+        let baseTarget: Int = {
+            guard let raw = childIndex else { return count }
+            let sameParentBefore = originalLocs.compactMap { $0 }.filter { $0.0 == groupID && $0.1 < raw }.count
+            return min(max(raw - sameParentBefore, 0), count)
+        }()
+        var insertAt = baseTarget
+        for node in detached {
+            _ = Self.insert(node, intoParent: groupID, at: insertAt, nodes: &root)
+            insertAt += 1
+        }
+        normalize()
+    }
+
+    /// Move a heterogeneous, visual-order sequence of items into root at `index`
+    /// (or append). Order is preserved exactly — see `moveItems(_:toGroup:at:)`.
+    public mutating func moveItemsToRoot(_ items: [WorkspaceItem], at index: Int?) {
+        let unique = Self.uniquedItems(items).filter { existsItem($0) }
+        guard !unique.isEmpty else { return }
+        let originalLocs = unique.map { Self.locateItem($0, in: root) }
+        var detached: [TabNode] = []
+        for item in unique {
+            switch item {
+            case .tab(let id):
+                if Self.removeTab(id, from: &root) { detached.append(.tab(id)) }
+            case .group(let id):
+                if let g = Self.removeGroup(id, from: &root) { detached.append(.group(g)) }
+            }
+        }
+        let baseTarget: Int = {
+            guard let raw = index else { return root.count }
+            let sameRootBefore = originalLocs.compactMap { $0 }.filter { $0.0 == nil && $0.1 < raw }.count
+            return min(max(raw - sameRootBefore, 0), root.count)
+        }()
+        var insertAt = baseTarget
+        for node in detached {
+            root.insert(node, at: min(insertAt, root.count))
+            insertAt += 1
+        }
+        normalize()
+    }
+
+    private func existsItem(_ item: WorkspaceItem) -> Bool {
+        switch item {
+        case .tab(let id): return hasTab(id)
+        case .group(let id): return Self.findGroup(id, in: root) != nil
+        }
+    }
+
+    private static func uniquedItems(_ items: [WorkspaceItem]) -> [WorkspaceItem] {
+        var seen: Set<WorkspaceItem> = []
+        return items.filter { seen.insert($0).inserted }
+    }
+
+    private static func locateItem(_ item: WorkspaceItem, in nodes: [TabNode]) -> (TabGroup.ID?, Int)? {
+        switch item {
+        case .tab(let id): return locate(tab: id, in: nodes)
+        case .group(let id): return locate(group: id, in: nodes)
+        }
     }
 
     /// Bulk reorder a list of tabs into root, anchoring at `index` (or appending).
@@ -818,6 +902,53 @@ public struct Workspace: Sendable {
     /// The root index of the top-level node whose subtree contains `tabID`.
     private static func rootIndexOfTopLevel(containing tabID: NavTab.ID, in nodes: [TabNode]) -> Int? {
         nodes.firstIndex { leafIDs([$0]).contains(tabID) }
+    }
+
+    /// Ancestor group ids on the path from root to `tabID`, outermost first
+    /// (root-level group → immediate parent). Empty when the tab is at root or
+    /// missing. Used by LCA placement.
+    private static func ancestorGroupPath(of tabID: NavTab.ID, in nodes: [TabNode],
+                                          accumulator: [TabGroup.ID] = []) -> [TabGroup.ID]? {
+        for node in nodes {
+            switch node {
+            case .tab(let id):
+                if id == tabID { return accumulator }
+            case .group(let g):
+                if let inner = ancestorGroupPath(of: tabID, in: g.children,
+                                                 accumulator: accumulator + [g.id]) {
+                    return inner
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Longest common ancestor-group path across `tabs`. Empty array means root
+    /// is the only common ancestor. Missing tabs are skipped (callers filter).
+    static func longestCommonAncestorPath(forTabs tabs: [NavTab.ID],
+                                          in nodes: [TabNode]) -> [TabGroup.ID] {
+        let paths = tabs.compactMap { ancestorGroupPath(of: $0, in: nodes) }
+        guard let first = paths.first else { return [] }
+        var prefix = first
+        for path in paths.dropFirst() {
+            let limit = min(prefix.count, path.count)
+            var i = 0
+            while i < limit, prefix[i] == path[i] { i += 1 }
+            prefix = Array(prefix.prefix(i))
+            if prefix.isEmpty { break }
+        }
+        return prefix
+    }
+
+    /// Inside `group`, the child index of the direct child whose subtree
+    /// contains `tabID`. Nil if not found.
+    static func indexInChildren(of group: TabGroup, containingTab tabID: NavTab.ID) -> Int? {
+        group.children.firstIndex { node in
+            switch node {
+            case .tab(let id): return id == tabID
+            case .group(let g): return leafIDs(g.children).contains(tabID)
+            }
+        }
     }
 
     /// The (parentID?, childIndex) location of a group.
