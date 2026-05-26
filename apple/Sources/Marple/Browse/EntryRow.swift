@@ -3,33 +3,40 @@ import MarpleKit
 
 /// List-row anatomy (spec §4): title + content preview + a calm meta line.
 /// The preview's natural height variation is the "how much is here" signal —
-/// replacing the old gold-star wall. In search mode the row also lists the body
-/// lines that matched (Bear/Ulysses style), each clickable to jump into the doc.
+/// replacing the old gold-star wall.
+///
+/// In search mode, the matched lines and the "再显示 N 个" toggle are their
+/// OWN rows in the table now (flat-row architecture per Ulysses' keyboard-nav
+/// behavior — each match line is an independent ↑↓ stop, not a subview of the
+/// entry row). See `EntryListTable.RowItem`.
 struct EntryRow: View {
     let entry: Entry
 
-    // Search-mode extras (plain data passed down by EntryListView, so the row never
-    // observes AppModel broadly — keeps per-keystroke field edits cheap).
-    var matches: BodyMatches? = nil
-    var expanded: Bool = false
-    var onToggleExpand: (() -> Void)? = nil
-    var onMatchTap: ((BodyMatchLine) -> Void)? = nil
-
-    private let matchCap = 3
+    /// Title+preview area sized to ~4 lines of mixed type (headline 15pt + subheadline 13pt).
+    /// `.layoutPriority(1)` on the title lets it claim its natural 1–2 lines first;
+    /// the preview takes the remainder and naturally clamps to 3 lines (when title is 1)
+    /// or 2 lines (when title is 2). Spec §4: "preview lineLimit 2–3" — i.e. title+preview
+    /// always sums to 4 lines so cards stay equal-height regardless of title length.
+    private static let titlePreviewBoxHeight: CGFloat = 76
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s3) {
-            Text(entry.title ?? "(untitled)")
-                .font(Typo.headline)
-                .foregroundStyle(.primary)
-                .lineLimit(2)
+            VStack(alignment: .leading, spacing: Space.s3) {
+                Text(entry.title ?? "(untitled)")
+                    .font(Typo.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
 
-            if !entry.preview.isEmpty {
-                Text(entry.preview)
-                    .font(Typo.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(hasMatches ? 2 : 3)
+                if !entry.preview.isEmpty {
+                    Text(entry.preview)
+                        .font(Typo.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
             }
+            .frame(height: Self.titlePreviewBoxHeight, alignment: .topLeading)
 
             if hasMeta {
                 HStack(spacing: Space.s3) {
@@ -50,58 +57,8 @@ struct EntryRow: View {
                 .font(Typo.caption)
                 .foregroundStyle(.tertiary)
             }
-
-            matchedLines
         }
         .padding(.vertical, Space.s5)
-        .tag(entry.path)
-    }
-
-    private var hasMatches: Bool { (matches?.lines.isEmpty == false) }
-
-    @ViewBuilder private var matchedLines: some View {
-        if let matches, !matches.lines.isEmpty {
-            let shown = expanded ? matches.lines : Array(matches.lines.prefix(matchCap))
-            VStack(alignment: .leading, spacing: Space.s2) {
-                ForEach(shown) { line in
-                    Button { onMatchTap?(line) } label: {
-                        Text(highlighted(line))
-                            .font(Typo.subheadline)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("跳转到这一处")
-                }
-                if matches.lines.count > matchCap {
-                    Button { onToggleExpand?() } label: {
-                        Text(expanded ? "收起" : "再显示 \(matches.lines.count - matchCap) 个匹配项…")
-                            .font(Typo.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.top, Space.s2)
-        }
-    }
-
-    /// Build the matched-line text with the keyword spans tinted in the accent color.
-    private func highlighted(_ line: BodyMatchLine) -> AttributedString {
-        var astr = AttributedString(line.excerpt)
-        astr.foregroundColor = .secondary
-        let excerpt = line.excerpt
-        for span in line.spans {
-            let nsr = NSRange(location: span.location, length: span.length)
-            guard let r = Range(nsr, in: excerpt),
-                  let lo = AttributedString.Index(r.lowerBound, within: astr),
-                  let hi = AttributedString.Index(r.upperBound, within: astr) else { continue }
-            astr[lo..<hi].backgroundColor = Color.accentColor.opacity(0.22)
-            astr[lo..<hi].foregroundColor = Color.accentColor
-        }
-        return astr
     }
 
     private var metaLeading: String? {
