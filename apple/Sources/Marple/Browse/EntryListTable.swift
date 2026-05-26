@@ -102,6 +102,14 @@ struct EntryListTable: NSViewRepresentable {
         /// entry array compares equal (edge case: a query that returns the full
         /// pane verbatim).
         private var lastSearchMode = false
+        /// Tracks model.openPath across reloads so we know which rows could have
+        /// flipped `activeMatchOrdinal` (= which rows actually need re-config).
+        /// Cells are otherwise inert to model mutations now that
+        /// `EntryListRowHost` no longer uses `@Bindable model`.
+        private var lastOpenPath: String?
+        /// Fingerprint of `matchJump` (sans the UUID `id`) so a click on the
+        /// same matched line twice doesn't trigger an unnecessary cell refresh.
+        private var lastMatchJumpKey: String?
         private var isUpdatingSelection = false
         private var pendingReload = false
         /// Row heights only vary by SHAPE — not by per-entry text content, since
@@ -177,6 +185,8 @@ struct EntryListTable: NSViewRepresentable {
             let newExpanded = model.matchExpanded
             let newCounts = matchLineCounts(for: newEntries)
             let newSearchMode = !newCounts.isEmpty
+            let newOpenPath = model.openPath
+            let newMatchJumpKey = matchJumpFingerprint()
 
             let entriesChanged = entries != newEntries
             // Even if entries compare equal, a search-mode flip requires a full
@@ -190,6 +200,8 @@ struct EntryListTable: NSViewRepresentable {
                 lastExpanded = newExpanded
                 lastMatchLineCounts = newCounts
                 lastSearchMode = newSearchMode
+                lastOpenPath = newOpenPath
+                lastMatchJumpKey = newMatchJumpKey
                 shapeHeightCache.removeAll(keepingCapacity: true)
                 // Suppress implicit scroll/content animations that produced the
                 // visible "jitter" on search activation. With duration 0 the
@@ -200,32 +212,41 @@ struct EntryListTable: NSViewRepresentable {
                 table.reloadData()
                 NSAnimationContext.endGrouping()
                 syncSelection(in: table)
-                // Search just turned on — show the top of the results rather
-                // than wherever the pre-search scroll happened to land (with
-                // row heights and counts both changing, the old offset would
-                // point into a different content region and feel like a shake).
                 if newSearchMode && !wasSearchMode {
                     table.scrollRowToVisible(0)
                 }
                 return
             }
 
-            // Same entry list AND same mode — but expansion or match counts may
-            // have moved (e.g. user toggled "再显示 N 个匹配项…" or the search
-            // backend republished match lines). Push fresh content + remeasure
-            // heights.
-            //
-            // Match-jump / open-path flips don't need this: EntryListRowHost is
-            // @Bindable on AppModel, so observation re-renders the SwiftUI body
-            // inside NSHostingView without any manual refresh.
+            // Same entry list AND same mode. Three increasingly targeted paths:
+            //   1. expansion or match-line counts moved → height + content
+            //      changed for visible rows; refresh ALL visible cells +
+            //      re-measure heights.
+            //   2. openPath or matchJump moved → only the rows that hold those
+            //      paths can have a different `activeMatchOrdinal`; refresh
+            //      just those two cells.
+            //   3. Nothing relevant moved → just sync the AppKit selection to
+            //      track openPath (cheap).
             if newExpanded != lastExpanded || newCounts != lastMatchLineCounts {
                 lastExpanded = newExpanded
                 lastMatchLineCounts = newCounts
+                lastOpenPath = newOpenPath
+                lastMatchJumpKey = newMatchJumpKey
                 shapeHeightCache.removeAll(keepingCapacity: true)
                 refreshVisibleHostedViews(in: table)
                 table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<entries.count))
+            } else if newOpenPath != lastOpenPath || newMatchJumpKey != lastMatchJumpKey {
+                let previousOpenPath = lastOpenPath
+                lastOpenPath = newOpenPath
+                lastMatchJumpKey = newMatchJumpKey
+                refreshRowsForOpenPathChange(previous: previousOpenPath, current: newOpenPath, in: table)
             }
             syncSelection(in: table)
+        }
+
+        private func matchJumpFingerprint() -> String {
+            guard let jump = model.matchJump else { return "" }
+            return "\(jump.query)|\(jump.ordinal)|\(jump.anchor)"
         }
 
         private func matchLineCounts(for entries: [Entry]) -> [String: Int] {
@@ -245,8 +266,66 @@ struct EntryListTable: NSViewRepresentable {
                 guard row >= 0 && row < entries.count,
                       let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? EntryHostingCell
                 else { continue }
-                cell.configure(entry: entries[row], model: model)
+                cell.configure(host: makeRowHost(for: entries[row]))
             }
+        }
+
+        /// Refresh only the rows whose `activeMatchOrdinal` could have flipped
+        /// (the previously open path's row + the now-open path's row). Avoids
+        /// repainting every visible cell on each click — which was the
+        /// "微微抖动" the user saw on every selection change.
+        private func refreshRowsForOpenPathChange(previous: String?, current: String?, in table: NSTableView) {
+            var touchedRows = Set<Int>()
+            for path in [previous, current] {
+                guard let path,
+                      let idx = entries.firstIndex(where: { $0.path == path })
+                else { continue }
+                touchedRows.insert(idx)
+            }
+            for row in touchedRows {
+                guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? EntryHostingCell
+                else { continue }
+                cell.configure(host: makeRowHost(for: entries[row]))
+            }
+        }
+
+        /// Build a fully-resolved row host snapshot for `entry` from the current
+        /// model state. All inputs are values — once handed to the cell, the
+        /// host doesn't observe AppModel, so unrelated model mutations don't
+        /// trigger a re-layout.
+        private func makeRowHost(for entry: Entry) -> EntryListRowHost {
+            let searching = !model.searchText.trimmingCharacters(in: .whitespaces).isEmpty
+            let matches: BodyMatches? = searching ? model.searchMatches[entry.path] : nil
+            let expanded = model.matchExpanded.contains(entry.path)
+            let activeOrdinal: Int? = {
+                // matchJump survives until the next match-line click or until
+                // search is cleared, so an "A" jump can outlive the user moving
+                // on to query "B". Gate by the producing query so an old jump
+                // doesn't claim an active row in a different query's results.
+                guard model.openPath == entry.path,
+                      let jump = model.matchJump,
+                      jump.query == model.searchMatchQuery
+                else { return nil }
+                return jump.ordinal
+            }()
+            let path = entry.path
+            return EntryListRowHost(
+                entry: entry,
+                matches: matches,
+                expanded: expanded,
+                activeMatchOrdinal: activeOrdinal,
+                onToggleExpand: { [weak self] in
+                    self?.model.toggleMatchExpanded(path)
+                },
+                onMatchTap: { [weak self] line in
+                    guard let self else { return }
+                    let query = self.model.searchMatchQuery
+                    Task { await self.model.openMatchedLine(
+                        path: path, query: query,
+                        ordinal: line.matchOrdinal, anchor: line.anchor)
+                    }
+                }
+            )
         }
 
         private func syncSelection(in table: NSTableView) {
@@ -275,7 +354,7 @@ struct EntryListTable: NSViewRepresentable {
             let cell = tableView.makeView(withIdentifier: Self.cellIdentifier, owner: self) as? EntryHostingCell
                 ?? EntryHostingCell()
             cell.identifier = Self.cellIdentifier
-            cell.configure(entry: entries[row], model: model)
+            cell.configure(host: makeRowHost(for: entries[row]))
             return cell
         }
 
@@ -323,12 +402,13 @@ struct EntryListTable: NSViewRepresentable {
             if let cached = shapeHeightCache[shape] { return cached }
 
             let availableWidth = max(columnWidth - Self.rowHorizontalInset * 2, 100)
+            let probeHost = makeRowHost(for: entry)
             let controller: NSHostingController<EntryListRowHost>
             if let existing = measurementController {
-                existing.rootView = EntryListRowHost(entry: entry, model: model)
+                existing.rootView = probeHost
                 controller = existing
             } else {
-                let c = NSHostingController(rootView: EntryListRowHost(entry: entry, model: model))
+                let c = NSHostingController(rootView: probeHost)
                 measurementController = c
                 controller = c
             }
@@ -474,70 +554,50 @@ private final class EntryListSearchRowView: NSTableRowView {
 /// invalidation needed when those flip.
 @MainActor
 private final class EntryHostingCell: NSTableCellView {
-    private var host: NSHostingView<EntryListRowHost>?
+    private var hostingView: NSHostingView<EntryListRowHost>?
 
-    func configure(entry: Entry, model: AppModel) {
-        let root = EntryListRowHost(entry: entry, model: model)
-        if let host {
-            host.rootView = root
+    func configure(host: EntryListRowHost) {
+        if let view = hostingView {
+            view.rootView = host
         } else {
-            let h = NSHostingView(rootView: root)
-            // CRITICAL for `usesAutomaticRowHeights`: without this, NSHostingView
-            // does NOT publish the SwiftUI body's natural size as its intrinsic
-            // content size, so NSTableView measures the row at a stale height
-            // (rows overlap when search-mode expands match lines, no breathing
-            // room when collapsed). macOS 13+ API; we target macOS 15.
-            h.sizingOptions = .intrinsicContentSize
-            h.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(h)
+            let view = NSHostingView(rootView: host)
+            view.sizingOptions = .intrinsicContentSize
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
             NSLayoutConstraint.activate([
-                h.topAnchor.constraint(equalTo: topAnchor),
-                h.bottomAnchor.constraint(equalTo: bottomAnchor),
-                h.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-                h.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+                view.topAnchor.constraint(equalTo: topAnchor),
+                view.bottomAnchor.constraint(equalTo: bottomAnchor),
+                view.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+                view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             ])
-            host = h
+            hostingView = view
         }
     }
 }
 
-/// Tiny SwiftUI bridge: forwards EntryRow inputs and lifts the per-row
-/// active-match-ordinal out of AppModel. Living in this file keeps the
-/// model-touching cell-host glue separate from the pure-presentation EntryRow.
-private struct EntryListRowHost: View {
+/// Pure value-driven row host. `@Bindable model` used to live here — and any
+/// AppModel mutation (e.g. clicking a card → `openPath` changes) would
+/// invalidate every visible cell, re-evaluate every body, recreate every
+/// closure, and force NSHostingView to re-lay out the whole row. That's the
+/// "微微抖动" visible on every selection click. Now the cell receives a fully
+/// resolved snapshot at configure time; only the cells the coordinator
+/// explicitly re-configures actually re-render.
+struct EntryListRowHost: View {
     let entry: Entry
-    @Bindable var model: AppModel
+    let matches: BodyMatches?
+    let expanded: Bool
+    let activeMatchOrdinal: Int?
+    let onToggleExpand: () -> Void
+    let onMatchTap: (BodyMatchLine) -> Void
 
     var body: some View {
         EntryRow(
             entry: entry,
-            matches: searching ? model.searchMatches[entry.path] : nil,
-            expanded: model.matchExpanded.contains(entry.path),
+            matches: matches,
+            expanded: expanded,
             activeMatchOrdinal: activeMatchOrdinal,
-            onToggleExpand: { model.toggleMatchExpanded(entry.path) },
-            onMatchTap: { line in
-                Task {
-                    await model.openMatchedLine(
-                        path: entry.path,
-                        query: model.searchMatchQuery,
-                        ordinal: line.matchOrdinal,
-                        anchor: line.anchor)
-                }
-            }
+            onToggleExpand: onToggleExpand,
+            onMatchTap: onMatchTap
         )
-    }
-
-    private var searching: Bool { !model.searchText.trimmingCharacters(in: .whitespaces).isEmpty }
-
-    private var activeMatchOrdinal: Int? {
-        // matchJump survives until the next match-line click or until search is
-        // cleared, so an "A" jump can outlive the user moving on to query "B".
-        // Gate by the query that produced the current match set — if the user
-        // is now searching something else, no row should claim active.
-        guard model.openPath == entry.path,
-              let jump = model.matchJump,
-              jump.query == model.searchMatchQuery
-        else { return nil }
-        return jump.ordinal
     }
 }
