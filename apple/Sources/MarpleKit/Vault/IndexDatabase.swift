@@ -357,8 +357,19 @@ public final class IndexDatabase: @unchecked Sendable {
         let path: String = row["path"]
         let typeRaw: String = row["type"]
         let title: String? = row["title"]
-        let authorJoined: String? = row["author"]
-        let author: [String] = splitAuthors(authorJoined)
+        let authorRaw: String? = row["author"]
+        // Column may hold either the new JSON-array shape (`["A","B"]`) or the
+        // legacy joined-string shape (`"A, B"`) in databases built before
+        // QUA-109. Try JSON first; fall back to splitAuthors.
+        let author: [String] = {
+            guard let raw = authorRaw, !raw.isEmpty else { return [] }
+            if raw.hasPrefix("["),
+               let data = raw.data(using: .utf8),
+               let list = try? JSONDecoder().decode([String].self, from: data) {
+                return list
+            }
+            return splitAuthors(raw)
+        }()
         let preview: String = (row["preview"] as String?) ?? ""
         let source: String? = row["source"]
         let book: String? = row["book"]

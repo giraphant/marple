@@ -441,11 +441,16 @@ private struct AuthorRow: View {
         FieldRow("作者") {
             let names = entry.author
             if editingAll {
-                FullAuthorEditor(initial: names.joined(separator: ", ")) { newValue in
+                // One author per line — keeps multi-word last-first names
+                // ("Smith, John Jr.") intact. The chip editor handles per-name
+                // edits; this is for bulk add / reorder / replace.
+                FullAuthorEditor(initial: names.joined(separator: "\n")) { newValue in
                     Task {
-                        // FullAuthorEditor still takes a single string for legacy
-                        // typing flow; split into the canonical list on save.
-                        await model.setAuthor(splitAuthors(newValue))
+                        let parsed: [String] = newValue
+                            .split(separator: "\n", omittingEmptySubsequences: true)
+                            .map { $0.trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty }
+                        await model.setAuthor(parsed)
                         editingAll = false
                     }
                 } onCancel: { editingAll = false }
@@ -628,6 +633,10 @@ private struct ChipEditor: View {
     }
 }
 
+/// Multi-line editor for the author list — one name per line. Replaces the
+/// previous single-line text field with comma-separated parsing, which would
+/// silently corrupt names like "Smith, John Jr." (Last, First convention) by
+/// splitting them on the comma.
 private struct FullAuthorEditor: View {
     let initial: String
     let onCommit: (String) -> Void
@@ -636,13 +645,30 @@ private struct FullAuthorEditor: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        TextField("A, B & C", text: $draft)
-            .textFieldStyle(.roundedBorder)
-            .frame(maxWidth: 170, alignment: .trailing)
-            .focused($focused)
-            .onSubmit { onCommit(draft) }
-            .onExitCommand { onCancel() }
-            .onAppear { draft = initial; focused = true }
+        VStack(alignment: .trailing, spacing: 6) {
+            TextEditor(text: $draft)
+                .font(Typo.callout)
+                .frame(minWidth: 220, minHeight: 80, maxHeight: 140)
+                .padding(4)
+                .background(.background)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(.tertiary, lineWidth: 0.5)
+                )
+                .focused($focused)
+                .onExitCommand { onCancel() }
+                .onAppear { draft = initial; focused = true }
+            HStack(spacing: 8) {
+                Text("每行一位作者")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button("取消") { onCancel() }
+                Button("保存") { onCommit(draft) }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(8)
     }
 }
 
