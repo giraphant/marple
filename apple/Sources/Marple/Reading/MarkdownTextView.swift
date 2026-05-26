@@ -6,7 +6,14 @@ struct MarkdownTextView: NSViewRepresentable {
     let markdown: String
     let style: RenderStyle
     let scrollTarget: NSRange?
+    /// Query whose matches are highlighted in the body (nil = none).
+    var highlightQuery: String?
+    /// One-shot scroll-to-match request (a clicked search line); nil = none.
+    var jump: AppModel.MatchJump?
     let onLinkClick: (URL) -> Bool
+
+    private static let matchColor = NSColor.controlAccentColor.withAlphaComponent(0.22)
+    private static let currentMatchColor = NSColor.controlAccentColor.withAlphaComponent(0.45)
 
     private final class MarkdownScrollView: NSScrollView {
         override func layout() {
@@ -79,6 +86,67 @@ struct MarkdownTextView: NSViewRepresentable {
             textView.scrollRangeToVisible(target)
             co.lastScrollTarget = target
         }
+
+        // Search-match highlight: refresh when the doc or the query changes.
+        let query = (highlightQuery?.isEmpty == false) ? highlightQuery : nil
+        if markdown != co.lastHighlightMarkdown || query != co.lastHighlightQuery {
+            applyHighlights(textView: textView, query: query, co: co)
+            co.lastHighlightMarkdown = markdown
+            co.lastHighlightQuery = query
+            co.currentMatch = nil   // a re-highlight invalidates the current-match marker
+        }
+
+        // Scroll to a clicked match (one-shot, keyed by the jump's UUID).
+        if let jump, jump.id != co.lastJumpID {
+            co.lastJumpID = jump.id
+            scrollToMatch(jump, in: scrollView, textView: textView, co: co)
+        }
+    }
+
+    /// Apply a translucent background over every match of `query` in the rendered
+    /// text via the layout manager's TEMPORARY attributes — so the permanent code /
+    /// table backgrounds set by the renderer are untouched and clearing is a single
+    /// range removal.
+    private func applyHighlights(textView: NSTextView, query: String?, co: Coordinator) {
+        guard let lm = textView.layoutManager, let storage = textView.textStorage else { return }
+        let full = NSRange(location: 0, length: storage.length)
+        lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: full)
+        guard let query else { co.matchRanges = []; return }
+        let ranges = BodyMatching.ranges(in: storage.string, query: query)
+        co.matchRanges = ranges
+        for r in ranges {
+            lm.addTemporaryAttribute(.backgroundColor, value: Self.matchColor, forCharacterRange: r)
+        }
+    }
+
+    /// Resolve the clicked line's target range (anchor first, ordinal fallback),
+    /// scroll it to a comfortable position near the top, and mark it as current.
+    private func scrollToMatch(_ jump: AppModel.MatchJump, in scrollView: NSScrollView,
+                               textView: NSTextView, co: Coordinator) {
+        guard let lm = textView.layoutManager, let tc = textView.textContainer,
+              let storage = textView.textStorage else { return }
+        guard let target = BodyMatching.resolveJumpTarget(
+            in: storage.string, matchRanges: co.matchRanges,
+            anchor: jump.anchor, ordinal: jump.ordinal) else { return }
+
+        // Restore the previous current-match to the normal color, promote the new one.
+        if let prev = co.currentMatch {
+            lm.addTemporaryAttribute(.backgroundColor, value: Self.matchColor, forCharacterRange: prev)
+        }
+        lm.addTemporaryAttribute(.backgroundColor, value: Self.currentMatchColor, forCharacterRange: target)
+        co.currentMatch = target
+
+        lm.ensureLayout(for: tc)
+        let glyphRange = lm.glyphRange(forCharacterRange: target, actualCharacterRange: nil)
+        let rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
+        let clip = scrollView.contentView
+        let topPadding: CGFloat = 96
+        let docY = rect.minY + textView.textContainerOrigin.y
+        let maxY = max(0, textView.frame.height - clip.bounds.height)
+        let y = min(max(0, docY - topPadding), maxY)
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
+        scrollView.reflectScrolledClipView(clip)
+        co.lastScrollTarget = target   // keep the outline channel from re-scrolling
     }
 
     private static func sizeDocumentView(in scrollView: NSScrollView) {
@@ -112,6 +180,13 @@ struct MarkdownTextView: NSViewRepresentable {
         var lastStyle: RenderStyle?
         var lastScrollTarget: NSRange?
         var headings: [HeadingAnchor] = []
+
+        // Search-match highlight state.
+        var lastHighlightQuery: String?
+        var lastHighlightMarkdown: String = ""
+        var matchRanges: [NSRange] = []
+        var currentMatch: NSRange?
+        var lastJumpID: UUID?
 
         init(onLinkClick: @escaping (URL) -> Bool) {
             self.onLinkClick = onLinkClick
