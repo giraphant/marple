@@ -21,7 +21,7 @@ public func buildAuthorIndex(_ entries: [Entry]) -> [String: [Entry]] {
     var idx: [String: [Entry]] = [:]
     for e in entries {
         guard e.type == .paperAnalysis || e.type == .bookOverview else { continue }
-        for name in splitAuthors(e.author) {
+        for name in e.author {
             idx[name.lowercased(), default: []].append(e)
         }
     }
@@ -92,7 +92,7 @@ public func relations(for entry: Entry, in entries: [Entry],
     if entry.type == .paperAnalysis || entry.type == .bookOverview {
         var siblings: [Entry] = []
         var seen = Set<String>()
-        for name in splitAuthors(entry.author) {
+        for name in entry.author {
             let key = name.lowercased()
             if out.authorProfile == nil {
                 out.authorProfile = entries.first {

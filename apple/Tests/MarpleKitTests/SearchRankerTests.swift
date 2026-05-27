@@ -2,11 +2,14 @@ import Testing
 @testable import MarpleKit
 
 @Suite struct SearchRankerTests {
+    /// Test factory — accepts a legacy joined-string `author` for terseness;
+    /// `splitAuthors` converts it to the canonical `[String]` on construction.
     func e(_ path: String, type: EntryType = .paperAnalysis, title: String? = nil,
            author: String? = nil, themes: [String] = [], topic: String? = nil,
            source: String? = nil, book: String? = nil, year: String? = nil,
            preview: String = "", doi: String? = nil, rating: Double = 0) -> Entry {
-        Entry(path: path, type: type, title: title, author: author, year: year,
+        Entry(path: path, type: type, title: title,
+              author: splitAuthors(author), year: year,
               ratingScore: rating, themes: themes, preview: preview, hasPDF: false,
               source: source, book: book, topic: topic, doi: doi)
     }

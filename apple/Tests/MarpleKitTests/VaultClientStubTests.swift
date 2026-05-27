@@ -4,7 +4,7 @@ import Testing
 @Suite struct VaultClientStubTests {
     @Test func testStubReturnsSeededEntries() async throws {
         let e = Entry(path: "vault/p/a.md", type: .paperAnalysis, title: "A",
-                      author: nil, year: nil, ratingScore: 0, themes: [],
+                      author: [], year: nil, ratingScore: 0, themes: [],
                       preview: "", hasPDF: false)
         let client: VaultClient = StubVaultClient(entries: [e], texts: ["vault/p/a.md": "# A"])
         let idx = try await client.index()
@@ -27,7 +27,7 @@ import Testing
 
     @Test func testStubSearchReturnsConfiguredHits() async throws {
         let hit = SearchHit(entry: Entry(path: "vault/p/a.md", type: .paperAnalysis,
-                              title: "A", author: nil, year: nil, ratingScore: 0,
+                              title: "A", author: [], year: nil, ratingScore: 0,
                               themes: [], preview: "", hasPDF: false),
                             score: 9, snippet: "…A…", source: "fulltext")
         let stub = StubVaultClient(entries: [], texts: [:], hits: [hit])

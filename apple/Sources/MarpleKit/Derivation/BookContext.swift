@@ -77,7 +77,8 @@ private func chapterBookSlug(_ entry: Entry) -> String? {
 }
 
 private func hasCitationMetadata(_ entry: Entry) -> Bool {
-    [entry.author, entry.year, entry.source, entry.doi].contains { value in
+    if !entry.author.isEmpty { return true }
+    return [entry.year, entry.source, entry.doi].contains { value in
         value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 }

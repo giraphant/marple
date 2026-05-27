@@ -88,20 +88,20 @@ func makeSyntheticEntries(_ n: Int) -> [Entry] {
     for i in 0..<n {
         let isCJK = rng.next() % 10 < 3
         let title: String
-        let author: String?
+        let author: [String]
         let book: String?
         if isCJK {
             let a = cjkTitleParts[Int(rng.next() % UInt64(cjkTitleParts.count))]
             let b = cjkTitleParts[Int(rng.next() % UInt64(cjkTitleParts.count))]
             title = "\(a)的\(b)研究 \(i)"
-            author = "作者\(i % 200)"
+            author = ["作者\(i % 200)"]
             book = books[Int(rng.next() % UInt64(books.count))]
         } else {
             let a = latinTitleParts[Int(rng.next() % UInt64(latinTitleParts.count))]
             let b = latinTitleParts[Int(rng.next() % UInt64(latinTitleParts.count))]
             let c = latinTitleParts[Int(rng.next() % UInt64(latinTitleParts.count))]
             title = "\(a) \(b) \(c) \(i)"
-            author = authors[Int(rng.next() % UInt64(authors.count))]
+            author = [authors[Int(rng.next() % UInt64(authors.count))]]
             book = nil
         }
         let theme = themes[Int(rng.next() % UInt64(themes.count))]

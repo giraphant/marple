@@ -3,10 +3,13 @@ import Testing
 @testable import MarpleKit
 
 @Suite struct ListFilterTests {
+    /// Test factory — accepts a legacy joined-string `author` for terseness;
+    /// `splitAuthors` converts it to the canonical `[String]` on construction.
     func e(_ path: String, author: String? = nil, year: String? = nil, rating: Double = 0,
            themes: [String] = [], source: String? = nil, hasPDF: Bool = false,
            added: Double? = nil) -> Entry {
-        Entry(path: path, type: .paperAnalysis, title: nil, author: author, year: year,
+        Entry(path: path, type: .paperAnalysis, title: nil,
+              author: splitAuthors(author), year: year,
               ratingScore: rating, themes: themes, preview: "", hasPDF: hasPDF,
               mtime: nil, added: added, source: source)
     }
@@ -43,6 +46,35 @@ import Testing
                              match: .all).map(\.path) == ["b"])
         #expect(Set(applyFilters(list, [FilterClause(field: .theme, op: .contains, value: "econ")],
                                  match: .all).map(\.path)) == ["a", "b"])
+    }
+
+    /// QUA-109 contract: author filter is "any author contains needle"
+    /// (case-insensitive substring against each author independently). This
+    /// replaces the pre-QUA-109 behavior of substring-matching against the
+    /// joined string, which let queries like ", " match any multi-author
+    /// entry. Document the new contract here so future refactors don't
+    /// regress it silently.
+    @Test func testAuthorFilterMatchesAnyAuthor() {
+        let solo = Entry(path: "vault/papers/solo.md", type: .paperAnalysis,
+                         title: nil, author: ["Sara Ahmed"], year: nil,
+                         ratingScore: 0, themes: [], preview: "", hasPDF: false)
+        let pair = Entry(path: "vault/papers/pair.md", type: .paperAnalysis,
+                         title: nil, author: ["Sara Ahmed", "Jane Doe"], year: nil,
+                         ratingScore: 0, themes: [], preview: "", hasPDF: false)
+        let other = Entry(path: "vault/papers/other.md", type: .paperAnalysis,
+                          title: nil, author: ["John Smith"], year: nil,
+                          ratingScore: 0, themes: [], preview: "", hasPDF: false)
+        let list = [solo, pair, other]
+
+        // Single-name needle matches both entries that have that author.
+        let aClause = FilterClause(field: .author, op: .contains, value: "Sara")
+        let hits = applyFilters(list, [aClause], match: .all).map(\.path)
+        #expect(Set(hits) == ["vault/papers/solo.md", "vault/papers/pair.md"])
+
+        // The ", " needle no longer falsely matches multi-author entries by
+        // exploiting the joined-string separator.
+        let bClause = FilterClause(field: .author, op: .contains, value: ", ")
+        #expect(applyFilters(list, [bClause], match: .all).isEmpty)
     }
 
     @Test func testAddedWithinDays() {

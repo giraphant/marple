@@ -309,7 +309,7 @@ struct CommandPalette: View {
 
     private func metaLine(_ entry: Entry) -> String {
         var parts = [entry.type.label]
-        if let a = entry.author, !a.isEmpty { parts.append(a) }
+        if !entry.author.isEmpty { parts.append(entry.author.joined(separator: ", ")) }
         if let y = entry.year, !y.isEmpty { parts.append(y) }
         return parts.joined(separator: " · ")
     }

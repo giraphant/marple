@@ -197,27 +197,42 @@ struct IndexFieldsTests {
         #expect(stripWiki("[[path| Solo ]]") == "Solo")
     }
 
-    // MARK: - flattenAuthor
+    // MARK: - parseAuthors  (replaced flattenAuthor in QUA-109)
 
-    @Test("flattenAuthor: sequence of strings")
-    func flattenAuthorSequence() {
-        #expect(flattenAuthor(.sequence([.string("A"), .string("B")])) == "A, B")
+    @Test("parseAuthors: sequence of strings → list")
+    func parseAuthorsSequence() {
+        #expect(parseAuthors(.sequence([.string("A"), .string("B")])) == ["A", "B"])
     }
 
-    @Test("flattenAuthor: scalar with wiki link")
-    func flattenAuthorScalarWiki() {
-        #expect(flattenAuthor(.string("[[x|Solo]]")) == "Solo")
+    @Test("parseAuthors: scalar with wiki link → 1-element list")
+    func parseAuthorsScalarWiki() {
+        #expect(parseAuthors(.string("[[x|Solo]]")) == ["Solo"])
     }
 
-    @Test("flattenAuthor: null → nil")
-    func flattenAuthorNull() {
-        #expect(flattenAuthor(.null) == nil)
+    @Test("parseAuthors: scalar bare name → 1-element list")
+    func parseAuthorsScalarBare() {
+        #expect(parseAuthors(.string("Solo Author")) == ["Solo Author"])
     }
 
-    @Test("flattenAuthor: sequence filters empty after stripWiki")
-    func flattenAuthorSequenceFiltersEmpty() {
-        let result = flattenAuthor(.sequence([.string("A"), .string(""), .string("B")]))
-        #expect(result == "A, B")
+    @Test("parseAuthors: legacy comma scalar → split via splitAuthors")
+    func parseAuthorsScalarLegacyComma() {
+        #expect(parseAuthors(.string("A, B & C")) == ["A", "B", "C"])
+    }
+
+    @Test("parseAuthors: nil → empty list")
+    func parseAuthorsNilEmpty() {
+        #expect(parseAuthors(nil) == [])
+    }
+
+    @Test("parseAuthors: null → empty list")
+    func parseAuthorsNull() {
+        #expect(parseAuthors(.null) == [])
+    }
+
+    @Test("parseAuthors: sequence filters empty after stripWiki")
+    func parseAuthorsSequenceFiltersEmpty() {
+        let result = parseAuthors(.sequence([.string("A"), .string(""), .string("B")]))
+        #expect(result == ["A", "B"])
     }
 
     // MARK: - themeArray
