@@ -11,6 +11,26 @@ final class AppModel {
     private(set) var entries: [Entry] = []
     var status: String = ""
 
+    /// True until the first `loadIndex()` either publishes a snapshot or
+    /// reports an error. Stays false for the rest of the session — subsequent
+    /// reloads from the watcher / deferred reconcile / user refresh don't flip
+    /// it back. Views read this to distinguish "still booting, show skeleton"
+    /// from "loaded but empty vault, show empty state" (QUA-105). The bare
+    /// `entries.isEmpty` check those views used before was ambiguous between
+    /// the two and would have rendered drop-zones during cold start.
+    private(set) var isBootstrapping: Bool = true
+
+    /// True while a post-bootstrap background reconcile + reload is running
+    /// (deferred reconcile on the fast path, FSEvents watcher, future user-
+    /// triggered refresh). Counter-backed so two reconciles overlapping don't
+    /// race the indicator off and on. The sidebar status row reads this to
+    /// surface "正在更新索引…" without the heavier "正在建立索引…" wording
+    /// that `isBootstrapping` carries. QUA-105.
+    private var refreshingCount: Int = 0
+    var isRefreshing: Bool { refreshingCount > 0 }
+    func beginRefreshing() { refreshingCount += 1 }
+    func endRefreshing() { refreshingCount = max(0, refreshingCount - 1) }
+
     /// Card grid vs single-column list. Pure UI toggle; no derived cache depends on it.
     var browseMode: BrowseMode = .grid { didSet { persist() } }
 
@@ -143,6 +163,15 @@ final class AppModel {
         self.stateStore = stateStore
         self.semantic = semantic
         if let s = stateStore?.load() {
+            // QUA-105: seed `loadedCountsSnapshot` BEFORE the property setters
+            // below trigger `persist()` via didSet. Otherwise the first persist
+            // (from `browsePane = ...`) writes `counts: nil` back to disk,
+            // wiping the user's restored type counts before we'd had a chance
+            // to round-trip them.
+            if let restored = s.counts {
+                counts = restored
+                loadedCountsSnapshot = restored
+            }
             browsePane = s.browsePane
             workspace = s.makeWorkspace()
             isBrowsing = workspace == nil ? true : s.isBrowsing
@@ -154,14 +183,42 @@ final class AppModel {
         loadTypeOrder()
     }
 
+    /// Last-session sidebar counts, restored from PersistedState in init. Kept
+    /// so `persist()` can round-trip them during the bootstrap window — without
+    /// this, every persist before the first loadIndex would overwrite the
+    /// stored counts with an empty `[:]` (because didSet on browsePane etc.
+    /// fires during AppModel.init, well before entries are loaded). Once
+    /// bootstrap completes, the live `counts` is authoritative. QUA-105.
+    private var loadedCountsSnapshot: [EntryType: Int]?
+
     /// Save the current place (browse category + doc tabs + controls). Cheap — a small
     /// JSON blob to UserDefaults; invoked from the state properties' didSet, so every
     /// mutation auto-saves without per-intent hooks.
     private func persist() {
         guard let stateStore else { return }
         let ws = workspace
-        let savedTabs = ws?.tabs.map { PersistedTab(location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) } ?? []
+        let liveByPath: [String: Entry] = Dictionary(
+            entries.lazy.compactMap { e -> (String, Entry)? in (e.path, e) },
+            uniquingKeysWith: { a, _ in a })
+        let savedTabs = ws?.tabs.map { tab -> PersistedTab in
+            // Title + type snapshot: prefer the live entry; if entries haven't
+            // loaded (bootstrap window) or the path no longer resolves (file
+            // was deleted), carry over whatever we previously cached so the
+            // next launch's sidebar still shows the right title AND the right
+            // type icon. Falls to nil only if no source has ever produced one.
+            let liveEntry = tab.location.openPath.flatMap { liveByPath[$0] }
+            let cachedTitle = liveEntry?.title ?? tab.cachedTitle
+            let cachedType = liveEntry?.type ?? tab.cachedType
+            return PersistedTab(location: tab.location, pinned: tab.pinned,
+                                customTitle: tab.customTitle,
+                                cachedTitle: cachedTitle,
+                                cachedType: cachedType)
+        } ?? []
         let idx = ws.flatMap { w in w.tabs.firstIndex { $0.id == w.activeID } } ?? 0
+        // Same round-trip discipline for counts — during bootstrap, write back
+        // the loaded snapshot rather than the still-empty `counts` dict.
+        let persistedCounts: [EntryType: Int]? =
+            isBootstrapping ? loadedCountsSnapshot : counts
         stateStore.save(PersistedState(
             browsePane: browsePane,
             isBrowsing: isBrowsing,
@@ -171,7 +228,8 @@ final class AppModel {
             filterClauses: filterClauses,
             filterMatch: filterMatch,
             browseMode: browseMode.rawValue,
-            currentSpace: ws.map { PersistedWorkspaceSpace(tree: $0.treeSnapshot) }))
+            currentSpace: ws.map { PersistedWorkspaceSpace(tree: $0.treeSnapshot) },
+            counts: persistedCounts))
     }
 
     // MARK: type order persistence
@@ -298,23 +356,73 @@ final class AppModel {
 
     // MARK: actions
 
+    /// `loadIndex()` runs concurrently with itself in practice: the fast-path boot
+    /// kicks a deferred reconcile that calls loadIndex on completion, the FSEvents
+    /// watcher calls loadIndex on every debounced vault change, and the in-progress
+    /// QUA-105 startup flow adds a background "full hydration" path. Each call
+    /// captures a `loadIndexGeneration` at entry; after every suspension point we
+    /// recheck — if a newer call has already started, the older one drops its
+    /// result instead of overwriting freshly-published `entries`/`trashItems`.
+    /// Same shape as `derivedGeneration` in `scheduleDeferredDerivedRebuild`.
+    private var loadIndexGeneration: Int = 0
+
     func loadIndex() async {
+        loadIndexGeneration &+= 1
+        let generation = loadIndexGeneration
+        let fetched: [Entry]
         do {
-            entries = try await client.index()
-            status = "\(entries.count) entries"
-            rebuildIndexDerived()
-            if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-                recomputeVisible()
-            } else {
-                runSearch()
-            }
-            if openPath != loadedDocPath { await loadDoc(openPath) }
-            await loadTrash()
-            print("[marple] index loaded: \(entries.count) entries")
+            fetched = try await client.index()
         } catch {
-            status = "index failed: \(error)"
-            print("[marple] index FAILED: \(error)")
+            // Only the latest call publishes failure state — an older stale
+            // failure shouldn't clobber a newer call's "n entries" status.
+            if loadIndexGeneration == generation {
+                status = "index failed: \(error)"
+                isBootstrapping = false
+                print("[marple] index FAILED: \(error)")
+            }
+            return
         }
+        guard loadIndexGeneration == generation else {
+            print("[marple] loadIndex gen \(generation) stale after index() (latest \(loadIndexGeneration)), dropping")
+            return
+        }
+        entries = fetched
+        isBootstrapping = false
+        status = "\(entries.count) entries"
+        rebuildIndexDerived()
+        if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+            recomputeVisible()
+        } else {
+            runSearch()
+        }
+        // QUA-105: explicitly persist right after the first snapshot publishes.
+        // `entries` and `counts` are not `didSet`-instrumented (changing them
+        // is too hot a path to fire a UserDefaults write on every reload), so
+        // a "boot and quit without interaction" session would otherwise never
+        // round-trip live titles/counts into PersistedState — defeating the
+        // whole point of caching them for next launch's bootstrap window.
+        persist()
+        if openPath != loadedDocPath {
+            await loadDoc(openPath)
+            guard loadIndexGeneration == generation else {
+                print("[marple] loadIndex gen \(generation) stale after loadDoc, dropping trash refresh")
+                return
+            }
+        }
+        // Inline the trash fetch instead of `await loadTrash()` so we can guard
+        // the publish point against a newer loadIndex (the public `loadTrash()`
+        // is also called from user actions where this guard would be wrong).
+        do {
+            let trash = try await client.listTrash()
+            guard loadIndexGeneration == generation else {
+                print("[marple] loadIndex gen \(generation) stale after listTrash, dropping trash result")
+                return
+            }
+            trashItems = trash
+        } catch {
+            print("[marple] listTrash FAILED: \(error)")
+        }
+        print("[marple] index loaded: \(entries.count) entries (gen \(generation))")
     }
 
     func select(pane newPane: Pane) {
@@ -756,11 +864,18 @@ final class AppModel {
 
     // MARK: tab labels
 
+    /// Title resolution: user-renamed → live entry title → last-session cached
+    /// title (kept in `NavTab.cachedTitle`, populated from PersistedState at
+    /// restore) → path basename. The cachedTitle fallback is what keeps the
+    /// sidebar tab list from showing raw `00-overview.md` filenames during
+    /// the bootstrap window before `entries` has loaded (QUA-105).
     func tabTitle(_ tab: NavTab) -> String {
         if let customTitle = tab.customTitle { return customTitle }
         let loc = tab.location
         if let p = loc.openPath {
-            return entries.first { $0.path == p }?.title ?? (p as NSString).lastPathComponent
+            if let live = entries.first(where: { $0.path == p })?.title { return live }
+            if let cached = tab.cachedTitle, !cached.isEmpty { return cached }
+            return (p as NSString).lastPathComponent
         }
         switch loc.pane {
         case .type(let t):     return t.label

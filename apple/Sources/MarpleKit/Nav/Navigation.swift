@@ -41,17 +41,30 @@ public struct NavHistory: Hashable, Sendable {
 }
 
 /// One tab: an identity, its own history, a pinned flag, and an optional user title.
+///
+/// `cachedTitle` carries last-session's `entry.title` for the tab's path across
+/// restarts. It is consulted as a fallback in the title resolution chain when
+/// `entries` hasn't loaded yet — the live UI never reaches this field once
+/// loadIndex has published. Mutating tab.cachedTitle in-session is not required;
+/// `AppModel.persist` re-snapshots from live `entries` at write time.
 public struct NavTab: Identifiable, Hashable, Sendable {
     public let id: UUID
     public var history: NavHistory
     public var pinned: Bool
     public var customTitle: String?
+    public var cachedTitle: String?
+    public var cachedType: EntryType?
 
-    public init(id: UUID = UUID(), location: NavLocation, pinned: Bool = false, customTitle: String? = nil) {
+    public init(id: UUID = UUID(), location: NavLocation, pinned: Bool = false,
+                customTitle: String? = nil,
+                cachedTitle: String? = nil,
+                cachedType: EntryType? = nil) {
         self.id = id
         self.history = NavHistory(location)
         self.pinned = pinned
         self.customTitle = customTitle
+        self.cachedTitle = cachedTitle
+        self.cachedType = cachedType
     }
 
     public var location: NavLocation { history.current }
@@ -176,10 +189,18 @@ public struct Workspace: Sendable {
 
     /// Rebuild a workspace from persisted tab snapshots + legacy (v1) flat groups.
     /// Each tab starts with a fresh single-entry history. Returns nil if empty.
-    public init?(restoring tabs: [(location: NavLocation, pinned: Bool, customTitle: String?)], activeIndex: Int,
+    public init?(restoring tabs: [(location: NavLocation, pinned: Bool,
+                                   customTitle: String?, cachedTitle: String?,
+                                   cachedType: EntryType?)],
+                 activeIndex: Int,
                  groups: [WorkspaceGroupSnapshot] = []) {
         guard !tabs.isEmpty else { return nil }
-        let built = tabs.map { NavTab(location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) }
+        let built = tabs.map {
+            NavTab(location: $0.location, pinned: $0.pinned,
+                   customTitle: $0.customTitle,
+                   cachedTitle: $0.cachedTitle,
+                   cachedType: $0.cachedType)
+        }
         self.tabs = built
         let idx = built.indices.contains(activeIndex) ? activeIndex : 0
         self.activeID = built[idx].id
@@ -189,16 +210,25 @@ public struct Workspace: Sendable {
 
     public init?(restoring tabs: [(location: NavLocation, pinned: Bool)], activeIndex: Int,
                  groups: [WorkspaceGroupSnapshot] = []) {
-        self.init(restoring: tabs.map { (location: $0.location, pinned: $0.pinned, customTitle: nil) },
-                  activeIndex: activeIndex,
-                  groups: groups)
+        self.init(restoring: tabs.map {
+            (location: $0.location, pinned: $0.pinned,
+             customTitle: nil, cachedTitle: nil, cachedType: nil)
+        }, activeIndex: activeIndex, groups: groups)
     }
 
     /// Rebuild from the recursive (v2) tree snapshot.
-    public init?(restoring tabs: [(location: NavLocation, pinned: Bool, customTitle: String?)], activeIndex: Int,
+    public init?(restoring tabs: [(location: NavLocation, pinned: Bool,
+                                   customTitle: String?, cachedTitle: String?,
+                                   cachedType: EntryType?)],
+                 activeIndex: Int,
                  tree: WorkspaceTreeSnapshot) {
         guard !tabs.isEmpty else { return nil }
-        let built = tabs.map { NavTab(location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) }
+        let built = tabs.map {
+            NavTab(location: $0.location, pinned: $0.pinned,
+                   customTitle: $0.customTitle,
+                   cachedTitle: $0.cachedTitle,
+                   cachedType: $0.cachedType)
+        }
         self.tabs = built
         let idx = built.indices.contains(activeIndex) ? activeIndex : 0
         self.activeID = built[idx].id

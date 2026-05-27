@@ -79,27 +79,33 @@ final class MarpleWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func boot(paths: VaultPaths) {
-        setContent(boxed(ProgressView("建立索引…").frame(maxWidth: .infinity, maxHeight: .infinity)))
-        Task { @MainActor in
-            await appState.boot(paths: paths)
-            if let model = appState.model {
-                ActiveModel.current = model
-                applyTheme()
-                window?.titleVisibility = .hidden
-                window?.titlebarAppearsTransparent = false
-                window?.toolbarStyle = .unified
-                let split = MarpleSplitViewController(model: model)
-                setContent(split)
-                toolbarController.model = model
-                toolbarController.shell = split
-                toolbarController.splitView = split.splitView   // we own this split → tracking separators are safe
-                window?.toolbar = toolbarController.makeToolbar()
-            } else if let err = appState.bootError {
+        // QUA-105: `AppState.boot` is now synchronous (no awaits inside, the
+        // data load is dispatched onto a background Task internally). We mount
+        // the split chrome immediately so it's the window's content when
+        // `showWindow` is called below — no "ProgressView for several seconds"
+        // wait, no spinner→split-swap flash. Views render with
+        // `model.isBootstrapping=true` and show skeleton state until the
+        // first loadIndex completes.
+        appState.boot(paths: paths)
+        guard let model = appState.model else {
+            if let err = appState.bootError {
                 setContent(boxed(
                     ContentUnavailableView("启动失败", systemImage: "exclamationmark.triangle",
                                            description: Text(err))))
             }
+            return
         }
+        ActiveModel.current = model
+        applyTheme()
+        window?.titleVisibility = .hidden
+        window?.titlebarAppearsTransparent = false
+        window?.toolbarStyle = .unified
+        let split = MarpleSplitViewController(model: model)
+        setContent(split)
+        toolbarController.model = model
+        toolbarController.shell = split
+        toolbarController.splitView = split.splitView   // we own this split → tracking separators are safe
+        window?.toolbar = toolbarController.makeToolbar()
     }
 
     private func applyTheme() {

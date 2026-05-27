@@ -47,7 +47,16 @@ struct EntryGridView: View {
         }
     }
 
+    /// During bootstrap (data still loading) the drop-zone must not appear:
+    /// `visibleEntries.isEmpty` is true regardless of whether the vault is
+    /// genuinely empty, so without this gate the image pane would show the
+    /// "拖拽图片到这里" prompt on cold start, and a drop landing then would
+    /// race with the in-flight loadIndex — importImage appends locally, then
+    /// loadIndex publishes a fresh `entries` snapshot from the DB that may
+    /// not yet include the just-imported image (the reconcile picking it up
+    /// runs later). QUA-105.
     private var acceptsImageDrops: Bool {
+        guard !model.isBootstrapping else { return false }
         if case .type(.image) = model.pane { return true }
         return false
     }
