@@ -47,7 +47,13 @@ struct MarkdownTextView: NSViewRepresentable {
         let textView = NSTextView(frame: .zero, textContainer: textContainer)
         textView.isEditable = false
         textView.isSelectable = true
-        textView.isVerticallyResizable = true
+        // Own the documentView frame ourselves via `sizeDocumentView` — leaving
+        // `isVerticallyResizable = true` had NSTextView's own auto-resize race with
+        // our manual `setFrameSize`, intermittently leaving the frame ≈ viewport
+        // height so NSScrollView decided nothing was scrollable (wheel + outline
+        // jump both dead, content still painted because glyphs were laid out for
+        // the full container).
+        textView.isVerticallyResizable = false
         textView.isHorizontallyResizable = false
         textView.isRichText = false
         textView.allowsUndo = false
@@ -152,7 +158,8 @@ struct MarkdownTextView: NSViewRepresentable {
     private static func sizeDocumentView(in scrollView: NSScrollView) {
         guard let textView = scrollView.documentView as? NSTextView,
               let lm = textView.layoutManager,
-              let tc = textView.textContainer else { return }
+              let tc = textView.textContainer,
+              let storage = textView.textStorage else { return }
 
         let availableWidth = scrollView.contentSize.width > 0 ? scrollView.contentSize.width : Reading.measure
         let sidePadding = Space.s10
@@ -161,12 +168,21 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.textContainerInset = NSSize(width: horizontalInset, height: Space.s9)
         tc.containerSize = NSSize(width: columnWidth, height: .greatestFiniteMagnitude)
 
-        lm.ensureLayout(for: tc)
+        // `ensureLayout(for: container)` lays out only until the container fills, which
+        // with `.greatestFiniteMagnitude` height should be everything — but the layout
+        // manager can still return a stale `usedRect` if glyph generation hasn't
+        // caught up with the latest textStorage edit. Forcing layout by character
+        // range over the whole storage is deterministic.
+        lm.ensureLayout(forCharacterRange: NSRange(location: 0, length: storage.length))
         let used = lm.usedRect(for: tc)
         let height = ceil(used.maxY + textView.textContainerInset.height * 2)
         let size = NSSize(width: availableWidth, height: height)
         if textView.frame.size != size {
             textView.setFrameSize(size)
+            // Nudge the scroll view to recompute its scrollable range. Without this
+            // it occasionally kept believing the document was unscrollable (held the
+            // previous "frame ≈ viewport" geometry) even after we grew the frame.
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
     }
 
