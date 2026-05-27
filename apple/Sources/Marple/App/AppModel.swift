@@ -298,23 +298,64 @@ final class AppModel {
 
     // MARK: actions
 
+    /// `loadIndex()` runs concurrently with itself in practice: the fast-path boot
+    /// kicks a deferred reconcile that calls loadIndex on completion, the FSEvents
+    /// watcher calls loadIndex on every debounced vault change, and the in-progress
+    /// QUA-105 startup flow adds a background "full hydration" path. Each call
+    /// captures a `loadIndexGeneration` at entry; after every suspension point we
+    /// recheck — if a newer call has already started, the older one drops its
+    /// result instead of overwriting freshly-published `entries`/`trashItems`.
+    /// Same shape as `derivedGeneration` in `scheduleDeferredDerivedRebuild`.
+    private var loadIndexGeneration: Int = 0
+
     func loadIndex() async {
+        loadIndexGeneration &+= 1
+        let generation = loadIndexGeneration
+        let fetched: [Entry]
         do {
-            entries = try await client.index()
-            status = "\(entries.count) entries"
-            rebuildIndexDerived()
-            if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-                recomputeVisible()
-            } else {
-                runSearch()
-            }
-            if openPath != loadedDocPath { await loadDoc(openPath) }
-            await loadTrash()
-            print("[marple] index loaded: \(entries.count) entries")
+            fetched = try await client.index()
         } catch {
-            status = "index failed: \(error)"
-            print("[marple] index FAILED: \(error)")
+            // Only the latest call publishes failure state — an older stale
+            // failure shouldn't clobber a newer call's "n entries" status.
+            if loadIndexGeneration == generation {
+                status = "index failed: \(error)"
+                print("[marple] index FAILED: \(error)")
+            }
+            return
         }
+        guard loadIndexGeneration == generation else {
+            print("[marple] loadIndex gen \(generation) stale after index() (latest \(loadIndexGeneration)), dropping")
+            return
+        }
+        entries = fetched
+        status = "\(entries.count) entries"
+        rebuildIndexDerived()
+        if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+            recomputeVisible()
+        } else {
+            runSearch()
+        }
+        if openPath != loadedDocPath {
+            await loadDoc(openPath)
+            guard loadIndexGeneration == generation else {
+                print("[marple] loadIndex gen \(generation) stale after loadDoc, dropping trash refresh")
+                return
+            }
+        }
+        // Inline the trash fetch instead of `await loadTrash()` so we can guard
+        // the publish point against a newer loadIndex (the public `loadTrash()`
+        // is also called from user actions where this guard would be wrong).
+        do {
+            let trash = try await client.listTrash()
+            guard loadIndexGeneration == generation else {
+                print("[marple] loadIndex gen \(generation) stale after listTrash, dropping trash result")
+                return
+            }
+            trashItems = trash
+        } catch {
+            print("[marple] listTrash FAILED: \(error)")
+        }
+        print("[marple] index loaded: \(entries.count) entries (gen \(generation))")
     }
 
     func select(pane newPane: Pane) {
