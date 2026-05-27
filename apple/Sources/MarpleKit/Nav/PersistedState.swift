@@ -2,12 +2,33 @@ import Foundation
 
 /// One restored tab: its current location plus pinned flag. Histories are not
 /// persisted — a restored tab starts with a fresh single-entry history.
+///
+/// `cachedTitle` is a session-to-session snapshot of `entry.title` for the tab's
+/// path, written at persist time and read at the next launch BEFORE `entries`
+/// has loaded. Without it, the sidebar tab list would show bare filenames like
+/// `00-overview.md` during bootstrap (because the live `entry?.title` lookup
+/// returns nil against an empty entries array). Decoded as nil on legacy state
+/// that predates this field, falling through to the existing filename fallback.
 public struct PersistedTab: Codable, Sendable, Equatable {
     public var location: NavLocation
     public var pinned: Bool
     public var customTitle: String?
-    public init(location: NavLocation, pinned: Bool, customTitle: String? = nil) {
-        self.location = location; self.pinned = pinned; self.customTitle = customTitle
+    public var cachedTitle: String?
+    /// Snapshot of `entry.type` for the bootstrap window — paired with
+    /// `cachedTitle`, this is what lets the sidebar render the correct
+    /// type icon (paper / note / book / image / chapter / theme) instead of
+    /// falling back to the default `list.bullet` while `entries` is empty.
+    /// Decoded as nil on legacy state predating this field. QUA-105.
+    public var cachedType: EntryType?
+    public init(location: NavLocation, pinned: Bool,
+                customTitle: String? = nil,
+                cachedTitle: String? = nil,
+                cachedType: EntryType? = nil) {
+        self.location = location
+        self.pinned = pinned
+        self.customTitle = customTitle
+        self.cachedTitle = cachedTitle
+        self.cachedType = cachedType
     }
 }
 
@@ -52,20 +73,33 @@ public struct PersistedState: Codable, Sendable, Equatable {
     public var filterMatch: FilterMatch
     public var browseMode: String
     public var currentSpace: PersistedWorkspaceSpace?
+    /// Last-session sidebar counts per `EntryType`. Restored at boot so the
+    /// type list shows stale-but-plausible numbers instead of all-zeros during
+    /// the bootstrap window; replaced with live values once the first
+    /// `loadIndex` publishes. Optional for backward compat with state blobs
+    /// that predate this field.
+    public var counts: [EntryType: Int]?
 
     public init(browsePane: Pane, isBrowsing: Bool, tabs: [PersistedTab], activeIndex: Int,
                 sortClauses: [SortClause], filterClauses: [FilterClause],
                 filterMatch: FilterMatch, browseMode: String,
-                currentSpace: PersistedWorkspaceSpace? = nil) {
+                currentSpace: PersistedWorkspaceSpace? = nil,
+                counts: [EntryType: Int]? = nil) {
         self.browsePane = browsePane; self.isBrowsing = isBrowsing
         self.tabs = tabs; self.activeIndex = activeIndex
         self.sortClauses = sortClauses; self.filterClauses = filterClauses
         self.filterMatch = filterMatch; self.browseMode = browseMode
         self.currentSpace = currentSpace
+        self.counts = counts
     }
 
     public func makeWorkspace() -> Workspace? {
-        let restoring = tabs.map { (location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) }
+        let restoring = tabs.map {
+            (location: $0.location, pinned: $0.pinned,
+             customTitle: $0.customTitle,
+             cachedTitle: $0.cachedTitle,
+             cachedType: $0.cachedType)
+        }
         if let tree = currentSpace?.tree {
             return Workspace(restoring: restoring, activeIndex: activeIndex, tree: tree)
         }
