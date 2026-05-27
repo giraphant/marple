@@ -123,6 +123,43 @@ import Testing
         #expect(model.isBootstrapping == false)
     }
 
+    // MARK: - isRefreshing counter (QUA-105)
+
+    @MainActor
+    @Test func refreshingDefaultsToFalse() {
+        let model = AppModel(client: ScriptedDelayedClient())
+        #expect(model.isRefreshing == false)
+    }
+
+    @MainActor
+    @Test func refreshingCounterIsReentrantSafe() {
+        // Two overlapping background refreshes (deferred reconcile + watcher,
+        // or two FSEvents bursts firing close together) must not race the
+        // indicator off while the second is still running. Counter-based.
+        let model = AppModel(client: ScriptedDelayedClient())
+        model.beginRefreshing()
+        #expect(model.isRefreshing == true)
+        model.beginRefreshing()
+        #expect(model.isRefreshing == true)
+        model.endRefreshing()
+        #expect(model.isRefreshing == true)   // still one outstanding
+        model.endRefreshing()
+        #expect(model.isRefreshing == false)
+    }
+
+    @MainActor
+    @Test func endRefreshingClampsAtZero() {
+        // Defensive: stray endRefreshing without a matching begin must not
+        // make the counter go negative (it would then take an extra begin to
+        // recover, and the indicator would be permanently desynced).
+        let model = AppModel(client: ScriptedDelayedClient())
+        model.endRefreshing()
+        model.endRefreshing()
+        #expect(model.isRefreshing == false)
+        model.beginRefreshing()
+        #expect(model.isRefreshing == true)
+    }
+
     @MainActor
     @Test func sequentialLoadIndexCallsStillPublish() async throws {
         // Sanity: the gen guard must not break the common case of back-to-back
