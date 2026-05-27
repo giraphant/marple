@@ -51,10 +51,12 @@ final class AppState: ObservableObject {
         // AppModel.loadIndex makes overlapping bootstrap + watcher-triggered
         // calls converge to the latest snapshot.
         let watcher = VaultWatcher(vaultDirectory: URL(fileURLWithPath: paths.vaultDir)) { [weak m, indexer] in
+            await m?.beginRefreshing()
             do { _ = try await Task.detached { try indexer.reconcile() }.value }
             catch { print("[marple] watcher reconcile failed: \(error)") }
             await m?.loadIndex()
             await m?.reloadOpen()
+            await m?.endRefreshing()
         }
         watcher.start()
         self.watcher = watcher
@@ -85,6 +87,7 @@ final class AppState: ObservableObject {
             await m?.loadIndex()
             if canSkip {
                 Task { @MainActor [weak m, indexer] in
+                    m?.beginRefreshing()
                     let stats: ReconcileStats?
                     do { stats = try await Task.detached { try indexer.reconcile() }.value }
                     catch {
@@ -95,6 +98,7 @@ final class AppState: ObservableObject {
                         await m?.loadIndex()
                         await m?.reloadOpen()
                     }
+                    m?.endRefreshing()
                 }
             }
         }

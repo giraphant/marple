@@ -20,6 +20,17 @@ final class AppModel {
     /// the two and would have rendered drop-zones during cold start.
     private(set) var isBootstrapping: Bool = true
 
+    /// True while a post-bootstrap background reconcile + reload is running
+    /// (deferred reconcile on the fast path, FSEvents watcher, future user-
+    /// triggered refresh). Counter-backed so two reconciles overlapping don't
+    /// race the indicator off and on. The sidebar status row reads this to
+    /// surface "正在更新索引…" without the heavier "正在建立索引…" wording
+    /// that `isBootstrapping` carries. QUA-105.
+    private var refreshingCount: Int = 0
+    var isRefreshing: Bool { refreshingCount > 0 }
+    func beginRefreshing() { refreshingCount += 1 }
+    func endRefreshing() { refreshingCount = max(0, refreshingCount - 1) }
+
     /// Card grid vs single-column list. Pure UI toggle; no derived cache depends on it.
     var browseMode: BrowseMode = .grid { didSet { persist() } }
 
