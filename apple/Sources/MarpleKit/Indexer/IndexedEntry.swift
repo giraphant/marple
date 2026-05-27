@@ -75,6 +75,12 @@ public struct IndexedEntry: Sendable, Equatable {
     /// Column: `topic`.
     public var topic: String?
 
+    /// Column: `kind`.
+    public var kind: String?
+
+    /// Column: `journal`.
+    public var journal: String?
+
     /// Column: `source`.
     public var source: String?
 
@@ -86,6 +92,9 @@ public struct IndexedEntry: Sendable, Equatable {
 
     /// Column: `isbn`.
     public var isbn: String?
+
+    /// Column: `category`.
+    public var category: String? = nil
 
     // MARK: Translation / localisation
 
@@ -257,6 +266,7 @@ public func buildIndexedEntry(
                                         title: titleValue, body: body)
     let publisherValue: String? = truthyText(frontmatter, "publisher").map { stripWiki($0) }
     let isbnValue: String? = truthyText(frontmatter, "isbn")
+    let categoryValue: String? = truthyText(frontmatter, "category")
     let translationTitleCnValue: String? = translationTitleCn(frontmatter)
     let translationDoubanURLValue: String? = translationDoubanUrl(frontmatter)
 
@@ -280,6 +290,8 @@ public func buildIndexedEntry(
 
     // 12. Remaining optional fields.
     let topicValue: String? = truthyText(frontmatter, "topic")
+    let kindValue: String? = truthyText(frontmatter, "kind")
+    let journalValue: String? = truthyText(frontmatter, "journal")
     let sourceValue: String? = truthyText(frontmatter, "source")
     let doiValue: String? = truthyText(frontmatter, "doi")
     let chaptersAnalyzedValue: Int64? = intValue(field(frontmatter, "chapters_analyzed"))
@@ -299,10 +311,13 @@ public func buildIndexedEntry(
         ratingScore: ratingScoreValue,
         themes: themesValue,
         topic: topicValue,
+        kind: kindValue,
+        journal: journalValue,
         source: sourceValue,
         doi: doiValue,
         publisher: publisherValue,
         isbn: isbnValue,
+        category: categoryValue,
         translationTitleCn: translationTitleCnValue,
         translationDoubanURL: translationDoubanURLValue,
         chaptersAnalyzed: chaptersAnalyzedValue,

@@ -106,8 +106,8 @@ public final class IndexDatabase: @unchecked Sendable {
             result.reserveCapacity(expected)
             let cursor = try Row.fetchCursor(db, sql: """
                 SELECT path, type, book, title, author, year_json, rating_score,
-                       themes_json, topic, source, doi, annotates, has_pdf, pdf_slug,
-                       mtime, preview, added
+                       themes_json, topic, kind, journal, source, doi, publisher, isbn, category,
+                       annotates, created, has_pdf, pdf_slug, mtime, preview, added
                 FROM entries
                 ORDER BY path
                 """)
@@ -268,8 +268,11 @@ public final class IndexDatabase: @unchecked Sendable {
         var sql = """
             SELECT e.path AS path, e.type AS type, e.book AS book, e.title AS title,
                    e.author AS author, e.year_json AS year_json, e.rating_score AS rating_score,
-                   e.themes_json AS themes_json, e.topic AS topic, e.source AS source,
-                   e.doi AS doi, e.annotates AS annotates, e.has_pdf AS has_pdf,
+                   e.themes_json AS themes_json, e.topic AS topic, e.kind AS kind,
+                   e.journal AS journal, e.source AS source, e.doi AS doi,
+                   e.publisher AS publisher, e.isbn AS isbn,
+                   e.category AS category, e.annotates AS annotates, e.created AS created,
+                   e.has_pdf AS has_pdf,
                    e.pdf_slug AS pdf_slug,
                    e.mtime AS mtime, e.preview AS preview, e.added AS added,
                    bm25(entry_trigram) AS score,
@@ -279,7 +282,7 @@ public final class IndexDatabase: @unchecked Sendable {
             WHERE entry_trigram MATCH ?
             """
         var args: [(any DatabaseValueConvertible)?] = [match]
-        if let type { sql += "\n  AND e.type = ?"; args.append(type.rawValue) }
+        appendTypeFilter(type, to: &sql, args: &args)
         if let minRating { sql += "\n  AND e.rating_score >= ?"; args.append(minRating) }
         if let theme {
             sql += "\n  AND e.path IN (SELECT path FROM entry_themes WHERE theme = ?)"
@@ -312,8 +315,11 @@ public final class IndexDatabase: @unchecked Sendable {
         var sql = """
             SELECT e.path AS path, e.type AS type, e.book AS book, e.title AS title,
                    e.author AS author, e.year_json AS year_json, e.rating_score AS rating_score,
-                   e.themes_json AS themes_json, e.topic AS topic, e.source AS source,
-                   e.doi AS doi, e.annotates AS annotates, e.has_pdf AS has_pdf,
+                   e.themes_json AS themes_json, e.topic AS topic, e.kind AS kind,
+                   e.journal AS journal, e.source AS source, e.doi AS doi,
+                   e.publisher AS publisher, e.isbn AS isbn,
+                   e.category AS category, e.annotates AS annotates, e.created AS created,
+                   e.has_pdf AS has_pdf,
                    e.pdf_slug AS pdf_slug,
                    e.mtime AS mtime, e.preview AS preview, e.added AS added,
                    0.0 AS score,
@@ -323,7 +329,7 @@ public final class IndexDatabase: @unchecked Sendable {
             WHERE \(likeClause)
             """
         var args: [(any DatabaseValueConvertible)?] = terms.map { pattern($0) }
-        if let type { sql += "\n  AND e.type = ?"; args.append(type.rawValue) }
+        appendTypeFilter(type, to: &sql, args: &args)
         if let minRating { sql += "\n  AND e.rating_score >= ?"; args.append(minRating) }
         if let theme {
             sql += "\n  AND e.path IN (SELECT path FROM entry_themes WHERE theme = ?)"
@@ -336,6 +342,26 @@ public final class IndexDatabase: @unchecked Sendable {
             let snip: String? = row["snip"]
             return SearchHit(entry: Self.entry(from: row), score: 0,
                              snippet: snip, source: "trigram-like")
+        }
+    }
+
+    private static func appendTypeFilter(_ type: EntryType?, to sql: inout String,
+                                         args: inout [(any DatabaseValueConvertible)?]) {
+        guard let type else { return }
+        let rawValues: [String]
+        switch type {
+        case .topicSynthesis:
+            rawValues = ["topic-synthesis", "topic"]
+        default:
+            rawValues = [type.rawValue]
+        }
+        if rawValues.count == 1 {
+            sql += "\n  AND e.type = ?"
+        } else {
+            sql += "\n  AND e.type IN (" + rawValues.map { _ in "?" }.joined(separator: ", ") + ")"
+        }
+        for rawValue in rawValues {
+            args.append(rawValue)
         }
     }
 
@@ -374,8 +400,14 @@ public final class IndexDatabase: @unchecked Sendable {
         let source: String? = row["source"]
         let book: String? = row["book"]
         let topic: String? = row["topic"]
+        let kind: String? = row["kind"]
+        let journal: String? = row["journal"]
         let doi: String? = row["doi"]
+        let publisher: String? = row["publisher"]
+        let isbn: String? = row["isbn"]
+        let category: String? = row["category"]
         let annotates: String? = row["annotates"]
+        let created: String? = row["created"]
         return Entry(
             path: path,
             type: EntryType(rawValue: typeRaw),
@@ -392,8 +424,14 @@ public final class IndexDatabase: @unchecked Sendable {
             source: source,
             book: book,
             topic: topic,
+            kind: kind,
+            journal: journal,
             doi: doi,
-            annotates: annotates
+            publisher: publisher,
+            isbn: isbn,
+            category: category,
+            annotates: annotates,
+            created: created
         )
     }
 
