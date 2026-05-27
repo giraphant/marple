@@ -61,16 +61,14 @@ final class AppState: ObservableObject {
         watcher.start()
         self.watcher = watcher
 
-        // QUA-107: wire the local CLI socket. The server is opt-in (off by
-        // default); the UserDefaults observer makes the 设置 toggle live.
+        // QUA-107: construct the CLI socket holder now, but defer the actual
+        // listen + UserDefaults observer until the first loadIndex publishes
+        // (see the post-loadIndex tail below). Before that, AppModel.entries
+        // is empty, so handlers like `open` / `read` would return spurious
+        // "entry not found" instead of the connection-refused signal CLI
+        // clients used to see — which they retry against. Same end behavior
+        // as pre-QUA-105 (CLIServer wiring was after loadIndex).
         self.cliServer = CLIServer()
-        applyCLISetting()
-        cliSettingObserver = NotificationCenter.default.addObserver(
-            forName: UserDefaults.didChangeNotification,
-            object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.applyCLISetting() }
-        }
 
         // Kick the actual data load on a background task. Sequence:
         //  · slow path (canSkip=false, first launch / schema bump): reconcile,
@@ -79,12 +77,20 @@ final class AppState: ObservableObject {
         //    sidecar, then a second reconcile catches any stale rows and
         //    re-loads only if it found real changes. Unchanged behavior — just
         //    no longer blocking the UI mount.
-        Task { @MainActor [weak m, indexer] in
+        Task { @MainActor [weak self, weak m, indexer] in
             if !canSkip {
                 do { _ = try await Task.detached { try indexer.reconcile() }.value }
                 catch { print("[marple] boot reconcile failed (non-fatal): \(error)") }
             }
             await m?.loadIndex()
+            // Now safe to expose the CLI surface — entries is published.
+            self?.applyCLISetting()
+            self?.cliSettingObserver = NotificationCenter.default.addObserver(
+                forName: UserDefaults.didChangeNotification,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.applyCLISetting() }
+            }
             if canSkip {
                 Task { @MainActor [weak m, indexer] in
                     m?.beginRefreshing()
