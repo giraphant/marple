@@ -246,6 +246,48 @@ import Testing
     }
 
     @MainActor
+    @Test func loadIndexPersistsLiveTitlesAndCountsAfterFirstPublish() async throws {
+        // Without an explicit persist() call inside loadIndex, a "boot and
+        // quit without interaction" session would never round-trip live
+        // titles/counts into PersistedState — because the only persist()
+        // triggers are didSet on browsePane/workspace/etc., none of which
+        // fires while the app simply finishes loading. This regression test
+        // pins the post-publish persist.
+        let path = "vault/notes/n.md"
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        // Pre-seed a tab pointing at the path so loadIndex's title snapshot
+        // has something to attach to.
+        store.save(PersistedState(
+            browsePane: .type(.note),
+            isBrowsing: false,
+            tabs: [PersistedTab(
+                location: NavLocation(pane: .type(.note), openPath: path),
+                pinned: false)],     // cachedTitle deliberately nil — stale legacy
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "list"))
+
+        let live = Entry(path: path, type: .note, title: "Real Title", author: [],
+                         year: nil, ratingScore: 0, themes: [], preview: "", hasPDF: false)
+        let client = ScriptedDelayedClient()
+        client.queueIndex(entries: [live], delayMs: 0)
+        let model = AppModel(client: client, stateStore: store)
+        await model.loadIndex()
+
+        let onDisk = try #require(store.load())
+        // Tab cachedTitle should now carry the live entry title.
+        #expect(onDisk.tabs.first?.cachedTitle == "Real Title")
+        // counts should reflect the live distribution (one note).
+        #expect(onDisk.counts == [.note: 1])
+        _ = model
+    }
+
+    @MainActor
     @Test func appModelInitDoesNotWipeStoredCountsBeforeLoadIndex() throws {
         // Regression: persist() fires via didSet on browsePane/workspace/etc.
         // during AppModel.init, BEFORE loadIndex runs. Without loadedCountsSnapshot

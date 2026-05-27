@@ -392,6 +392,13 @@ final class AppModel {
         } else {
             runSearch()
         }
+        // QUA-105: explicitly persist right after the first snapshot publishes.
+        // `entries` and `counts` are not `didSet`-instrumented (changing them
+        // is too hot a path to fire a UserDefaults write on every reload), so
+        // a "boot and quit without interaction" session would otherwise never
+        // round-trip live titles/counts into PersistedState — defeating the
+        // whole point of caching them for next launch's bootstrap window.
+        persist()
         if openPath != loadedDocPath {
             await loadDoc(openPath)
             guard loadIndexGeneration == generation else {
