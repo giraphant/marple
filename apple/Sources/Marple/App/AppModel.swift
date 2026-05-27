@@ -201,15 +201,18 @@ final class AppModel {
             entries.lazy.compactMap { e -> (String, Entry)? in (e.path, e) },
             uniquingKeysWith: { a, _ in a })
         let savedTabs = ws?.tabs.map { tab -> PersistedTab in
-            // Title snapshot: prefer the live entry's title; if entries haven't
+            // Title + type snapshot: prefer the live entry; if entries haven't
             // loaded (bootstrap window) or the path no longer resolves (file
             // was deleted), carry over whatever we previously cached so the
-            // next launch still sees the good title in the sidebar. Falls all
-            // the way to nil only if no source has ever produced one.
-            let liveTitle = tab.location.openPath.flatMap { liveByPath[$0]?.title }
-            let cached = liveTitle ?? tab.cachedTitle
+            // next launch's sidebar still shows the right title AND the right
+            // type icon. Falls to nil only if no source has ever produced one.
+            let liveEntry = tab.location.openPath.flatMap { liveByPath[$0] }
+            let cachedTitle = liveEntry?.title ?? tab.cachedTitle
+            let cachedType = liveEntry?.type ?? tab.cachedType
             return PersistedTab(location: tab.location, pinned: tab.pinned,
-                                customTitle: tab.customTitle, cachedTitle: cached)
+                                customTitle: tab.customTitle,
+                                cachedTitle: cachedTitle,
+                                cachedType: cachedType)
         } ?? []
         let idx = ws.flatMap { w in w.tabs.firstIndex { $0.id == w.activeID } } ?? 0
         // Same round-trip discipline for counts — during bootstrap, write back
