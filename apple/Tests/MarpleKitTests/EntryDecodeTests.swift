@@ -63,6 +63,17 @@ import Testing
         #expect(e.doi == "10.1/x")
     }
 
+    @Test func testDecodesBookCanonicalMetadataForInspector() throws {
+        let entries = try decode("""
+        [{"path":"vault/books/b.md","type":"book-overview","title":"B","rating_score":0,
+          "preview":"","publisher":"MIT Press","isbn":"978-0-262-13472-9","category":"monograph"}]
+        """)
+        let e = entries[0]
+        #expect(e.publisher == "MIT Press")
+        #expect(e.isbn == "978-0-262-13472-9")
+        #expect(e.category == "monograph")
+    }
+
     @Test func testBrowseFieldsTolerateAbsence() throws {
         let entries = try decode("""
         [{"path":"vault/n/b.md","type":"note","preview":"","rating_score":0}]
@@ -71,6 +82,18 @@ import Testing
         #expect(e.mtime == nil)
         #expect(e.added == nil)
         #expect(e.source == nil)
+    }
+
+    @Test func testDecodesLightweightCanonicalMetadataForInspector() throws {
+        let entries = try decode("""
+        [{"path":"vault/journals/ajs.md","type":"journal","preview":"","rating_score":0,
+          "kind":"overview","journal":"American Journal of Sociology","created":"2026-05-27"}]
+        """)
+        let e = entries[0]
+        #expect(e.type == .journal)
+        #expect(e.kind == "overview")
+        #expect(e.journal == "American Journal of Sociology")
+        #expect(e.created == "2026-05-27")
     }
 
     @Test func testDecodesAnnotates() throws {
@@ -86,6 +109,15 @@ import Testing
         [{"path":"vault/papers/p.md","type":"paper-analysis","preview":"","rating_score":0}]
         """)
         #expect(entries[0].annotates == nil)
+    }
+
+    @Test func testShortTopicTypeUsesModeledTopic() throws {
+        let entries = try decode("""
+        [{"path":"vault/topics/repair.md","type":"topic","preview":"","rating_score":0,
+          "topic":"repair","kind":"overview"}]
+        """)
+        #expect(entries[0].type == .topicSynthesis)
+        #expect(entriesForPane(.type(.topicSynthesis), in: entries).map(\.path) == ["vault/topics/repair.md"])
     }
 
     @Test func testImageTypeIsModeled() {
@@ -106,8 +138,9 @@ import Testing
 
     @Test func testModeledTypesOrderAndLabels() {
         #expect(EntryType.modeled == [.paperAnalysis, .bookOverview, .authorProfile,
-                                      .topicSynthesis, .chapterSummary, .note, .image])
+                                      .topicSynthesis, .journal, .chapterSummary, .note, .image])
         #expect(EntryType.paperAnalysis.label == "论文")
+        #expect(EntryType.journal.label == "期刊")
         #expect(EntryType.note.label == "笔记")
         #expect(EntryType.image.label == "图片")
         #expect(EntryType.other("topic-reading-list").label == "topic-reading-list")

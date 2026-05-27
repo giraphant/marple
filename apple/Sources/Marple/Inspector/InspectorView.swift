@@ -288,80 +288,18 @@ private struct PageOutlineRow: View {
 
 // MARK: - 信息
 
-/// Whether the chip-based author row should be visible for this entry — true
-/// for the modeled "has author" types regardless of whether the current entry
-/// has any authors yet (so the user can always re-add). For other types we
-/// only show the row when authors are already present (avoid surfacing an
-/// edit affordance for entries that conceptually shouldn't carry an author).
-private func authorRowApplies(to entry: Entry) -> Bool {
-    switch entry.type {
-    case .paperAnalysis, .bookOverview, .chapterSummary:
-        return true
-    default:
-        return !entry.author.isEmpty
-    }
-}
-
-// Mirror FIELDS_BY_TYPE (PropertyPanel.tsx); themes handled separately.
-private func editableFields(for type: EntryType) -> Set<String> {
-    switch type {
-    case .paperAnalysis:  return ["rating", "year", "source", "doi", "topic"]
-    case .bookOverview:   return ["rating", "year", "source", "topic"]
-    case .chapterSummary: return ["rating", "year", "source", "topic"]
-    case .authorProfile:  return ["rating"]
-    case .topicSynthesis: return ["rating", "topic"]
-    case .note:           return []
-    case .image:          return ["title", "author", "source", "topic"]
-    case .other:          return []
-    }
-}
-
 private struct InfoSection: View {
     @Bindable var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: InspectorStyle.sectionSpacing) {
             if let e = model.openEntry {
-                let fields = editableFields(for: e.type)
                 VStack(alignment: .leading, spacing: InspectorStyle.headerSpacing) {
                     SectionHeader("信息")
                     if let err = model.writeError {
                         Text("保存失败：\(err)").font(.caption).foregroundStyle(.red)
                     }
                     VStack(alignment: .leading, spacing: 0) {
-                        if fields.contains("rating") { RatingRow(model: model, score: Int(e.ratingScore)) }
-                        if fields.contains("title") {
-                            ScalarRow(model: model, label: "名称", value: e.title) { await model.setTitle($0) }
-                        }
-                        if fields.contains("year") {
-                            ScalarRow(model: model, label: "年份", value: e.year) { await model.setYear($0) }
-                        }
-                        if fields.contains("author") {
-                            // Image-type entries get a single-line scalar editor
-                            // (typical: one photo credit). The model layer still
-                            // stores it as `[String]`; we round-trip via
-                            // `splitAuthors` for comma-separated input.
-                            ScalarRow(
-                                model: model,
-                                label: "作者",
-                                value: e.author.first
-                            ) { newValue in
-                                await model.setAuthor(splitAuthors(newValue))
-                            }
-                        } else if authorRowApplies(to: e) {
-                            // Keep the row visible even when empty so the user
-                            // can re-add authors via the empty-state "+ 添加"
-                            // affordance inside AuthorRow.
-                            AuthorRow(model: model, entry: e)
-                        }
-                        if fields.contains("source") {
-                            ScalarRow(model: model, label: "来源", value: e.source) { await model.setSource($0) }
-                        }
-                        if fields.contains("doi") {
-                            ScalarRow(model: model, label: "DOI", value: e.doi) { await model.setDoi($0) }
-                        }
-                        if fields.contains("topic") {
-                            ScalarRow(model: model, label: "专题", value: e.topic) { await model.setTopic($0) }
-                        }
+                        InspectorInfoRowsView(model: model, entry: e)
                     }
                     .disabled(model.savingField != nil)
                 }
@@ -373,6 +311,45 @@ private struct InfoSection: View {
                     Text("—").foregroundStyle(.secondary).font(.callout)
                 }
             }
+        }
+    }
+}
+
+private struct InspectorInfoRowsView: View {
+    @Bindable var model: AppModel
+    let entry: Entry
+
+    var body: some View {
+        ForEach(Array(inspectorInfoRows(for: entry, in: model.entries).enumerated()), id: \.offset) { _, row in
+            switch row {
+            case .rating:
+                RatingRow(model: model, score: Int(entry.ratingScore))
+            case .authors:
+                AuthorRow(model: model, entry: entry)
+            case .editableScalar(let label, let value, let action):
+                ScalarRow(model: model, label: label, value: value) { await commit($0, action: action) }
+            case .readOnlyScalar(let label, let value, let copyValue):
+                ReadOnlyScalarRow(label: label, value: value, copyValue: copyValue)
+            case .identifier(let label, let displayValue, let fullValue):
+                ReadOnlyScalarRow(label: label, value: displayValue, copyValue: fullValue)
+            }
+        }
+    }
+
+    private func commit(_ value: String?, action: MetadataAction) async {
+        switch action {
+        case .title:
+            await model.setTitle(value)
+        case .year:
+            await model.setYear(value)
+        case .imageAuthor:
+            await model.setAuthor(splitAuthors(value))
+        case .source:
+            await model.setSource(value)
+        case .doi:
+            await model.setDoi(value)
+        case .topic:
+            await model.setTopic(value)
         }
     }
 }
@@ -442,6 +419,31 @@ private struct ScalarRow: View {
                 .buttonStyle(.plain)
                 .onHover { hovering = $0 }
             }
+        }
+    }
+}
+
+private struct ReadOnlyScalarRow: View {
+    let label: String
+    let value: String
+    var copyValue: String? = nil
+
+    var body: some View {
+        FieldRow(label) {
+            Text(value)
+                .font(Typo.callout)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 170, alignment: .trailing)
+                .help(copyValue ?? value)
+                .contextMenu {
+                    Button("复制") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(copyValue ?? value, forType: .string)
+                    }
+                }
         }
     }
 }

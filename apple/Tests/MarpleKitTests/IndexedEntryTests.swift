@@ -428,7 +428,7 @@ struct IndexedEntryTests {
         #expect(entry.searchText.contains("agent loop"))
     }
 
-    // MARK: - Optional fields: topic, source, doi, publisher, isbn
+    // MARK: - Optional fields: topic, source, doi, publisher, isbn, category
 
     @Test("optional metadata fields populated correctly")
     func optionalFields() throws {
@@ -439,10 +439,13 @@ struct IndexedEntryTests {
         author: Jones
         year: 2021
         topic: cognitive science
+        kind: overview
+        journal: Nature Human Behaviour
         source: Nature
         doi: 10.1234/test
         publisher: MIT Press
         isbn: 978-0-262-12345-6
+        category: monograph
         ---
 
         Abstract content here.
@@ -452,10 +455,13 @@ struct IndexedEntryTests {
             Issue.record("Expected .indexed"); return
         }
         #expect(entry.topic == "cognitive science")
+        #expect(entry.kind == "overview")
+        #expect(entry.journal == "Nature Human Behaviour")
         #expect(entry.source == "Nature")
         #expect(entry.doi == "10.1234/test")
         #expect(entry.publisher == "MIT Press")
         #expect(entry.isbn == "978-0-262-12345-6")
+        #expect(entry.category == "monograph")
     }
 
     // MARK: - yearJSON and ratingJSON field shapes
