@@ -61,6 +61,22 @@ struct VaultIndexerTests {
             [.modificationDate: newDate], ofItemAtPath: path)
     }
 
+    private func writeRaw(at path: String, _ content: String) throws {
+        try content.write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    private func entriesRevision(_ indexPath: String) throws -> Int64 {
+        try DatabaseQueue(path: indexPath).read { db in
+            try IndexWriter.entriesRevision(db)
+        }
+    }
+
+    private func entryCount(_ indexPath: String, path: String) throws -> Int {
+        try DatabaseQueue(path: indexPath).read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM entries WHERE path = ?", arguments: [path]) ?? 0
+        }
+    }
+
     /// Convenience: open IndexDatabase at the workspace's index path.
     private func openDB(_ workspaceRoot: String) -> IndexDatabase {
         let indexPath = workspaceRoot + "/.marple/index.sqlite"
@@ -371,6 +387,60 @@ struct VaultIndexerTests {
             try IndexWriter.entriesRevision(db)
         }
         #expect(revAfter == revBefore)
+    }
+
+    @Test("reconcile rolls back partial writes when a later upsert fails")
+    func reconcileRollsBackPartialWritesOnFailure() throws {
+        let ws = try makeTempWorkspace()
+        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+
+        let indexPath = ws + "/.marple/index.sqlite"
+        let revBefore = try entriesRevision(indexPath)
+
+        try write(at: ws + "/vault/papers/b.md", type: "paper-analysis", title: "Paper B")
+        try writeRaw(at: ws + "/vault/papers/c.md", """
+        ---
+        type: paper-analysis
+        title: Broken Paper
+        themes: [duplicate, duplicate]
+        ---
+        body
+        """)
+
+        do {
+            _ = try indexer.reconcile()
+            Issue.record("expected reconcile to throw")
+        } catch {
+        }
+
+        #expect(try entriesRevision(indexPath) == revBefore)
+        #expect(try entryCount(indexPath, path: "vault/papers/b.md") == 0)
+    }
+
+    @Test("reconcile bumps entries_revision when an indexed file becomes skipped")
+    func reconcileBumpsRevisionWhenIndexedFileBecomesSkipped() throws {
+        let ws = try makeTempWorkspace()
+        let path = ws + "/vault/papers/a.md"
+        try write(at: path, type: "paper-analysis", title: "Paper A")
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+
+        let indexPath = ws + "/.marple/index.sqlite"
+        let revBefore = try entriesRevision(indexPath)
+
+        try writeRaw(at: path, "# Paper A\n\nNo frontmatter anymore.")
+        try touch(path)
+
+        let stats = try indexer.reconcile()
+
+        #expect(stats.upserted == 0)
+        #expect(stats.removed == 1)
+        #expect(try entryCount(indexPath, path: "vault/papers/a.md") == 0)
+        #expect(try entriesRevision(indexPath) > revBefore)
     }
 
     @Test("reconcile triggers full build when schema is stale")

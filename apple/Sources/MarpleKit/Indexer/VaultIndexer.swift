@@ -242,37 +242,42 @@ public final class VaultIndexer: @unchecked Sendable {
         }
 
         var stats = ReconcileStats()
+        var writes: [(rel: String, entry: IndexedEntry?)] = []
 
         // New or modified files: missing in index OR mtime differs → upsert (mirrors :401-413).
         for (rel, mt) in fsMap {
             if let indexedMtime = indexed[rel], indexedMtime == mt {
                 stats.unchanged += 1
-            } else {
-                let absPath = workspaceRoot + "/" + rel
-                let wasIndexed = try upsertPathInPool(pool, sourceSlugs: sourceSlugs,
-                                                      absPath: absPath, rel: rel)
-                if wasIndexed {
-                    stats.upserted += 1
-                }
+                continue
             }
-        }
 
-        // Vanished files: in index but not on disk → delete rows (mirrors :416-422).
-        for rel in indexed.keys {
-            if fsMap[rel] == nil {
-                try pool.write { db in
-                    try deletePathRows(db, rel: rel)
-                }
+            let existing = indexed.keys.contains(rel)
+            let absPath = workspaceRoot + "/" + rel
+            if let entry = indexedEntryForPath(sourceSlugs: sourceSlugs, absPath: absPath, rel: rel) {
+                writes.append((rel: rel, entry: entry))
+                stats.upserted += 1
+            } else if existing {
+                writes.append((rel: rel, entry: nil))
                 stats.removed += 1
             }
         }
 
-        // QUA-104: bump entries_revision once at the end if any rows changed,
-        // so the next loadEntries sees the cache as stale and rebuilds it.
-        // Skipping the bump on no-op reconciles lets the cache stay valid
-        // across watcher-triggered reconciles that found nothing to do.
-        if stats.upserted + stats.removed > 0 {
+        // Vanished files: in index but not on disk → delete rows (mirrors :416-422).
+        for rel in indexed.keys where fsMap[rel] == nil {
+            writes.append((rel: rel, entry: nil))
+            stats.removed += 1
+        }
+
+        // QUA-104: row changes and entries_revision must commit atomically, otherwise
+        // a matching old entries.cache can hide newly indexed rows from loadEntries().
+        if !writes.isEmpty {
             try pool.write { db in
+                for write in writes {
+                    try deletePathRows(db, rel: write.rel)
+                    if let entry = write.entry {
+                        try IndexWriter.insert(db, entry)
+                    }
+                }
                 try IndexWriter.bumpEntriesRevision(db)
             }
         }
@@ -419,24 +424,17 @@ public final class VaultIndexer: @unchecked Sendable {
         try db.execute(sql: "DELETE FROM entry_trigram WHERE path = ?",arguments: [rel])
     }
 
-    // MARK: upsertPathInPool
+    // MARK: indexedEntryForPath
 
-    /// Delete old rows for `rel` then re-parse and insert if it's still an entry.
-    /// Returns true when the file is now an indexed entry.
-    /// Mirrors `upsert_path_in_conn` (:476-491).
-    ///
-    /// NOTE: `added` is left at 0 for incremental upserts, matching Rust behaviour
-    /// (only `buildFull` sets `added` from git dates).
-    private func upsertPathInPool(
-        _ pool: DatabasePool,
+    /// Parse `rel` for a reconcile upsert. `added` remains 0 here, matching Rust
+    /// behaviour (only `buildFull` sets it from git dates).
+    private func indexedEntryForPath(
         sourceSlugs: Set<String>,
         absPath: String,
         rel: String
-    ) throws -> Bool {
+    ) -> IndexedEntry? {
         guard let text = try? String(contentsOfFile: absPath, encoding: .utf8) else {
-            // File unreadable — treat as vanished.
-            try pool.write { db in try deletePathRows(db, rel: rel) }
-            return false
+            return nil
         }
         let fileStem = URL(fileURLWithPath: absPath).deletingPathExtension().lastPathComponent
         let mtimeMs  = Self.mtimeMs(atPath: absPath)
@@ -449,14 +447,7 @@ public final class VaultIndexer: @unchecked Sendable {
             mtimeMs: mtimeMs
         )
 
-        try pool.write { db in
-            try deletePathRows(db, rel: rel)
-            if case .indexed(let entry) = outcome {
-                try IndexWriter.insert(db, entry)
-            }
-        }
-
-        if case .indexed = outcome { return true }
-        return false
+        if case .indexed(let entry) = outcome { return entry }
+        return nil
     }
 }
