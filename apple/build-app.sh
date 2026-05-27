@@ -72,20 +72,20 @@ else
 fi
 
 # Icon: build a .iconset from the appiconset PNGs in xcassets, then run
-# iconutil. The legacy Artwork/ tree was retired; we now own the renamed
-# copies inside the xcassets and apply Apple's @2x naming for iconutil.
+# iconutil. The xcassets ships explicit @2x renditions for every slot, so we
+# pair each source PNG with its iconutil slot name directly.
 TMP_ICONSET="$(mktemp -d)/AppIcon.iconset"
 mkdir -p "$TMP_ICONSET"
-cp "$APPICONSET/icon_16x16.png"     "$TMP_ICONSET/icon_16x16.png"
-cp "$APPICONSET/icon_32x32.png"     "$TMP_ICONSET/icon_16x16@2x.png"
-cp "$APPICONSET/icon_32x32.png"     "$TMP_ICONSET/icon_32x32.png"
-cp "$APPICONSET/icon_64x64.png"     "$TMP_ICONSET/icon_32x32@2x.png"
-cp "$APPICONSET/icon_128x128.png"   "$TMP_ICONSET/icon_128x128.png"
-cp "$APPICONSET/icon_256x256.png"   "$TMP_ICONSET/icon_128x128@2x.png"
-cp "$APPICONSET/icon_256x256.png"   "$TMP_ICONSET/icon_256x256.png"
-cp "$APPICONSET/icon_512x512.png"   "$TMP_ICONSET/icon_256x256@2x.png"
-cp "$APPICONSET/icon_512x512.png"   "$TMP_ICONSET/icon_512x512.png"
-cp "$APPICONSET/icon_1024x1024.png" "$TMP_ICONSET/icon_512x512@2x.png"
+cp "$APPICONSET/16x16-Marple.png"      "$TMP_ICONSET/icon_16x16.png"
+cp "$APPICONSET/16x16-Marple@2x.png"   "$TMP_ICONSET/icon_16x16@2x.png"
+cp "$APPICONSET/32x32-Marple.png"      "$TMP_ICONSET/icon_32x32.png"
+cp "$APPICONSET/32x32-Marple@2x.png"   "$TMP_ICONSET/icon_32x32@2x.png"
+cp "$APPICONSET/128x128-Marple.png"    "$TMP_ICONSET/icon_128x128.png"
+cp "$APPICONSET/128x128-Marple@2x.png" "$TMP_ICONSET/icon_128x128@2x.png"
+cp "$APPICONSET/256x256-Marple.png"    "$TMP_ICONSET/icon_256x256.png"
+cp "$APPICONSET/256x256-Marple@2x.png" "$TMP_ICONSET/icon_256x256@2x.png"
+cp "$APPICONSET/512x512-Marple.png"    "$TMP_ICONSET/icon_512x512.png"
+cp "$APPICONSET/512x512-Marple@2x.png" "$TMP_ICONSET/icon_512x512@2x.png"
 iconutil -c icns "$TMP_ICONSET" -o "$APP/Resources/AppIcon.icns"
 rm -rf "$(dirname "$TMP_ICONSET")"
 
