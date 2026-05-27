@@ -48,6 +48,11 @@ struct DocView: View {
         }
         .overlay(alignment: .top) { toastOverlay }
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.toast)
+        // QUA-105: same bootstrap fade-in as BrowseColumn. Doc area starts
+        // invisible (matching the empty `openBody` during bootstrap) and
+        // eases in once the first loadIndex has published.
+        .opacity(model.isBootstrapping ? 0.0 : 1.0)
+        .animation(.easeOut(duration: 0.22), value: model.isBootstrapping)
     }
 
     @ViewBuilder private var toastOverlay: some View {
