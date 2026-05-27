@@ -14,12 +14,14 @@ public struct SemanticSearcher: Sendable {
 
     public static let defaultTask =
         "Given a search query, retrieve relevant notes and documents from the library"
+    public static let defaultMinimumScore: Float = 0.48
 
     public func search(_ query: String, topK: Int = 20,
+                       minimumScore: Float = Self.defaultMinimumScore,
                        task: String = defaultTask
     ) async throws -> [(path: String, score: Float)] {
         let prompt = "Instruct: \(task)\nQuery:\(query)"
         let vec = try await embedder.embed(prompt)
-        return store.topK(vec, k: topK)
+        return store.topK(vec, k: topK).filter { $0.score >= minimumScore }
     }
 }

@@ -64,4 +64,29 @@ import Foundation
         #expect(hits.allSatisfy { ["a.md", "b.md", "c.md"].contains($0.path) })
         #expect(hits[0].score >= hits[1].score)   // descending
     }
+
+    @Test func testSearcherFiltersLowConfidenceNearestNeighbors() async throws {
+        let query = [Float(1), 0]
+        let weakY = (1 - Float(0.47 * 0.47)).squareRoot()
+        let noiseY = (1 - Float(0.20 * 0.20)).squareRoot()
+        let store = VectorStore(
+            dim: 2,
+            paths: ["confident.md", "weak.md", "noise.md"],
+            matrix: [0.50, Float(0.75).squareRoot(), 0.47, weakY, 0.20, noiseY]
+        )
+
+        let hits = try await SemanticSearcher(embedder: FixedTextEmbedder(vector: query), store: store)
+            .search("meaningless", topK: 3)
+
+        #expect(hits.map(\.path) == ["confident.md"])
+    }
+}
+
+private struct FixedTextEmbedder: TextEmbedder {
+    let vector: [Float]
+    var dimension: Int { vector.count }
+
+    func embed(_ texts: [String]) async throws -> [[Float]] {
+        texts.map { _ in vector }
+    }
 }
