@@ -77,6 +77,16 @@ struct VaultIndexerTests {
         }
     }
 
+    @discardableResult
+    private func awaitFile(_ path: String, seconds: Double = 2.0) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: path) { return true }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        return false
+    }
+
     /// Convenience: open IndexDatabase at the workspace's index path.
     private func openDB(_ workspaceRoot: String) -> IndexDatabase {
         let indexPath = workspaceRoot + "/.marple/index.sqlite"
@@ -363,6 +373,62 @@ struct VaultIndexerTests {
             try IndexWriter.entriesRevision(db)
         }
         #expect(revAfter > revBefore)
+    }
+
+    @Test("reconcile refreshes metadata visible through an existing entries cache")
+    func reconcileRefreshesMetadataThroughExistingEntriesCache() throws {
+        let ws = try makeTempWorkspace()
+        let path = ws + "/vault/papers/a.md"
+        try write(at: path, type: "paper-analysis", title: "Paper A")
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+
+        let db = openDB(ws)
+        let cachePath = ws + "/.marple/entries.cache"
+        #expect(try db.loadEntries().first?.title == "Paper A")
+        #expect(awaitFile(cachePath), "entries cache should exist before the external edit")
+
+        try write(at: path, type: "paper-analysis", title: "Paper A Updated")
+        try touch(path)
+
+        let stats = try indexer.reconcile()
+        #expect(stats.upserted == 1)
+
+        let entries = try db.loadEntries()
+        #expect(entries.first { $0.path == "vault/papers/a.md" }?.title == "Paper A Updated")
+    }
+
+    @Test("reconcile indexes a newly copied note through an existing entries cache")
+    func reconcileIndexesNewCopiedNoteThroughExistingEntriesCache() throws {
+        let ws = try makeTempWorkspace()
+        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+
+        let db = openDB(ws)
+        let cachePath = ws + "/.marple/entries.cache"
+        #expect(try db.loadEntries().count == 1)
+        #expect(awaitFile(cachePath), "entries cache should exist before the external copy")
+
+        let copied = ws + "/vault/notes/iphone2.md"
+        try writeRaw(at: copied, """
+        ---
+        type: note
+        title: "搞你的 iPhone2"
+        created: 2026-05-18
+        ---
+        """)
+        try touch(copied)
+
+        let stats = try indexer.reconcile()
+        #expect(stats.upserted == 1)
+
+        let entries = try db.loadEntries()
+        let note = entries.first { $0.path == "vault/notes/iphone2.md" }
+        #expect(note?.type == .note)
+        #expect(note?.title == "搞你的 iPhone2")
     }
 
     @Test("reconcile does NOT bump entries_revision when nothing changed")
