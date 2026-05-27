@@ -11,6 +11,15 @@ final class AppModel {
     private(set) var entries: [Entry] = []
     var status: String = ""
 
+    /// True until the first `loadIndex()` either publishes a snapshot or
+    /// reports an error. Stays false for the rest of the session — subsequent
+    /// reloads from the watcher / deferred reconcile / user refresh don't flip
+    /// it back. Views read this to distinguish "still booting, show skeleton"
+    /// from "loaded but empty vault, show empty state" (QUA-105). The bare
+    /// `entries.isEmpty` check those views used before was ambiguous between
+    /// the two and would have rendered drop-zones during cold start.
+    private(set) var isBootstrapping: Bool = true
+
     /// Card grid vs single-column list. Pure UI toggle; no derived cache depends on it.
     var browseMode: BrowseMode = .grid { didSet { persist() } }
 
@@ -319,6 +328,7 @@ final class AppModel {
             // failure shouldn't clobber a newer call's "n entries" status.
             if loadIndexGeneration == generation {
                 status = "index failed: \(error)"
+                isBootstrapping = false
                 print("[marple] index FAILED: \(error)")
             }
             return
@@ -328,6 +338,7 @@ final class AppModel {
             return
         }
         entries = fetched
+        isBootstrapping = false
         status = "\(entries.count) entries"
         rebuildIndexDerived()
         if searchText.trimmingCharacters(in: .whitespaces).isEmpty {

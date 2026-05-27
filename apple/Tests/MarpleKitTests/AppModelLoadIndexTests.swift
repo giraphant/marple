@@ -59,6 +59,70 @@ import Testing
         #expect(model.entries.map(\.path) == [newer.path])
     }
 
+    // MARK: - isBootstrapping (QUA-105)
+
+    @MainActor
+    @Test func appModelStartsInBootstrappingState() {
+        let client = ScriptedDelayedClient()
+        let model = AppModel(client: client)
+        #expect(model.isBootstrapping == true)
+    }
+
+    @MainActor
+    @Test func successfulLoadIndexClearsBootstrapping() async {
+        let client = ScriptedDelayedClient()
+        client.queueIndex(entries: [Self.entry("vault/notes/a.md")], delayMs: 0)
+        let model = AppModel(client: client)
+        await model.loadIndex()
+        #expect(model.isBootstrapping == false)
+    }
+
+    @MainActor
+    @Test func failedLoadIndexAlsoClearsBootstrapping() async {
+        // First load fails — views should still escape skeleton state (status
+        // string carries the error message; the alternative would be a forever-
+        // skeleton UI on a corrupt index).
+        let client = ScriptedDelayedClient()
+        client.queueIndexFailure(delayMs: 0)
+        let model = AppModel(client: client)
+        await model.loadIndex()
+        #expect(model.isBootstrapping == false)
+        #expect(model.status.starts(with: "index failed"))
+    }
+
+    @MainActor
+    @Test func emptyVaultStillClearsBootstrapping() async {
+        // Real empty vault — entries.isEmpty after load is NOT the same as
+        // "still bootstrapping". This is the case Codex flagged about empty-
+        // state views (EntryGridView drop-zone, ThemesView) — they need to
+        // distinguish skeleton-while-loading from genuine-empty.
+        let client = ScriptedDelayedClient()
+        client.queueIndex(entries: [], delayMs: 0)
+        let model = AppModel(client: client)
+        await model.loadIndex()
+        #expect(model.isBootstrapping == false)
+        #expect(model.entries.isEmpty)
+    }
+
+    @MainActor
+    @Test func staleLoadIndexDoesNotResetBootstrapping() async throws {
+        // Same race as `staleLoadIndexDoesNotOverwriteFresherEntries`, but the
+        // invariant we're pinning is the bootstrap flag — once a newer call
+        // has flipped it false, a stale older call must not flip it back true
+        // (or otherwise touch it).
+        let client = ScriptedDelayedClient()
+        client.queueIndex(entries: [Self.entry("vault/notes/older.md")], delayMs: 250)
+        client.queueIndex(entries: [Self.entry("vault/notes/newer.md")], delayMs: 20)
+
+        let model = AppModel(client: client)
+        async let first: Void = model.loadIndex()
+        try await Task.sleep(nanoseconds: 5_000_000)
+        async let second: Void = model.loadIndex()
+        _ = await (first, second)
+
+        #expect(model.isBootstrapping == false)
+    }
+
     @MainActor
     @Test func sequentialLoadIndexCallsStillPublish() async throws {
         // Sanity: the gen guard must not break the common case of back-to-back
