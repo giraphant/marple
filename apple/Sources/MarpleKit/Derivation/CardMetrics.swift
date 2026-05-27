@@ -19,7 +19,7 @@ public enum CardMetrics {
         let rawPreviewLines = Int(ceil(Double(entry.preview.count) / Double(previewPerLine)))
         let previewLines = min(12, max(0, rawPreviewLines))
 
-        let hasMeta = (entry.author?.isEmpty == false) || (entry.year?.isEmpty == false) || entry.ratingScore > 0
+        let hasMeta = !entry.author.isEmpty || (entry.year?.isEmpty == false) || entry.ratingScore > 0
         let metaHeight: CGFloat = hasMeta ? 20 : 0
         let themesHeight: CGFloat = entry.themes.isEmpty ? 0 : 22
 

@@ -22,7 +22,7 @@ import Foundation
 
     @Test func testAnnotationTargetsEntry() {
         let target = Entry(path: "vault/papers/marx-1867.md", type: .paperAnalysis,
-                           title: "Capital", author: nil, year: nil, ratingScore: 0,
+                           title: "Capital", author: [], year: nil, ratingScore: 0,
                            themes: [], preview: "", hasPDF: false)
         let d = NoteBuilder.annotation(target: target, today: date(2026, 5, 23), stamp: "wxyz")
         #expect(d.path == "vault/notes/marx-1867-note-wxyz.md")
@@ -33,7 +33,7 @@ import Foundation
 
     @Test func testAnnotationTitleFallsBackToFilenameStem() {
         let target = Entry(path: "vault/notes/loose-idea.md", type: .note,
-                           title: nil, author: nil, year: nil, ratingScore: 0,
+                           title: nil, author: [], year: nil, ratingScore: 0,
                            themes: [], preview: "", hasPDF: false)
         let d = NoteBuilder.annotation(target: target, today: date(2026, 5, 23), stamp: "0000")
         #expect(d.title == "对《loose-idea》的批注")
@@ -42,7 +42,7 @@ import Foundation
 
     @Test func testAnnotationTitleWithColonIsQuoted() {
         let target = Entry(path: "vault/papers/x.md", type: .paperAnalysis,
-                           title: "Marx: Capital", author: nil, year: nil, ratingScore: 0,
+                           title: "Marx: Capital", author: [], year: nil, ratingScore: 0,
                            themes: [], preview: "", hasPDF: false)
         let d = NoteBuilder.annotation(target: target, today: date(2026, 5, 23), stamp: "0000")
         #expect(d.text.contains("title: \"对《Marx: Capital》的批注\"\n"))

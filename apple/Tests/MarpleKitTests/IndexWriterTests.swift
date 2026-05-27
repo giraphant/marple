@@ -43,7 +43,7 @@ struct IndexWriterTests {
             title: "Dogs and Their Owners",
             titleEn: "Dogs and Their Owners",
             titleCn: nil,
-            author: "Smith, John",
+            author: ["Smith, John"],
             yearJSON: "2019",           // numeric scalar → "2019"
             ratingJSON: "\"★★★\"",
             ratingScore: 3.0,
@@ -79,7 +79,7 @@ struct IndexWriterTests {
             title: "猫の哲学",
             titleEn: "Philosophy of Cats",
             titleCn: "猫的哲学",
-            author: "Tanaka, Yuki",
+            author: ["Tanaka, Yuki"],
             yearJSON: "[2010,2015]",
             ratingJSON: nil,
             ratingScore: 0.0,
@@ -114,7 +114,7 @@ struct IndexWriterTests {
             title: "Quick Note on Cats",
             titleEn: nil,
             titleCn: nil,
-            author: nil,
+            author: [],
             yearJSON: nil,
             ratingJSON: nil,
             ratingScore: 0.0,
@@ -217,7 +217,10 @@ struct IndexWriterTests {
         #expect(e.path == "vault/papers/smith-dogs-2019.md")
         #expect(e.type == .paperAnalysis)
         #expect(e.title == "Dogs and Their Owners")
-        #expect(e.author == "Smith, John")
+        // SQLite round-trip is lossless: the author column stores a JSON
+        // array, so single authors with commas in their names (e.g. "Smith,
+        // John" in Last-First form) round-trip exactly.
+        #expect(e.author == ["Smith, John"])
         #expect(e.year == "2019")
         #expect(e.ratingScore == 3.0)
         #expect(e.hasPDF == true)
@@ -225,6 +228,53 @@ struct IndexWriterTests {
         #expect(e.added == 1_600_000_000_000)
         #expect(e.preview == "Dogs are fascinating creatures that form strong bonds.")
         #expect(e.themes.sorted() == ["animal-behaviour", "psychology"])
+    }
+
+    /// QUA-109: SQLite author column is JSON-encoded so round-trips preserve
+    /// identity even when individual names contain commas. The earlier
+    /// joined-string scheme would have split "Smith, John Jr." into two names.
+    @Test("author JSON round-trip preserves comma-in-name identity")
+    func authorRoundTripLossless() throws {
+        let path = try tempDBPath()
+        let queue = try openAndCreateSchema(at: path)
+        let entry = IndexedEntry(
+            path: "vault/papers/smith-jr-2020.md",
+            entryType: "paper-analysis", book: nil,
+            title: "Test", titleEn: nil, titleCn: nil,
+            author: ["Smith, John Jr.", "Jane Doe"],
+            yearJSON: "2020", ratingJSON: nil, ratingScore: 0,
+            themes: nil, topic: nil, source: nil, doi: nil,
+            publisher: nil, isbn: nil,
+            translationTitleCn: nil, translationDoubanURL: nil,
+            chaptersAnalyzed: nil, annotates: nil, created: nil,
+            pdfSlug: nil, hasPDF: false, mtime: nil,
+            preview: "", bodyLen: 0, added: 0,
+            bodyText: "", searchText: "test"
+        )
+        try queue.write { db in try IndexWriter.insert(db, entry) }
+        let db = IndexDatabase(indexDBPath: path)
+        let loaded = try db.loadEntries()
+        #expect(loaded.count == 1)
+        #expect(loaded[0].author == ["Smith, John Jr.", "Jane Doe"])
+    }
+
+    /// Legacy DBs (built before QUA-109) stored author as a joined string.
+    /// The decoder must still accept that shape so reindex doesn't break on
+    /// first-run upgrade.
+    @Test("loadEntries tolerates legacy joined-string author column")
+    func legacyAuthorColumnReadsBack() throws {
+        let path = try tempDBPath()
+        let queue = try openAndCreateSchema(at: path)
+        try queue.write { db in
+            try IndexWriter.insert(db, makePaperEntry())
+            // Simulate a pre-QUA-109 row by overwriting with the joined form.
+            try db.execute(sql: "UPDATE entries SET author = ?",
+                           arguments: ["Sara Ahmed, John Doe"])
+        }
+        let db = IndexDatabase(indexDBPath: path)
+        let loaded = try db.loadEntries()
+        #expect(loaded.count == 1)
+        #expect(loaded[0].author == ["Sara Ahmed", "John Doe"])
     }
 
     @Test("insert book entry + loadEntries maps all fields")

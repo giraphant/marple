@@ -123,7 +123,7 @@ private struct MetaRow: View {
     var body: some View {
         if hasMeta {
             HStack(spacing: Space.s3) {
-                if let author = entry.author, !author.isEmpty { Text(author).lineLimit(1) }
+                if !entry.author.isEmpty { Text(entry.author.joined(separator: ", ")).lineLimit(1) }
                 if let year = entry.year, !year.isEmpty { Text(year) }
                 Spacer(minLength: 0)
                 if entry.ratingScore > 0 {
@@ -139,7 +139,7 @@ private struct MetaRow: View {
     }
 
     private var hasMeta: Bool {
-        (entry.author?.isEmpty == false) || (entry.year?.isEmpty == false) || entry.ratingScore > 0
+        !entry.author.isEmpty || (entry.year?.isEmpty == false) || entry.ratingScore > 0
     }
 }
 

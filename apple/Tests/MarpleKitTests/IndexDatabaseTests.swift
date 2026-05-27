@@ -250,7 +250,7 @@ import GRDB
         // Hand-write a cache containing a synthetic entry that's NOT in the DB.
         // If loadEntries returns it, we know the cache path ran.
         let synthetic = Entry(path: "vault/papers/synth.md", type: .paperAnalysis,
-                              title: "From Cache", author: nil, year: nil,
+                              title: "From Cache", author: [], year: nil,
                               ratingScore: 0, themes: [], preview: "",
                               hasPDF: false)
         let blob = try buildCacheBlob(entries: [synthetic], revision: 0)

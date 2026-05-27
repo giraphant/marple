@@ -63,7 +63,7 @@ struct EntryRow: View {
 
     private var metaLeading: String? {
         var parts: [String] = []
-        if let a = entry.author, !a.isEmpty { parts.append(a) }
+        if !entry.author.isEmpty { parts.append(entry.author.joined(separator: ", ")) }
         if let y = entry.year, !y.isEmpty { parts.append(y) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

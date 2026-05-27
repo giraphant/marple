@@ -108,7 +108,7 @@ public struct LocalVaultClient: VaultClient {
         try FileManager.default.copyItem(at: sourceURL, to: dir.appendingPathComponent("\(ImageAsset.originalStem).\(ext)"))
         let metadata = FrontmatterPatch.setScalar("---\ntype: image\n---\n\n", key: "title", value: title)
         try metadata.write(to: dir.appendingPathComponent("image.md"), atomically: true, encoding: .utf8)
-        return Entry(path: "\(relDir)/image.md", type: .image, title: title, author: nil, year: nil,
+        return Entry(path: "\(relDir)/image.md", type: .image, title: title, author: [], year: nil,
                      ratingScore: 0, themes: [], preview: "", hasPDF: false)
     }
 

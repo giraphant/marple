@@ -117,28 +117,31 @@ public func stripWiki(_ s: String) -> String {
     return output
 }
 
-// MARK: - flattenAuthor  (:924-938)
+// MARK: - parseAuthors
 
-/// Flatten an author value to a string.
+/// Parse an author frontmatter value into an array of names.
 ///
-/// - null     → nil
-/// - sequence → join non-empty stripWiki'd textValue items with ", "
-/// - scalar   → stripWiki(textValue)
+/// - nil / null   → `[]`
+/// - sequence     → wiki-stripped non-empty text-value items
+/// - scalar       → legacy joined-string form (`"A, B & C"`); split via
+///                  `splitAuthors` for back-compat with vault files written
+///                  before QUA-109
 ///
-/// Mirrors `flatten_author` (:924-938).
-public func flattenAuthor(_ v: YamlValue?) -> String? {
-    guard let v else { return nil }
+/// Replaces the older `flattenAuthor` (which joined back into a single string).
+/// All consumers now work with `[String]` directly.
+public func parseAuthors(_ v: YamlValue?) -> [String] {
+    guard let v else { return [] }
     switch v {
     case .null:
-        return nil
+        return []
     case .sequence(let items):
-        let authors = items
+        return items
             .compactMap { textValue($0) }
             .map { stripWiki($0) }
             .filter { !$0.isEmpty }
-        return authors.joined(separator: ", ")
     default:
-        return textValue(v).map { stripWiki($0) }
+        guard let s = textValue(v) else { return [] }
+        return splitAuthors(stripWiki(s))
     }
 }
 

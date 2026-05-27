@@ -263,7 +263,7 @@ private func entryFields(_ entry: Entry) -> [SearchField] {
     let identifierText = (entry.doi ?? "").trimmingCharacters(in: .whitespaces)
     let rawTexts: [String] = [
         entry.title ?? "",
-        entry.author ?? "",
+        entry.author.joined(separator: ", "),
         entry.book ?? "",
         entry.themes.joined(separator: " "),
         entry.topic ?? "",

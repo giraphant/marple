@@ -150,6 +150,13 @@ public enum IndexWriter {
             // serde_json::to_string of a String array → compact JSON array
             "[" + themes.map { jsonEncodeStringLiteral($0) }.joined(separator: ",") + "]"
         }
+        // Author column stores a JSON array (same shape as themes_json) so
+        // round-trips are lossless even when individual names contain commas
+        // (e.g. "Smith, John Jr." stays one author). The legacy joined-string
+        // shape is still tolerated on read for back-compat with old caches.
+        let authorJSONStr: String? = entry.author.isEmpty
+            ? nil
+            : "[" + entry.author.map { jsonEncodeStringLiteral($0) }.joined(separator: ",") + "]"
 
         try db.execute(
             sql: """
@@ -167,7 +174,7 @@ public enum IndexWriter {
                 entry.title,
                 entry.titleEn,
                 entry.titleCn,
-                entry.author,
+                authorJSONStr,
                 entry.yearJSON,         // already-built JSON string or nil
                 entry.ratingJSON,       // already-built JSON string or nil
                 entry.ratingScore,

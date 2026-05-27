@@ -64,7 +64,11 @@ private func test(_ e: Entry, _ c: FilterClause, now: Date) -> Bool {
         guard let got = toNum(e.year) else { return false }
         switch c.op { case .lte: return got <= want; case .eq: return got == want; default: return got >= want }
     case .author:
-        return (e.author ?? "").lowercased().contains(c.value.trimmingCharacters(in: .whitespaces).lowercased())
+        // Match if any author contains the query (case-insensitive). Multi-
+        // author entries should still surface when the user filters by one
+        // of their names.
+        let needle = c.value.trimmingCharacters(in: .whitespaces).lowercased()
+        return e.author.contains { $0.lowercased().contains(needle) }
     case .theme:
         let v = c.value.trimmingCharacters(in: .whitespaces).lowercased()
         return c.op == .is_ ? e.themes.contains { $0.lowercased() == v }

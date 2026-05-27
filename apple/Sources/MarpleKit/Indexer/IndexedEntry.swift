@@ -47,9 +47,11 @@ public struct IndexedEntry: Sendable, Equatable {
 
     // MARK: Attribution
 
-    /// Flattened author string (sequence joined with `", "`, or scalar).
-    /// Column: `author`.
-    public var author: String?
+    /// Parsed author list (single-author = 1-element list, no scalar branch).
+    /// Empty means no author. Column: `author` (TEXT — stored as
+    /// `joined(", ")` for FTS / sort compatibility; readers split back via
+    /// `splitAuthors` on row decode).
+    public var author: [String]
 
     // MARK: Year / rating
 
@@ -245,8 +247,9 @@ public func buildIndexedEntry(
 
     // 8. Themes, author.
     let themesValue: [String]? = themeArray(field(frontmatter, "themes"))
-    let authorValue: String? = (field(frontmatter, "author") ?? field(frontmatter, "authors"))
-        .flatMap { flattenAuthor($0) }
+    let authorValue: [String] = parseAuthors(
+        field(frontmatter, "author") ?? field(frontmatter, "authors")
+    )
 
     // 9. Titles (en, cn), publisher, isbn, translation fields.
     let titleEnValue: String? = titleEn(frontmatter)
@@ -268,7 +271,7 @@ public func buildIndexedEntry(
         titleValue ?? "",
         titleEnValue ?? "",
         titleCnValue ?? "",
-        authorValue ?? "",
+        authorValue.joined(separator: ", "),
         publisherValue ?? "",
         isbnValue ?? "",
         translationTitleCnValue ?? "",

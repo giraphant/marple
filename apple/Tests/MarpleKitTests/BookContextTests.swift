@@ -2,10 +2,13 @@ import Testing
 @testable import MarpleKit
 
 @Suite struct BookContextTests {
+    /// Test factory — accepts a legacy joined-string `author` for terseness;
+    /// `splitAuthors` converts it to the canonical `[String]` on construction.
     func mk(_ path: String, _ type: String, title: String? = nil, author: String? = nil,
             year: String? = nil, book: String? = nil, hasPDF: Bool = false,
             pdfSlug: String? = nil, source: String? = nil, doi: String? = nil) -> Entry {
-        Entry(path: path, type: EntryType(rawValue: type), title: title, author: author,
+        Entry(path: path, type: EntryType(rawValue: type), title: title,
+              author: splitAuthors(author),
               year: year, ratingScore: 0, themes: [], preview: "", hasPDF: hasPDF,
               pdfSlug: pdfSlug, source: source, book: book, doi: doi)
     }

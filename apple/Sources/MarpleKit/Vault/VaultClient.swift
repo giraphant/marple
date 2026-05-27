@@ -102,7 +102,7 @@ public struct StubVaultClient: VaultClient {
             : sourceURL.deletingPathExtension().lastPathComponent
         let path = "vault/images/\(ImageAsset.slug(fromTitle: name))/image.md"
         createLog.record(path, "")
-        return Entry(path: path, type: .image, title: name, author: nil, year: nil,
+        return Entry(path: path, type: .image, title: name, author: [], year: nil,
                      ratingScore: 0, themes: [], preview: "", hasPDF: false)
     }
     public func writeFile(path: String, text: String) async throws { writeLog.record(path, text) }
