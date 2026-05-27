@@ -149,15 +149,24 @@ private struct Chrome<Content: View>: View {
 struct BrowseColumn: View {
     @Bindable var model: AppModel
     var body: some View {
-        switch model.pane {
-        case .themesIndex: ThemesView(model: model)
-        case .trash:       TrashView(model: model)
-        default:
-            if model.browseMode == .grid {
-                EntryGridView(model: model)
-            } else {
-                EntryListView(model: model)
+        Group {
+            switch model.pane {
+            case .themesIndex: ThemesView(model: model)
+            case .trash:       TrashView(model: model)
+            default:
+                if model.browseMode == .grid {
+                    EntryGridView(model: model)
+                } else {
+                    EntryListView(model: model)
+                }
             }
         }
+        // QUA-105: fade the list/grid in when bootstrap completes. During
+        // bootstrap the visibleEntries snapshot is empty (skeleton state); the
+        // 0→1 opacity transition replaces what used to be a hard "pop" when
+        // the first loadIndex published its snapshot. Sidebar isn't faded
+        // because its restored selection is already legitimate from t=0.
+        .opacity(model.isBootstrapping ? 0.0 : 1.0)
+        .animation(.easeOut(duration: 0.22), value: model.isBootstrapping)
     }
 }
