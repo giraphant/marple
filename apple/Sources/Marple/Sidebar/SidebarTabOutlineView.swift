@@ -335,7 +335,9 @@ struct SidebarOutlineView: NSViewRepresentable {
             if let customTitle = tab.customTitle { return customTitle }
             let loc = tab.location
             if let path = loc.openPath {
-                return entry?.title ?? (path as NSString).lastPathComponent
+                if let live = entry?.title { return live }
+                if let cached = tab.cachedTitle, !cached.isEmpty { return cached }
+                return (path as NSString).lastPathComponent
             }
             switch loc.pane {
             case .type(let type): return type.label

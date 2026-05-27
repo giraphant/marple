@@ -163,6 +163,15 @@ final class AppModel {
         self.stateStore = stateStore
         self.semantic = semantic
         if let s = stateStore?.load() {
+            // QUA-105: seed `loadedCountsSnapshot` BEFORE the property setters
+            // below trigger `persist()` via didSet. Otherwise the first persist
+            // (from `browsePane = ...`) writes `counts: nil` back to disk,
+            // wiping the user's restored type counts before we'd had a chance
+            // to round-trip them.
+            if let restored = s.counts {
+                counts = restored
+                loadedCountsSnapshot = restored
+            }
             browsePane = s.browsePane
             workspace = s.makeWorkspace()
             isBrowsing = workspace == nil ? true : s.isBrowsing
@@ -174,14 +183,39 @@ final class AppModel {
         loadTypeOrder()
     }
 
+    /// Last-session sidebar counts, restored from PersistedState in init. Kept
+    /// so `persist()` can round-trip them during the bootstrap window — without
+    /// this, every persist before the first loadIndex would overwrite the
+    /// stored counts with an empty `[:]` (because didSet on browsePane etc.
+    /// fires during AppModel.init, well before entries are loaded). Once
+    /// bootstrap completes, the live `counts` is authoritative. QUA-105.
+    private var loadedCountsSnapshot: [EntryType: Int]?
+
     /// Save the current place (browse category + doc tabs + controls). Cheap — a small
     /// JSON blob to UserDefaults; invoked from the state properties' didSet, so every
     /// mutation auto-saves without per-intent hooks.
     private func persist() {
         guard let stateStore else { return }
         let ws = workspace
-        let savedTabs = ws?.tabs.map { PersistedTab(location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle) } ?? []
+        let liveByPath: [String: Entry] = Dictionary(
+            entries.lazy.compactMap { e -> (String, Entry)? in (e.path, e) },
+            uniquingKeysWith: { a, _ in a })
+        let savedTabs = ws?.tabs.map { tab -> PersistedTab in
+            // Title snapshot: prefer the live entry's title; if entries haven't
+            // loaded (bootstrap window) or the path no longer resolves (file
+            // was deleted), carry over whatever we previously cached so the
+            // next launch still sees the good title in the sidebar. Falls all
+            // the way to nil only if no source has ever produced one.
+            let liveTitle = tab.location.openPath.flatMap { liveByPath[$0]?.title }
+            let cached = liveTitle ?? tab.cachedTitle
+            return PersistedTab(location: tab.location, pinned: tab.pinned,
+                                customTitle: tab.customTitle, cachedTitle: cached)
+        } ?? []
         let idx = ws.flatMap { w in w.tabs.firstIndex { $0.id == w.activeID } } ?? 0
+        // Same round-trip discipline for counts — during bootstrap, write back
+        // the loaded snapshot rather than the still-empty `counts` dict.
+        let persistedCounts: [EntryType: Int]? =
+            isBootstrapping ? loadedCountsSnapshot : counts
         stateStore.save(PersistedState(
             browsePane: browsePane,
             isBrowsing: isBrowsing,
@@ -191,7 +225,8 @@ final class AppModel {
             filterClauses: filterClauses,
             filterMatch: filterMatch,
             browseMode: browseMode.rawValue,
-            currentSpace: ws.map { PersistedWorkspaceSpace(tree: $0.treeSnapshot) }))
+            currentSpace: ws.map { PersistedWorkspaceSpace(tree: $0.treeSnapshot) },
+            counts: persistedCounts))
     }
 
     // MARK: type order persistence
@@ -819,11 +854,18 @@ final class AppModel {
 
     // MARK: tab labels
 
+    /// Title resolution: user-renamed → live entry title → last-session cached
+    /// title (kept in `NavTab.cachedTitle`, populated from PersistedState at
+    /// restore) → path basename. The cachedTitle fallback is what keeps the
+    /// sidebar tab list from showing raw `00-overview.md` filenames during
+    /// the bootstrap window before `entries` has loaded (QUA-105).
     func tabTitle(_ tab: NavTab) -> String {
         if let customTitle = tab.customTitle { return customTitle }
         let loc = tab.location
         if let p = loc.openPath {
-            return entries.first { $0.path == p }?.title ?? (p as NSString).lastPathComponent
+            if let live = entries.first(where: { $0.path == p })?.title { return live }
+            if let cached = tab.cachedTitle, !cached.isEmpty { return cached }
+            return (p as NSString).lastPathComponent
         }
         switch loc.pane {
         case .type(let t):     return t.label

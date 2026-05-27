@@ -179,6 +179,123 @@ import Testing
         #expect(model.entries.map(\.path) == [second.path])
     }
 
+    // MARK: - cachedTitle / counts bootstrap fallback (QUA-105 follow-up)
+
+    @MainActor
+    @Test func tabTitleFallsThroughCachedTitleDuringBootstrap() async throws {
+        // Construct an AppModel restored from persisted state with a tab whose
+        // cachedTitle is set — entries is empty (bootstrap), so the live title
+        // lookup fails. tabTitle() must return the cached title rather than
+        // the filename basename.
+        let path = "vault/notes/long-filename.md"
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        store.save(PersistedState(
+            browsePane: .type(.note),
+            isBrowsing: false,
+            tabs: [PersistedTab(
+                location: NavLocation(pane: .type(.note), openPath: path),
+                pinned: false,
+                customTitle: nil,
+                cachedTitle: "Real Document Title")],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "list"))
+
+        let model = AppModel(client: ScriptedDelayedClient(), stateStore: store)
+        let tab = try #require(model.tabs.first)
+        #expect(model.entries.isEmpty)                          // bootstrap
+        #expect(model.tabTitle(tab) == "Real Document Title")   // not "long-filename.md"
+    }
+
+    @MainActor
+    @Test func tabTitleUsesLiveEntryOnceLoaded() async throws {
+        // Once loadIndex publishes, the live entry's title should win over
+        // the cached one — cachedTitle is fallback only.
+        let path = "vault/notes/n.md"
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        store.save(PersistedState(
+            browsePane: .type(.note),
+            isBrowsing: false,
+            tabs: [PersistedTab(
+                location: NavLocation(pane: .type(.note), openPath: path),
+                pinned: false,
+                customTitle: nil,
+                cachedTitle: "Stale Title")],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "list"))
+
+        let live = Entry(path: path, type: .note, title: "Live Title", author: [],
+                         year: nil, ratingScore: 0, themes: [], preview: "", hasPDF: false)
+        let client = ScriptedDelayedClient()
+        client.queueIndex(entries: [live], delayMs: 0)
+        let model = AppModel(client: client, stateStore: store)
+        await model.loadIndex()
+        let tab = try #require(model.tabs.first)
+        #expect(model.tabTitle(tab) == "Live Title")
+    }
+
+    @MainActor
+    @Test func appModelInitDoesNotWipeStoredCountsBeforeLoadIndex() throws {
+        // Regression: persist() fires via didSet on browsePane/workspace/etc.
+        // during AppModel.init, BEFORE loadIndex runs. Without loadedCountsSnapshot
+        // being seeded first, those persist() calls would round-trip an empty
+        // counts dict over the user's previously-saved type counts — and the
+        // *next* launch (no entries published yet) would then show all zeros
+        // permanently, defeating the whole point of persisting counts.
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        let seeded: [EntryType: Int] = [.note: 7, .paperAnalysis: 23]
+        var state = PersistedState(
+            browsePane: .type(.note),
+            isBrowsing: true,
+            tabs: [],
+            activeIndex: 0,
+            sortClauses: [], filterClauses: [], filterMatch: .all, browseMode: "list")
+        state.counts = seeded
+        store.save(state)
+
+        // Construct AppModel — its init triggers multiple persist() calls.
+        _ = AppModel(client: ScriptedDelayedClient(), stateStore: store)
+
+        // Disk state must still carry the user's counts, not an empty dict.
+        let onDisk = try #require(store.load())
+        #expect(onDisk.counts == seeded)
+    }
+
+    @MainActor
+    @Test func countsSeedFromPersistedStateOnInit() throws {
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        let seeded: [EntryType: Int] = [.note: 7, .paperAnalysis: 23]
+        var state = PersistedState(
+            browsePane: .type(.note),
+            isBrowsing: true,
+            tabs: [],
+            activeIndex: 0,
+            sortClauses: [], filterClauses: [], filterMatch: .all, browseMode: "list")
+        state.counts = seeded
+        store.save(state)
+
+        let model = AppModel(client: ScriptedDelayedClient(), stateStore: store)
+        #expect(model.counts == seeded)              // stale-but-plausible from t=0
+        #expect(model.isBootstrapping == true)        // entries haven't loaded
+    }
+
     // MARK: helpers
 
     private static func entry(_ path: String) -> Entry {
