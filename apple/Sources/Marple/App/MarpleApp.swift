@@ -15,7 +15,12 @@ final class AppState: ObservableObject {
     private var cliServer: CLIServer?
     private var cliSettingObserver: NSObjectProtocol?
 
-    func boot(paths: VaultPaths) async {
+    /// Synchronous (no awaits inside) since Phase A — the heavy reconcile +
+    /// loadIndex moved to a background Task at the bottom of this method. Lets
+    /// `MarpleWindowController.start()` mount the split chrome BEFORE the
+    /// window is ordered front, eliminating the brief "blank window" flash
+    /// that an async boot would leave between `showWindow` and the split mount.
+    func boot(paths: VaultPaths) {
         guard model == nil, !booting else { return }
         booting = true; bootError = nil
         let indexer = VaultIndexer(workspaceRoot: paths.workspaceRoot)

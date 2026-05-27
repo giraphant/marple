@@ -10,8 +10,16 @@ struct TrashView: View {
             header
             Divider()
             if model.trashItems.isEmpty {
-                ContentUnavailableView("回收站为空", systemImage: "trash")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Suppress the "回收站为空" message during bootstrap — the empty
+                // array is then ambiguous between "trash is genuinely empty"
+                // and "we haven't fetched yet". Show a blank pane instead;
+                // loadIndex will populate trashItems within a beat. QUA-105.
+                if !model.isBootstrapping {
+                    ContentUnavailableView("回收站为空", systemImage: "trash")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
                 List(model.trashItems) { item in
                     TrashRow(item: item)
