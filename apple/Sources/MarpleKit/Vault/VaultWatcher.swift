@@ -1,4 +1,5 @@
 import Foundation
+import CoreServices
 
 /// Collapses a burst of signals into a single trailing-edge call.
 public final class Coalescer: @unchecked Sendable {
@@ -28,14 +29,36 @@ public final class Coalescer: @unchecked Sendable {
     }
 }
 
-/// FSEvents-backed directory watcher via a DispatchSource on the directory fd.
+/// Recursive FSEvents-backed watcher for the vault directory.
 /// Coarse by design: it only hints "something changed"; the handler decides what
 /// to refresh (the VaultIndexer reconciles by mtime diff on each signal).
 public final class VaultWatcher: @unchecked Sendable {
+    private final class CallbackContext: @unchecked Sendable {
+        let coalescer: Coalescer
+        init(coalescer: Coalescer) { self.coalescer = coalescer }
+    }
+
+    private static let contextRetain: CFAllocatorRetainCallBack = { info in
+        guard let info else { return nil }
+        _ = Unmanaged<CallbackContext>.fromOpaque(info).retain()
+        return info
+    }
+
+    private static let contextRelease: CFAllocatorReleaseCallBack = { info in
+        guard let info else { return }
+        Unmanaged<CallbackContext>.fromOpaque(info).release()
+    }
+
+    private static let streamCallback: FSEventStreamCallback = { _, info, _, _, _, _ in
+        guard let info else { return }
+        Unmanaged<CallbackContext>.fromOpaque(info).takeUnretainedValue().coalescer.signal()
+    }
+
     private let url: URL
     private let coalescer: Coalescer
-    private var source: DispatchSourceFileSystemObject?
-    private var fd: Int32 = -1
+    private let queue = DispatchQueue(label: "marple.vault-watcher")
+    private let lock = NSLock()
+    private var stream: FSEventStreamRef?
 
     public init(vaultDirectory: URL, debounce: TimeInterval = 0.4,
                 onChange: @escaping @Sendable () async -> Void) {
@@ -44,20 +67,48 @@ public final class VaultWatcher: @unchecked Sendable {
     }
 
     public func start() {
-        fd = open(url.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-        let src = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd, eventMask: [.write, .rename, .delete, .extend],
-            queue: DispatchQueue.global())
-        src.setEventHandler { [weak self] in self?.coalescer.signal() }
-        src.setCancelHandler { [weak self] in if let fd = self?.fd, fd >= 0 { close(fd) } }
-        src.resume()
-        self.source = src
+        lock.lock()
+        defer { lock.unlock() }
+        guard stream == nil else { return }
+        let callbackContext = CallbackContext(coalescer: coalescer)
+        var context = FSEventStreamContext(
+            version: 0,
+            info: Unmanaged.passUnretained(callbackContext).toOpaque(),
+            retain: Self.contextRetain,
+            release: Self.contextRelease,
+            copyDescription: nil
+        )
+        let flags = UInt32(
+            kFSEventStreamCreateFlagUseCFTypes |
+            kFSEventStreamCreateFlagFileEvents |
+            kFSEventStreamCreateFlagWatchRoot
+        )
+        guard let stream = FSEventStreamCreate(
+            kCFAllocatorDefault,
+            Self.streamCallback,
+            &context,
+            [url.path] as CFArray,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+            0.1,
+            flags
+        ) else { return }
+        FSEventStreamSetDispatchQueue(stream, queue)
+        guard FSEventStreamStart(stream) else {
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+            return
+        }
+        self.stream = stream
     }
 
     public func stop() {
-        source?.cancel()
-        source = nil
+        lock.lock()
+        defer { lock.unlock() }
+        guard let stream else { return }
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
+        self.stream = nil
     }
 
     deinit { stop() }
