@@ -20,20 +20,14 @@ final class AppState: ObservableObject {
         booting = true; bootError = nil
         let indexer = VaultIndexer(workspaceRoot: paths.workspaceRoot)
         self.indexer = indexer
-        // Fast path: if the live index already exists and its schema is current,
-        // skip awaiting reconcile. Open the existing SQLite, render the UI, and
-        // run reconcile in the background — mirrors the FSEvents watcher below
-        // and matches how Mail/Notes/NetNewsWire open instantly then refresh.
-        // First launch / schema bump still awaits buildFull (the spinner stays
-        // up because there's literally nothing to show yet).
+        // QUA-105: publish the model BEFORE running reconcile / loadIndex.
+        // Previously both ran behind `await` so the window sat on a spinner
+        // for several seconds on first launch (slow path) and flashed
+        // "spinner → split swap" on every warm launch. Now the window mounts
+        // the split chrome at t≈0 with `isBootstrapping=true`, and the data
+        // path runs as a background Task that flips bootstrap when the first
+        // snapshot lands. Mirrors how Mail/Notes/NetNewsWire feel instant.
         let canSkip = indexer.canSkipFullBuild()
-        if !canSkip {
-            do {
-                _ = try await Task.detached { try indexer.reconcile() }.value
-            } catch {
-                print("[marple] boot reconcile failed (non-fatal): \(error)")
-            }
-        }
         let index = IndexDatabase(indexDBPath: paths.workspaceRoot + "/.marple/index.sqlite")
         let client = LocalVaultClient(workspaceRoot: paths.workspaceRoot, index: index)
         // 深度 (semantic) mode: wire the MLX backend only when a vector index exists
@@ -43,49 +37,25 @@ final class AppState: ObservableObject {
             FileManager.default.fileExists(atPath: marpleDir.appendingPathComponent("vectors.json").path)
             ? MLXSemanticBackend(dir: marpleDir) : nil
         let m = AppModel(client: client, stateStore: UserDefaultsStateStore(), semantic: semantic)
-        await m.loadIndex()
         self.model = m
         self.booting = false
-        // If we took the fast path, the index we just showed may be stale. Run
-        // reconcile on a background detached task, then re-load only when stats
-        // show actual changes (skip the work for the typical no-edit restart).
-        // Note: this task is fire-and-forget; the watcher is wired below before
-        // this task runs. Concurrent reconciles (this one + watcher-triggered)
-        // are safe — `VaultIndexer.writeLock` serialises the diff/write phase
-        // on the live DB and SQLite WAL gives readers consistent snapshots, so
-        // overlapping reconciles converge to the latest filesystem state.
-        if canSkip {
-            Task { @MainActor [weak m, indexer] in
-                let stats: ReconcileStats?
-                do { stats = try await Task.detached { try indexer.reconcile() }.value }
-                catch {
-                    print("[marple] deferred reconcile failed: \(error)")
-                    stats = nil
-                }
-                if let s = stats, s.upserted + s.removed > 0 {
-                    await m?.loadIndex()
-                    await m?.reloadOpen()
-                }
-            }
-        }
-        // Wire the FSEvents watcher: on a debounced vault change, reconcile the
-        // index then reload the list + open doc so external edits surface promptly.
-        // Capture `indexer` directly (it is @unchecked Sendable) to avoid crossing
-        // an actor boundary through `self` inside a @Sendable closure.
+
+        // Wire the FSEvents watcher and CLI server up front — they're safe to
+        // exist before the first loadIndex completes. The watcher's reconcile
+        // closure calls loadIndex itself, and the generation guard in
+        // AppModel.loadIndex makes overlapping bootstrap + watcher-triggered
+        // calls converge to the latest snapshot.
         let watcher = VaultWatcher(vaultDirectory: URL(fileURLWithPath: paths.vaultDir)) { [weak m, indexer] in
-            // Reconcile off the main actor (synchronous/blocking).
             do { _ = try await Task.detached { try indexer.reconcile() }.value }
             catch { print("[marple] watcher reconcile failed: \(error)") }
-            // Reload the list and the open document on the main actor.
             await m?.loadIndex()
             await m?.reloadOpen()
         }
         watcher.start()
         self.watcher = watcher
 
-        // QUA-107: wire the local CLI socket once everything else is up. The
-        // server is opt-in (off by default); we install a UserDefaults observer
-        // so flipping the toggle in 设置 → AI 接入 takes effect immediately.
+        // QUA-107: wire the local CLI socket. The server is opt-in (off by
+        // default); the UserDefaults observer makes the 设置 toggle live.
         self.cliServer = CLIServer()
         applyCLISetting()
         cliSettingObserver = NotificationCenter.default.addObserver(
@@ -93,6 +63,35 @@ final class AppState: ObservableObject {
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.applyCLISetting() }
+        }
+
+        // Kick the actual data load on a background task. Sequence:
+        //  · slow path (canSkip=false, first launch / schema bump): reconcile,
+        //    then loadIndex publishes the freshly built snapshot.
+        //  · fast path (canSkip=true): loadIndex now against the cached
+        //    sidecar, then a second reconcile catches any stale rows and
+        //    re-loads only if it found real changes. Unchanged behavior — just
+        //    no longer blocking the UI mount.
+        Task { @MainActor [weak m, indexer] in
+            if !canSkip {
+                do { _ = try await Task.detached { try indexer.reconcile() }.value }
+                catch { print("[marple] boot reconcile failed (non-fatal): \(error)") }
+            }
+            await m?.loadIndex()
+            if canSkip {
+                Task { @MainActor [weak m, indexer] in
+                    let stats: ReconcileStats?
+                    do { stats = try await Task.detached { try indexer.reconcile() }.value }
+                    catch {
+                        print("[marple] deferred reconcile failed: \(error)")
+                        stats = nil
+                    }
+                    if let s = stats, s.upserted + s.removed > 0 {
+                        await m?.loadIndex()
+                        await m?.reloadOpen()
+                    }
+                }
+            }
         }
     }
 
