@@ -96,12 +96,12 @@ public struct EntryDigest: Codable, Sendable {
     public let title: String?
     public let type: String
     public let themes: [String]
-    public let author: String?
+    public let author: [String]
     public let year: String?
     public let mtime: Double?
 
     public init(path: String, title: String?, type: String, themes: [String],
-                author: String?, year: String?, mtime: Double?) {
+                author: [String], year: String?, mtime: Double?) {
         self.path = path; self.title = title; self.type = type
         self.themes = themes; self.author = author; self.year = year
         self.mtime = mtime
