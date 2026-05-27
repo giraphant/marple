@@ -324,11 +324,17 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         private func tabNode(_ tab: NavTab, entryByPath: [String: Entry]) -> SidebarOutlineNode {
             let entry = tab.location.openPath.flatMap { entryByPath[$0] }
+            // QUA-105: during bootstrap entries is empty so `entry?.type` is
+            // nil, which would drop the row to the generic list.bullet icon.
+            // Fall through to the persisted cachedType so the right type icon
+            // (paper / book / note / image / chapter / author) renders from
+            // the first frame.
+            let resolvedType = entry?.type ?? tab.cachedType
             return SidebarOutlineNode(kind: .tab(tab.id),
                                       title: tabTitle(tab, entry: entry),
                                       iconName: "list.bullet",
                                       pinned: tab.pinned,
-                                      entryType: entry?.type)
+                                      entryType: resolvedType)
         }
 
         private func tabTitle(_ tab: NavTab, entry: Entry?) -> String {

@@ -14,12 +14,21 @@ public struct PersistedTab: Codable, Sendable, Equatable {
     public var pinned: Bool
     public var customTitle: String?
     public var cachedTitle: String?
+    /// Snapshot of `entry.type` for the bootstrap window — paired with
+    /// `cachedTitle`, this is what lets the sidebar render the correct
+    /// type icon (paper / note / book / image / chapter / theme) instead of
+    /// falling back to the default `list.bullet` while `entries` is empty.
+    /// Decoded as nil on legacy state predating this field. QUA-105.
+    public var cachedType: EntryType?
     public init(location: NavLocation, pinned: Bool,
-                customTitle: String? = nil, cachedTitle: String? = nil) {
+                customTitle: String? = nil,
+                cachedTitle: String? = nil,
+                cachedType: EntryType? = nil) {
         self.location = location
         self.pinned = pinned
         self.customTitle = customTitle
         self.cachedTitle = cachedTitle
+        self.cachedType = cachedType
     }
 }
 
@@ -87,7 +96,9 @@ public struct PersistedState: Codable, Sendable, Equatable {
     public func makeWorkspace() -> Workspace? {
         let restoring = tabs.map {
             (location: $0.location, pinned: $0.pinned,
-             customTitle: $0.customTitle, cachedTitle: $0.cachedTitle)
+             customTitle: $0.customTitle,
+             cachedTitle: $0.cachedTitle,
+             cachedType: $0.cachedType)
         }
         if let tree = currentSpace?.tree {
             return Workspace(restoring: restoring, activeIndex: activeIndex, tree: tree)

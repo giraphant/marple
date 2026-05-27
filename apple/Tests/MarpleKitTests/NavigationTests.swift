@@ -547,7 +547,7 @@ import Foundation
         let data = try JSONEncoder().encode(snap)
         let decoded = try JSONDecoder().decode(WorkspaceTreeSnapshot.self, from: data)
         let restored = try #require(Workspace(
-            restoring: w.tabs.map { (location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle, cachedTitle: $0.cachedTitle) },
+            restoring: w.tabs.map { (location: $0.location, pinned: $0.pinned, customTitle: $0.customTitle, cachedTitle: $0.cachedTitle, cachedType: $0.cachedType) },
             activeIndex: 0,
             tree: decoded))
         #expect(restored.tabs.map(\.location) == w.tabs.map(\.location))
@@ -614,7 +614,7 @@ import Foundation
     /// QUA-99: when the selection spans sibling groups under a common non-root
     /// ancestor, the new group lands inside that ancestor — not at root.
     @Test func groupTabsAcrossSiblingGroupsAnchorsAtCommonAncestor() throws {
-        let tabSpecs = (0..<5).map { (location: loc($0), pinned: false, customTitle: String?.none, cachedTitle: String?.none) }
+        let tabSpecs = (0..<5).map { (location: loc($0), pinned: false, customTitle: String?.none, cachedTitle: String?.none, cachedType: EntryType?.none) }
         let snap = WorkspaceTreeSnapshot(roots: [
             .group(.init(name: "G", isCollapsed: false, children: [
                 .group(.init(name: "A", isCollapsed: false, children: [.tab(0), .tab(1)])),
@@ -644,7 +644,7 @@ import Foundation
     /// QUA-99: same-parent case still places the new group inside that parent
     /// at the earliest tab's slot — unchanged behavior.
     @Test func groupTabsSameNonRootParentAnchorsAtEarliestSlot() throws {
-        let tabSpecs = (0..<4).map { (location: loc($0), pinned: false, customTitle: String?.none, cachedTitle: String?.none) }
+        let tabSpecs = (0..<4).map { (location: loc($0), pinned: false, customTitle: String?.none, cachedTitle: String?.none, cachedType: EntryType?.none) }
         let snap = WorkspaceTreeSnapshot(roots: [
             .group(.init(name: "A", isCollapsed: false, children: [
                 .tab(0), .tab(1), .tab(2),
@@ -672,8 +672,8 @@ import Foundation
     @Test func groupTabsAcrossDeeplyNestedSiblingsAnchorsAtLCA() throws {
         let l0 = loc(0); let l1 = loc(1); let lT2 = loc(2)
         let lAJ = loc(3); let lAK = loc(4)
-        let tabSpecs: [(location: NavLocation, pinned: Bool, customTitle: String?, cachedTitle: String?)] =
-            [l0, l1, lT2, lAJ, lAK].map { (location: $0, pinned: false, customTitle: nil, cachedTitle: nil) }
+        let tabSpecs: [(location: NavLocation, pinned: Bool, customTitle: String?, cachedTitle: String?, cachedType: EntryType?)] =
+            [l0, l1, lT2, lAJ, lAK].map { (location: $0, pinned: false, customTitle: nil, cachedTitle: nil, cachedType: nil) }
         let snap = WorkspaceTreeSnapshot(roots: [
             .group(.init(name: "G", isCollapsed: false, children: [
                 .group(.init(name: "H", isCollapsed: false, children: [
@@ -705,7 +705,7 @@ import Foundation
     /// already contains some of the dragged items — verifies in-parent
     /// adjusted-index applies correctly to the mixed case.
     @Test func moveItemsIntoGroupWithExistingDraggedTabsReorders() throws {
-        let tabSpecs = (0..<5).map { (location: loc($0), pinned: false, customTitle: String?.none, cachedTitle: String?.none) }
+        let tabSpecs = (0..<5).map { (location: loc($0), pinned: false, customTitle: String?.none, cachedTitle: String?.none, cachedType: EntryType?.none) }
         let snap = WorkspaceTreeSnapshot(roots: [
             .group(.init(name: "Dst", isCollapsed: false, children: [.tab(0), .tab(1), .tab(2)])),
             .group(.init(name: "Sub", isCollapsed: false, children: [.tab(3), .tab(4)])),
@@ -732,7 +732,7 @@ import Foundation
     /// moveItemsToRoot. Confirms baseTarget adjustment when every source sits
     /// in the destination (root) at slots before the raw index.
     @Test func moveItemsToRootGroupOnlyReorderAdjustsBaseTarget() throws {
-        let tabSpecs = (0..<4).map { (location: loc($0), pinned: false, customTitle: String?.none, cachedTitle: String?.none) }
+        let tabSpecs = (0..<4).map { (location: loc($0), pinned: false, customTitle: String?.none, cachedTitle: String?.none, cachedType: EntryType?.none) }
         let snap = WorkspaceTreeSnapshot(roots: [
             .group(.init(name: "G1", isCollapsed: false, children: [.tab(0), .tab(1)])),
             .group(.init(name: "G2", isCollapsed: false, children: [.tab(2), .tab(3)])),
@@ -884,7 +884,7 @@ import Foundation
     @Test func moveItemsIntoGroupPreservesInterleavedOrder() throws {
         // Dst needs ≥2 anchor tabs so it survives normalize after Src + ids4
         // land inside it; otherwise dissolveSmall would unwrap Dst.
-        let tabSpecs = (0..<5).map { (location: loc($0), pinned: false, customTitle: String?.none, cachedTitle: String?.none) }
+        let tabSpecs = (0..<5).map { (location: loc($0), pinned: false, customTitle: String?.none, cachedTitle: String?.none, cachedType: EntryType?.none) }
         let snap = WorkspaceTreeSnapshot(roots: [
             .group(.init(name: "Dst", isCollapsed: false, children: [.tab(0), .tab(1)])),
             .group(.init(name: "Src", isCollapsed: false, children: [.tab(2), .tab(3)])),
