@@ -54,10 +54,13 @@ public enum IndexWriter {
               rating_score REAL NOT NULL DEFAULT 0,
               themes_json TEXT,
               topic TEXT,
+              kind TEXT,
+              journal TEXT,
               source TEXT,
               doi TEXT,
               publisher TEXT,
               isbn TEXT,
+              category TEXT,
               translation_title_cn TEXT,
               translation_douban_url TEXT,
               chapters_analyzed INTEGER,
@@ -162,10 +165,10 @@ public enum IndexWriter {
             sql: """
                 INSERT INTO entries (
                   path, type, book, title, title_en, title_cn, author, year_json, rating_json,
-                  rating_score, themes_json, topic, source, doi, publisher, isbn,
+                  rating_score, themes_json, topic, kind, journal, source, doi, publisher, isbn, category,
                   translation_title_cn, translation_douban_url, chapters_analyzed,
                   annotates, created, pdf_slug, has_pdf, mtime, preview, body_len, added
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
             arguments: [
                 entry.path,
@@ -180,10 +183,13 @@ public enum IndexWriter {
                 entry.ratingScore,
                 themesJSONStr,
                 entry.topic,
+                entry.kind,
+                entry.journal,
                 entry.source,
                 entry.doi,
                 entry.publisher,
                 entry.isbn,
+                entry.category,
                 entry.translationTitleCn,
                 entry.translationDoubanURL,
                 entry.chaptersAnalyzed,

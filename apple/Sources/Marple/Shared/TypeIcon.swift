@@ -11,6 +11,7 @@ extension EntryType {
         case .bookOverview:   return "book"
         case .authorProfile:  return "person"
         case .topicSynthesis: return "square.stack.3d.up"
+        case .journal:        return "newspaper"
         case .chapterSummary: return "list.bullet.rectangle"
         case .note:           return "note.text"
         case .image:          return "photo"
@@ -24,6 +25,7 @@ extension EntryType {
         case .bookOverview:   return .orange
         case .authorProfile:  return .purple
         case .topicSynthesis: return .teal
+        case .journal:        return .green
         case .chapterSummary: return .indigo
         case .note:           return .yellow
         case .image:          return .pink

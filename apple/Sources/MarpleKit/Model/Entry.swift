@@ -6,6 +6,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
     case chapterSummary
     case authorProfile
     case topicSynthesis
+    case journal
     case note
     case image
     /// Any entry type the reader doesn't model yet. The vault is produced by an
@@ -19,7 +20,8 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
         case "book-overview": self = .bookOverview
         case "chapter-summary": self = .chapterSummary
         case "author-profile": self = .authorProfile
-        case "topic-synthesis": self = .topicSynthesis
+        case "topic", "topic-synthesis": self = .topicSynthesis
+        case "journal": self = .journal
         case "note": self = .note
         case "image": self = .image
         default: self = .other(rawValue)
@@ -33,6 +35,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
         case .chapterSummary: return "chapter-summary"
         case .authorProfile: return "author-profile"
         case .topicSynthesis: return "topic-synthesis"
+        case .journal: return "journal"
         case .note: return "note"
         case .image: return "image"
         case .other(let raw): return raw
@@ -54,7 +57,7 @@ public extension EntryType {
     /// The six modeled types in the canonical sidebar order (mirrors web TYPES).
     static let modeled: [EntryType] = [
         .paperAnalysis, .bookOverview, .authorProfile,
-        .topicSynthesis, .chapterSummary, .note, .image,
+        .topicSynthesis, .journal, .chapterSummary, .note, .image,
     ]
 
     var label: String {
@@ -63,6 +66,7 @@ public extension EntryType {
         case .bookOverview:   return "图书"
         case .authorProfile:  return "作者"
         case .topicSynthesis: return "主题"
+        case .journal:        return "期刊"
         case .chapterSummary: return "章节"
         case .note:           return "笔记"
         case .image:          return "图片"
@@ -92,8 +96,14 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public let source: String?
     public let book: String?
     public let topic: String?
+    public let kind: String?
+    public let journal: String?
     public let doi: String?
+    public let publisher: String?
+    public let isbn: String?
+    public let category: String?
     public let annotates: String?
+    public let created: String?
 
     enum CodingKeys: String, CodingKey {
         case path, type, title, author, year, preview
@@ -101,7 +111,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         case themes
         case hasPDF = "has_pdf"
         case pdfSlug = "pdf_slug"
-        case mtime, added, source, book, topic, doi, annotates
+        case mtime, added, source, book, topic, kind, journal, doi, publisher, isbn, category, annotates, created
     }
 
     public init(from decoder: Decoder) throws {
@@ -137,16 +147,24 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         source = (try? c.decodeIfPresent(String.self, forKey: .source)) ?? nil
         book = (try? c.decodeIfPresent(String.self, forKey: .book)) ?? nil
         topic = (try? c.decodeIfPresent(String.self, forKey: .topic)) ?? nil
+        kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? nil
+        journal = (try? c.decodeIfPresent(String.self, forKey: .journal)) ?? nil
         doi = (try? c.decodeIfPresent(String.self, forKey: .doi)) ?? nil
+        publisher = (try? c.decodeIfPresent(String.self, forKey: .publisher)) ?? nil
+        isbn = (try? c.decodeIfPresent(String.self, forKey: .isbn)) ?? nil
+        category = (try? c.decodeIfPresent(String.self, forKey: .category)) ?? nil
         annotates = (try? c.decodeIfPresent(String.self, forKey: .annotates)) ?? nil
+        created = (try? c.decodeIfPresent(String.self, forKey: .created)) ?? nil
     }
 
     public init(path: String, type: EntryType, title: String?, author: [String],
                 year: String?, ratingScore: Double, themes: [String],
                 preview: String, hasPDF: Bool, pdfSlug: String? = nil,
                 mtime: Double? = nil, added: Double? = nil, source: String? = nil,
-                book: String? = nil, topic: String? = nil, doi: String? = nil,
-                annotates: String? = nil) {
+                book: String? = nil, topic: String? = nil, kind: String? = nil,
+                journal: String? = nil, doi: String? = nil, publisher: String? = nil,
+                isbn: String? = nil, category: String? = nil, annotates: String? = nil,
+                created: String? = nil) {
         self.path = path
         self.type = type
         self.title = title
@@ -162,8 +180,14 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         self.source = source
         self.book = book
         self.topic = topic
+        self.kind = kind
+        self.journal = journal
         self.doi = doi
+        self.publisher = publisher
+        self.isbn = isbn
+        self.category = category
         self.annotates = annotates
+        self.created = created
     }
 }
 
@@ -180,7 +204,8 @@ public extension Entry {
               year: year ?? self.year, ratingScore: ratingScore ?? self.ratingScore,
               themes: themes ?? self.themes, preview: preview, hasPDF: hasPDF,
               pdfSlug: pdfSlug, mtime: mtime, added: added, source: source ?? self.source,
-              book: book, topic: topic ?? self.topic, doi: doi ?? self.doi,
-              annotates: annotates)
+              book: book, topic: topic ?? self.topic, kind: kind, journal: journal,
+              doi: doi ?? self.doi, publisher: publisher, isbn: isbn, category: category,
+              annotates: annotates, created: created)
     }
 }

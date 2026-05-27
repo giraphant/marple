@@ -19,8 +19,8 @@ import GRDB
                 CREATE TABLE entries (
                   path TEXT PRIMARY KEY, type TEXT NOT NULL, book TEXT, title TEXT,
                   title_en TEXT, title_cn TEXT, author TEXT, year_json TEXT, rating_json TEXT,
-                  rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topic TEXT, source TEXT,
-                  doi TEXT, publisher TEXT, isbn TEXT, translation_title_cn TEXT,
+                  rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topic TEXT, kind TEXT, journal TEXT, source TEXT,
+                  doi TEXT, publisher TEXT, isbn TEXT, category TEXT, translation_title_cn TEXT,
                   translation_douban_url TEXT, chapters_analyzed INTEGER, annotates TEXT,
                   created TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
                   preview TEXT NOT NULL DEFAULT '', body_len INTEGER NOT NULL DEFAULT 0,
@@ -87,6 +87,48 @@ import GRDB
         #expect(e.ratingScore == 4.0)
     }
 
+    @Test func loadEntriesMapsBookCanonicalMetadataColumns() throws {
+        let path = try makeFixtureDB([
+            (path: "vault/books/b.md", type: "book-overview", title: "Book",
+             themesJSON: nil, yearJSON: #""1934""#, hasPDF: 0, rating: 2.0, text: "book body"),
+        ])
+        let queue = try DatabaseQueue(path: path)
+        try queue.write { db in
+            try db.execute(
+                sql: "UPDATE entries SET publisher = ?, isbn = ?, category = ?, doi = ? WHERE path = ?",
+                arguments: ["Harcourt Brace", "978-0-262-13472-9", "monograph", "10.1234/book", "vault/books/b.md"]
+            )
+        }
+
+        let db = IndexDatabase(indexDBPath: path)
+        let e = try #require(try db.loadEntries().first)
+        #expect(e.publisher == "Harcourt Brace")
+        #expect(e.isbn == "978-0-262-13472-9")
+        #expect(e.category == "monograph")
+        #expect(e.doi == "10.1234/book")
+    }
+
+    @Test func loadEntriesMapsLightweightCanonicalMetadataColumns() throws {
+        let path = try makeFixtureDB([
+            (path: "vault/journals/ajs.md", type: "journal", title: "AJS",
+             themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "journal body"),
+        ])
+        let queue = try DatabaseQueue(path: path)
+        try queue.write { db in
+            try db.execute(
+                sql: "UPDATE entries SET kind = ?, journal = ?, created = ? WHERE path = ?",
+                arguments: ["overview", "American Journal of Sociology", "2026-05-27", "vault/journals/ajs.md"]
+            )
+        }
+
+        let db = IndexDatabase(indexDBPath: path)
+        let e = try #require(try db.loadEntries().first)
+        #expect(e.type == .journal)
+        #expect(e.kind == "overview")
+        #expect(e.journal == "American Journal of Sociology")
+        #expect(e.created == "2026-05-27")
+    }
+
     @Test func loadEntriesReturnsEmptyWhenDBMissing() throws {
         let db = IndexDatabase(indexDBPath: "/nonexistent/index.sqlite")
         #expect(try db.loadEntries() == [])
@@ -139,6 +181,16 @@ import GRDB
         #expect(limited.count == 1)
     }
 
+    @Test func searchTopicPaneMatchesShortTopicRows() throws {
+        let path = try makeFixtureDB([
+            (path: "vault/topics/repair.md", type: "topic", title: "Repair",
+             themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "repair keyword"),
+        ])
+        let db = IndexDatabase(indexDBPath: path)
+        let hits = try db.search("repair", type: .topicSynthesis, minRating: nil, theme: nil, limit: 80)
+        #expect(hits.map(\.entry.path) == ["vault/topics/repair.md"])
+    }
+
     /// Regression test for SQLITE_CANTOPEN when reading a WAL-mode database whose
     /// writer connection has already closed (leaving a WAL-header db with no -shm).
     /// A read-only connection cannot attach the wal-index in that state; the fix is
@@ -164,8 +216,8 @@ import GRDB
                     CREATE TABLE entries (
                       path TEXT PRIMARY KEY, type TEXT NOT NULL, book TEXT, title TEXT,
                       title_en TEXT, title_cn TEXT, author TEXT, year_json TEXT, rating_json TEXT,
-                      rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topic TEXT, source TEXT,
-                      doi TEXT, publisher TEXT, isbn TEXT, translation_title_cn TEXT,
+                      rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topic TEXT, kind TEXT, journal TEXT, source TEXT,
+                      doi TEXT, publisher TEXT, isbn TEXT, category TEXT, translation_title_cn TEXT,
                       translation_douban_url TEXT, chapters_analyzed INTEGER, annotates TEXT,
                       created TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
                       preview TEXT NOT NULL DEFAULT '', body_len INTEGER NOT NULL DEFAULT 0,

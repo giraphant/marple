@@ -309,7 +309,7 @@ struct VaultIndexerTests {
                   path TEXT PRIMARY KEY, type TEXT NOT NULL, book TEXT, title TEXT,
                   title_en TEXT, title_cn TEXT, author TEXT, year_json TEXT, rating_json TEXT,
                   rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topic TEXT, source TEXT,
-                  doi TEXT, publisher TEXT, isbn TEXT, translation_title_cn TEXT,
+                  doi TEXT, publisher TEXT, isbn TEXT, category TEXT, translation_title_cn TEXT,
                   translation_douban_url TEXT, chapters_analyzed INTEGER, annotates TEXT,
                   created TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
                   preview TEXT NOT NULL DEFAULT '', body_len INTEGER NOT NULL DEFAULT 0,

@@ -381,7 +381,7 @@ public final class VaultIndexer: @unchecked Sendable {
         // Required `entries` columns: missing any of these → schema predates
         // the second translation/PDF metadata expansion.
         let required: Set<String> = [
-            "title_en", "title_cn", "publisher", "isbn",
+            "title_en", "title_cn", "kind", "journal", "publisher", "isbn", "category",
             "translation_title_cn", "translation_douban_url",
         ]
 
