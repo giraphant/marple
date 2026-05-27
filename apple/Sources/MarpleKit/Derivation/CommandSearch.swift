@@ -34,6 +34,13 @@ public enum SearchMode: String, CaseIterable, Sendable {
         }
     }
 
+    public var paletteInlineScoreFloorRatio: Double? {
+        switch self {
+        case .fast: return nil
+        case .balanced, .deep: return 0.60
+        }
+    }
+
     /// Next mode in the Tab cycle (wraps deep → fast).
     public func next() -> SearchMode {
         let all = SearchMode.allCases
@@ -71,9 +78,20 @@ public func paletteSections(
     _ rows: [(entry: Entry, score: Double)],
     order: [EntryType],
     promote: EntryType?,
-    perType: Int
+    perType: Int,
+    minimumInlineScoreRatio: Double? = nil
 ) -> [PaletteSection] {
     if rows.isEmpty { return [] }
+
+    let inlineScoreFloor: Double?
+    if let minimumInlineScoreRatio,
+       rows.count > perType,
+       let bestScore = rows.map(\.score).max(),
+       bestScore > 0 {
+        inlineScoreFloor = bestScore * minimumInlineScoreRatio
+    } else {
+        inlineScoreFloor = nil
+    }
 
     var buckets: [EntryType: [(entry: Entry, score: Double)]] = [:]
     for row in rows { buckets[row.entry.type, default: []].append(row) }
@@ -91,10 +109,13 @@ public func paletteSections(
         // Deterministic within-bucket order (tiebreak by path) so identical
         // searches render identically run-to-run.
         bucket.sort { $0.score != $1.score ? $0.score > $1.score : $0.entry.path < $1.entry.path }
+        let inlineBucket = inlineScoreFloor.map { floor in
+            bucket.filter { $0.score >= floor }
+        } ?? bucket
         out.append(PaletteSection(
             type: meta,
             total: bucket.count,
-            top: bucket.prefix(perType).map { $0.entry }
+            top: inlineBucket.prefix(perType).map { $0.entry }
         ))
     }
     return out

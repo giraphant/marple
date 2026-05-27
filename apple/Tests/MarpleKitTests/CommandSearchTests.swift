@@ -25,6 +25,12 @@ import Testing
         #expect(searchSourceBadge(nil) == nil)
     }
 
+    @Test func nonFastModesUseInlineScoreFloor() {
+        #expect(SearchMode.fast.paletteInlineScoreFloorRatio == nil)
+        #expect(SearchMode.balanced.paletteInlineScoreFloorRatio == 0.60)
+        #expect(SearchMode.deep.paletteInlineScoreFloorRatio == 0.60)
+    }
+
     let order = EntryType.modeled
 
     @Test func groupsByTypeInOrder() {
@@ -41,6 +47,50 @@ import Testing
         #expect(sections.count == 1)
         #expect(sections[0].total == 8)
         #expect(sections[0].top.count == 5)
+    }
+
+    @Test func inlineScoreFloorCollapsesLowRowsAgainstGlobalBest() {
+        let rows = [
+            e("paper-strong", .paperAnalysis, score: 100),
+            e("paper-low", .paperAnalysis, score: 20),
+            e("book-strong", .bookOverview, score: 61),
+            e("book-low", .bookOverview, score: 59),
+            e("summary-low", .chapterSummary, score: 30),
+            e("note-low", .note, score: 10),
+        ]
+        let sections = paletteSections(rows, order: order, promote: nil, perType: 5,
+                                       minimumInlineScoreRatio: 0.60)
+        #expect(sections.map(\.type) == [.paperAnalysis, .bookOverview, .chapterSummary, .note])
+        #expect(sections[0].total == 2)
+        #expect(sections[0].top.map(\.path) == ["paper-strong"])
+        #expect(sections[1].total == 2)
+        #expect(sections[1].top.map(\.path) == ["book-strong"])
+    }
+
+    @Test func inlineScoreFloorKeepsLowSectionsCollapsed() {
+        let rows = [
+            e("paper-strong", .paperAnalysis, score: 100),
+            e("book-low-1", .bookOverview, score: 50),
+            e("book-low-2", .bookOverview, score: 49),
+            e("book-low-3", .bookOverview, score: 48),
+            e("book-low-4", .bookOverview, score: 47),
+            e("book-low-5", .bookOverview, score: 46),
+        ]
+        let sections = paletteSections(rows, order: order, promote: nil, perType: 5,
+                                       minimumInlineScoreRatio: 0.60)
+        #expect(sections.map(\.type) == [.paperAnalysis, .bookOverview])
+        #expect(sections[1].total == 5)
+        #expect(sections[1].top.isEmpty)
+    }
+
+    @Test func inlineScoreFloorDoesNotCollapseSmallResultSets() {
+        let rows = [
+            e("paper-strong", .paperAnalysis, score: 100),
+            e("book-low", .bookOverview, score: 40),
+        ]
+        let sections = paletteSections(rows, order: order, promote: nil, perType: 5,
+                                       minimumInlineScoreRatio: 0.60)
+        #expect(sections.flatMap(\.top).map(\.path) == ["paper-strong", "book-low"])
     }
 
     @Test func withinBucketSortedByScoreDesc() {
