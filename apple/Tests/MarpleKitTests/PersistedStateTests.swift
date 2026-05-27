@@ -223,4 +223,72 @@ import Foundation
         store.save(sample())
         #expect(store.load() == sample())
     }
+
+    // MARK: - cachedTitle / counts (QUA-105 follow-up)
+
+    @Test func persistedTabCachedTitleRoundTrips() throws {
+        let tab = PersistedTab(
+            location: NavLocation(pane: .type(.note), openPath: "v/n.md"),
+            pinned: false,
+            customTitle: nil,
+            cachedTitle: "Real Title")
+        let data = try JSONEncoder().encode(tab)
+        let decoded = try JSONDecoder().decode(PersistedTab.self, from: data)
+        #expect(decoded.cachedTitle == "Real Title")
+    }
+
+    @Test func persistedTabLegacyJSONDecodesWithNilCachedTitle() throws {
+        // State written before the cachedTitle field existed must still decode
+        // cleanly (no key in JSON → nil). Build the legacy payload by encoding
+        // a current PersistedTab then stripping `cachedTitle` from the dict —
+        // this stays robust against any future tweak to the Pane wire format
+        // (which would have invalidated a hand-rolled JSON literal).
+        let tab = PersistedTab(
+            location: NavLocation(pane: .type(.note), openPath: "v/n.md"),
+            pinned: false)
+        let data = try JSONEncoder().encode(tab)
+        var dict = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        dict.removeValue(forKey: "cachedTitle")
+        let legacy = try JSONSerialization.data(withJSONObject: dict)
+        let decoded = try JSONDecoder().decode(PersistedTab.self, from: legacy)
+        #expect(decoded.cachedTitle == nil)
+        #expect(decoded.customTitle == nil)
+        #expect(decoded.location.openPath == "v/n.md")
+    }
+
+    @Test func persistedStateCountsRoundTrip() throws {
+        var s = sample()
+        s.counts = [.note: 12, .paperAnalysis: 47, .bookOverview: 3]
+        let data = try JSONEncoder().encode(s)
+        let decoded = try JSONDecoder().decode(PersistedState.self, from: data)
+        #expect(decoded.counts == s.counts)
+    }
+
+    @Test func persistedStateLegacyJSONDecodesWithNilCounts() throws {
+        // Old PersistedState blobs (no `counts` key) must decode without
+        // failing the whole load — that would silently wipe user state.
+        let s = sample()
+        let data = try JSONEncoder().encode(s)
+        let decoded = try JSONDecoder().decode(PersistedState.self, from: data)
+        #expect(decoded.counts == nil)
+    }
+
+    @Test func makeWorkspaceCarriesCachedTitleIntoNavTab() throws {
+        let s = PersistedState(
+            browsePane: .type(.note),
+            isBrowsing: false,
+            tabs: [PersistedTab(
+                location: NavLocation(pane: .type(.note), openPath: "v/a.md"),
+                pinned: false,
+                customTitle: nil,
+                cachedTitle: "Cached Title")],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "list")
+        let ws = try #require(s.makeWorkspace())
+        #expect(ws.tabs.first?.cachedTitle == "Cached Title")
+    }
 }
