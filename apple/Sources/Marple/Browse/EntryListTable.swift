@@ -407,7 +407,7 @@ struct EntryListTable: NSViewRepresentable {
         }
 
         private func rowHasMeta(_ entry: Entry) -> Bool {
-            if let a = entry.author, !a.isEmpty { return true }
+            if !entry.author.isEmpty { return true }
             if let y = entry.year, !y.isEmpty { return true }
             if entry.ratingScore > 0 { return true }
             if entry.hasPDF { return true }

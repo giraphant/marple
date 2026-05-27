@@ -303,7 +303,11 @@ final class AppModel {
             entries = try await client.index()
             status = "\(entries.count) entries"
             rebuildIndexDerived()
-            recomputeVisible()
+            if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                recomputeVisible()
+            } else {
+                runSearch()
+            }
             if openPath != loadedDocPath { await loadDoc(openPath) }
             await loadTrash()
             print("[marple] index loaded: \(entries.count) entries")

@@ -93,8 +93,71 @@ import Darwin
         }
     }
 
+    @MainActor
+    @Test func loadIndexRerunsActiveSearch() async throws {
+        let note = Entry(path: "vault/notes/iphone2.md", type: .note, title: "搞你的 iPhone2",
+                         author: [], year: nil, ratingScore: 0, themes: [], preview: "", hasPDF: false)
+        let client = MutableVaultClient(entries: [], hits: [])
+        let model = AppModel(client: client)
+        model.select(pane: .type(.note))
+        await model.loadIndex()
+        model.setSearchText("iPhone2")
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(model.visibleEntries.isEmpty)
+
+        client.set(entries: [note], hits: [SearchHit(entry: note, score: 1, snippet: nil, source: "test")])
+        await model.loadIndex()
+
+        let deadline = Date().addingTimeInterval(1.0)
+        while Date() < deadline {
+            if model.visibleEntries.map(\.path) == [note.path] { return }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        #expect(model.visibleEntries.map(\.path) == [note.path])
+    }
+
+    private final class MutableVaultClient: VaultClient, @unchecked Sendable {
+        private let queue = DispatchQueue(label: "MarpleKitTests.MutableVaultClient")
+        private var currentEntries: [Entry]
+        private var currentHits: [SearchHit]
+
+        init(entries: [Entry], hits: [SearchHit]) {
+            self.currentEntries = entries
+            self.currentHits = hits
+        }
+
+        func set(entries: [Entry], hits: [SearchHit]) {
+            queue.sync {
+                currentEntries = entries
+                currentHits = hits
+            }
+        }
+
+        func index() async throws -> [Entry] {
+            queue.sync { currentEntries }
+        }
+
+        func search(_ query: SearchQuery) async throws -> [SearchHit] {
+            queue.sync { currentHits }
+        }
+
+        func entryText(path: String) async throws -> String { "" }
+        func openInEditor(path: String, app: String) async throws {}
+        func openPDF(slug: String) async throws {}
+        func openTranslation(slug: String) async throws {}
+        func hasTranslation(slug: String) -> Bool { false }
+        func imageOriginalURL(forImageEntryPath path: String) async throws -> URL? { nil }
+        func createImageObject(from sourceURL: URL, title: String?) async throws -> Entry { throw VaultError.notFound(sourceURL.path) }
+        func writeFile(path: String, text: String) async throws {}
+        func createNote(path: String, text: String) async throws {}
+        func moveToTrash(path: String) async throws -> String { "" }
+        func listTrash() async throws -> [TrashItem] { [] }
+        func restoreTrash(name: String) async throws -> String { "" }
+        func purgeTrash(name: String) async throws {}
+    }
+
     private static func entry(_ path: String) -> Entry {
-        Entry(path: path, type: .note, title: path, author: nil, year: nil,
+        Entry(path: path, type: .note, title: path, author: [], year: nil,
               ratingScore: 0, themes: [], preview: "", hasPDF: false)
     }
 
