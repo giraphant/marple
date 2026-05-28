@@ -12,6 +12,11 @@ import MarpleKit
 struct EntryRow: View {
     let entry: Entry
 
+    /// Vault-conformance flag: true when this doc is missing required frontmatter
+    /// for its type, per `.quasi/schema.json`. Defaults false so the row is
+    /// identical when no schema snapshot exists. See [[VaultConformance]].
+    var nonConforming: Bool = false
+
     /// Title+preview area sized to ~4 lines of mixed type (headline 15pt + subheadline 13pt).
     /// `.layoutPriority(1)` on the title lets it claim its natural 1–2 lines first;
     /// the preview takes the remainder and naturally clamps to 3 lines (when title is 1)
@@ -22,12 +27,21 @@ struct EntryRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s3) {
             VStack(alignment: .leading, spacing: Space.s3) {
-                Text(entry.title ?? "(untitled)")
-                    .font(Typo.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .layoutPriority(1)
+                HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                    Text(entry.title ?? "(untitled)")
+                        .font(Typo.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+                    if nonConforming {
+                        Spacer(minLength: Space.s2)
+                        Image(systemName: "circle.fill")
+                            .font(.system(size: 6))
+                            .foregroundStyle(.orange)
+                            .help("缺少必填字段")
+                    }
+                }
 
                 if !entry.preview.isEmpty {
                     Text(entry.preview)

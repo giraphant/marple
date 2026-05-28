@@ -11,6 +11,23 @@ final class AppModel {
     private(set) var entries: [Entry] = []
     var status: String = ""
 
+    /// Workspace root (parent of `vault/`). Used only to locate the optional
+    /// `.quasi/schema.json` conformance snapshot. Empty in stub-backed tests.
+    let workspaceRoot: String
+
+    /// The vault's self-describing schema snapshot, reloaded on every index load.
+    /// nil when the vault has no `.quasi/schema.json` (or it's stale/unreadable) —
+    /// in which case the conformance feature stays dark. See [[SchemaSnapshot]].
+    private(set) var schemaSnapshot: SchemaSnapshot?
+
+    /// Required-field conformance for one entry, or nil when the vault has no
+    /// schema opinion on it (no snapshot, or an unmodeled type). Read-only,
+    /// auxiliary: callers that get nil render exactly as before.
+    func conformance(for entry: Entry) -> ConformanceResult? {
+        guard let snapshot = schemaSnapshot else { return nil }
+        return VaultConformance.check(entry, against: snapshot)
+    }
+
     /// True until the first `loadIndex()` either publishes a snapshot or
     /// reports an error. Stays false for the rest of the session — subsequent
     /// reloads from the watcher / deferred reconcile / user refresh don't flip
@@ -160,8 +177,10 @@ final class AppModel {
     }
 
     init(client: VaultClient, stateStore: StateStore? = nil,
-         semantic: (any SemanticBackend)? = nil, isFirstRun: Bool = false) {
+         semantic: (any SemanticBackend)? = nil, isFirstRun: Bool = false,
+         workspaceRoot: String = "") {
         self.client = client
+        self.workspaceRoot = workspaceRoot
         self.stateStore = stateStore
         self.semantic = semantic
         self.isFirstRun = isFirstRun
@@ -392,6 +411,11 @@ final class AppModel {
         entries = fetched
         isBootstrapping = false
         status = "\(entries.count) entries"
+        // Refresh the conformance snapshot on the same cadence as the index. The
+        // file is tiny and rarely changes; an absent/stale one simply leaves the
+        // feature dark. Loaded here (not watched) since `.quasi/` is a sibling of
+        // the watched `vault/` dir.
+        schemaSnapshot = SchemaSnapshot.load(workspaceRoot: workspaceRoot)
         rebuildIndexDerived()
         if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
             recomputeVisible()
