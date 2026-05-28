@@ -941,13 +941,13 @@ private struct RelationsView: View {
         if let r = model.openRelations {
             VStack(alignment: .leading, spacing: InspectorStyle.sectionSpacing) {
                 if !r.works.isEmpty {
-                    let books = r.works.filter { $0.type == .bookOverview }
-                    let papers = r.works.filter { $0.type == .paperAnalysis }
+                    let books = r.works.filter { $0.type == .book }
+                    let papers = r.works.filter { $0.type == .paper }
                     relGroup("图书", books)
                     relGroup("论文", papers)
                 }
-                let siblingBooks = r.siblings.filter { $0.type == .bookOverview }
-                let siblingPapers = r.siblings.filter { $0.type == .paperAnalysis }
+                let siblingBooks = r.siblings.filter { $0.type == .book }
+                let siblingPapers = r.siblings.filter { $0.type == .paper }
                 relGroup("同作者专著", siblingBooks)
                 relGroup("同作者论文", siblingPapers)
                 relGroup("同主题相似", r.similar)

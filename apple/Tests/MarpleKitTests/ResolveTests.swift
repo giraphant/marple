@@ -3,7 +3,7 @@ import Testing
 
 @Suite struct ResolveTests {
     let entries = [
-        Entry(path: "vault/papers/foo.md", type: .paperAnalysis, title: "Foo Paper",
+        Entry(path: "vault/papers/foo.md", type: .paper, title: "Foo Paper",
               author: [], year: nil, ratingScore: 0, themes: [], preview: "", hasPDF: false),
         Entry(path: "vault/notes/bar.md", type: .note, title: "Bar",
               author: [], year: nil, ratingScore: 0, themes: [], preview: "", hasPDF: false),

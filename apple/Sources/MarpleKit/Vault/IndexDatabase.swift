@@ -348,21 +348,8 @@ public final class IndexDatabase: @unchecked Sendable {
     private static func appendTypeFilter(_ type: EntryType?, to sql: inout String,
                                          args: inout [(any DatabaseValueConvertible)?]) {
         guard let type else { return }
-        let rawValues: [String]
-        switch type {
-        case .topicSynthesis:
-            rawValues = ["topic-synthesis", "topic"]
-        default:
-            rawValues = [type.rawValue]
-        }
-        if rawValues.count == 1 {
-            sql += "\n  AND e.type = ?"
-        } else {
-            sql += "\n  AND e.type IN (" + rawValues.map { _ in "?" }.joined(separator: ", ") + ")"
-        }
-        for rawValue in rawValues {
-            args.append(rawValue)
-        }
+        sql += "\n  AND e.type = ?"
+        args.append(type.rawValue)
     }
 
     /// Map one `entries` row (or a search-join row aliased to the same names) to `Entry`.

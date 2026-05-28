@@ -39,7 +39,7 @@ final class AppModel {
 
     // Browse axis: which category list the sidebar shows. Separate from tabs —
     // selecting a category never touches the open document tabs.
-    private(set) var browsePane: Pane = .type(.paperAnalysis) { didSet { persist() } }
+    private(set) var browsePane: Pane = .type(.paper) { didSet { persist() } }
 
     // Browsing the category list (true) vs reading an open document tab (false).
     private(set) var isBrowsing: Bool = true { didSet { persist() } }
@@ -1145,7 +1145,7 @@ final class AppModel {
         let key = name.lowercased().trimmingCharacters(in: .whitespaces)
         guard !key.isEmpty else { return nil }
         return entries.first {
-            $0.type == .authorProfile && ($0.title ?? "").lowercased() == key
+            $0.type == .author && ($0.title ?? "").lowercased() == key
         }
     }
 

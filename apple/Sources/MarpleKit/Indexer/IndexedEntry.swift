@@ -7,6 +7,8 @@
 // `build_indexed_entry` function (:132-244) in
 // `rust/reader-core/src/indexer.rs` — read those line ranges as the spec.
 
+import Foundation
+
 // MARK: - IndexedEntry struct
 
 /// One row in the `entries` table plus the FTS support columns.
@@ -25,12 +27,13 @@ public struct IndexedEntry: Sendable, Equatable {
 
     // MARK: Classification
 
-    /// Canonical type string (output of `canonicalType`), e.g. `"paper-analysis"`.
-    /// Column: `type`.
+    /// Canonical short-form type string (output of `canonicalType`), e.g.
+    /// `"paper"`. One of `paper / book / chapter / author / topic / journal /
+    /// note / image`.  Column: `type`.
     public var entryType: String
 
-    /// For `chapter-summary` entries only: first path component after
-    /// `"vault/books/"`.  Column: `book`.
+    /// For `chapter` entries only: first path component after `"vault/books/"`.
+    /// Column: `book`.
     public var book: String?
 
     // MARK: Titles
@@ -41,7 +44,7 @@ public struct IndexedEntry: Sendable, Equatable {
     /// English title from `title_en` / `chapter_title_en`.  Column: `title_en`.
     public var titleEn: String?
 
-    /// Chinese title from frontmatter or (book-overview only) first Chinese H1.
+    /// Chinese title from frontmatter or (book only) first Chinese H1.
     /// Column: `title_cn`.
     public var titleCn: String?
 
@@ -106,7 +109,7 @@ public struct IndexedEntry: Sendable, Equatable {
 
     // MARK: Chapter / reference links
 
-    /// Number of chapters analyzed (for book-overview).  Column: `chapters_analyzed`.
+    /// Number of chapters analyzed (for book entries).  Column: `chapters_analyzed`.
     public var chaptersAnalyzed: Int64?
 
     /// Path/slug of the entry this one annotates.  Column: `annotates`.
@@ -163,11 +166,66 @@ public enum BuildOutcome: Sendable, Equatable {
     /// Has a frontmatter fence but no `type` key.
     case skippedNoType
 
-    /// Has a `type` value that `canonicalType` maps to nil (i.e. `""` or `"A"`).
-    case skippedUnknownType
+    /// Has a `type` value that `canonicalType` does not recognize: empty / "A"
+    /// sentinels OR a legacy/free-text type (e.g. `paper-analysis`, `monograph`,
+    /// `reading-list`). The rejected raw value travels in the associated value
+    /// so callers can report which vault file produced an unrecognized type
+    /// instead of silently dropping it (QUA-119).
+    case skippedUnknownType(String)
 
     /// No frontmatter fence at all — a plain markdown file.
     case skipped
+}
+
+// MARK: - Unknown-type diagnostic sink
+
+/// One unknown-type report. `path` is the vault-relative path,
+/// `rawType` is the rejected frontmatter `type:` value.
+public struct UnknownTypeReport: Sendable, Equatable {
+    public let path: String
+    public let rawType: String
+    public init(path: String, rawType: String) {
+        self.path = path
+        self.rawType = rawType
+    }
+}
+
+/// Diagnostic sink for unknown frontmatter `type:` values surfaced by
+/// `buildIndexedEntry`. The default handler writes one line per report to
+/// stderr so a stale vault file is visibly skipped instead of silently
+/// vanishing from the index — a first-boot migration with N stale files emits
+/// N stderr lines, which is intentional: those lines are the unique signal
+/// that the vault still needs cleanup.
+///
+/// Tests install an override via `$override.withValue(handler) { ... }`. The
+/// override is `@TaskLocal`, so parallel test cases (Swift Testing runs each
+/// `@Test` in its own Task) each see their own handler and don't race over a
+/// shared mutable global.
+///
+/// The handler runs synchronously inside `buildIndexedEntry`, so keep it cheap.
+public enum UnknownTypeReporter {
+
+    /// Per-task override. `nil` (the default) falls through to `defaultHandler`.
+    /// Tests wrap the relevant `buildIndexedEntry` call in
+    /// `UnknownTypeReporter.$override.withValue(capture) { ... }`.
+    @TaskLocal
+    public static var override: (@Sendable (UnknownTypeReport) -> Void)?
+
+    /// Production default: one stderr line per report.
+    public static let defaultHandler: @Sendable (UnknownTypeReport) -> Void = { report in
+        FileHandle.standardError.write(Data(
+            "[marple] skipping vault entry with unrecognized type=\(report.rawType): \(report.path)\n".utf8
+        ))
+    }
+
+    /// Submit one report. Routes to the task-local override when present.
+    public static func report(_ report: UnknownTypeReport) {
+        if let override {
+            override(report)
+        } else {
+            defaultHandler(report)
+        }
+    }
 }
 
 // MARK: - buildIndexedEntry
@@ -217,15 +275,19 @@ public func buildIndexedEntry(
         return .skippedNoType
     }
 
-    // 4. Canonical type mapping.
+    // 4. Canonical type mapping (QUA-119: only the eight short Quasi forms;
+    //    everything else is reported and skipped, not silently normalized).
     guard let entryType = canonicalType(rawType) else {
-        return .skippedUnknownType
+        UnknownTypeReporter.report(
+            UnknownTypeReport(path: rel, rawType: rawType)
+        )
+        return .skippedUnknownType(rawType)
     }
 
     // 5. Derive structural fields.
 
-    // book: only for chapter-summary
-    let book: String? = entryType == "chapter-summary" ? bookSlug(rel) : nil
+    // book: only for chapter entries
+    let book: String? = entryType == "chapter" ? bookSlug(rel) : nil
 
     // pdf_slug
     let pdfSlugValue: String? = pdfSlug(type: entryType, rel: rel, fileStem: fileStem)

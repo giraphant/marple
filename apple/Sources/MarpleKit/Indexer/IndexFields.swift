@@ -145,32 +145,29 @@ public func parseAuthors(_ v: YamlValue?) -> [String] {
     }
 }
 
-// MARK: - canonicalType  (:940-963)
+// MARK: - canonicalType  (QUA-119)
 
-/// Map a raw `type` field value to a canonical type string.
+/// Recognize a raw `type` field value as one of the eight canonical Quasi
+/// schema short forms, or reject it.
 ///
-/// - "" and "A" → nil (sentinel values meaning "skip entry")
-/// - known aliases → their canonical form
-/// - any other non-empty string → passed through unchanged
+/// - "" and "A" → nil (sentinel "skip entry" values from the legacy pipeline)
+/// - one of `paper / book / chapter / author / topic / journal / note / image`
+///   → the same string
+/// - anything else (including pre-QUA-119 long forms like `paper-analysis` /
+///   `book-overview` and the older free-text aliases like `monograph` /
+///   `reading-list` / `concept-note`) → nil, so `buildIndexedEntry` returns
+///   `.skippedUnknownType` and the entry is reported (not silently normalized
+///   into a familiar bucket).
 ///
-/// Mirrors `canonical_type` (:940-963).
+/// The vault is the source of truth — Marple no longer compensates for stale
+/// frontmatter. See feedback-align-marple-to-quasi-schema memory for context.
 public func canonicalType(_ raw: String) -> String? {
-    if raw.isEmpty || raw == "A" { return nil }
     switch raw {
-    case "paper", "paper-summary", "article-analysis",
-         "journal-article", "journal-article-analysis":
-        return "paper-analysis"
-    case "author":
-        return "author-profile"
-    case "book", "book-analysis", "monograph", "monograph-analysis", "overview":
-        return "book-overview"
-    case "chapter", "book-chapter", "book_chapter", "chapter-analysis":
-        return "chapter-summary"
-    case "journal-synthesis", "snowball-synthesis", "citation-snowball-synthesis",
-         "reading-list", "research-note", "concept-note":
-        return "topic-synthesis"
-    default:
+    case "paper", "book", "chapter", "author",
+         "topic", "journal", "note", "image":
         return raw
+    default:
+        return nil
     }
 }
 

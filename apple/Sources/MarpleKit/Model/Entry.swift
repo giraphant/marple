@@ -1,43 +1,45 @@
 import Foundation
 
 public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable {
-    case paperAnalysis
-    case bookOverview
-    case chapterSummary
-    case authorProfile
-    case topicSynthesis
+    case paper
+    case book
+    case chapter
+    case author
+    case topic
     case journal
     case note
     case image
-    /// Any entry type the reader doesn't model yet. The vault is produced by an
-    /// evolving pipeline (e.g. "topic-reading-list"); preserving the raw value
-    /// here means one unknown type never fails the whole index decode.
+    /// Any type the reader doesn't model. The vault is produced by an evolving
+    /// pipeline and may carry experimental kinds (e.g. "topic-reading-list").
+    /// Holding the raw value here means one unknown type doesn't fail the whole
+    /// index decode — the entry surfaces as `.other` rather than being silently
+    /// dropped or normalized to a familiar bucket.
     case other(String)
 
     public init(rawValue: String) {
         switch rawValue {
-        case "paper-analysis": self = .paperAnalysis
-        case "book-overview": self = .bookOverview
-        case "chapter-summary": self = .chapterSummary
-        case "author-profile": self = .authorProfile
-        case "topic", "topic-synthesis": self = .topicSynthesis
+        case "paper":   self = .paper
+        case "book":    self = .book
+        case "chapter": self = .chapter
+        case "author":  self = .author
+        case "topic":   self = .topic
         case "journal": self = .journal
-        case "note": self = .note
-        case "image": self = .image
-        default: self = .other(rawValue)
+        case "note":    self = .note
+        case "image":   self = .image
+        default:        self = .other(rawValue)
         }
     }
 
     public var rawValue: String {
         switch self {
-        case .paperAnalysis: return "paper-analysis"
-        case .bookOverview: return "book-overview"
-        case .chapterSummary: return "chapter-summary"
-        case .authorProfile: return "author-profile"
-        case .topicSynthesis: return "topic-synthesis"
+        case .paper:   return "paper"
+        case .book:    return "book"
+        case .chapter: return "chapter"
+        case .author:  return "author"
+        case .topic:   return "topic"
         case .journal: return "journal"
-        case .note: return "note"
-        case .image: return "image"
+        case .note:    return "note"
+        case .image:   return "image"
         case .other(let raw): return raw
         }
     }
@@ -54,22 +56,22 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
 }
 
 public extension EntryType {
-    /// The six modeled types in the canonical sidebar order (mirrors web TYPES).
+    /// The eight modeled types in the canonical sidebar order (mirrors web TYPES).
     static let modeled: [EntryType] = [
-        .paperAnalysis, .bookOverview, .authorProfile,
-        .topicSynthesis, .journal, .chapterSummary, .note, .image,
+        .paper, .book, .author,
+        .topic, .journal, .chapter, .note, .image,
     ]
 
     var label: String {
         switch self {
-        case .paperAnalysis:  return "论文"
-        case .bookOverview:   return "图书"
-        case .authorProfile:  return "作者"
-        case .topicSynthesis: return "主题"
-        case .journal:        return "期刊"
-        case .chapterSummary: return "章节"
-        case .note:           return "笔记"
-        case .image:          return "图片"
+        case .paper:   return "论文"
+        case .book:    return "图书"
+        case .author:  return "作者"
+        case .topic:   return "主题"
+        case .journal: return "期刊"
+        case .chapter: return "章节"
+        case .note:    return "笔记"
+        case .image:   return "图片"
         case .other(let raw): return raw
         }
     }

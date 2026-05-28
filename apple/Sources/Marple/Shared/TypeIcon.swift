@@ -7,29 +7,29 @@ import MarpleKit
 extension EntryType {
     var symbolName: String {
         switch self {
-        case .paperAnalysis:  return "doc.text"
-        case .bookOverview:   return "book"
-        case .authorProfile:  return "person"
-        case .topicSynthesis: return "square.stack.3d.up"
-        case .journal:        return "newspaper"
-        case .chapterSummary: return "list.bullet.rectangle"
-        case .note:           return "note.text"
-        case .image:          return "photo"
-        case .other:          return "questionmark.square.dashed"
+        case .paper:   return "doc.text"
+        case .book:    return "book"
+        case .author:  return "person"
+        case .topic:   return "square.stack.3d.up"
+        case .journal: return "newspaper"
+        case .chapter: return "list.bullet.rectangle"
+        case .note:    return "note.text"
+        case .image:   return "photo"
+        case .other:   return "questionmark.square.dashed"
         }
     }
 
     var tint: Color {
         switch self {
-        case .paperAnalysis:  return .blue
-        case .bookOverview:   return .orange
-        case .authorProfile:  return .purple
-        case .topicSynthesis: return .teal
-        case .journal:        return .green
-        case .chapterSummary: return .indigo
-        case .note:           return .yellow
-        case .image:          return .pink
-        case .other:          return .gray
+        case .paper:   return .blue
+        case .book:    return .orange
+        case .author:  return .purple
+        case .topic:   return .teal
+        case .journal: return .green
+        case .chapter: return .indigo
+        case .note:    return .yellow
+        case .image:   return .pink
+        case .other:   return .gray
         }
     }
 }

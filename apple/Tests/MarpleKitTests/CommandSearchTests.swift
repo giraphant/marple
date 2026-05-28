@@ -34,15 +34,15 @@ import Testing
     let order = EntryType.modeled
 
     @Test func groupsByTypeInOrder() {
-        let rows = [e("p1", .paperAnalysis), e("b1", .bookOverview), e("p2", .paperAnalysis)]
+        let rows = [e("p1", .paper), e("b1", .book), e("p2", .paper)]
         let sections = paletteSections(rows, order: order, promote: nil, perType: 5)
-        #expect(sections.map(\.type) == [.paperAnalysis, .bookOverview])
+        #expect(sections.map(\.type) == [.paper, .book])
         #expect(sections[0].total == 2)
         #expect(sections[1].total == 1)
     }
 
     @Test func perTypeLimitWithFullTotal() {
-        let rows = (1...8).map { e("p\($0)", .paperAnalysis, score: Double($0)) }
+        let rows = (1...8).map { e("p\($0)", .paper, score: Double($0)) }
         let sections = paletteSections(rows, order: order, promote: nil, perType: 5)
         #expect(sections.count == 1)
         #expect(sections[0].total == 8)
@@ -51,16 +51,16 @@ import Testing
 
     @Test func inlineScoreFloorCollapsesLowRowsAgainstGlobalBest() {
         let rows = [
-            e("paper-strong", .paperAnalysis, score: 100),
-            e("paper-low", .paperAnalysis, score: 20),
-            e("book-strong", .bookOverview, score: 61),
-            e("book-low", .bookOverview, score: 59),
-            e("summary-low", .chapterSummary, score: 30),
+            e("paper-strong", .paper, score: 100),
+            e("paper-low", .paper, score: 20),
+            e("book-strong", .book, score: 61),
+            e("book-low", .book, score: 59),
+            e("summary-low", .chapter, score: 30),
             e("note-low", .note, score: 10),
         ]
         let sections = paletteSections(rows, order: order, promote: nil, perType: 5,
                                        minimumInlineScoreRatio: 0.60)
-        #expect(sections.map(\.type) == [.paperAnalysis, .bookOverview, .chapterSummary, .note])
+        #expect(sections.map(\.type) == [.paper, .book, .chapter, .note])
         #expect(sections[0].total == 2)
         #expect(sections[0].top.map(\.path) == ["paper-strong"])
         #expect(sections[1].total == 2)
@@ -69,24 +69,24 @@ import Testing
 
     @Test func inlineScoreFloorKeepsLowSectionsCollapsed() {
         let rows = [
-            e("paper-strong", .paperAnalysis, score: 100),
-            e("book-low-1", .bookOverview, score: 50),
-            e("book-low-2", .bookOverview, score: 49),
-            e("book-low-3", .bookOverview, score: 48),
-            e("book-low-4", .bookOverview, score: 47),
-            e("book-low-5", .bookOverview, score: 46),
+            e("paper-strong", .paper, score: 100),
+            e("book-low-1", .book, score: 50),
+            e("book-low-2", .book, score: 49),
+            e("book-low-3", .book, score: 48),
+            e("book-low-4", .book, score: 47),
+            e("book-low-5", .book, score: 46),
         ]
         let sections = paletteSections(rows, order: order, promote: nil, perType: 5,
                                        minimumInlineScoreRatio: 0.60)
-        #expect(sections.map(\.type) == [.paperAnalysis, .bookOverview])
+        #expect(sections.map(\.type) == [.paper, .book])
         #expect(sections[1].total == 5)
         #expect(sections[1].top.isEmpty)
     }
 
     @Test func inlineScoreFloorDoesNotCollapseSmallResultSets() {
         let rows = [
-            e("paper-strong", .paperAnalysis, score: 100),
-            e("book-low", .bookOverview, score: 40),
+            e("paper-strong", .paper, score: 100),
+            e("book-low", .book, score: 40),
         ]
         let sections = paletteSections(rows, order: order, promote: nil, perType: 5,
                                        minimumInlineScoreRatio: 0.60)
@@ -94,23 +94,23 @@ import Testing
     }
 
     @Test func withinBucketSortedByScoreDesc() {
-        let rows = [e("low", .paperAnalysis, score: 1), e("high", .paperAnalysis, score: 9),
-                    e("mid", .paperAnalysis, score: 5)]
+        let rows = [e("low", .paper, score: 1), e("high", .paper, score: 9),
+                    e("mid", .paper, score: 5)]
         let sections = paletteSections(rows, order: order, promote: nil, perType: 5)
         #expect(sections[0].top.map(\.path) == ["high", "mid", "low"])
     }
 
     @Test func promotePullsTypeToFront() {
-        let rows = [e("p1", .paperAnalysis), e("b1", .bookOverview)]
-        let sections = paletteSections(rows, order: order, promote: .bookOverview, perType: 5)
-        #expect(sections.first?.type == .bookOverview)
+        let rows = [e("p1", .paper), e("b1", .book)]
+        let sections = paletteSections(rows, order: order, promote: .book, perType: 5)
+        #expect(sections.first?.type == .book)
     }
 
     @Test func dropsEmptyAndUnorderedTypes() {
         // .other is not in EntryType.modeled → its bucket is dropped.
-        let rows = [e("p1", .paperAnalysis), e("x1", .other("topic-reading-list"))]
+        let rows = [e("p1", .paper), e("x1", .other("topic-reading-list"))]
         let sections = paletteSections(rows, order: order, promote: nil, perType: 5)
-        #expect(sections.map(\.type) == [.paperAnalysis])
+        #expect(sections.map(\.type) == [.paper])
     }
 
     @Test func emptyInputYieldsNoSections() {
