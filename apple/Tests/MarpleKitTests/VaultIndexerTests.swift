@@ -40,7 +40,7 @@ struct VaultIndexerTests {
     /// Write a minimal valid frontmatter markdown file.
     private func write(
         at path: String,
-        type: String = "paper-analysis",
+        type: String = "paper",
         title: String = "Test Paper",
         body: String = "Some body text for search."
     ) throws {
@@ -98,7 +98,7 @@ struct VaultIndexerTests {
     @Test("buildFull returns correct entry count for 2 valid files")
     func buildFullReturnsTwoEntries() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
         try write(at: ws + "/vault/notes/b.md", type: "note", title: "Note B")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
@@ -110,7 +110,7 @@ struct VaultIndexerTests {
     @Test("buildFull produces a readable index via IndexDatabase")
     func buildFullProducesReadableIndex() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
         try write(at: ws + "/vault/notes/b.md", type: "note", title: "Note B")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
@@ -125,7 +125,7 @@ struct VaultIndexerTests {
     @Test("buildFull leaves the live DB in WAL mode")
     func buildFullLeavesWALMode() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
         _ = try indexer.buildFull()
@@ -144,7 +144,7 @@ struct VaultIndexerTests {
     @Test("reconcile builds the index when none exists")
     func reconcileBuildsWhenMissing() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
         try write(at: ws + "/vault/notes/b.md", type: "note", title: "Note B")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
@@ -164,16 +164,16 @@ struct VaultIndexerTests {
     @Test("reconcile diffs: upserts new+modified, deletes vanished")
     func reconcileDelta() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
         try write(at: ws + "/vault/notes/b.md", type: "note", title: "Note B")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
         _ = try indexer.buildFull()
 
         // Add a new file, modify a.md, and delete b.md
-        try write(at: ws + "/vault/papers/c.md", type: "paper-analysis", title: "Paper C")
+        try write(at: ws + "/vault/papers/c.md", type: "paper", title: "Paper C")
         // Re-write a.md with new content AND explicitly bump mtime
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis",
+        try write(at: ws + "/vault/papers/a.md", type: "paper",
                   title: "Paper A Updated", body: "New body text after update.")
         try touch(ws + "/vault/papers/a.md", offset: 10.0)
         try FileManager.default.removeItem(atPath: ws + "/vault/notes/b.md")
@@ -194,7 +194,7 @@ struct VaultIndexerTests {
     @Test("second reconcile with no changes is all unchanged")
     func reconcileSecondCallNoChanges() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
         try write(at: ws + "/vault/notes/b.md", type: "note", title: "Note B")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
@@ -213,7 +213,7 @@ struct VaultIndexerTests {
     func dotfilesAndTrashExcluded() throws {
         let ws = try makeTempWorkspace()
         // One real file
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
 
         // A dotfile at the root vault level
         try ".hidden".write(toFile: ws + "/vault/.hidden.md", atomically: true, encoding: .utf8)
@@ -222,7 +222,7 @@ struct VaultIndexerTests {
         let trashDir = ws + "/vault/.trash"
         try FileManager.default.createDirectory(
             atPath: trashDir, withIntermediateDirectories: true)
-        try write(at: trashDir + "/trashed.md", type: "paper-analysis", title: "Trashed")
+        try write(at: trashDir + "/trashed.md", type: "paper", title: "Trashed")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
         let count = try indexer.buildFull()
@@ -239,7 +239,7 @@ struct VaultIndexerTests {
     @Test("files without frontmatter are skipped (not counted in buildFull)")
     func filesWithoutFrontmatterSkipped() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
         // plain markdown, no frontmatter fence
         try "# Just a heading\n\nSome text.".write(
             toFile: ws + "/vault/notes/plain.md", atomically: true, encoding: .utf8)
@@ -262,7 +262,7 @@ struct VaultIndexerTests {
     @Test("canSkipFullBuild is true after a successful buildFull")
     func canSkipFullBuildTrueAfterBuild() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
         let indexer = VaultIndexer(workspaceRoot: ws)
         _ = try indexer.buildFull()
         #expect(indexer.canSkipFullBuild() == true)
@@ -319,8 +319,13 @@ struct VaultIndexerTests {
                   path UNINDEXED, type UNINDEXED, title, author, book, themes,
                   topic, source, year, preview, doi, body
                 );
+                CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                INSERT INTO meta(key, value) VALUES ('schema_version', '2');
                 """)
         }
+        // meta.schema_version is current — the only stale signal is the
+        // presence of `entry_search`. This proves canSkipFullBuild rejects
+        // the DB on the entry_search check rather than only via schema_version.
         let indexer = VaultIndexer(workspaceRoot: ws)
         #expect(indexer.canSkipFullBuild() == false)
     }
@@ -330,7 +335,7 @@ struct VaultIndexerTests {
     @Test("buildFull bumps entries_revision and removes a stale entries.cache")
     func buildFullBumpsRevisionAndNukesCache() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
 
         // Plant a stale cache before any build runs — buildFull must delete it.
         let marpleDir = ws + "/.marple"
@@ -354,7 +359,7 @@ struct VaultIndexerTests {
     @Test("reconcile bumps entries_revision when there are changes")
     func reconcileBumpsRevisionOnChange() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
         _ = try indexer.buildFull()
@@ -365,7 +370,7 @@ struct VaultIndexerTests {
         }
 
         // Add a new file → reconcile upserts it → revision should bump.
-        try write(at: ws + "/vault/papers/b.md", type: "paper-analysis", title: "Paper B")
+        try write(at: ws + "/vault/papers/b.md", type: "paper", title: "Paper B")
         let stats = try indexer.reconcile()
         #expect(stats.upserted >= 1)
 
@@ -379,7 +384,7 @@ struct VaultIndexerTests {
     func reconcileRefreshesMetadataThroughExistingEntriesCache() throws {
         let ws = try makeTempWorkspace()
         let path = ws + "/vault/papers/a.md"
-        try write(at: path, type: "paper-analysis", title: "Paper A")
+        try write(at: path, type: "paper", title: "Paper A")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
         _ = try indexer.buildFull()
@@ -389,7 +394,7 @@ struct VaultIndexerTests {
         #expect(try db.loadEntries().first?.title == "Paper A")
         #expect(awaitFile(cachePath), "entries cache should exist before the external edit")
 
-        try write(at: path, type: "paper-analysis", title: "Paper A Updated")
+        try write(at: path, type: "paper", title: "Paper A Updated")
         try touch(path)
 
         let stats = try indexer.reconcile()
@@ -402,7 +407,7 @@ struct VaultIndexerTests {
     @Test("reconcile indexes a newly copied note through an existing entries cache")
     func reconcileIndexesNewCopiedNoteThroughExistingEntriesCache() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
         _ = try indexer.buildFull()
@@ -434,7 +439,7 @@ struct VaultIndexerTests {
     @Test("reconcile does NOT bump entries_revision when nothing changed")
     func reconcileNoBumpWhenUnchanged() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
         _ = try indexer.buildFull()
@@ -458,7 +463,7 @@ struct VaultIndexerTests {
     @Test("reconcile rolls back partial writes when a later upsert fails")
     func reconcileRollsBackPartialWritesOnFailure() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
         _ = try indexer.buildFull()
@@ -466,10 +471,10 @@ struct VaultIndexerTests {
         let indexPath = ws + "/.marple/index.sqlite"
         let revBefore = try entriesRevision(indexPath)
 
-        try write(at: ws + "/vault/papers/b.md", type: "paper-analysis", title: "Paper B")
+        try write(at: ws + "/vault/papers/b.md", type: "paper", title: "Paper B")
         try writeRaw(at: ws + "/vault/papers/c.md", """
         ---
-        type: paper-analysis
+        type: paper
         title: Broken Paper
         themes: [duplicate, duplicate]
         ---
@@ -490,7 +495,7 @@ struct VaultIndexerTests {
     func reconcileBumpsRevisionWhenIndexedFileBecomesSkipped() throws {
         let ws = try makeTempWorkspace()
         let path = ws + "/vault/papers/a.md"
-        try write(at: path, type: "paper-analysis", title: "Paper A")
+        try write(at: path, type: "paper", title: "Paper A")
 
         let indexer = VaultIndexer(workspaceRoot: ws)
         _ = try indexer.buildFull()
@@ -512,7 +517,7 @@ struct VaultIndexerTests {
     @Test("reconcile triggers full build when schema is stale")
     func reconcileFullBuildOnStaleSchema() throws {
         let ws = try makeTempWorkspace()
-        try write(at: ws + "/vault/papers/a.md", type: "paper-analysis", title: "Paper A")
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
 
         // Manually create a DB with a stripped (stale) schema — missing required columns
         let marpleDir = ws + "/.marple"
@@ -525,7 +530,7 @@ struct VaultIndexerTests {
                   path TEXT PRIMARY KEY,
                   type TEXT NOT NULL
                 );
-                INSERT INTO entries (path, type) VALUES ('vault/papers/a.md', 'paper-analysis');
+                INSERT INTO entries (path, type) VALUES ('vault/papers/a.md', 'paper');
                 """)
         }
 

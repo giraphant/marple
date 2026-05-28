@@ -9,13 +9,13 @@ import Testing
 
     @Test func testDecodesNumberYearAndRating() throws {
         let entries = try decode("""
-        [{"path":"vault/p/a.md","type":"paper-analysis","title":"A",
+        [{"path":"vault/p/a.md","type":"paper","title":"A",
           "author":"Smith","year":2019,"rating_score":3.0,
           "themes":["x","y"],"preview":"hi","has_pdf":true}]
         """)
         #expect(entries.count == 1)
         let e = entries[0]
-        #expect(e.type == .paperAnalysis)
+        #expect(e.type == .paper)
         #expect(e.year == "2019")
         #expect(e.ratingScore == 3.0)
         #expect(e.themes == ["x", "y"])
@@ -28,11 +28,11 @@ import Testing
         // index decode — it should become .other and the array stays intact.
         let entries = try decode("""
         [{"path":"vault/t/r.md","type":"topic-reading-list","preview":"","rating_score":0},
-         {"path":"vault/p/a.md","type":"paper-analysis","preview":"","rating_score":0}]
+         {"path":"vault/p/a.md","type":"paper","preview":"","rating_score":0}]
         """)
         #expect(entries.count == 2)
         #expect(entries[0].type == .other("topic-reading-list"))
-        #expect(entries[1].type == .paperAnalysis)
+        #expect(entries[1].type == .paper)
     }
 
     @Test func testToleratesStringYearNullThemesMissingPdf() throws {
@@ -50,7 +50,7 @@ import Testing
 
     @Test func testDecodesBrowseFieldsForSortAndFilter() throws {
         let entries = try decode("""
-        [{"path":"vault/p/a.md","type":"paper-analysis","title":"A","rating_score":0,
+        [{"path":"vault/p/a.md","type":"paper","title":"A","rating_score":0,
           "preview":"","mtime":1700000000000,"added":1690000000000,
           "source":"JSTOR","book":"Some Book","topic":"econ","doi":"10.1/x"}]
         """)
@@ -65,7 +65,7 @@ import Testing
 
     @Test func testDecodesBookCanonicalMetadataForInspector() throws {
         let entries = try decode("""
-        [{"path":"vault/books/b.md","type":"book-overview","title":"B","rating_score":0,
+        [{"path":"vault/books/b.md","type":"book","title":"B","rating_score":0,
           "preview":"","publisher":"MIT Press","isbn":"978-0-262-13472-9","category":"monograph"}]
         """)
         let e = entries[0]
@@ -106,7 +106,7 @@ import Testing
 
     @Test func testAnnotatesAbsentIsNil() throws {
         let entries = try decode("""
-        [{"path":"vault/papers/p.md","type":"paper-analysis","preview":"","rating_score":0}]
+        [{"path":"vault/papers/p.md","type":"paper","preview":"","rating_score":0}]
         """)
         #expect(entries[0].annotates == nil)
     }
@@ -116,8 +116,8 @@ import Testing
         [{"path":"vault/topics/repair.md","type":"topic","preview":"","rating_score":0,
           "topic":"repair","kind":"overview"}]
         """)
-        #expect(entries[0].type == .topicSynthesis)
-        #expect(entriesForPane(.type(.topicSynthesis), in: entries).map(\.path) == ["vault/topics/repair.md"])
+        #expect(entries[0].type == .topic)
+        #expect(entriesForPane(.type(.topic), in: entries).map(\.path) == ["vault/topics/repair.md"])
     }
 
     @Test func testImageTypeIsModeled() {
@@ -137,9 +137,9 @@ import Testing
     }
 
     @Test func testModeledTypesOrderAndLabels() {
-        #expect(EntryType.modeled == [.paperAnalysis, .bookOverview, .authorProfile,
-                                      .topicSynthesis, .journal, .chapterSummary, .note, .image])
-        #expect(EntryType.paperAnalysis.label == "论文")
+        #expect(EntryType.modeled == [.paper, .book, .author,
+                                      .topic, .journal, .chapter, .note, .image])
+        #expect(EntryType.paper.label == "论文")
         #expect(EntryType.journal.label == "期刊")
         #expect(EntryType.note.label == "笔记")
         #expect(EntryType.image.label == "图片")

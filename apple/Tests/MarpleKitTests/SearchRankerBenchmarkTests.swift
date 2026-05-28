@@ -113,7 +113,7 @@ func makeSyntheticEntries(_ n: Int) -> [Entry] {
         let path = "vault/\(isCJK ? "books" : "papers")/entry-\(i).md"
         out.append(Entry(
             path: path,
-            type: isCJK ? .bookOverview : .paperAnalysis,
+            type: isCJK ? .book : .paper,
             title: title,
             author: author,
             year: year,

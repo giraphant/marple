@@ -23,7 +23,7 @@ import Testing
     }
 
     @Test func annotationsByTarget() {
-        let p = mk("vault/papers/p.md", "paper-analysis")
+        let p = mk("vault/papers/p.md", "paper")
         let n = mk("vault/notes/n.md", "note", annotates: "vault/papers/p.md")
         let entries = [p, n]
         let rel = relations(for: p, in: entries,
@@ -33,8 +33,8 @@ import Testing
     }
 
     @Test func chapterAnnotationsResolveToBookOverview() {
-        let overview = mk("vault/books/smith-2020/00-overview.md", "book-overview")
-        let chapter = mk("vault/books/smith-2020/ch01.md", "chapter-summary", book: "smith-2020")
+        let overview = mk("vault/books/smith-2020/00-overview.md", "book")
+        let chapter = mk("vault/books/smith-2020/ch01.md", "chapter", book: "smith-2020")
         let note = mk("vault/notes/chapter-note.md", "note", annotates: "vault/books/smith-2020/ch01.md")
         let entries = [overview, chapter, note]
         let annotationIndex = buildAnnotationIndex(entries)
@@ -54,8 +54,8 @@ import Testing
     }
 
     @Test func chapterPathSlugFindsOverviewWhenBookFieldIsMissing() {
-        let overview = mk("vault/books/smith-2020/00-overview.md", "book-overview")
-        let chapter = mk("vault/books/smith-2020/ch01.md", "chapter-summary")
+        let overview = mk("vault/books/smith-2020/00-overview.md", "book")
+        let chapter = mk("vault/books/smith-2020/ch01.md", "chapter")
         let note = mk("vault/notes/chapter-note.md", "note", annotates: chapter.path)
         let entries = [overview, chapter, note]
         let annotationIndex = buildAnnotationIndex(entries)
@@ -65,7 +65,7 @@ import Testing
     }
 
     @Test func chapterWithoutOverviewKeepsItsOwnAnnotationAnchor() {
-        let chapter = mk("vault/books/missing/ch01.md", "chapter-summary", book: "missing")
+        let chapter = mk("vault/books/missing/ch01.md", "chapter", book: "missing")
         let note = mk("vault/notes/chapter-note.md", "note", annotates: chapter.path)
         let entries = [chapter, note]
         let annotationIndex = buildAnnotationIndex(entries)
@@ -75,9 +75,9 @@ import Testing
     }
 
     @Test func siblingsAndAuthorProfile() {
-        let prof = mk("vault/authors/x.md", "author-profile", title: "Jane Doe")
-        let p1 = mk("vault/papers/a.md", "paper-analysis", author: "Jane Doe", rating: 1)
-        let p2 = mk("vault/papers/b.md", "paper-analysis", author: "Jane Doe", rating: 3)
+        let prof = mk("vault/authors/x.md", "author", title: "Jane Doe")
+        let p1 = mk("vault/papers/a.md", "paper", author: "Jane Doe", rating: 1)
+        let p2 = mk("vault/papers/b.md", "paper", author: "Jane Doe", rating: 3)
         let entries = [prof, p1, p2]
         let rel = relations(for: p1, in: entries,
                             authorIndex: buildAuthorIndex(entries),
@@ -87,9 +87,9 @@ import Testing
     }
 
     @Test func similarSharesTwoThemes() {
-        let base = mk("vault/papers/a.md", "paper-analysis", themes: ["t1", "t2", "t3"])
-        let sim  = mk("vault/papers/b.md", "paper-analysis", themes: ["t1", "t2"], rating: 2)
-        let no   = mk("vault/papers/c.md", "paper-analysis", themes: ["t1"])
+        let base = mk("vault/papers/a.md", "paper", themes: ["t1", "t2", "t3"])
+        let sim  = mk("vault/papers/b.md", "paper", themes: ["t1", "t2"], rating: 2)
+        let no   = mk("vault/papers/c.md", "paper", themes: ["t1"])
         let entries = [base, sim, no]
         let rel = relations(for: base, in: entries,
                             authorIndex: buildAuthorIndex(entries),
@@ -98,8 +98,8 @@ import Testing
     }
 
     @Test func worksForAuthorProfile() {
-        let prof = mk("vault/authors/x.md", "author-profile", title: "Jane Doe")
-        let p1 = mk("vault/papers/a.md", "paper-analysis", author: "Jane Doe", rating: 5)
+        let prof = mk("vault/authors/x.md", "author", title: "Jane Doe")
+        let p1 = mk("vault/papers/a.md", "paper", author: "Jane Doe", rating: 5)
         let entries = [prof, p1]
         let rel = relations(for: prof, in: entries,
                             authorIndex: buildAuthorIndex(entries),

@@ -299,7 +299,7 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
-        let seeded: [EntryType: Int] = [.note: 7, .paperAnalysis: 23]
+        let seeded: [EntryType: Int] = [.note: 7, .paper: 23]
         var state = PersistedState(
             browsePane: .type(.note),
             isBrowsing: true,
@@ -323,7 +323,7 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
-        let seeded: [EntryType: Int] = [.note: 7, .paperAnalysis: 23]
+        let seeded: [EntryType: Int] = [.note: 7, .paper: 23]
         var state = PersistedState(
             browsePane: .type(.note),
             isBrowsing: true,

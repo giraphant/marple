@@ -15,6 +15,27 @@ import GRDB
 
 public enum IndexWriter {
 
+    // MARK: - schemaVersion (QUA-119)
+
+    /// Layout version of the index database. Bumped any time existing rows
+    /// would need to be regenerated to remain valid under new reader code.
+    ///
+    /// History:
+    /// - 1 (implicit, never written): post-QUA-102 schema (entry_search /
+    ///   entry_text dropped). `entries.type` stored long-form values like
+    ///   `paper-analysis` / `book-overview`.
+    /// - 2 (QUA-119): `entries.type` stores Quasi short forms (`paper`,
+    ///   `book`, `chapter`, `author`, `topic`, `journal`, `note`, `image`).
+    ///   `canonicalType` rejects everything else, so a v1 DB cannot be read
+    ///   correctly with v2 code — `VaultIndexer.indexSchemaCurrent()` returns
+    ///   false when `meta.schema_version` is missing or `< 2`, which forces
+    ///   `reconcile()` into `buildFull` (temp DB + atomic rename — no live
+    ///   table drop).
+    public static let schemaVersion: Int = 2
+
+    /// `meta` key under which `schemaVersion` is persisted.
+    public static let schemaVersionKey: String = "schema_version"
+
     // MARK: - createSchema
 
     /// Create the full index schema on an open GRDB `Database`.
@@ -102,6 +123,26 @@ public enum IndexWriter {
 
             INSERT INTO meta(key, value) VALUES ('entries_revision', '0');
             """)
+
+        // QUA-119: persist the on-disk layout version so a future reader can
+        // detect this DB as current and skip a full rebuild. Written inside
+        // createSchema so it is impossible to forget on any future write path.
+        try db.execute(
+            sql: "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+            arguments: [schemaVersionKey, String(schemaVersion)]
+        )
+    }
+
+    /// Read the persisted `meta.schema_version`. Returns 0 when the key is
+    /// absent (pre-QUA-119 DBs, which had no schema_version concept).
+    public static func schemaVersion(_ db: Database) throws -> Int {
+        guard try db.tableExists("meta") else { return 0 }
+        let raw = try String.fetchOne(
+            db,
+            sql: "SELECT value FROM meta WHERE key = ?",
+            arguments: [schemaVersionKey]
+        )
+        return raw.flatMap { Int($0) } ?? 0
     }
 
     // MARK: - bumpEntriesRevision

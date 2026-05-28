@@ -4,7 +4,7 @@ import Foundation
 
 @Suite struct CardMetricsTests {
     private func entry(preview: String, title: String = "Title", themes: [String] = []) -> Entry {
-        Entry(path: "p.md", type: .paperAnalysis, title: title, author: ["A"], year: "2020",
+        Entry(path: "p.md", type: .paper, title: title, author: ["A"], year: "2020",
               ratingScore: 5, themes: themes, preview: preview, hasPDF: false)
     }
 

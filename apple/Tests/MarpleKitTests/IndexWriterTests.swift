@@ -34,11 +34,11 @@ struct IndexWriterTests {
 
     // MARK: - Fixture entries
 
-    /// A paper-analysis entry with themes, year array, author, rating, preview.
+    /// A paper entry with themes, year array, author, rating, preview.
     private func makePaperEntry() -> IndexedEntry {
         IndexedEntry(
             path: "vault/papers/smith-dogs-2019.md",
-            entryType: "paper-analysis",
+            entryType: "paper",
             book: nil,
             title: "Dogs and Their Owners",
             titleEn: "Dogs and Their Owners",
@@ -69,12 +69,12 @@ struct IndexWriterTests {
         )
     }
 
-    /// A book-overview with CJK title, year stored as JSON array, no PDF.
+    /// A book with CJK title, year stored as JSON array, no PDF.
     private func makeBookEntry() -> IndexedEntry {
         // year_json = "[2010,2015]" — a JSON array; fts_json should flatten to "2010 2015"
         IndexedEntry(
             path: "vault/books/tanaka-cat-2010/overview.md",
-            entryType: "book-overview",
+            entryType: "book",
             book: nil,
             title: "猫の哲学",
             titleEn: "Philosophy of Cats",
@@ -215,7 +215,7 @@ struct IndexWriterTests {
         #expect(entries.count == 1)
         let e = entries[0]
         #expect(e.path == "vault/papers/smith-dogs-2019.md")
-        #expect(e.type == .paperAnalysis)
+        #expect(e.type == .paper)
         #expect(e.title == "Dogs and Their Owners")
         // SQLite round-trip is lossless: the author column stores a JSON
         // array, so single authors with commas in their names (e.g. "Smith,
@@ -239,7 +239,7 @@ struct IndexWriterTests {
         let queue = try openAndCreateSchema(at: path)
         let entry = IndexedEntry(
             path: "vault/papers/smith-jr-2020.md",
-            entryType: "paper-analysis", book: nil,
+            entryType: "paper", book: nil,
             title: "Test", titleEn: nil, titleCn: nil,
             author: ["Smith, John Jr.", "Jane Doe"],
             yearJSON: "2020", ratingJSON: nil, ratingScore: 0,
@@ -289,7 +289,7 @@ struct IndexWriterTests {
         #expect(entries.count == 1)
         let e = entries[0]
         #expect(e.path == "vault/books/tanaka-cat-2010/overview.md")
-        #expect(e.type == .bookOverview)
+        #expect(e.type == .book)
         #expect(e.title == "猫の哲学")
         #expect(e.ratingScore == 0.0)
         #expect(e.hasPDF == false)
@@ -337,7 +337,7 @@ struct IndexWriterTests {
             let themes: [String] = rows.map { $0["theme"] }
             #expect(themes == ["animal-behaviour", "psychology"])
             let types: [String] = rows.map { $0["type"] }
-            #expect(types == ["paper-analysis", "paper-analysis"])
+            #expect(types == ["paper", "paper"])
         }
     }
 

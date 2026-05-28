@@ -70,9 +70,9 @@ public func titleEn(_ map: [(String, YamlValue)]) -> String? {
 /// Return the Chinese title.
 ///
 /// Checks `title_cn`, `title_zh`, `chapter_title_cn`, `chapter_title_zh` in
-/// order, stripping wiki links.  For type `"book-overview"` only, if no
-/// frontmatter key was found, falls back to `firstChineseH1(body)` — but only
-/// if that heading differs from `title` (prevents trivial self-references).
+/// order, stripping wiki links.  For type `"book"` only, if no frontmatter key
+/// was found, falls back to `firstChineseH1(body)` — but only if that heading
+/// differs from `title` (prevents trivial self-references).
 ///
 /// Mirrors `title_cn_value` (:997-1015).
 public func titleCn(
@@ -89,7 +89,7 @@ public func titleCn(
 
     if let v = fromFrontmatter { return v }
 
-    if entryType == "book-overview" {
+    if entryType == "book" {
         return firstChineseH1(body).flatMap { heading in
             // filter(|heading| title != Some(heading.as_str()))
             if title == heading { return nil }

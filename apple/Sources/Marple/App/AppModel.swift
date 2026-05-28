@@ -36,7 +36,7 @@ final class AppModel {
 
     // Browse axis: which category list the sidebar shows. Separate from tabs —
     // selecting a category never touches the open document tabs.
-    private(set) var browsePane: Pane = .type(.paperAnalysis) { didSet { persist() } }
+    private(set) var browsePane: Pane = .type(.paper) { didSet { persist() } }
 
     // Browsing the category list (true) vs reading an open document tab (false).
     private(set) var isBrowsing: Bool = true { didSet { persist() } }
@@ -239,8 +239,10 @@ final class AppModel {
     private func loadTypeOrder() {
         guard let data = UserDefaults.standard.data(forKey: Self.typeOrderKey),
               let decoded = try? JSONDecoder().decode([EntryType].self, from: data) else { return }
-        var order = decoded
-        // Append any new modeled types not yet in the saved order.
+        // QUA-119: pre-migration saves can contain long-form rawValues that
+        // now decode to .other(_). Drop those before backfilling so the
+        // sidebar never renders an unknown bucket beside the modeled types.
+        var order = decoded.filter { $0.isModeled }
         for t in EntryType.modeled where !order.contains(t) { order.append(t) }
         typeOrder = order
     }
@@ -1140,7 +1142,7 @@ final class AppModel {
         let key = name.lowercased().trimmingCharacters(in: .whitespaces)
         guard !key.isEmpty else { return nil }
         return entries.first {
-            $0.type == .authorProfile && ($0.title ?? "").lowercased() == key
+            $0.type == .author && ($0.title ?? "").lowercased() == key
         }
     }
 

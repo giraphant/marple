@@ -4,7 +4,7 @@ import Foundation
 
 @Suite struct NavHistoryTests {
     let a = NavLocation(pane: .type(.note))
-    let b = NavLocation(pane: .type(.paperAnalysis), openPath: "x.md")
+    let b = NavLocation(pane: .type(.paper), openPath: "x.md")
     let c = NavLocation(pane: .theme("econ"))
 
     @Test func testInitialHasNoBackOrForward() {
@@ -70,7 +70,7 @@ import Foundation
 
 @Suite struct WorkspaceTests {
     let a = NavLocation(pane: .type(.note))
-    let b = NavLocation(pane: .type(.paperAnalysis), openPath: "x.md")
+    let b = NavLocation(pane: .type(.paper), openPath: "x.md")
     let c = NavLocation(pane: .theme("econ"))
 
     @Test func testInitHasOneActiveTab() {

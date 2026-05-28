@@ -32,17 +32,17 @@ public func bookSlug(_ rel: String) -> String? {
 }
 
 // MARK: - pdfSlug
-// PDF source slug derivation:
-// paper-analysis → fileStem; book-overview → bookSlug(rel);
-// chapter-summary → bookSlug(rel)-fileStem to avoid cross-book chapter-name collisions.
+// PDF source slug derivation (QUA-119 short forms):
+// paper → fileStem; book → bookSlug(rel);
+// chapter → bookSlug(rel)-fileStem (avoids cross-book chapter-name collisions).
 
 public func pdfSlug(type: String, rel: String, fileStem: String) -> String? {
     switch type {
-    case "paper-analysis":
+    case "paper":
         return fileStem
-    case "book-overview":
+    case "book":
         return bookSlug(rel)
-    case "chapter-summary":
+    case "chapter":
         return bookSlug(rel).map { "\($0)-\(fileStem)" }
     default:
         return nil

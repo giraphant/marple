@@ -8,12 +8,12 @@ import Testing
     }
 
     @Test func testTypePaneKeepsType() {
-        let list = [e("a", .paperAnalysis), e("b", .note), e("c", .paperAnalysis)]
-        #expect(entriesForPane(.type(.paperAnalysis), in: list).map(\.path) == ["a", "c"])
+        let list = [e("a", .paper), e("b", .note), e("c", .paper)]
+        #expect(entriesForPane(.type(.paper), in: list).map(\.path) == ["a", "c"])
     }
 
     @Test func testThemePaneKeepsThemeAcrossTypes() {
-        let list = [e("a", .paperAnalysis, themes: ["econ"]),
+        let list = [e("a", .paper, themes: ["econ"]),
                     e("b", .note, themes: ["econ"]),
                     e("c", .note, themes: ["history"])]
         #expect(entriesForPane(.theme("econ"), in: list).map(\.path) == ["a", "b"])

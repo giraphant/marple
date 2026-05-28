@@ -4,7 +4,7 @@ import Foundation
 
 @Suite struct DomainCodableTests {
     @Test func paneRoundTrips() throws {
-        let cases: [Pane] = [.type(.paperAnalysis), .type(.other("weird")),
+        let cases: [Pane] = [.type(.paper), .type(.other("weird")),
                              .themesIndex, .theme("现象学"), .trash]
         for p in cases {
             let data = try JSONEncoder().encode(p)
@@ -34,7 +34,7 @@ import Foundation
 @Suite struct WorkspaceRestoreTests {
     @Test func restoringBuildsTabsAndActive() throws {
         let ws = try #require(Workspace(restoring: [
-            (NavLocation(pane: .type(.paperAnalysis)), false),
+            (NavLocation(pane: .type(.paper)), false),
             (NavLocation(pane: .theme("X"), openPath: "v/a.md"), true),
         ], activeIndex: 1))
         #expect(ws.tabs.count == 2)
@@ -56,8 +56,8 @@ import Foundation
 
     @Test func pruneNullsMissingOpenPaths() throws {
         var ws = try #require(Workspace(restoring: [
-            (NavLocation(pane: .type(.bookOverview), openPath: "gone.md"), false),
-            (NavLocation(pane: .type(.bookOverview), openPath: "keep.md"), false),
+            (NavLocation(pane: .type(.book), openPath: "gone.md"), false),
+            (NavLocation(pane: .type(.book), openPath: "keep.md"), false),
         ], activeIndex: 0))
         ws.pruneOpenPaths(validPaths: ["keep.md"])
         #expect(ws.tabs[0].location.openPath == nil)
@@ -74,9 +74,9 @@ import Foundation
 @Suite struct PersistedStateTests {
     private func sample() -> PersistedState {
         PersistedState(
-            browsePane: .type(.paperAnalysis),
+            browsePane: .type(.paper),
             isBrowsing: false,
-            tabs: [PersistedTab(location: NavLocation(pane: .type(.paperAnalysis), openPath: "v/x.md"), pinned: false),
+            tabs: [PersistedTab(location: NavLocation(pane: .type(.paper), openPath: "v/x.md"), pinned: false),
                    PersistedTab(location: NavLocation(pane: .theme("X"), openPath: "v/a.md"), pinned: true)],
             activeIndex: 1,
             sortClauses: [SortClause(field: .rating, dir: .desc)],
@@ -100,9 +100,9 @@ import Foundation
 
     @Test func makeWorkspaceRestoresTabTitles() throws {
         let s = PersistedState(
-            browsePane: .type(.paperAnalysis),
+            browsePane: .type(.paper),
             isBrowsing: false,
-            tabs: [PersistedTab(location: NavLocation(pane: .type(.paperAnalysis), openPath: "v/x.md"), pinned: false, customTitle: "Desk")],
+            tabs: [PersistedTab(location: NavLocation(pane: .type(.paper), openPath: "v/x.md"), pinned: false, customTitle: "Desk")],
             activeIndex: 0,
             sortClauses: [],
             filterClauses: [],
@@ -114,9 +114,9 @@ import Foundation
 
     @Test func makeWorkspaceRestoresDefaultSpaceGroups() throws {
         let s = PersistedState(
-            browsePane: .type(.paperAnalysis),
+            browsePane: .type(.paper),
             isBrowsing: false,
-            tabs: [PersistedTab(location: NavLocation(pane: .type(.paperAnalysis), openPath: "v/x.md"), pinned: false),
+            tabs: [PersistedTab(location: NavLocation(pane: .type(.paper), openPath: "v/x.md"), pinned: false),
                    PersistedTab(location: NavLocation(pane: .theme("X"), openPath: "v/a.md"), pinned: true),
                    PersistedTab(location: NavLocation(pane: .trash), pinned: false)],
             activeIndex: 1,
@@ -138,9 +138,9 @@ import Foundation
 
     @Test func makeWorkspaceMigratesOldGeneratedGroupNames() throws {
         let s = PersistedState(
-            browsePane: .type(.paperAnalysis),
+            browsePane: .type(.paper),
             isBrowsing: false,
-            tabs: [PersistedTab(location: NavLocation(pane: .type(.paperAnalysis), openPath: "v/x.md"), pinned: false),
+            tabs: [PersistedTab(location: NavLocation(pane: .type(.paper), openPath: "v/x.md"), pinned: false),
                    PersistedTab(location: NavLocation(pane: .theme("X"), openPath: "v/a.md"), pinned: true)],
             activeIndex: 0,
             sortClauses: [],
@@ -259,7 +259,7 @@ import Foundation
 
     @Test func persistedStateCountsRoundTrip() throws {
         var s = sample()
-        s.counts = [.note: 12, .paperAnalysis: 47, .bookOverview: 3]
+        s.counts = [.note: 12, .paper: 47, .book: 3]
         let data = try JSONEncoder().encode(s)
         let decoded = try JSONDecoder().decode(PersistedState.self, from: data)
         #expect(decoded.counts == s.counts)

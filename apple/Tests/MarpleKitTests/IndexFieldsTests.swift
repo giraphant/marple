@@ -4,111 +4,43 @@ import Testing
 @Suite("IndexFields")
 struct IndexFieldsTests {
 
-    // MARK: - canonicalType
+    // MARK: - canonicalType (QUA-119: strict-short identity)
 
-    @Test("canonicalType: paper → paper-analysis")
-    func canonicalTypePaper() {
-        #expect(canonicalType("paper") == "paper-analysis")
+    @Test("canonicalType: each Quasi short form → itself")
+    func canonicalTypeShortFormsIdentity() {
+        for raw in ["paper", "book", "chapter", "author",
+                    "topic", "journal", "note", "image"] {
+            #expect(canonicalType(raw) == raw,
+                    "expected \(raw) to round-trip identically")
+        }
     }
 
-    @Test("canonicalType: paper-summary → paper-analysis")
-    func canonicalTypePaperSummary() {
-        #expect(canonicalType("paper-summary") == "paper-analysis")
+    @Test("canonicalType: pre-QUA-119 long forms → nil")
+    func canonicalTypeLegacyLongFormsRejected() {
+        // These used to be canonicalType's output. Now they're inputs that
+        // the function rejects so a stale vault file is reported (skipped)
+        // rather than silently re-canonicalized.
+        for raw in ["paper-analysis", "book-overview",
+                    "chapter-summary", "author-profile", "topic-synthesis"] {
+            #expect(canonicalType(raw) == nil,
+                    "expected legacy long form \(raw) to be rejected")
+        }
     }
 
-    @Test("canonicalType: article-analysis → paper-analysis")
-    func canonicalTypeArticleAnalysis() {
-        #expect(canonicalType("article-analysis") == "paper-analysis")
-    }
-
-    @Test("canonicalType: journal-article → paper-analysis")
-    func canonicalTypeJournalArticle() {
-        #expect(canonicalType("journal-article") == "paper-analysis")
-    }
-
-    @Test("canonicalType: journal-article-analysis → paper-analysis")
-    func canonicalTypeJournalArticleAnalysis() {
-        #expect(canonicalType("journal-article-analysis") == "paper-analysis")
-    }
-
-    @Test("canonicalType: author → author-profile")
-    func canonicalTypeAuthor() {
-        #expect(canonicalType("author") == "author-profile")
-    }
-
-    @Test("canonicalType: book → book-overview")
-    func canonicalTypeBook() {
-        #expect(canonicalType("book") == "book-overview")
-    }
-
-    @Test("canonicalType: book-analysis → book-overview")
-    func canonicalTypeBookAnalysis() {
-        #expect(canonicalType("book-analysis") == "book-overview")
-    }
-
-    @Test("canonicalType: monograph → book-overview")
-    func canonicalTypeMonograph() {
-        #expect(canonicalType("monograph") == "book-overview")
-    }
-
-    @Test("canonicalType: monograph-analysis → book-overview")
-    func canonicalTypeMonographAnalysis() {
-        #expect(canonicalType("monograph-analysis") == "book-overview")
-    }
-
-    @Test("canonicalType: overview → book-overview")
-    func canonicalTypeOverview() {
-        #expect(canonicalType("overview") == "book-overview")
-    }
-
-    @Test("canonicalType: chapter → chapter-summary")
-    func canonicalTypeChapter() {
-        #expect(canonicalType("chapter") == "chapter-summary")
-    }
-
-    @Test("canonicalType: book-chapter → chapter-summary")
-    func canonicalTypeBookChapter() {
-        #expect(canonicalType("book-chapter") == "chapter-summary")
-    }
-
-    @Test("canonicalType: book_chapter → chapter-summary")
-    func canonicalTypeBookChapterUnderscore() {
-        #expect(canonicalType("book_chapter") == "chapter-summary")
-    }
-
-    @Test("canonicalType: chapter-analysis → chapter-summary")
-    func canonicalTypeChapterAnalysis() {
-        #expect(canonicalType("chapter-analysis") == "chapter-summary")
-    }
-
-    @Test("canonicalType: journal-synthesis → topic-synthesis")
-    func canonicalTypeJournalSynthesis() {
-        #expect(canonicalType("journal-synthesis") == "topic-synthesis")
-    }
-
-    @Test("canonicalType: snowball-synthesis → topic-synthesis")
-    func canonicalTypeSnowballSynthesis() {
-        #expect(canonicalType("snowball-synthesis") == "topic-synthesis")
-    }
-
-    @Test("canonicalType: citation-snowball-synthesis → topic-synthesis")
-    func canonicalTypeCitationSnowball() {
-        #expect(canonicalType("citation-snowball-synthesis") == "topic-synthesis")
-    }
-
-    @Test("canonicalType: reading-list → topic-synthesis")
-    func canonicalTypeReadingList() {
-        #expect(canonicalType("reading-list") == "topic-synthesis")
-    }
-
-    @Test("canonicalType: research-note → topic-synthesis")
-    func canonicalTypeResearchNote() {
-        #expect(canonicalType("research-note") == "topic-synthesis")
-    }
-
-    @Test("canonicalType: concept-note → topic-synthesis")
-    func canonicalTypeConceptNote() {
-        #expect(canonicalType("concept-note") == "topic-synthesis")
+    @Test("canonicalType: pre-QUA-119 free-text aliases → nil")
+    func canonicalTypeLegacyAliasesRejected() {
+        // The old recognizer collapsed all of these into a few buckets. Under
+        // strict-short the vault is the source of truth — these come back nil
+        // so the entry surfaces as `.skippedUnknownType` and gets reported.
+        for raw in ["paper-summary", "article-analysis", "journal-article",
+                    "journal-article-analysis", "book-analysis", "monograph",
+                    "monograph-analysis", "overview", "book-chapter",
+                    "book_chapter", "chapter-analysis", "journal-synthesis",
+                    "snowball-synthesis", "citation-snowball-synthesis",
+                    "reading-list", "research-note", "concept-note"] {
+            #expect(canonicalType(raw) == nil,
+                    "expected legacy alias \(raw) to be rejected")
+        }
     }
 
     @Test("canonicalType: empty string → nil")
@@ -116,15 +48,16 @@ struct IndexFieldsTests {
         #expect(canonicalType("") == nil)
     }
 
-    @Test("canonicalType: 'A' → nil")
+    @Test("canonicalType: 'A' sentinel → nil")
     func canonicalTypeA() {
         #expect(canonicalType("A") == nil)
     }
 
-    @Test("canonicalType: unknown non-empty → passthrough")
-    func canonicalTypeUnknownPassthrough() {
-        #expect(canonicalType("note") == "note")
-        #expect(canonicalType("weird") == "weird")
+    @Test("canonicalType: arbitrary unknown strings → nil")
+    func canonicalTypeUnknownRejected() {
+        #expect(canonicalType("weird") == nil)
+        #expect(canonicalType("topic-reading-list") == nil)
+        #expect(canonicalType("PAPER") == nil, "case sensitive — uppercase rejected")
     }
 
     // MARK: - ratingScore
@@ -399,8 +332,8 @@ struct IndexFieldsTests {
 
     @Test("field: first case-sensitive match")
     func fieldLookup() {
-        let map: [(String, YamlValue)] = [("type", .string("paper-analysis")), ("title", .string("Hello"))]
-        #expect(field(map, "type") == .string("paper-analysis"))
+        let map: [(String, YamlValue)] = [("type", .string("paper")), ("title", .string("Hello"))]
+        #expect(field(map, "type") == .string("paper"))
         #expect(field(map, "title") == .string("Hello"))
         #expect(field(map, "Type") == nil)
         #expect(field(map, "missing") == nil)
@@ -410,8 +343,8 @@ struct IndexFieldsTests {
 
     @Test("truthyText: non-empty value")
     func truthyTextNonEmpty() {
-        let map: [(String, YamlValue)] = [("type", .string("paper-analysis"))]
-        #expect(truthyText(map, "type") == "paper-analysis")
+        let map: [(String, YamlValue)] = [("type", .string("paper"))]
+        #expect(truthyText(map, "type") == "paper")
     }
 
     @Test("truthyText: empty string → nil")

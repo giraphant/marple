@@ -4,7 +4,7 @@ import Testing
 @Suite struct SearchRankerTests {
     /// Test factory — accepts a legacy joined-string `author` for terseness;
     /// `splitAuthors` converts it to the canonical `[String]` on construction.
-    func e(_ path: String, type: EntryType = .paperAnalysis, title: String? = nil,
+    func e(_ path: String, type: EntryType = .paper, title: String? = nil,
            author: String? = nil, themes: [String] = [], topic: String? = nil,
            source: String? = nil, book: String? = nil, year: String? = nil,
            preview: String = "", doi: String? = nil, rating: Double = 0) -> Entry {
