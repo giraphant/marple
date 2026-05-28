@@ -221,6 +221,50 @@ struct IndexTitlesTests {
         #expect(titleCn([], type: "paper", title: nil, body: "") == nil)
     }
 
+    // MARK: - resolveTitle
+
+    @Test("resolveTitle: note prefers first body heading")
+    func resolveTitleNotePrefersHeading() {
+        let map: [(String, YamlValue)] = [("title", .string("FM Title"))]
+        #expect(resolveTitle(map, type: "note", body: "## Body Heading\ntext") == "Body Heading")
+    }
+
+    @Test("resolveTitle: note with no heading → frontmatter title")
+    func resolveTitleNoteNoHeadingFmTitle() {
+        let map: [(String, YamlValue)] = [("title", .string("FM Title"))]
+        #expect(resolveTitle(map, type: "note", body: "just a paragraph") == "FM Title")
+    }
+
+    @Test("resolveTitle: note with no heading and no title → name")
+    func resolveTitleNoteFallsBackToName() {
+        let map: [(String, YamlValue)] = [("name", .string("FM Name"))]
+        #expect(resolveTitle(map, type: "note", body: "just a paragraph") == "FM Name")
+    }
+
+    @Test("resolveTitle: non-note ignores body heading, uses frontmatter title")
+    func resolveTitleNonNoteIgnoresBody() {
+        let map: [(String, YamlValue)] = [("title", .string("FM Title"))]
+        #expect(resolveTitle(map, type: "paper", body: "# Body Heading\ntext") == "FM Title")
+    }
+
+    @Test("resolveTitle: non-note falls back to name")
+    func resolveTitleNonNoteName() {
+        let map: [(String, YamlValue)] = [("name", .string("FM Name"))]
+        #expect(resolveTitle(map, type: "book", body: "# Body Heading") == "FM Name")
+    }
+
+    @Test("resolveTitle: strips wiki links from frontmatter")
+    func resolveTitleStripsWiki() {
+        let map: [(String, YamlValue)] = [("title", .string("[[path|Real]]"))]
+        #expect(resolveTitle(map, type: "paper", body: "") == "Real")
+    }
+
+    @Test("resolveTitle: nothing → nil")
+    func resolveTitleNil() {
+        #expect(resolveTitle([], type: "paper", body: "") == nil)
+        #expect(resolveTitle([], type: "note", body: "no heading") == nil)
+    }
+
     // MARK: - translationTitleCn + translationDoubanUrl
     // Parse a realistic localisations block via YamlFrontmatter.parseMapping
 
