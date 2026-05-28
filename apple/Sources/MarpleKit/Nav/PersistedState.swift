@@ -30,30 +30,6 @@ public struct PersistedTab: Codable, Sendable, Equatable {
         self.cachedTitle = cachedTitle
         self.cachedType = cachedType
     }
-
-    enum CodingKeys: String, CodingKey {
-        case location, pinned, customTitle, cachedTitle, cachedType
-    }
-
-    /// Decode with QUA-119 legacy sanitization: a pre-QUA-119 persisted blob
-    /// may carry long-form values (`paper-analysis` etc.) for `cachedType`
-    /// and for the pane inside `location`. Those would decode to
-    /// `EntryType.other(_)` and then mis-render in the sidebar (wrong icon
-    /// or empty bucket). Drop the cached type, normalize the pane.
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        let rawLocation = try c.decode(NavLocation.self, forKey: .location)
-        self.location = NavLocation.sanitizingLegacyPane(rawLocation)
-        self.pinned = try c.decode(Bool.self, forKey: .pinned)
-        self.customTitle = try c.decodeIfPresent(String.self, forKey: .customTitle)
-        self.cachedTitle = try c.decodeIfPresent(String.self, forKey: .cachedTitle)
-        if let raw = try c.decodeIfPresent(EntryType.self, forKey: .cachedType),
-           raw.isModeled {
-            self.cachedType = raw
-        } else {
-            self.cachedType = nil
-        }
-    }
 }
 
 public struct PersistedWorkspaceSpace: Codable, Sendable, Equatable {
@@ -115,45 +91,6 @@ public struct PersistedState: Codable, Sendable, Equatable {
         self.filterMatch = filterMatch; self.browseMode = browseMode
         self.currentSpace = currentSpace
         self.counts = counts
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case browsePane, isBrowsing, tabs, activeIndex
-        case sortClauses, filterClauses, filterMatch, browseMode
-        case currentSpace, counts
-    }
-
-    /// QUA-119 legacy sanitization. A pre-QUA-119 persisted blob holds
-    /// long-form pane types and counts keys (`paper-analysis`, …) that decode
-    /// into `EntryType.other(_)`. Those would render as empty sidebar buckets
-    /// and inflate the count list with phantom rows. Replace a stale browse
-    /// pane with the first modeled type and drop legacy keys from `counts`.
-    /// Tab-level pane / cachedType cleanup happens inside `PersistedTab.init`.
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-
-        let rawPane = try c.decode(Pane.self, forKey: .browsePane)
-        if case let .type(t) = rawPane, !t.isModeled {
-            self.browsePane = .type(EntryType.modeled[0])
-        } else {
-            self.browsePane = rawPane
-        }
-
-        self.isBrowsing = try c.decode(Bool.self, forKey: .isBrowsing)
-        self.tabs = try c.decode([PersistedTab].self, forKey: .tabs)
-        self.activeIndex = try c.decode(Int.self, forKey: .activeIndex)
-        self.sortClauses = try c.decode([SortClause].self, forKey: .sortClauses)
-        self.filterClauses = try c.decode([FilterClause].self, forKey: .filterClauses)
-        self.filterMatch = try c.decode(FilterMatch.self, forKey: .filterMatch)
-        self.browseMode = try c.decode(String.self, forKey: .browseMode)
-        self.currentSpace = try c.decodeIfPresent(PersistedWorkspaceSpace.self, forKey: .currentSpace)
-
-        if let raw = try c.decodeIfPresent([EntryType: Int].self, forKey: .counts) {
-            let cleaned = raw.filter { $0.key.isModeled }
-            self.counts = cleaned.isEmpty ? nil : cleaned
-        } else {
-            self.counts = nil
-        }
     }
 
     public func makeWorkspace() -> Workspace? {

@@ -239,10 +239,8 @@ final class AppModel {
     private func loadTypeOrder() {
         guard let data = UserDefaults.standard.data(forKey: Self.typeOrderKey),
               let decoded = try? JSONDecoder().decode([EntryType].self, from: data) else { return }
-        // QUA-119: pre-migration saves can contain long-form rawValues that
-        // now decode to .other(_). Drop those before backfilling so the
-        // sidebar never renders an unknown bucket beside the modeled types.
-        var order = decoded.filter { $0.isModeled }
+        var order = decoded
+        // Append any new modeled types not yet in the saved order.
         for t in EntryType.modeled where !order.contains(t) { order.append(t) }
         typeOrder = order
     }

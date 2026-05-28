@@ -391,10 +391,7 @@ import GRDB
         var blob = Data()
         // Magic "MARPLE\0C" — must match IndexDatabase.cacheMagic.
         blob.append(contentsOf: [0x4D, 0x41, 0x52, 0x50, 0x4C, 0x45, 0x00, 0x43])
-        // QUA-119: cacheFormatVersion is now 2 (was 1). The IndexDatabase
-        // readCache path rejects any mismatched version, so the test helper
-        // must emit a header that matches the running build.
-        var v = UInt32(2).littleEndian
+        var v = UInt32(1).littleEndian
         withUnsafeBytes(of: &v) { blob.append(contentsOf: $0) }
         var r = UInt64(bitPattern: revision).littleEndian
         withUnsafeBytes(of: &r) { blob.append(contentsOf: $0) }

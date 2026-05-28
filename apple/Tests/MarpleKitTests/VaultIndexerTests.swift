@@ -319,13 +319,8 @@ struct VaultIndexerTests {
                   path UNINDEXED, type UNINDEXED, title, author, book, themes,
                   topic, source, year, preview, doi, body
                 );
-                CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-                INSERT INTO meta(key, value) VALUES ('schema_version', '2');
                 """)
         }
-        // meta.schema_version is current — the only stale signal is the
-        // presence of `entry_search`. This proves canSkipFullBuild rejects
-        // the DB on the entry_search check rather than only via schema_version.
         let indexer = VaultIndexer(workspaceRoot: ws)
         #expect(indexer.canSkipFullBuild() == false)
     }
