@@ -371,14 +371,10 @@ public final class VaultIndexer: @unchecked Sendable {
 
     // MARK: indexSchemaCurrent
 
-    /// Returns true iff the live index exists, has all REQUIRED columns, no
-    /// retired tables, AND carries the current `meta.schema_version`. Returning
-    /// false here forces `reconcile()` to fall back to `buildFull`:
-    /// - QUA-102 migrated an existing 1.4 GB DB (with `entry_search` /
-    ///   `entry_text`) down to the current ~750 MB shape.
-    /// - QUA-119 rebuilds any DB whose `entries.type` rows still hold long
-    ///   forms (`paper-analysis`, `book-overview`, …) so the new
-    ///   strict-short-form `canonicalType` doesn't see stale rows.
+    /// Returns true iff the live index exists, has all REQUIRED columns AND no
+    /// retired tables. Returning false here forces `reconcile()` to fall back
+    /// to `buildFull`, which is how QUA-102 migrates an existing 1.4 GB DB
+    /// (with `entry_search` / `entry_text`) down to the current ~750 MB shape.
     private func indexSchemaCurrent() throws -> Bool {
         guard FileManager.default.fileExists(atPath: indexDBPath) else { return false }
 
@@ -415,15 +411,7 @@ public final class VaultIndexer: @unchecked Sendable {
                   WHERE type IN ('table','view') AND name = 'entry_search'
                 )
                 """) ?? false
-            if hasRetiredEntrySearch { return false }
-
-            // QUA-119 schema bump: rows with long-form types must be rebuilt.
-            // Reading `schema_version` works on any DB that has a `meta` table;
-            // it returns 0 when the row is absent, which is the pre-QUA-119
-            // signal we treat as "stale". buildFull (temp DB + atomic rename)
-            // takes over from there — no live table drop.
-            let version = try IndexWriter.schemaVersion(db)
-            return version >= IndexWriter.schemaVersion
+            return !hasRetiredEntrySearch
         }
     }
 

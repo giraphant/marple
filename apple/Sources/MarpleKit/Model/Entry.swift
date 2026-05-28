@@ -13,11 +13,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
     /// pipeline and may carry experimental kinds (e.g. "topic-reading-list").
     /// Holding the raw value here means one unknown type doesn't fail the whole
     /// index decode — the entry surfaces as `.other` rather than being silently
-    /// dropped or normalized to a familiar bucket. Legacy long-form values
-    /// (`paper-analysis`, `book-overview`, etc.) also land here so persisted
-    /// state and on-disk indices from before QUA-119 are not silently mapped
-    /// forward; `PersistedState` / `AppModel` sanitize those out, and a fresh
-    /// `buildFull` rewrites the SQLite index with short canonical values.
+    /// dropped or normalized to a familiar bucket.
     case other(String)
 
     public init(rawValue: String) {
@@ -65,15 +61,6 @@ public extension EntryType {
         .paper, .book, .author,
         .topic, .journal, .chapter, .note, .image,
     ]
-
-    /// True for the eight canonical Quasi schema types; false for `.other(_)`.
-    /// Used by persisted-state sanitizers to drop legacy/unknown buckets so they
-    /// don't render as empty sidebar rows or send `e.type = '<long-form>'`
-    /// filters into a v2 SQL index that only stores short values.
-    var isModeled: Bool {
-        if case .other = self { return false }
-        return true
-    }
 
     var label: String {
         switch self {

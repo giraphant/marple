@@ -40,16 +40,7 @@ public final class IndexDatabase: @unchecked Sendable {
     /// Optional Entry fields added with safe `decodeIfPresent` do NOT require a
     /// bump — old caches still decode, missing fields default to nil/empty.
     /// Required new fields, encoder swaps, or header rearrangement DO require a bump.
-    ///
-    /// Version history:
-    /// - 1: original plist snapshot.
-    /// - 2 (QUA-119): `Entry.type` rawValue switched to Quasi short forms
-    ///   (`paper` / `book` / `chapter` / `author` / `topic`). A v1 cache holds
-    ///   long-form values that decode to `EntryType.other(_)` under v2 code,
-    ///   producing phantom sidebar buckets. Bump rejects v1 files and the
-    ///   first post-rebuild loadEntries rewrites the sidecar from the SQL
-    ///   path, now keyed to short canonical forms.
-    private static let cacheFormatVersion: UInt32 = 2
+    private static let cacheFormatVersion: UInt32 = 1
 
     /// 8-byte ASCII magic "MARPLE\0C" — guards against decoding a foreign file
     /// that happened to land at this path.
@@ -357,20 +348,6 @@ public final class IndexDatabase: @unchecked Sendable {
     private static func appendTypeFilter(_ type: EntryType?, to sql: inout String,
                                          args: inout [(any DatabaseValueConvertible)?]) {
         guard let type else { return }
-        // QUA-119: PersistedState sanitizes legacy long-form panes to a
-        // modeled bucket on decode, so a `.other(_)` arriving here means
-        // something set the pane programmatically with an unknown type
-        // (e.g. an experimental Quasi schema kind, or a developer typo).
-        // Emitting `e.type = '<unknown>'` against a v2 SQL index would
-        // silently return zero rows — a near-invisible search failure.
-        // Skip the filter, drop a stderr breadcrumb so the cause is visible,
-        // and let the text query still produce results.
-        if case .other(let raw) = type {
-            FileHandle.standardError.write(Data(
-                "[marple] search type filter skipped — unrecognized EntryType(\(raw))\n".utf8
-            ))
-            return
-        }
         sql += "\n  AND e.type = ?"
         args.append(type.rawValue)
     }
