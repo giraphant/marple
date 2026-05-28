@@ -41,7 +41,8 @@ final class AppState: ObservableObject {
         let semantic: (any SemanticBackend)? =
             FileManager.default.fileExists(atPath: marpleDir.appendingPathComponent("vectors.json").path)
             ? MLXSemanticBackend(dir: marpleDir) : nil
-        let m = AppModel(client: client, stateStore: UserDefaultsStateStore(), semantic: semantic)
+        let m = AppModel(client: client, stateStore: UserDefaultsStateStore(),
+                         semantic: semantic, isFirstRun: !canSkip)
         self.model = m
         self.booting = false
 
