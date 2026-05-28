@@ -6,7 +6,7 @@ import Testing
     /// `splitAuthors` converts it to the canonical `[String]` on construction.
     private func entry(author: String? = nil, year: String? = nil, title: String? = nil,
                        source: String? = nil, doi: String? = nil) -> Entry {
-        Entry(path: "p.md", type: .paperAnalysis, title: title,
+        Entry(path: "p.md", type: .paper, title: title,
               author: splitAuthors(author),
               year: year, ratingScore: 0, themes: [], preview: "", hasPDF: false,
               source: source, doi: doi)

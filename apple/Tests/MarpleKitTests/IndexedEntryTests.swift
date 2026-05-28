@@ -59,7 +59,7 @@ struct IndexedEntryTests {
         #expect(build(text: text) == .skippedNoType)
     }
 
-    @Test("type: A → .skippedUnknownType")
+    @Test("type: A → .skippedUnknownType(\"A\")")
     func typeA() {
         let text = """
         ---
@@ -69,7 +69,20 @@ struct IndexedEntryTests {
 
         Body content.
         """
-        #expect(build(text: text) == .skippedUnknownType)
+        #expect(build(text: text) == .skippedUnknownType("A"))
+    }
+
+    @Test("legacy long form type → .skippedUnknownType carrying raw value")
+    func typeLegacyLongRejected() {
+        let text = """
+        ---
+        type: paper-analysis
+        title: Pre-QUA-119
+        ---
+
+        Body.
+        """
+        #expect(build(text: text) == .skippedUnknownType("paper-analysis"))
     }
 
     @Test("empty type value → .skippedNoType (field_text returns None for null)")
@@ -90,7 +103,7 @@ struct IndexedEntryTests {
 
     // MARK: - Paper analysis with rating, themes, year
 
-    @Test("paper-analysis: type alias 'paper' → canonical 'paper-analysis'")
+    @Test("paper: type alias 'paper' → canonical 'paper'")
     func paperTypeAlias() throws {
         let text = """
         ---
@@ -112,7 +125,7 @@ struct IndexedEntryTests {
             Issue.record("Expected .indexed, got \(outcome)")
             return
         }
-        #expect(entry.entryType == "paper-analysis")
+        #expect(entry.entryType == "paper")
         #expect(entry.title == "Dogs and Cats in the Wild")
         // Scalar `author: Smith, John` is QUA-109 lossy-split into two names
         // by `splitAuthors` (the comma is the separator). Users who genuinely
@@ -121,7 +134,7 @@ struct IndexedEntryTests {
         #expect(entry.ratingScore == 3.0)
         #expect(entry.yearJSON == "2019")
         #expect(entry.themes == ["ai", "ethics"])
-        // pdfSlug for paper-analysis = fileStem
+        // pdfSlug for paper = fileStem
         #expect(entry.pdfSlug == "smith-dogs-2019")
         // hasPDF false — no source slugs provided
         #expect(entry.hasPDF == false)
@@ -139,11 +152,11 @@ struct IndexedEntryTests {
         #expect(entry.ratingJSON == "\"★★★\"")
     }
 
-    @Test("paper-analysis: hasPDF true when slug is in sourceSlugs")
+    @Test("paper: hasPDF true when slug is in sourceSlugs")
     func paperHasPDF() throws {
         let text = """
         ---
-        type: paper-analysis
+        type: paper
         title: My Paper
         ---
         Body.
@@ -158,11 +171,11 @@ struct IndexedEntryTests {
         #expect(entry.hasPDF == true)
     }
 
-    @Test("paper-analysis: mtime passed through")
+    @Test("paper: mtime passed through")
     func paperMtime() throws {
         let text = """
         ---
-        type: paper-analysis
+        type: paper
         title: Mtime Test
         ---
         Body.
@@ -236,11 +249,11 @@ struct IndexedEntryTests {
 
     // MARK: - Book overview: titleCn from Chinese H1
 
-    @Test("book-overview: titleCn from Chinese H1 when no title_cn frontmatter")
+    @Test("book: titleCn from Chinese H1 when no title_cn frontmatter")
     func bookTitleCnFromH1() throws {
         let text = """
         ---
-        type: book-overview
+        type: book
         title: English Title
         ---
 
@@ -254,17 +267,17 @@ struct IndexedEntryTests {
             Issue.record("Expected .indexed, got \(outcome)")
             return
         }
-        #expect(entry.entryType == "book-overview")
+        #expect(entry.entryType == "book")
         #expect(entry.titleCn == "中文标题")
-        // book = nil — book-overview doesn't set `book` (only chapter-summary does)
+        // book = nil — book doesn't set `book` (only chapter does)
         #expect(entry.book == nil)
     }
 
-    @Test("book-overview: titleCn nil when Chinese H1 matches title")
+    @Test("book: titleCn nil when Chinese H1 matches title")
     func bookTitleCnNilWhenSameAsTitle() throws {
         let text = """
         ---
-        type: book-overview
+        type: book
         title: 中文标题
         ---
 
@@ -282,7 +295,7 @@ struct IndexedEntryTests {
 
     // MARK: - Chapter summary: book slug derived from path
 
-    @Test("chapter-summary: book slug extracted from vault/books/... path")
+    @Test("chapter: book slug extracted from vault/books/... path")
     func chapterBook() throws {
         let text = """
         ---
@@ -299,13 +312,13 @@ struct IndexedEntryTests {
             Issue.record("Expected .indexed, got \(outcome)")
             return
         }
-        #expect(entry.entryType == "chapter-summary")
+        #expect(entry.entryType == "chapter")
         #expect(entry.book == "smith-dogs-2020")
         #expect(entry.pdfSlug == "smith-dogs-2020-ch1")
         #expect(entry.hasPDF == false)
     }
 
-    @Test("chapter-summary: bare chapter source slug does not collide across books")
+    @Test("chapter: bare chapter source slug does not collide across books")
     func chapterBareSourceSlugDoesNotMatch() throws {
         let text = """
         ---
@@ -327,7 +340,7 @@ struct IndexedEntryTests {
         #expect(entry.hasPDF == false)
     }
 
-    @Test("chapter-summary: book-prefixed chapter source slug marks hasPDF")
+    @Test("chapter: book-prefixed chapter source slug marks hasPDF")
     func chapterBookPrefixedSourceSlugMatches() throws {
         let text = """
         ---
@@ -355,7 +368,7 @@ struct IndexedEntryTests {
     func multiAuthor() throws {
         let text = """
         ---
-        type: paper-analysis
+        type: paper
         title: Joint Work
         authors:
           - Alice Smith
@@ -375,7 +388,7 @@ struct IndexedEntryTests {
     func authorVsAuthors() throws {
         let text = """
         ---
-        type: paper-analysis
+        type: paper
         title: Test
         author: Solo Author
         authors:
@@ -434,7 +447,7 @@ struct IndexedEntryTests {
     func optionalFields() throws {
         let text = """
         ---
-        type: paper-analysis
+        type: paper
         title: Comprehensive Paper
         author: Jones
         year: 2021
@@ -558,7 +571,7 @@ struct IndexedEntryTests {
     func searchTextComposition() throws {
         let text = """
         ---
-        type: paper-analysis
+        type: paper
         title: Unique Paper Title
         ---
 
@@ -580,7 +593,7 @@ struct IndexedEntryTests {
     func translationTitleCn() throws {
         let text = """
         ---
-        type: book-overview
+        type: book
         title: The Origin of Species
         localisations:
           zh:
@@ -604,7 +617,7 @@ struct IndexedEntryTests {
     func chaptersAnalyzedAndAnnotates() throws {
         let text = """
         ---
-        type: book-overview
+        type: book
         title: A Big Book
         chapters_analyzed: 12
         annotates: vault/sources/big-book.md
@@ -645,7 +658,7 @@ struct IndexedEntryTests {
     func titleEnField() throws {
         let text = """
         ---
-        type: book-overview
+        type: book
         title: 机器学习
         title_en: Machine Learning
         ---
@@ -677,10 +690,10 @@ struct IndexedEntryTests {
         #expect(entry.bodyText == "Hello world.")
     }
 
-    // MARK: - type aliases
+    // MARK: - QUA-119: type acceptance
 
-    @Test("type alias 'book' → 'book-overview'")
-    func typeAliasBook() throws {
+    @Test("type 'book' → entryType 'book'")
+    func typeBookAccepted() throws {
         let text = """
         ---
         type: book
@@ -692,11 +705,14 @@ struct IndexedEntryTests {
         guard case .indexed(let entry) = outcome else {
             Issue.record("Expected .indexed"); return
         }
-        #expect(entry.entryType == "book-overview")
+        #expect(entry.entryType == "book")
     }
 
-    @Test("type alias 'book_chapter' → 'chapter-summary'")
-    func typeAliasBookChapter() throws {
+    @Test("legacy alias 'book_chapter' → .skippedUnknownType")
+    func typeLegacyAliasBookChapterRejected() throws {
+        // Pre-QUA-119 this aliased to chapter. Now the vault is the
+        // source of truth: the file must use `chapter` or it's reported as
+        // an unrecognized type rather than silently mapped forward.
         let text = """
         ---
         type: book_chapter
@@ -704,18 +720,14 @@ struct IndexedEntryTests {
         ---
         Body.
         """
-        let outcome = build(text: text,
-                            rel: "vault/books/some-book-2020/ch2.md",
-                            fileStem: "ch2")
-        guard case .indexed(let entry) = outcome else {
-            Issue.record("Expected .indexed"); return
-        }
-        #expect(entry.entryType == "chapter-summary")
-        #expect(entry.book == "some-book-2020")
+        #expect(build(text: text,
+                      rel: "vault/books/some-book-2020/ch2.md",
+                      fileStem: "ch2")
+                == .skippedUnknownType("book_chapter"))
     }
 
-    @Test("unknown non-empty type passed through unchanged")
-    func typeUnknownPassthrough() throws {
+    @Test("unknown non-empty type → .skippedUnknownType with raw value preserved")
+    func typeUnknownRejected() throws {
         let text = """
         ---
         type: my-custom-type
@@ -723,10 +735,10 @@ struct IndexedEntryTests {
         ---
         Body.
         """
-        let outcome = build(text: text)
-        guard case .indexed(let entry) = outcome else {
-            Issue.record("Expected .indexed"); return
-        }
-        #expect(entry.entryType == "my-custom-type")
+        // QUA-119: canonicalType only accepts the eight Quasi short forms.
+        // Anything else is reported and skipped so a stale or experimental
+        // type in the vault is visible rather than silently bucketed as the
+        // wrong entry kind.
+        #expect(build(text: text) == .skippedUnknownType("my-custom-type"))
     }
 }

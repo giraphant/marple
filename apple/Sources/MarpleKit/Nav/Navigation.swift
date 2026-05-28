@@ -10,6 +10,16 @@ public struct NavLocation: Hashable, Sendable, Codable {
         self.pane = pane
         self.openPath = openPath
     }
+
+    /// Replace `.type(.other(_))` (pre-QUA-119 long-form persisted state) with
+    /// the first modeled type. Leaves themesIndex / theme / trash and any
+    /// modeled .type(...) pane unchanged. Called by `PersistedTab.init(from:)`
+    /// so legacy tabs don't restore pointing at a phantom sidebar bucket.
+    public static func sanitizingLegacyPane(_ location: NavLocation) -> NavLocation {
+        guard case let .type(t) = location.pane, !t.isModeled else { return location }
+        return NavLocation(pane: .type(EntryType.modeled[0]),
+                           openPath: location.openPath)
+    }
 }
 
 /// A browser-style back/forward stack of locations. A new push past the current

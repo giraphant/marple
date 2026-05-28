@@ -8,7 +8,7 @@ import Testing
     func e(_ path: String, author: String? = nil, year: String? = nil, rating: Double = 0,
            themes: [String] = [], source: String? = nil, hasPDF: Bool = false,
            added: Double? = nil) -> Entry {
-        Entry(path: path, type: .paperAnalysis, title: nil,
+        Entry(path: path, type: .paper, title: nil,
               author: splitAuthors(author), year: year,
               ratingScore: rating, themes: themes, preview: "", hasPDF: hasPDF,
               mtime: nil, added: added, source: source)
@@ -55,13 +55,13 @@ import Testing
     /// entry. Document the new contract here so future refactors don't
     /// regress it silently.
     @Test func testAuthorFilterMatchesAnyAuthor() {
-        let solo = Entry(path: "vault/papers/solo.md", type: .paperAnalysis,
+        let solo = Entry(path: "vault/papers/solo.md", type: .paper,
                          title: nil, author: ["Sara Ahmed"], year: nil,
                          ratingScore: 0, themes: [], preview: "", hasPDF: false)
-        let pair = Entry(path: "vault/papers/pair.md", type: .paperAnalysis,
+        let pair = Entry(path: "vault/papers/pair.md", type: .paper,
                          title: nil, author: ["Sara Ahmed", "Jane Doe"], year: nil,
                          ratingScore: 0, themes: [], preview: "", hasPDF: false)
-        let other = Entry(path: "vault/papers/other.md", type: .paperAnalysis,
+        let other = Entry(path: "vault/papers/other.md", type: .paper,
                           title: nil, author: ["John Smith"], year: nil,
                           ratingScore: 0, themes: [], preview: "", hasPDF: false)
         let list = [solo, pair, other]

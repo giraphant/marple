@@ -30,30 +30,30 @@ struct SourceResolverTests {
 
     // MARK: - pdfSlug
 
-    @Test("pdfSlug: paper-analysis → fileStem")
+    @Test("pdfSlug: paper → fileStem")
     func pdfSlugPaperAnalysis() {
-        #expect(pdfSlug(type: "paper-analysis", rel: "vault/papers/foo.md", fileStem: "foo") == "foo")
+        #expect(pdfSlug(type: "paper", rel: "vault/papers/foo.md", fileStem: "foo") == "foo")
     }
 
-    @Test("pdfSlug: book-overview → bookSlug(rel)")
+    @Test("pdfSlug: book → bookSlug(rel)")
     func pdfSlugBookOverview() {
-        #expect(pdfSlug(type: "book-overview", rel: "vault/books/smith-dog-2020/overview.md", fileStem: "overview") == "smith-dog-2020")
+        #expect(pdfSlug(type: "book", rel: "vault/books/smith-dog-2020/overview.md", fileStem: "overview") == "smith-dog-2020")
     }
 
-    @Test("pdfSlug: book-overview with no vault/books prefix → nil")
+    @Test("pdfSlug: book with no vault/books prefix → nil")
     func pdfSlugBookOverviewNilSlug() {
-        #expect(pdfSlug(type: "book-overview", rel: "vault/papers/overview.md", fileStem: "overview") == nil)
+        #expect(pdfSlug(type: "book", rel: "vault/papers/overview.md", fileStem: "overview") == nil)
     }
 
-    @Test("pdfSlug: chapter-summary → bookSlug-fileStem")
+    @Test("pdfSlug: chapter → bookSlug-fileStem")
     func pdfSlugChapterSummary() {
-        #expect(pdfSlug(type: "chapter-summary", rel: "vault/books/x/ch1.md", fileStem: "ch1") == "x-ch1")
+        #expect(pdfSlug(type: "chapter", rel: "vault/books/x/ch1.md", fileStem: "ch1") == "x-ch1")
     }
 
     @Test("pdfSlug: other type → nil")
     func pdfSlugOtherType() {
         #expect(pdfSlug(type: "note", rel: "vault/notes/foo.md", fileStem: "foo") == nil)
-        #expect(pdfSlug(type: "topic-synthesis", rel: "vault/topics/x.md", fileStem: "x") == nil)
+        #expect(pdfSlug(type: "topic", rel: "vault/topics/x.md", fileStem: "x") == nil)
     }
 
     // MARK: - loadSourceSlugs

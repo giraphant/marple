@@ -21,7 +21,7 @@ import Foundation
     }
 
     @Test func testAnnotationTargetsEntry() {
-        let target = Entry(path: "vault/papers/marx-1867.md", type: .paperAnalysis,
+        let target = Entry(path: "vault/papers/marx-1867.md", type: .paper,
                            title: "Capital", author: [], year: nil, ratingScore: 0,
                            themes: [], preview: "", hasPDF: false)
         let d = NoteBuilder.annotation(target: target, today: date(2026, 5, 23), stamp: "wxyz")
@@ -41,7 +41,7 @@ import Foundation
     }
 
     @Test func testAnnotationTitleWithColonIsQuoted() {
-        let target = Entry(path: "vault/papers/x.md", type: .paperAnalysis,
+        let target = Entry(path: "vault/papers/x.md", type: .paper,
                            title: "Marx: Capital", author: [], year: nil, ratingScore: 0,
                            themes: [], preview: "", hasPDF: false)
         let d = NoteBuilder.annotation(target: target, today: date(2026, 5, 23), stamp: "0000")

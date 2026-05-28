@@ -21,28 +21,15 @@ enum InspectorInfoRow: Equatable {
 // Keep this presentation policy in sync with the Quasi plugin schemas at ~/.agents/plugins/quasi/scripts/schemas.
 func inspectorInfoRows(for entry: Entry, in entries: [Entry] = []) -> [InspectorInfoRow] {
     switch entry.type {
-    case .paperAnalysis:
-        return paperRows(for: entry)
-    case .bookOverview:
-        return bookRows(for: entry)
-    case .chapterSummary:
-        return chapterRows(for: entry, in: entries)
-    case .authorProfile:
-        return [.rating]
-    case .topicSynthesis:
-        return topicRows(for: entry)
-    case .journal:
-        return journalRows(for: entry)
-    case .note:
-        return noteRows(for: entry, in: entries)
-    case .image:
-        return imageRows(for: entry)
-    case .other(let raw) where raw == "topic":
-        return topicRows(for: entry)
-    case .other(let raw) where raw == "journal":
-        return journalRows(for: entry)
-    case .other:
-        return []
+    case .paper:   return paperRows(for: entry)
+    case .book:    return bookRows(for: entry)
+    case .chapter: return chapterRows(for: entry, in: entries)
+    case .author:  return [.rating]
+    case .topic:   return topicRows(for: entry)
+    case .journal: return journalRows(for: entry)
+    case .note:    return noteRows(for: entry, in: entries)
+    case .image:   return imageRows(for: entry)
+    case .other:   return []
     }
 }
 

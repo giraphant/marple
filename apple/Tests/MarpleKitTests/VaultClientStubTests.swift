@@ -3,7 +3,7 @@ import Testing
 
 @Suite struct VaultClientStubTests {
     @Test func testStubReturnsSeededEntries() async throws {
-        let e = Entry(path: "vault/p/a.md", type: .paperAnalysis, title: "A",
+        let e = Entry(path: "vault/p/a.md", type: .paper, title: "A",
                       author: [], year: nil, ratingScore: 0, themes: [],
                       preview: "", hasPDF: false)
         let client: VaultClient = StubVaultClient(entries: [e], texts: ["vault/p/a.md": "# A"])
@@ -26,7 +26,7 @@ import Testing
     }
 
     @Test func testStubSearchReturnsConfiguredHits() async throws {
-        let hit = SearchHit(entry: Entry(path: "vault/p/a.md", type: .paperAnalysis,
+        let hit = SearchHit(entry: Entry(path: "vault/p/a.md", type: .paper,
                               title: "A", author: [], year: nil, ratingScore: 0,
                               themes: [], preview: "", hasPDF: false),
                             score: 9, snippet: "…A…", source: "fulltext")

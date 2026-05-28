@@ -90,7 +90,10 @@ public struct CLIResponseData: Codable, Sendable {
 }
 
 /// Light projection of `Entry` — what list/search need without dragging derived
-/// caches across the wire. `type` is the raw EntryType rawValue (e.g. "paper-analysis").
+/// caches across the wire. `type` is the raw EntryType rawValue: one of the
+/// canonical Quasi short forms `paper / book / chapter / author / topic /
+/// journal / note / image`, or any unknown raw string preserved as-is for
+/// `.other(_)` entries (QUA-119).
 public struct EntryDigest: Codable, Sendable {
     public let path: String
     public let title: String?

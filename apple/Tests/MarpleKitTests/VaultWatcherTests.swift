@@ -26,7 +26,7 @@ import Testing
         let papers = vault.appendingPathComponent("papers")
         try FileManager.default.createDirectory(at: papers, withIntermediateDirectories: true)
         let file = papers.appendingPathComponent("a.md")
-        try "---\ntype: paper-analysis\ntitle: Before\n---\n".write(to: file, atomically: true, encoding: .utf8)
+        try "---\ntype: paper\ntitle: Before\n---\n".write(to: file, atomically: true, encoding: .utf8)
 
         let probe = Probe()
         let watcher = VaultWatcher(vaultDirectory: vault, debounce: 0.05) {
@@ -37,7 +37,7 @@ import Testing
 
         try? await Task.sleep(nanoseconds: 200_000_000)
         await probe.reset()
-        try "---\ntype: paper-analysis\ntitle: After\n---\n".write(to: file, atomically: true, encoding: .utf8)
+        try "---\ntype: paper\ntitle: After\n---\n".write(to: file, atomically: true, encoding: .utf8)
 
         try await expectFired(probe, message: "watcher should fire for nested markdown file content changes")
     }
