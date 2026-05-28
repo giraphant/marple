@@ -7,31 +7,41 @@ import MarpleKit
 struct EntryCard: View {
     let entry: Entry
     let imageOriginalURL: ((String) async -> URL?)?
+    /// Vault-conformance flag (missing required frontmatter for this type). Defaults
+    /// false so the card is identical when no schema snapshot exists.
+    let nonConforming: Bool
 
-    init(entry: Entry, imageOriginalURL: ((String) async -> URL?)? = nil) {
+    init(entry: Entry, nonConforming: Bool = false,
+         imageOriginalURL: ((String) async -> URL?)? = nil) {
         self.entry = entry
+        self.nonConforming = nonConforming
         self.imageOriginalURL = imageOriginalURL
     }
 
     var body: some View {
         if entry.type == .image {
-            ImageEntryCard(entry: entry, imageOriginalURL: imageOriginalURL)
+            ImageEntryCard(entry: entry, nonConforming: nonConforming,
+                           imageOriginalURL: imageOriginalURL)
         } else {
-            TextEntryCard(entry: entry)
+            TextEntryCard(entry: entry, nonConforming: nonConforming)
         }
     }
 }
 
 private struct TextEntryCard: View {
     let entry: Entry
+    var nonConforming: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s3) {
             MetaRow(entry: entry)
 
-            Text(entry.title ?? fallbackTitle)
-                .font(Typo.headline)
-                .lineLimit(2)
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                Text(entry.title ?? fallbackTitle)
+                    .font(Typo.headline)
+                    .lineLimit(2)
+                if nonConforming { ConformanceDot() }
+            }
 
             if !entry.preview.isEmpty {
                 Text(entry.preview)
@@ -53,6 +63,7 @@ private struct TextEntryCard: View {
 
 private struct ImageEntryCard: View {
     let entry: Entry
+    var nonConforming: Bool = false
     let imageOriginalURL: ((String) async -> URL?)?
     @State private var image: NSImage?
 
@@ -60,9 +71,12 @@ private struct ImageEntryCard: View {
         VStack(alignment: .leading, spacing: Space.s3) {
             imagePreview
 
-            Text(entry.title ?? fallbackTitle)
-                .font(Typo.headline)
-                .lineLimit(2)
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                Text(entry.title ?? fallbackTitle)
+                    .font(Typo.headline)
+                    .lineLimit(2)
+                if nonConforming { ConformanceDot() }
+            }
 
             MetaRow(entry: entry)
 
@@ -140,6 +154,17 @@ private struct MetaRow: View {
 
     private var hasMeta: Bool {
         !entry.author.isEmpty || (entry.year?.isEmpty == false) || entry.ratingScore > 0
+    }
+}
+
+/// Subtle orange marker that a card's doc is missing required frontmatter for its
+/// type, per `.quasi/schema.json`. See [[VaultConformance]].
+private struct ConformanceDot: View {
+    var body: some View {
+        Image(systemName: "circle.fill")
+            .font(.system(size: 6))
+            .foregroundStyle(.orange)
+            .help("缺少必填字段")
     }
 }
 
