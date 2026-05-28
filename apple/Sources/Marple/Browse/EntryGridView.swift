@@ -14,7 +14,8 @@ struct EntryGridView: View {
             ScrollView {
                 LazyVMasonry(model.visibleEntries, id: \.path,
                              columns: .adaptive(minSize: 260), spacing: Space.s5) { entry in
-                    EntryCard(entry: entry) { path in
+                    EntryCard(entry: entry,
+                              nonConforming: model.conformance(for: entry)?.isConforming == false) { path in
                         try? await model.client.imageOriginalURL(forImageEntryPath: path)
                     }
                     .onTapGesture { Task { await model.open(entry.path) } }

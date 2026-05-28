@@ -160,3 +160,23 @@ private func doiDisplayValue(_ doi: String) -> String {
     guard doi.count > 12 else { return doi }
     return String(doi.prefix(11)) + "…"
 }
+
+/// Human-readable label for a schema field name surfaced by the conformance
+/// checker. Falls back to the raw name for fields this build doesn't translate
+/// (a newer Quasi schema could add one) so the banner degrades gracefully.
+func conformanceFieldLabel(_ field: String) -> String {
+    switch field {
+    case "title":     return "标题"
+    case "name":      return "名称"
+    case "authors", "author": return "作者"
+    case "year":      return "年份"
+    case "journal":   return "期刊"
+    case "themes":    return "主题"
+    case "publisher": return "出版"
+    case "book":      return "书籍"
+    case "kind":      return "类型"
+    case "topic":     return "专题"
+    case "created":   return "创建"
+    default:          return field
+    }
+}
