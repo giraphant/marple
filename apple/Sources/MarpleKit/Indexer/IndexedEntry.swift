@@ -297,17 +297,8 @@ public func buildIndexedEntry(
         hasPDF(slug: slug, sourceSlugs: sourceSlugs)
     } ?? false
 
-    // 6. Title — note type prefers first_heading first.
-    let titleValue: String?
-    if entryType == "note" {
-        titleValue = firstHeading(body)
-            ?? truthyText(frontmatter, "title").map { stripWiki($0) }
-            ?? truthyText(frontmatter, "name").map { stripWiki($0) }
-    } else {
-        titleValue = (truthyText(frontmatter, "title")
-            ?? truthyText(frontmatter, "name"))
-            .map { stripWiki($0) }
-    }
+    // 6. Title.
+    let titleValue: String? = resolveTitle(frontmatter, type: entryType, body: body)
 
     // 7. Year and rating.
     //    field_json = fieldJSONCell(field(...))
