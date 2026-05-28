@@ -53,6 +53,33 @@ public func firstChineseH1(_ body: String) -> String? {
     return nil
 }
 
+// MARK: - resolveTitle
+
+/// Resolve an entry's main title.
+///
+/// Two distinct conventions, by type:
+/// - `note`: free-form documents whose title is the first heading in the body
+///   (any level), falling back to frontmatter `title` then `name`.
+/// - everything else: structured Quasi entries that always carry a frontmatter
+///   `title` (or `name`); the body is never consulted.
+///
+/// This is a separate concern from `titleCn`, which independently consults the
+/// body (a Chinese H1) only to enrich the localised subtitle of a `book`.
+public func resolveTitle(
+    _ map: [(String, YamlValue)],
+    type entryType: String,
+    body: String
+) -> String? {
+    if entryType == "note" {
+        return firstHeading(body)
+            ?? truthyText(map, "title").map { stripWiki($0) }
+            ?? truthyText(map, "name").map { stripWiki($0) }
+    }
+    return (truthyText(map, "title")
+        ?? truthyText(map, "name"))
+        .map { stripWiki($0) }
+}
+
 // MARK: - titleEn  (:991-995)
 
 /// Return the English title, checking `title_en` then `chapter_title_en`.
