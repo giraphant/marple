@@ -168,5 +168,19 @@ struct BrowseColumn: View {
         // because its restored selection is already legitimate from t=0.
         .opacity(model.isBootstrapping ? 0.0 : 1.0)
         .animation(.easeOut(duration: 0.22), value: model.isBootstrapping)
+        .overlay {
+            if model.isBootstrapping && model.isFirstRun {
+                ContentUnavailableView {
+                    Label("首次建立索引", systemImage: "books.vertical")
+                } description: {
+                    Text("正在解析您的文库,首次启动可能需要几分钟。完成后会自动加载,无需手动刷新。")
+                } actions: {
+                    ProgressView().controlSize(.small)
+                }
+                .transition(.opacity)
+            }
+        }
+        // A second animation scope covers the overlay transition.
+        .animation(.easeOut(duration: 0.22), value: model.isBootstrapping)
     }
 }

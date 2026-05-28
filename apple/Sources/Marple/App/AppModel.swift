@@ -20,6 +20,9 @@ final class AppModel {
     /// the two and would have rendered drop-zones during cold start.
     private(set) var isBootstrapping: Bool = true
 
+    /// True when this session has no reusable index sidecar.
+    let isFirstRun: Bool
+
     /// True while a post-bootstrap background reconcile + reload is running
     /// (deferred reconcile on the fast path, FSEvents watcher, future user-
     /// triggered refresh). Counter-backed so two reconciles overlapping don't
@@ -158,10 +161,12 @@ final class AppModel {
         didSet { persistTypeOrder() }
     }
 
-    init(client: VaultClient, stateStore: StateStore? = nil, semantic: (any SemanticBackend)? = nil) {
+    init(client: VaultClient, stateStore: StateStore? = nil,
+         semantic: (any SemanticBackend)? = nil, isFirstRun: Bool = false) {
         self.client = client
         self.stateStore = stateStore
         self.semantic = semantic
+        self.isFirstRun = isFirstRun
         if let s = stateStore?.load() {
             // QUA-105: seed `loadedCountsSnapshot` BEFORE the property setters
             // below trigger `persist()` via didSet. Otherwise the first persist
