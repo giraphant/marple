@@ -3,7 +3,7 @@ import Testing
 
 @Suite struct ThemeIndexTests {
     func e(_ path: String, _ themes: [String]) -> Entry {
-        Entry(path: path, type: .paperAnalysis, title: nil, author: [], year: nil,
+        Entry(path: path, type: .paper, title: nil, author: [], year: nil,
               ratingScore: 0, themes: themes, preview: "", hasPDF: false)
     }
 

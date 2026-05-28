@@ -71,7 +71,7 @@ import GRDB
 
     @Test func loadEntriesMapsColumns() throws {
         let path = try makeFixtureDB([
-            (path: "vault/papers/a.md", type: "paper-analysis", title: "Alpha",
+            (path: "vault/papers/a.md", type: "paper", title: "Alpha",
              themesJSON: #"["x","y"]"#, yearJSON: #""2014""#, hasPDF: 1, rating: 4.0, text: "alpha body"),
         ])
         let db = IndexDatabase(indexDBPath: path)
@@ -79,7 +79,7 @@ import GRDB
         #expect(entries.count == 1)
         let e = entries[0]
         #expect(e.path == "vault/papers/a.md")
-        #expect(e.type == .paperAnalysis)
+        #expect(e.type == .paper)
         #expect(e.title == "Alpha")
         #expect(e.themes == ["x", "y"])
         #expect(e.year == "2014")
@@ -89,7 +89,7 @@ import GRDB
 
     @Test func loadEntriesMapsBookCanonicalMetadataColumns() throws {
         let path = try makeFixtureDB([
-            (path: "vault/books/b.md", type: "book-overview", title: "Book",
+            (path: "vault/books/b.md", type: "book", title: "Book",
              themesJSON: nil, yearJSON: #""1934""#, hasPDF: 0, rating: 2.0, text: "book body"),
         ])
         let queue = try DatabaseQueue(path: path)
@@ -136,9 +136,9 @@ import GRDB
 
     @Test func searchMatchesChineseSubstring() throws {
         let path = try makeFixtureDB([
-            (path: "vault/papers/cn.md", type: "paper-analysis", title: "量表",
+            (path: "vault/papers/cn.md", type: "paper", title: "量表",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "拨号量表与感官"),
-            (path: "vault/papers/en.md", type: "paper-analysis", title: "Dial",
+            (path: "vault/papers/en.md", type: "paper", title: "Dial",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "dial gauge senses"),
         ])
         let db = IndexDatabase(indexDBPath: path)
@@ -153,11 +153,11 @@ import GRDB
         // and `%` as wildcards, so a raw query of "_" would match every row. The
         // fallback must escape them so they match only literal occurrences.
         let path = try makeFixtureDB([
-            (path: "vault/papers/under.md", type: "paper-analysis", title: "Under",
+            (path: "vault/papers/under.md", type: "paper", title: "Under",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "has a _ underscore"),
-            (path: "vault/papers/plain.md", type: "paper-analysis", title: "Plain",
+            (path: "vault/papers/plain.md", type: "paper", title: "Plain",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "no special chars here"),
-            (path: "vault/papers/pct.md", type: "paper-analysis", title: "Pct",
+            (path: "vault/papers/pct.md", type: "paper", title: "Pct",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "fifty % off"),
         ])
         let db = IndexDatabase(indexDBPath: path)
@@ -169,13 +169,13 @@ import GRDB
 
     @Test func searchRespectsTypeFilterAndLimit() throws {
         let path = try makeFixtureDB([
-            (path: "vault/papers/p.md", type: "paper-analysis", title: "P",
+            (path: "vault/papers/p.md", type: "paper", title: "P",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "shared keyword"),
             (path: "vault/notes/n.md", type: "note", title: "N",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "shared keyword"),
         ])
         let db = IndexDatabase(indexDBPath: path)
-        let onlyPapers = try db.search("shared", type: .paperAnalysis, minRating: nil, theme: nil, limit: 80)
+        let onlyPapers = try db.search("shared", type: .paper, minRating: nil, theme: nil, limit: 80)
         #expect(onlyPapers.map(\.entry.path) == ["vault/papers/p.md"])
         let limited = try db.search("shared", type: nil, minRating: nil, theme: nil, limit: 1)
         #expect(limited.count == 1)
@@ -187,7 +187,7 @@ import GRDB
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "repair keyword"),
         ])
         let db = IndexDatabase(indexDBPath: path)
-        let hits = try db.search("repair", type: .topicSynthesis, minRating: nil, theme: nil, limit: 80)
+        let hits = try db.search("repair", type: .topic, minRating: nil, theme: nil, limit: 80)
         #expect(hits.map(\.entry.path) == ["vault/topics/repair.md"])
     }
 
@@ -232,10 +232,10 @@ import GRDB
                                         has_pdf, preview, mtime, added)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    arguments: ["vault/papers/wal-test.md", "paper-analysis", "WAL Test Title",
+                    arguments: ["vault/papers/wal-test.md", "paper", "WAL Test Title",
                                 #""2023""#, 3.5, #"["regression"]"#, 1, "preview text", 1000, 2000])
                 try db.execute(sql: "INSERT INTO entry_trigram (path, type, text) VALUES (?, ?, ?)",
-                               arguments: ["vault/papers/wal-test.md", "paper-analysis", "WAL Test Title regression"])
+                               arguments: ["vault/papers/wal-test.md", "paper", "WAL Test Title regression"])
             }
             // `writer` deinits here — SQLite checkpoints the WAL.
         }
@@ -273,9 +273,9 @@ import GRDB
     /// the file to confirm the write happened.
     @Test func loadEntriesWritesCacheOnFirstCall() throws {
         let path = try makeFixtureDB([
-            (path: "vault/papers/a.md", type: "paper-analysis", title: "Alpha",
+            (path: "vault/papers/a.md", type: "paper", title: "Alpha",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "alpha"),
-            (path: "vault/papers/b.md", type: "paper-analysis", title: "Beta",
+            (path: "vault/papers/b.md", type: "paper", title: "Beta",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "beta"),
         ])
         let cachePath = Self.entriesCachePath(forDB: path)
@@ -294,14 +294,14 @@ import GRDB
     /// not we get the real DB rows.
     @Test func loadEntriesPrefersCacheWhenRevisionMatches() throws {
         let path = try makeFixtureDB([
-            (path: "vault/papers/sql.md", type: "paper-analysis", title: "From SQL",
+            (path: "vault/papers/sql.md", type: "paper", title: "From SQL",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "sql"),
         ])
         let cachePath = Self.entriesCachePath(forDB: path)
 
         // Hand-write a cache containing a synthetic entry that's NOT in the DB.
         // If loadEntries returns it, we know the cache path ran.
-        let synthetic = Entry(path: "vault/papers/synth.md", type: .paperAnalysis,
+        let synthetic = Entry(path: "vault/papers/synth.md", type: .paper,
                               title: "From Cache", author: [], year: nil,
                               ratingScore: 0, themes: [], preview: "",
                               hasPDF: false)
@@ -319,7 +319,7 @@ import GRDB
     /// loadEntries must fall back to SQL.
     @Test func loadEntriesInvalidatesCacheOnRevisionBump() throws {
         let path = try makeFixtureDB([
-            (path: "vault/papers/a.md", type: "paper-analysis", title: "Alpha",
+            (path: "vault/papers/a.md", type: "paper", title: "Alpha",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "alpha"),
         ])
         let cachePath = Self.entriesCachePath(forDB: path)
@@ -347,7 +347,7 @@ import GRDB
     /// A corrupt cache (garbage bytes) must be deleted and the SQL path used.
     @Test func loadEntriesRecoversFromCorruptCache() throws {
         let path = try makeFixtureDB([
-            (path: "vault/papers/a.md", type: "paper-analysis", title: "Alpha",
+            (path: "vault/papers/a.md", type: "paper", title: "Alpha",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "alpha"),
         ])
         let cachePath = Self.entriesCachePath(forDB: path)
@@ -367,11 +367,11 @@ import GRDB
     /// SQL path orders by path ascending so cache contents are stable.
     @Test func loadEntriesOrderedByPath() throws {
         let path = try makeFixtureDB([
-            (path: "vault/papers/zeta.md",  type: "paper-analysis", title: "Z",
+            (path: "vault/papers/zeta.md",  type: "paper", title: "Z",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "z"),
-            (path: "vault/papers/alpha.md", type: "paper-analysis", title: "A",
+            (path: "vault/papers/alpha.md", type: "paper", title: "A",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "a"),
-            (path: "vault/papers/mu.md",    type: "paper-analysis", title: "M",
+            (path: "vault/papers/mu.md",    type: "paper", title: "M",
              themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "m"),
         ])
         let db = IndexDatabase(indexDBPath: path)

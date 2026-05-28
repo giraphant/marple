@@ -9,7 +9,7 @@ struct YamlFrontmatterTests {
     @Test("Well-formed mapping: scalars + nested sequence")
     func wellFormedMapping() {
         let raw = """
-        type: paper-analysis
+        type: paper
         title: Hello
         year: 2019
         themes:
@@ -18,7 +18,7 @@ struct YamlFrontmatterTests {
         """
         let result = YamlFrontmatter.parseMapping(raw)
         let dict = Dictionary(uniqueKeysWithValues: result)
-        #expect(dict["type"] == .string("paper-analysis"))
+        #expect(dict["type"] == .string("paper"))
         #expect(dict["title"] == .string("Hello"))
         #expect(dict["year"] == .int(2019))
         #expect(dict["themes"] == .sequence([.string("ai"), .string("ethics")]))
@@ -30,14 +30,14 @@ struct YamlFrontmatterTests {
 
     @Test("Lenient rescue: unquoted inner colon in value — full YAML fails, lenient rescues both keys")
     func lenientRescueInnerColon() {
-        // "book: Understanding Dogs: A Study\ntype: book-overview"
+        // "book: Understanding Dogs: A Study\ntype: book"
         // serde_yaml / Yams will reject this because of the unquoted inner ':'
         // The lenient fallback must rescue BOTH keys.
-        let raw = "book: Understanding Dogs: A Study\ntype: book-overview"
+        let raw = "book: Understanding Dogs: A Study\ntype: book"
         let result = YamlFrontmatter.parseMapping(raw)
         let dict = Dictionary(uniqueKeysWithValues: result)
         #expect(dict["book"] == .string("Understanding Dogs: A Study"))
-        #expect(dict["type"] == .string("book-overview"))
+        #expect(dict["type"] == .string("book"))
         #expect(result.count == 2)
     }
 

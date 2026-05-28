@@ -20,7 +20,7 @@ public func splitAuthors(_ s: String?) -> [String] {
 public func buildAuthorIndex(_ entries: [Entry]) -> [String: [Entry]] {
     var idx: [String: [Entry]] = [:]
     for e in entries {
-        guard e.type == .paperAnalysis || e.type == .bookOverview else { continue }
+        guard e.type == .paper || e.type == .book else { continue }
         for name in e.author {
             idx[name.lowercased(), default: []].append(e)
         }
@@ -49,14 +49,14 @@ public func buildAnnotationIndex(_ entries: [Entry]) -> [String: [Entry]] {
 
 private func bookOverviewBySlug(_ entries: [Entry]) -> [String: Entry] {
     var out: [String: Entry] = [:]
-    for e in entries where e.type == .bookOverview {
+    for e in entries where e.type == .book {
         if let slug = bookSlug(e.path), out[slug] == nil { out[slug] = e }
     }
     return out
 }
 
 private func annotationAnchor(for entry: Entry, overviewBySlug: [String: Entry]) -> Entry {
-    if entry.type == .chapterSummary {
+    if entry.type == .chapter {
         let slug = entry.book ?? bookSlug(entry.path)
         if let slug, let overview = overviewBySlug[slug] { return overview }
     }
@@ -64,11 +64,12 @@ private func annotationAnchor(for entry: Entry, overviewBySlug: [String: Entry])
 }
 
 public struct Relations: Equatable, Sendable {
-    public var works: [Entry] = []          // author-profile: all works by this author
+    public var works: [Entry] = []          // author: all works by this author
     public var siblings: [Entry] = []       // paper/book: other works by same author(s)
     public var similar: [Entry] = []        // same-type entries sharing ≥2 themes (cap 6)
     public var annotations: [Entry] = []    // notes keyed by this entry's annotation anchor
-    public var authorProfile: Entry?        // paper/book: matching author-profile entry
+    public var authorProfile: Entry?        // paper/book: matching author entry (kept named
+                                            // `authorProfile` to disambiguate from `Entry.author: [String]`)
     public init() {}
 }
 
@@ -82,21 +83,21 @@ public func relations(for entry: Entry, in entries: [Entry],
     let anchor = annotationAnchor(for: entry, in: entries)
     out.annotations = (annotationIndex[anchor.path] ?? []).sorted(by: byRatingDesc)
 
-    if entry.type == .authorProfile {
+    if entry.type == .author {
         let key = (entry.title ?? "").lowercased().trimmingCharacters(in: .whitespaces)
         out.works = key.isEmpty ? [] : (authorIndex[key] ?? [])
             .filter { $0.path != entry.path }
             .sorted(by: byRatingDesc)
     }
 
-    if entry.type == .paperAnalysis || entry.type == .bookOverview {
+    if entry.type == .paper || entry.type == .book {
         var siblings: [Entry] = []
         var seen = Set<String>()
         for name in entry.author {
             let key = name.lowercased()
             if out.authorProfile == nil {
                 out.authorProfile = entries.first {
-                    $0.type == .authorProfile && ($0.title ?? "").lowercased() == key
+                    $0.type == .author && ($0.title ?? "").lowercased() == key
                 }
             }
             for w in authorIndex[key] ?? [] where w.path != entry.path && !seen.contains(w.path) {

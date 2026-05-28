@@ -170,55 +170,55 @@ struct IndexTitlesTests {
     @Test("titleCn: title_cn key → value")
     func titleCnFromTitleCn() {
         let map: [(String, YamlValue)] = [("title_cn", .string("犬的研究"))]
-        #expect(titleCn(map, type: "book-overview", title: nil, body: "") == "犬的研究")
+        #expect(titleCn(map, type: "book", title: nil, body: "") == "犬的研究")
     }
 
     @Test("titleCn: falls back to title_zh")
     func titleCnFallbackTitleZh() {
         let map: [(String, YamlValue)] = [("title_zh", .string("犬的研究"))]
-        #expect(titleCn(map, type: "book-overview", title: nil, body: "") == "犬的研究")
+        #expect(titleCn(map, type: "book", title: nil, body: "") == "犬的研究")
     }
 
     @Test("titleCn: falls back to chapter_title_cn")
     func titleCnFallbackChapterCn() {
         let map: [(String, YamlValue)] = [("chapter_title_cn", .string("第一章"))]
-        #expect(titleCn(map, type: "chapter-summary", title: nil, body: "") == "第一章")
+        #expect(titleCn(map, type: "chapter", title: nil, body: "") == "第一章")
     }
 
     @Test("titleCn: falls back to chapter_title_zh")
     func titleCnFallbackChapterZh() {
         let map: [(String, YamlValue)] = [("chapter_title_zh", .string("第一章"))]
-        #expect(titleCn(map, type: "chapter-summary", title: nil, body: "") == "第一章")
+        #expect(titleCn(map, type: "chapter", title: nil, body: "") == "第一章")
     }
 
-    @Test("titleCn: book-overview + no cn frontmatter, body has CJK H1 → fallback to H1")
+    @Test("titleCn: book + no cn frontmatter, body has CJK H1 → fallback to H1")
     func titleCnBookOverviewH1Fallback() {
         let body = "# English Title\n# 中文\n\nSome content."
-        #expect(titleCn([], type: "book-overview", title: "English Title", body: body) == "中文")
+        #expect(titleCn([], type: "book", title: "English Title", body: body) == "中文")
     }
 
-    @Test("titleCn: book-overview + body H1 == title → nil (no self-reference)")
+    @Test("titleCn: book + body H1 == title → nil (no self-reference)")
     func titleCnBookOverviewH1EqualTitle() {
         let body = "# 中文\n\nSome content."
-        #expect(titleCn([], type: "book-overview", title: "中文", body: body) == nil)
+        #expect(titleCn([], type: "book", title: "中文", body: body) == nil)
     }
 
-    @Test("titleCn: non-book-overview type → no H1 fallback")
+    @Test("titleCn: non-book type → no H1 fallback")
     func titleCnNonBookOverviewNoFallback() {
         let body = "# 中文\n\nSome content."
-        // paper-analysis should NOT fall back to H1
-        #expect(titleCn([], type: "paper-analysis", title: nil, body: body) == nil)
+        // paper should NOT fall back to H1
+        #expect(titleCn([], type: "paper", title: nil, body: body) == nil)
     }
 
     @Test("titleCn: strips wiki links")
     func titleCnStripWiki() {
         let map: [(String, YamlValue)] = [("title_cn", .string("[[path|中文标题]]"))]
-        #expect(titleCn(map, type: "paper-analysis", title: nil, body: "") == "中文标题")
+        #expect(titleCn(map, type: "paper", title: nil, body: "") == "中文标题")
     }
 
     @Test("titleCn: missing → nil")
     func titleCnMissing() {
-        #expect(titleCn([], type: "paper-analysis", title: nil, body: "") == nil)
+        #expect(titleCn([], type: "paper", title: nil, body: "") == nil)
     }
 
     // MARK: - translationTitleCn + translationDoubanUrl

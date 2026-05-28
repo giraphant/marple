@@ -6,7 +6,7 @@ import Testing
     @Test func bookRowsUseCanonicalMetadataOrderAndOmitTitle() {
         let entry = Entry(
             path: "vault/books/book.md",
-            type: .bookOverview,
+            type: .book,
             title: "The Long Title Should Stay In Reader",
             author: ["Lewis Mumford"],
             year: "1934",
@@ -35,7 +35,7 @@ import Testing
     @Test func bookRowsUseDoiOnlyWhenIsbnIsMissing() {
         let entry = Entry(
             path: "vault/books/book.md",
-            type: .bookOverview,
+            type: .book,
             title: "Book",
             author: ["Author"],
             year: "2020",
@@ -63,7 +63,7 @@ import Testing
     @Test func paperRowsUseCanonicalBibliographicOrder() {
         let entry = Entry(
             path: "vault/papers/paper.md",
-            type: .paperAnalysis,
+            type: .paper,
             title: "Paper",
             author: ["Alice"],
             year: "2024",
@@ -89,7 +89,7 @@ import Testing
     @Test func paperRowsFallBackToSourceWhenJournalIsMissing() {
         let entry = Entry(
             path: "vault/papers/paper.md",
-            type: .paperAnalysis,
+            type: .paper,
             title: "Paper",
             author: ["Alice"],
             year: "2024",
@@ -108,7 +108,7 @@ import Testing
     @Test func chapterRowsResolveBookSlugToBookTitleAndOmitTopic() {
         let entry = Entry(
             path: "vault/books/abbott-masking-in-the-pandemic-2023/ch01.md",
-            type: .chapterSummary,
+            type: .chapter,
             title: "Chapter",
             author: ["Alice"],
             year: "2024",
@@ -121,7 +121,7 @@ import Testing
         )
         let book = Entry(
             path: "vault/books/abbott-masking-in-the-pandemic-2023/00-overview.md",
-            type: .bookOverview,
+            type: .book,
             title: "Masking in the Pandemic",
             author: ["Abbott"],
             year: "2023",
@@ -142,7 +142,7 @@ import Testing
     @Test func authorRowsOnlyShowRating() {
         let entry = Entry(
             path: "vault/authors/alice.md",
-            type: .authorProfile,
+            type: .author,
             title: "Alice",
             author: [],
             year: nil,
@@ -158,7 +158,7 @@ import Testing
     @Test func topicRowsShowKindAndTopicWithoutRating() {
         let entry = Entry(
             path: "vault/topics/repair.md",
-            type: .topicSynthesis,
+            type: .topic,
             title: nil,
             author: [],
             year: nil,
@@ -213,7 +213,7 @@ import Testing
         )
         let target = Entry(
             path: "vault/books/book/ch01.md",
-            type: .chapterSummary,
+            type: .chapter,
             title: "第一章 维修与社会",
             author: ["Alice"],
             year: "2024",
