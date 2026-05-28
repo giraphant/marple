@@ -91,6 +91,7 @@ struct EntryListTable: NSViewRepresentable {
 
         private var items: [RowItem] = []
         private var lastSearchMode = false
+        private var lastSnapshot: SchemaSnapshot?
         private var isUpdatingSelection = false
         private var pendingReload = false
 
@@ -124,6 +125,7 @@ struct EntryListTable: NSViewRepresentable {
                 _ = model.searchMatchQuery
                 _ = model.matchExpanded
                 _ = model.matchJump
+                _ = model.schemaSnapshot
                 for entry in model.visibleEntries {
                     _ = model.searchMatches[entry.path]?.lines.count
                 }
@@ -154,11 +156,16 @@ struct EntryListTable: NSViewRepresentable {
             // search-mode flip swaps row-view classes (default ↔ group),
             // require a full reloadData even if items happen to compare equal
             let searchModeFlipped = newSearchMode != lastSearchMode
+            // conformance dots are computed at configure-time, not encoded in
+            // RowItem; a snapshot nil→present/version change with unchanged
+            // entries must still repaint, so force a reload on snapshot drift.
+            let snapshotChanged = model.schemaSnapshot != lastSnapshot
 
-            if itemsChanged || searchModeFlipped {
+            if itemsChanged || searchModeFlipped || snapshotChanged {
                 let wasSearchMode = lastSearchMode
                 items = newItems
                 lastSearchMode = newSearchMode
+                lastSnapshot = model.schemaSnapshot
                 NSAnimationContext.beginGrouping()
                 NSAnimationContext.current.duration = 0
                 table.reloadData()
@@ -289,7 +296,8 @@ struct EntryListTable: NSViewRepresentable {
                 let cell = tableView.makeView(withIdentifier: Self.headerCellID, owner: self) as? EntryHeaderCell
                     ?? EntryHeaderCell()
                 cell.identifier = Self.headerCellID
-                cell.configure(entry: entry)
+                cell.configure(entry: entry,
+                               nonConforming: model.conformance(for: entry)?.isConforming == false)
                 return cell
             case .match(_, let line):
                 let cell = tableView.makeView(withIdentifier: Self.matchCellID, owner: self) as? MatchLineCell
@@ -580,8 +588,8 @@ private final class EntryGroupRowView: NSTableRowView {
 private final class EntryHeaderCell: NSTableCellView {
     private var hostingView: NSHostingView<EntryRow>?
 
-    func configure(entry: Entry) {
-        let root = EntryRow(entry: entry)
+    func configure(entry: Entry, nonConforming: Bool) {
+        let root = EntryRow(entry: entry, nonConforming: nonConforming)
         if let view = hostingView {
             view.rootView = root
         } else {

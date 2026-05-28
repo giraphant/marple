@@ -123,6 +123,26 @@ private struct MarkerRow<Content: View>: View {
     }
 }
 
+/// Auxiliary conformance flag: lists the required frontmatter fields this entry's
+/// canonical type is missing, per the vault's `.quasi/schema.json`. Only rendered
+/// when a snapshot exists AND the entry is non-conforming — otherwise the caller
+/// shows nothing, so the inspector is byte-identical to a vault with no snapshot.
+private struct ConformanceBanner: View {
+    let missing: [String]
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: InspectorStyle.markerSize, weight: .medium))
+                .foregroundStyle(.orange)
+            Text("缺少必填：" + missing.map(conformanceFieldLabel).joined(separator: "、"))
+                .font(Typo.caption)
+                .foregroundStyle(InspectorStyle.rowLabelColor)
+        }
+        .frame(minHeight: InspectorStyle.rowHeight)
+    }
+}
+
 // MARK: - 统计
 
 private struct StatsSection: View {
@@ -297,6 +317,9 @@ private struct InfoSection: View {
                     SectionHeader("信息")
                     if let err = model.writeError {
                         Text("保存失败：\(err)").font(.caption).foregroundStyle(.red)
+                    }
+                    if let result = model.conformance(for: e), !result.isConforming {
+                        ConformanceBanner(missing: result.missingRequired)
                     }
                     VStack(alignment: .leading, spacing: 0) {
                         InspectorInfoRowsView(model: model, entry: e)
