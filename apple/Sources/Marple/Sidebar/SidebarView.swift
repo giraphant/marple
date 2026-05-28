@@ -19,7 +19,9 @@ struct SidebarView: View {
     /// "正在建立索引…" is the more accurate user-facing wording for that. The
     /// footer disappears entirely when neither flag is set. QUA-105.
     private var statusLabel: String? {
-        if model.isBootstrapping { return "正在建立索引…" }
+        if model.isBootstrapping {
+            return model.isFirstRun ? nil : "正在建立索引…"
+        }
         if model.isRefreshing { return "正在更新索引…" }
         return nil
     }
