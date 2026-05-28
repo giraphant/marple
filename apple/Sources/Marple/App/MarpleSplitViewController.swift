@@ -144,6 +144,22 @@ private struct Chrome<Content: View>: View {
     }
 }
 
+struct IndexLoadingPresentation {
+    let isBootstrapping: Bool
+    let isFirstRun: Bool
+
+    var title: String? {
+        guard isBootstrapping else { return nil }
+        return isFirstRun ? "首次建立索引" : "正在加载索引"
+    }
+
+    var message: String {
+        isFirstRun
+        ? "正在解析您的文库，首次启动可能需要几分钟。完成后会自动加载，无需手动刷新。"
+        : "正在读取本地索引，完成后会自动加载。"
+    }
+}
+
 /// The middle column (browse list/grid, or themes/trash), lifted out of RootView so
 /// it can be hosted on its own.
 struct BrowseColumn: View {
@@ -169,11 +185,13 @@ struct BrowseColumn: View {
         .opacity(model.isBootstrapping ? 0.0 : 1.0)
         .animation(.easeOut(duration: 0.22), value: model.isBootstrapping)
         .overlay {
-            if model.isBootstrapping && model.isFirstRun {
+            let presentation = IndexLoadingPresentation(isBootstrapping: model.isBootstrapping,
+                                                        isFirstRun: model.isFirstRun)
+            if let title = presentation.title {
                 ContentUnavailableView {
-                    Label("首次建立索引", systemImage: "books.vertical")
+                    Label(title, systemImage: "books.vertical")
                 } description: {
-                    Text("正在解析您的文库,首次启动可能需要几分钟。完成后会自动加载,无需手动刷新。")
+                    Text(presentation.message)
                 } actions: {
                     ProgressView().controlSize(.small)
                 }

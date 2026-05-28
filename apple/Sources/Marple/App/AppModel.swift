@@ -26,9 +26,7 @@ final class AppModel {
     /// True while a post-bootstrap background reconcile + reload is running
     /// (deferred reconcile on the fast path, FSEvents watcher, future user-
     /// triggered refresh). Counter-backed so two reconciles overlapping don't
-    /// race the indicator off and on. The sidebar status row reads this to
-    /// surface "正在更新索引…" without the heavier "正在建立索引…" wording
-    /// that `isBootstrapping` carries. QUA-105.
+    /// race the future refresh affordance off and on.
     private var refreshingCount: Int = 0
     var isRefreshing: Bool { refreshingCount > 0 }
     func beginRefreshing() { refreshingCount += 1 }
