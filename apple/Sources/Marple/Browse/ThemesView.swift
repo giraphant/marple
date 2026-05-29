@@ -26,6 +26,6 @@ struct ThemesView: View {
             }
             .padding(16)
         }
-        .navigationTitle("主题 (\(model.themeIndex.count))")
+        .navigationTitle("标签 (\(model.themeIndex.count))")
     }
 }

@@ -67,7 +67,7 @@ public extension EntryType {
         case .paper:   return "论文"
         case .book:    return "图书"
         case .author:  return "作者"
-        case .topic:   return "主题"
+        case .topic:   return "专题"
         case .journal: return "期刊"
         case .chapter: return "章节"
         case .note:    return "笔记"
@@ -90,6 +90,12 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public let year: String?
     public let ratingScore: Double
     public let themes: [String]
+    /// Topic-corpus membership (slug array), mirroring `themes`. A "reverse member"
+    /// join key: an entity declares which topic corpora it belongs to. Optional in
+    /// the Quasi schema (never `required`), so it is read straight from frontmatter
+    /// — the schema snapshot never advertises it. Pairs with the topic page body's
+    /// `[[wikilink]]`s to form a bidirectional index (QUA-137).
+    public let topics: [String]
     public let preview: String
     public let hasPDF: Bool
     public let pdfSlug: String?
@@ -97,7 +103,6 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public let added: Double?
     public let source: String?
     public let book: String?
-    public let topic: String?
     public let kind: String?
     public let journal: String?
     public let doi: String?
@@ -110,10 +115,10 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case path, type, title, author, year, preview
         case ratingScore = "rating_score"
-        case themes
+        case themes, topics
         case hasPDF = "has_pdf"
         case pdfSlug = "pdf_slug"
-        case mtime, added, source, book, topic, kind, journal, doi, publisher, isbn, category, annotates, created
+        case mtime, added, source, book, kind, journal, doi, publisher, isbn, category, annotates, created
     }
 
     public init(from decoder: Decoder) throws {
@@ -133,6 +138,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         preview = (try? c.decodeIfPresent(String.self, forKey: .preview)) ?? ""
         ratingScore = (try? c.decodeIfPresent(Double.self, forKey: .ratingScore)) ?? 0
         themes = (try? c.decodeIfPresent([String].self, forKey: .themes)) ?? []
+        topics = (try? c.decodeIfPresent([String].self, forKey: .topics)) ?? []
         hasPDF = (try? c.decodeIfPresent(Bool.self, forKey: .hasPDF)) ?? false
         pdfSlug = try? c.decodeIfPresent(String.self, forKey: .pdfSlug)
         if let s = try? c.decodeIfPresent(String.self, forKey: .year) {
@@ -148,7 +154,6 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         added = (try? c.decodeIfPresent(Double.self, forKey: .added)) ?? nil
         source = (try? c.decodeIfPresent(String.self, forKey: .source)) ?? nil
         book = (try? c.decodeIfPresent(String.self, forKey: .book)) ?? nil
-        topic = (try? c.decodeIfPresent(String.self, forKey: .topic)) ?? nil
         kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? nil
         journal = (try? c.decodeIfPresent(String.self, forKey: .journal)) ?? nil
         doi = (try? c.decodeIfPresent(String.self, forKey: .doi)) ?? nil
@@ -161,9 +166,10 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
 
     public init(path: String, type: EntryType, title: String?, author: [String],
                 year: String?, ratingScore: Double, themes: [String],
+                topics: [String] = [],
                 preview: String, hasPDF: Bool, pdfSlug: String? = nil,
                 mtime: Double? = nil, added: Double? = nil, source: String? = nil,
-                book: String? = nil, topic: String? = nil, kind: String? = nil,
+                book: String? = nil, kind: String? = nil,
                 journal: String? = nil, doi: String? = nil, publisher: String? = nil,
                 isbn: String? = nil, category: String? = nil, annotates: String? = nil,
                 created: String? = nil) {
@@ -174,6 +180,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         self.year = year
         self.ratingScore = ratingScore
         self.themes = themes
+        self.topics = topics
         self.preview = preview
         self.hasPDF = hasPDF
         self.pdfSlug = pdfSlug
@@ -181,7 +188,6 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         self.added = added
         self.source = source
         self.book = book
-        self.topic = topic
         self.kind = kind
         self.journal = journal
         self.doi = doi
@@ -200,13 +206,14 @@ public extension Entry {
     /// (`[String]`) already encodes "empty" — pass `[]` to clear.
     func with(title: String?? = nil, author: [String]? = nil,
               ratingScore: Double? = nil, year: String?? = nil, source: String?? = nil,
-              topic: String?? = nil, doi: String?? = nil, themes: [String]? = nil) -> Entry {
+              doi: String?? = nil, themes: [String]? = nil, topics: [String]? = nil) -> Entry {
         Entry(path: path, type: type, title: title ?? self.title,
               author: author ?? self.author,
               year: year ?? self.year, ratingScore: ratingScore ?? self.ratingScore,
-              themes: themes ?? self.themes, preview: preview, hasPDF: hasPDF,
+              themes: themes ?? self.themes, topics: topics ?? self.topics,
+              preview: preview, hasPDF: hasPDF,
               pdfSlug: pdfSlug, mtime: mtime, added: added, source: source ?? self.source,
-              book: book, topic: topic ?? self.topic, kind: kind, journal: journal,
+              book: book, kind: kind, journal: journal,
               doi: doi ?? self.doi, publisher: publisher, isbn: isbn, category: category,
               annotates: annotates, created: created)
     }

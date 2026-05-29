@@ -53,7 +53,7 @@ public enum IndexWriter {
               rating_json TEXT,
               rating_score REAL NOT NULL DEFAULT 0,
               themes_json TEXT,
-              topic TEXT,
+              topics_json TEXT,
               kind TEXT,
               journal TEXT,
               source TEXT,
@@ -153,6 +153,10 @@ public enum IndexWriter {
             // serde_json::to_string of a String array → compact JSON array
             "[" + themes.map { jsonEncodeStringLiteral($0) }.joined(separator: ",") + "]"
         }
+        // topics: same compact-JSON-array shape as themes_json (QUA-137).
+        let topicsJSONStr: String? = entry.topics.map { topics in
+            "[" + topics.map { jsonEncodeStringLiteral($0) }.joined(separator: ",") + "]"
+        }
         // Author column stores a JSON array (same shape as themes_json) so
         // round-trips are lossless even when individual names contain commas
         // (e.g. "Smith, John Jr." stays one author). The legacy joined-string
@@ -165,7 +169,7 @@ public enum IndexWriter {
             sql: """
                 INSERT INTO entries (
                   path, type, book, title, title_en, title_cn, author, year_json, rating_json,
-                  rating_score, themes_json, topic, kind, journal, source, doi, publisher, isbn, category,
+                  rating_score, themes_json, topics_json, kind, journal, source, doi, publisher, isbn, category,
                   translation_title_cn, translation_douban_url, chapters_analyzed,
                   annotates, created, pdf_slug, has_pdf, mtime, preview, body_len, added
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -182,7 +186,7 @@ public enum IndexWriter {
                 entry.ratingJSON,       // already-built JSON string or nil
                 entry.ratingScore,
                 themesJSONStr,
-                entry.topic,
+                topicsJSONStr,
                 entry.kind,
                 entry.journal,
                 entry.source,

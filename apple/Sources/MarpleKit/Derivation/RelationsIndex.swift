@@ -68,6 +68,7 @@ public struct Relations: Equatable, Sendable {
     public var siblings: [Entry] = []       // paper/book: other works by same author(s)
     public var similar: [Entry] = []        // same-type entries sharing ≥2 themes (cap 6)
     public var annotations: [Entry] = []    // notes keyed by this entry's annotation anchor
+    public var topicMembers: [Entry] = []   // topic: entries declaring membership via `topics:`
     public var authorProfile: Entry?        // paper/book: matching author entry (kept named
                                             // `authorProfile` to disambiguate from `Entry.author: [String]`)
     public init() {}
@@ -78,10 +79,17 @@ private func byRatingDesc(_ a: Entry, _ b: Entry) -> Bool { a.ratingScore > b.ra
 /// Compute knowledge relations for `entry`. Ports the PropertyPanel backlinks memo.
 public func relations(for entry: Entry, in entries: [Entry],
                       authorIndex: [String: [Entry]],
-                      annotationIndex: [String: [Entry]]) -> Relations {
+                      annotationIndex: [String: [Entry]],
+                      topicMembership: TopicMembership = TopicMembership()) -> Relations {
     var out = Relations()
     let anchor = annotationAnchor(for: entry, in: entries)
     out.annotations = (annotationIndex[anchor.path] ?? []).sorted(by: byRatingDesc)
+
+    if entry.type == .topic, let slug = topicSlug(entry.path) {
+        out.topicMembers = (topicMembership.membersBySlug[slug] ?? [])
+            .filter { $0.path != entry.path }
+            .sorted(by: byRatingDesc)
+    }
 
     if entry.type == .author {
         let key = (entry.title ?? "").lowercased().trimmingCharacters(in: .whitespaces)

@@ -15,7 +15,6 @@ import Testing
             preview: "",
             hasPDF: false,
             source: "legacy source",
-            topic: "legacy topic",
             doi: "10.1234/book-doi",
             publisher: "Harcourt Brace",
             isbn: "978-0-262-13472-9",
@@ -72,7 +71,6 @@ import Testing
             preview: "",
             hasPDF: false,
             source: "legacy source",
-            topic: "legacy topic",
             journal: "Journal of Repair Studies",
             doi: "10.1234/paper"
         )
@@ -116,8 +114,7 @@ import Testing
             themes: [],
             preview: "",
             hasPDF: false,
-            book: "abbott-masking-in-the-pandemic-2023",
-            topic: "legacy topic"
+            book: "abbott-masking-in-the-pandemic-2023"
         )
         let book = Entry(
             path: "vault/books/abbott-masking-in-the-pandemic-2023/00-overview.md",
@@ -155,24 +152,60 @@ import Testing
         #expect(inspectorInfoRows(for: entry) == [.rating])
     }
 
-    @Test func topicRowsShowKindAndTopicWithoutRating() {
+    @Test func topicRowsShowKindWithoutRatingOrTopicScalar() {
+        // Schema 0.4.0: the singular `topic` scalar is gone; a topic page's
+        // identity is its directory slug + H1, so only `kind` surfaces here.
         let entry = Entry(
-            path: "vault/topics/repair.md",
+            path: "vault/topics/repair/00-overview.md",
             type: .topic,
-            title: nil,
+            title: "维修",
             author: [],
             year: nil,
             ratingScore: 4,
             themes: [],
             preview: "",
             hasPDF: false,
-            topic: "repair",
             kind: "resources"
         )
 
         #expect(inspectorInfoRows(for: entry) == [
             .readOnlyScalar(label: "类型", value: "资源", copyValue: "resources"),
-            .readOnlyScalar(label: "专题", value: "repair", copyValue: nil),
+        ])
+    }
+
+    @Test func topicsMembershipRowResolvesSlugsToTopicTitlesBeforeRating() {
+        // A paper declaring `topics:` membership shows a read-only "专题"
+        // row, with each slug resolved to its topic page's title when loaded
+        // (falling back to the raw slug), inserted just above the rating row.
+        let paper = Entry(
+            path: "vault/papers/p.md",
+            type: .paper,
+            title: "P",
+            author: ["Alice"],
+            year: "2024",
+            ratingScore: 3,
+            themes: [],
+            topics: ["smartphone-repair", "unknown-slug"],
+            preview: "",
+            hasPDF: false
+        )
+        let topicPage = Entry(
+            path: "vault/topics/smartphone-repair/00-overview.md",
+            type: .topic,
+            title: "智能手机维修",
+            author: [],
+            year: nil,
+            ratingScore: 0,
+            themes: [],
+            preview: "",
+            hasPDF: false
+        )
+
+        #expect(inspectorInfoRows(for: paper, in: [paper, topicPage]) == [
+            .authors,
+            .readOnlyScalar(label: "年份", value: "2024", copyValue: nil),
+            .readOnlyScalar(label: "专题", value: "智能手机维修 · unknown-slug", copyValue: nil),
+            .rating,
         ])
     }
 
@@ -240,8 +273,7 @@ import Testing
             themes: [],
             preview: "",
             hasPDF: false,
-            source: "legacy source",
-            topic: "legacy topic"
+            source: "legacy source"
         )
 
         #expect(inspectorInfoRows(for: entry) == [

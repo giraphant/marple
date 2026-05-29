@@ -5,13 +5,13 @@ import Testing
     /// Test factory — accepts a legacy joined-string `author` for terseness;
     /// `splitAuthors` converts it to the canonical `[String]` on construction.
     func e(_ path: String, type: EntryType = .paper, title: String? = nil,
-           author: String? = nil, themes: [String] = [], topic: String? = nil,
+           author: String? = nil, themes: [String] = [], topics: [String] = [],
            source: String? = nil, book: String? = nil, year: String? = nil,
            preview: String = "", doi: String? = nil, rating: Double = 0) -> Entry {
         Entry(path: path, type: type, title: title,
               author: splitAuthors(author), year: year,
-              ratingScore: rating, themes: themes, preview: preview, hasPDF: false,
-              source: source, book: book, topic: topic, doi: doi)
+              ratingScore: rating, themes: themes, topics: topics, preview: preview,
+              hasPDF: false, source: source, book: book, doi: doi)
     }
 
     func paths(_ entries: [Entry], _ query: String) -> [String] {

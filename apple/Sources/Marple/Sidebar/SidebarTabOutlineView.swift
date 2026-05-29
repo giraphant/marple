@@ -348,7 +348,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             switch loc.pane {
             case .type(let type): return type.label
             case .theme(let name): return "#\(name)"
-            case .themesIndex: return "主题"
+            case .themesIndex: return "标签"
             case .trash: return "回收站"
             }
         }

@@ -5,11 +5,12 @@ import Testing
     /// Test factory — accepts a legacy joined-string `author` for terseness;
     /// `splitAuthors` converts it to the canonical `[String]` on construction.
     func mk(_ path: String, _ type: String, title: String? = nil, author: String? = nil,
-            themes: [String] = [], rating: Double = 0, book: String? = nil,
+            themes: [String] = [], topics: [String] = [], rating: Double = 0, book: String? = nil,
             annotates: String? = nil) -> Entry {
         Entry(path: path, type: EntryType(rawValue: type), title: title,
               author: splitAuthors(author),
-              year: nil, ratingScore: rating, themes: themes, preview: "", hasPDF: false,
+              year: nil, ratingScore: rating, themes: themes, topics: topics,
+              preview: "", hasPDF: false,
               book: book, annotates: annotates)
     }
 
@@ -95,6 +96,22 @@ import Testing
                             authorIndex: buildAuthorIndex(entries),
                             annotationIndex: buildAnnotationIndex(entries))
         #expect(rel.similar.map(\.path) == ["vault/papers/b.md"])
+    }
+
+    @Test func topicPageShowsEntriesDeclaringTopicMembership() {
+        let topic = mk("vault/topics/repair/00-overview.md", "topic", title: "Repair")
+        let paper = mk("vault/papers/p.md", "paper", topics: ["repair"], rating: 2)
+        let book = mk("vault/books/b/00-overview.md", "book", topics: ["repair"], rating: 3)
+        let other = mk("vault/papers/other.md", "paper", topics: ["hci"], rating: 5)
+        let entries = [topic, paper, book, other]
+        let topicMembership = buildTopicMembership(entries)
+
+        let rel = relations(for: topic, in: entries,
+                            authorIndex: buildAuthorIndex(entries),
+                            annotationIndex: buildAnnotationIndex(entries),
+                            topicMembership: topicMembership)
+
+        #expect(rel.topicMembers.map(\.path) == ["vault/books/b/00-overview.md", "vault/papers/p.md"])
     }
 
     @Test func worksForAuthorProfile() {

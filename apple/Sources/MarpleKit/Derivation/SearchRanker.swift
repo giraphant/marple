@@ -3,7 +3,7 @@ import Darwin
 
 /// In-memory, field-weighted entry ranker — port of the web reader's
 /// `src/search.ts`. Powers the command palette's 快速 (metadata) mode: it scores
-/// title/author/book/themes/topic/source/year/path/preview/identifier with the
+/// title/author/book/themes/topics/source/year/path/preview/identifier with the
 /// same weights, boundary/exact-word boosts, phrase bonus, single-field bonus,
 /// rating tiebreak, and ASCII fuzzy fallback the web uses.
 ///
@@ -59,7 +59,7 @@ private let fieldDefinitions: [FieldDefinition] = [
     FieldDefinition(name: "author",     weight:  70.0, fuzzy: true),
     FieldDefinition(name: "book",       weight:  62.0, fuzzy: true),
     FieldDefinition(name: "themes",     weight:  56.0, fuzzy: true),
-    FieldDefinition(name: "topic",      weight:  50.0, fuzzy: true),
+    FieldDefinition(name: "topics",     weight:  50.0, fuzzy: true),
     FieldDefinition(name: "source",     weight:  44.0, fuzzy: true),
     FieldDefinition(name: "year",       weight:  36.0, fuzzy: false),
     FieldDefinition(name: "path",       weight:  26.0, fuzzy: false),
@@ -266,7 +266,7 @@ private func entryFields(_ entry: Entry) -> [SearchField] {
         entry.author.joined(separator: ", "),
         entry.book ?? "",
         entry.themes.joined(separator: " "),
-        entry.topic ?? "",
+        entry.topics.joined(separator: " "),
         entry.source ?? "",
         entry.year ?? "",
         entry.path,
