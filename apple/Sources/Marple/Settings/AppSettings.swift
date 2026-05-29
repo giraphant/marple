@@ -16,6 +16,10 @@ enum SettingsKeys {
     static let originalClickAction = "marple.originalClickAction"
     // QUA-107: opt-in switch for the local CLI socket server (off by default).
     static let cliServerEnabled = "marple.cliServerEnabled"
+    // QUA-106: local APFS-snapshot backups. Enabled by default (cheap + a safety
+    // feature). `backupLocation` empty ⇒ ~/Library/Application Support/Marple/Backups/.
+    static let backupEnabled = "marple.backupEnabled"
+    static let backupLocation = "marple.backupLocation"
 }
 
 /// What a single click on the 引用 toolbar button does. Right-click always shows
