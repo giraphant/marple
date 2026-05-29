@@ -14,6 +14,11 @@ enum SettingsKeys {
     static let citationFormat = "marple.citationFormat"
     static let citationClickAction = "marple.citationClickAction"
     static let originalClickAction = "marple.originalClickAction"
+    static let supersetWorkspaceID = "marple.supersetWorkspaceID"
+    static let supersetAgent = "marple.supersetAgent"
+    static let supersetCLIPath = "marple.supersetCLIPath"
+    static let supersetReanalyzePrompt = "marple.supersetReanalyzePrompt"
+    static let supersetFormatPrompt = "marple.supersetFormatPrompt"
     // QUA-107: opt-in switch for the local CLI socket server (off by default).
     static let cliServerEnabled = "marple.cliServerEnabled"
     // QUA-106: local APFS-snapshot backups. Enabled by default (cheap + a safety

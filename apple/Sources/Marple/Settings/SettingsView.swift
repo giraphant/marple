@@ -19,7 +19,7 @@ struct SettingsView: View {
             BackupSettings()
                 .tabItem { Label("备份", systemImage: "clock.arrow.circlepath") }
         }
-        .frame(width: 480, height: 380)
+        .frame(width: 620, height: 560)
     }
 }
 
@@ -124,6 +124,37 @@ private struct EditorPicker: View {
     }
 }
 
+private struct PromptTemplateEditor: View {
+    let title: String
+    @Binding var prompt: String
+    let defaultPrompt: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            HStack {
+                Text(title)
+                Spacer()
+                Button("恢复默认") { prompt = "" }
+                    .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $prompt)
+                    .font(.body)
+                    .frame(minHeight: 72)
+                    .padding(4)
+                    .background(Color(.textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(defaultPrompt)
+                        .foregroundStyle(Color(.placeholderTextColor))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 12)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - 工具栏
 
 private struct ToolbarSettings: View {
@@ -163,9 +194,65 @@ private struct ToolbarSettings: View {
 /// the listener live (no relaunch needed).
 private struct AIBridgeSettings: View {
     @AppStorage(SettingsKeys.cliServerEnabled) private var enabled = false
+    @AppStorage(SettingsKeys.supersetWorkspaceID) private var supersetWorkspaceID = ""
+    @AppStorage(SettingsKeys.supersetAgent) private var supersetAgent = "claude"
+    @AppStorage(SettingsKeys.supersetCLIPath) private var supersetCLIPath = "superset"
+    @AppStorage(SettingsKeys.supersetReanalyzePrompt) private var supersetReanalyzePrompt = ""
+    @AppStorage(SettingsKeys.supersetFormatPrompt) private var supersetFormatPrompt = ""
+    @State private var discoveredWorkspaces: [SupersetWorkspace] = []
+    @State private var workspaceLookupMessage: String?
+    @State private var workspaceLookupIsError = false
+    @State private var isLoadingWorkspaces = false
 
     var body: some View {
         Form {
+            Section("Reader AI 助手") {
+                HStack {
+                    TextField("Superset workspace ID", text: $supersetWorkspaceID)
+                        .textFieldStyle(.roundedBorder)
+                    Button(isLoadingWorkspaces ? "获取中…" : "获取") {
+                        Task { await refreshSupersetWorkspaces() }
+                    }
+                    .disabled(isLoadingWorkspaces)
+                }
+                if !discoveredWorkspaces.isEmpty {
+                    Picker("已发现", selection: $supersetWorkspaceID) {
+                        ForEach(discoveredWorkspaces) { workspace in
+                            Text(workspace.displayName).tag(workspace.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                if let workspaceLookupMessage {
+                    Text(workspaceLookupMessage)
+                        .font(.caption)
+                        .foregroundStyle(workspaceLookupIsError ? Color.red : Color(.secondaryLabelColor))
+                }
+                TextField("Agent", text: $supersetAgent)
+                    .textFieldStyle(.roundedBorder)
+                TextField("CLI 路径", text: $supersetCLIPath)
+                    .textFieldStyle(.roundedBorder)
+                Text("默认通过 PATH 调用 `superset`；也可以填写绝对路径。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("AI 咒语") {
+                PromptTemplateEditor(
+                    title: SupersetAction.reanalyze.label,
+                    prompt: $supersetReanalyzePrompt,
+                    defaultPrompt: SupersetAction.reanalyze.defaultPromptIntent
+                )
+                PromptTemplateEditor(
+                    title: SupersetAction.format.label,
+                    prompt: $supersetFormatPrompt,
+                    defaultPrompt: SupersetAction.format.defaultPromptIntent
+                )
+                Text("支持变量：`{{action}}`、`{{target_relative_path}}`、`{{target_absolute_path}}`、`{{context_package_path}}`。Marple 会固定追加安全边界：先读上下文包，只编辑目标文件。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("命令行接入") {
                 Toggle("允许 marple-cli 接入", isOn: $enabled)
                 Text("打开后,Marple 会在 ~/Library/Application Support/Marple/cli.sock 监听本机 AI 客户端。关闭时监听器不存在,资源占用为零。")
@@ -173,6 +260,36 @@ private struct AIBridgeSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    @MainActor private func refreshSupersetWorkspaces() async {
+        isLoadingWorkspaces = true
+        workspaceLookupMessage = nil
+        workspaceLookupIsError = false
+        defer { isLoadingWorkspaces = false }
+
+        do {
+            let workspaces = try await SupersetRunner().listWorkspaces(cliPath: supersetCLIPath)
+            discoveredWorkspaces = workspaces
+            let ids = workspaces.map(\.id)
+            if let first = workspaces.first {
+                if supersetWorkspaceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !ids.contains(supersetWorkspaceID) {
+                    supersetWorkspaceID = first.id
+                }
+                workspaceLookupMessage = workspaces.count == 1 ? "已填入 workspace ID：\(first.displayName)" : "找到 \(workspaces.count) 个本机 workspace，请选择一个。"
+            } else {
+                workspaceLookupIsError = true
+                workspaceLookupMessage = "没有找到本机 Superset workspace。"
+            }
+        } catch let error as SupersetWorkspaceListError {
+            workspaceLookupIsError = true
+            workspaceLookupMessage = error.friendlyMessage
+            print("[marple] Superset workspace lookup FAILED: \(error)")
+        } catch {
+            workspaceLookupIsError = true
+            workspaceLookupMessage = "无法获取 Superset workspace，请查看日志。"
+            print("[marple] Superset workspace lookup FAILED: \(error)")
+        }
     }
 }
 

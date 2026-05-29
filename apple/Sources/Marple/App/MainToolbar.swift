@@ -47,6 +47,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
     // Reused so menuNeedsUpdate can tell them apart (NSMenu has no stable identifier).
     private lazy var citationMenu: NSMenu = { let m = NSMenu(); m.delegate = self; return m }()
     private lazy var originalMenu: NSMenu = { let m = NSMenu(); m.delegate = self; return m }()
+    private lazy var assistantMenu: NSMenu = { let m = NSMenu(); m.delegate = self; return m }()
 
     func makeToolbar() -> NSToolbar {
         let tb = NSToolbar(identifier: "MarpleMainToolbar")
@@ -118,7 +119,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
                 self?.model?.canOpenPDF ?? false
             }
         case .assistant:
-            return buttonItem(id, "sparkles", "AI 助手（待实现）", #selector(aiAssistant)) { [weak self] in
+            return buttonItem(id, "sparkles", "AI 助手", #selector(assistantPrimary(_:)), menu: assistantMenu) { [weak self] in
                 self?.model?.openPath != nil
             }
         case .openExternal:
@@ -181,7 +182,18 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
     @objc private func openExternal()    { Task { await model?.openExternally() } }
     @objc private func readOriginal()    { Task { await model?.openPDF() } }
     @objc private func readTranslation() { Task { await model?.openTranslation() } }
-    @objc private func aiAssistant()     { model?.flash("AI 助手：待实现", symbol: "sparkles") }
+
+    @objc private func assistantPrimary(_ sender: NSButton) {
+        assistantMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+    }
+
+    @objc private func reanalyzeWithSuperset() {
+        Task { await model?.runSupersetAction(.reanalyze) }
+    }
+
+    @objc private func formatWithSuperset() {
+        Task { await model?.runSupersetAction(.format) }
+    }
 
     /// Click on 引用: per the setting, copy the default format or pop the menu.
     @objc private func citationPrimary(_ sender: NSButton) {
@@ -213,6 +225,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
         menu.removeAllItems()
         if menu === citationMenu { buildCitationMenu(menu) }
         else if menu === originalMenu { buildOriginalMenu(menu) }
+        else if menu === assistantMenu { buildAssistantMenu(menu) }
     }
 
     private func buildCitationMenu(_ menu: NSMenu) {
@@ -237,6 +250,22 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
             tr.target = self
             menu.addItem(tr)
         }
+    }
+
+    private func buildAssistantMenu(_ menu: NSMenu) {
+        let reanalyze = NSMenuItem(title: SupersetAction.reanalyze.label,
+                                   action: #selector(reanalyzeWithSuperset),
+                                   keyEquivalent: "")
+        reanalyze.target = self
+        reanalyze.isEnabled = model?.openPath != nil
+        menu.addItem(reanalyze)
+
+        let format = NSMenuItem(title: SupersetAction.format.label,
+                                action: #selector(formatWithSuperset),
+                                keyEquivalent: "")
+        format.target = self
+        format.isEnabled = model?.openPath != nil
+        menu.addItem(format)
     }
 
     private func defaultCitationFormat() -> CitationFormat {
