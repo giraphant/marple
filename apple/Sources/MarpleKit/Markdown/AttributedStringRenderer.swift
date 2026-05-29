@@ -17,60 +17,93 @@ public struct RenderedDocument {
     public let headings: [HeadingAnchor]
 }
 
-/// Font family for the reading column (mirrors ReadingFontFamily without SwiftUI import).
-public enum MarkdownFontDesign: String, Equatable, Sendable, CaseIterable {
-    case sans, serif, mono
-}
-
 /// Input parameters for rendering (Equatable via synthesized == on stored properties).
 /// AppKit types (NSFont, NSColor, NSParagraphStyle) are computed lazily.
 public struct RenderStyle: Equatable {
     public let size: Double
-    public let design: MarkdownFontDesign
+    /// System font family for body/headings (nil = system font, i.e. 苹方 for CJK).
+    /// Code blocks always stay monospaced regardless.
+    public let fontFamily: String?
+    /// Intended body weight. Traditional high-contrast 宋体 render faint on screen
+    /// (thin horizontals); a heavier body holds up for long reading — resolved to a
+    /// real cut where the family has one, light synthesis where it doesn't. Each family
+    /// names/orders its weights differently, so this is set per-font, not a flag.
+    public let bodyWeight: NSFont.Weight
     public let lineHeight: Double
+    /// CJK letter-spacing as a fraction of the em; applied as `size * letterSpacing`
+    /// to 中文 glyphs only (see `bodyKern`). 0 = packed (system default), no Latin effect.
+    public let letterSpacing: Double
 
-    public init(size: Double, design: MarkdownFontDesign, lineHeight: Double) {
+    public init(size: Double, fontFamily: String?, bodyWeight: NSFont.Weight = .regular,
+                letterSpacing: Double = 0, lineHeight: Double) {
         self.size = size
-        self.design = design
+        self.fontFamily = fontFamily
+        self.bodyWeight = bodyWeight
+        self.letterSpacing = letterSpacing
         self.lineHeight = lineHeight
     }
 
     // MARK: Fonts
 
-    var bodyFont: NSFont {
-        switch design {
-        case .sans:  return NSFont.systemFont(ofSize: size, weight: .regular)
-        case .serif: return NSFont(name: "Songti SC", size: size)
-            ?? NSFont.systemFont(ofSize: size, weight: .regular)
-        case .mono:  return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    /// Resolve a real weight cut from the chosen family. `NSFontManager` returns the
+    /// nearest *actual* member for a given weight — no faux-bold synthesis — which is
+    /// the whole point: many CJK families ship one file per weight. Falls back to the
+    /// system font (its CJK face is 苹方) when no family is chosen or it won't resolve.
+    func font(_ size: Double, weight: NSFont.Weight) -> NSFont {
+        if let fontFamily {
+            if let f = NSFontManager.shared.font(
+                withFamily: fontFamily, traits: [], weight: Self.managerWeight(weight), size: size) {
+                return f
+            }
+            if let f = NSFont(name: fontFamily, size: size) { return f }
+        }
+        return NSFont.systemFont(ofSize: size, weight: weight)
+    }
+
+    /// `NSFont.Weight` → `NSFontManager`'s 0–15 weight scale (regular≈5, bold≈9).
+    static func managerWeight(_ weight: NSFont.Weight) -> Int {
+        switch weight {
+        case .ultraLight: return 2
+        case .thin, .light: return 3
+        case .medium: return 6
+        case .semibold: return 8
+        case .bold: return 9
+        case .heavy: return 10
+        case .black: return 12
+        default: return 5   // .regular and anything unmapped
         }
     }
+
+    var bodyFont: NSFont { font(size, weight: bodyWeight) }
 
     var codeFont: NSFont {
         NSFont.monospacedSystemFont(ofSize: size * 0.92, weight: .regular)
     }
 
-    var tableBodyFont: NSFont {
-        switch design {
-        case .sans:  return NSFont.systemFont(ofSize: size * 0.90, weight: .regular)
-        case .serif: return NSFont(name: "Songti SC", size: size * 0.90)
-            ?? NSFont.systemFont(ofSize: size * 0.90, weight: .regular)
-        case .mono:  return NSFont.monospacedSystemFont(ofSize: size * 0.90, weight: .regular)
-        }
-    }
+    var tableBodyFont: NSFont { font(size * 0.90, weight: bodyWeight) }
 
-    var tableHeaderFont: NSFont {
-        let bodyFont = tableBodyFont
-        let descriptor = bodyFont.fontDescriptor.withSymbolicTraits(.bold)
-        return NSFont(descriptor: descriptor, size: bodyFont.pointSize)
-            ?? NSFont.systemFont(ofSize: size * 0.90, weight: .semibold)
+    var tableHeaderFont: NSFont { font(size * 0.90, weight: .semibold) }
+
+    func headingWeight(level: Int) -> NSFont.Weight {
+        [.bold, .semibold, .medium, .medium, .regular, .regular][min(level, 6) - 1]
     }
 
     func headingFont(level: Int) -> NSFont {
         let clamped = min(level, 6) - 1
-        let scale: CGFloat = [1.8, 1.5, 1.25, 1.125, 1.0, 1.0][clamped]
-        let weight: NSFont.Weight = [.bold, .semibold, .medium, .medium, .regular, .regular][clamped]
-        return NSFont.systemFont(ofSize: size * scale, weight: weight)
+        let scale: Double = [1.8, 1.5, 1.25, 1.125, 1.0, 1.0][clamped]
+        return font(size * scale, weight: headingWeight(level: level))
+    }
+
+    /// Synthetic-bold stroke (negative `.strokeWidth` = fill+stroke in the text color)
+    /// for families lacking a real heavier cut: when the resolved face is lighter than
+    /// `target`, thicken strokes in proportion to the weight gap. Returns nil for the
+    /// system font and whenever a real weight cut already covers the target — so 苹方
+    /// and real-weight families (霞鹜文楷) are byte-for-byte unaffected.
+    func synthStroke(of resolved: NSFont, target: NSFont.Weight) -> CGFloat? {
+        guard fontFamily != nil else { return nil }
+        let deficit = Self.managerWeight(target) - NSFontManager.shared.weight(of: resolved)
+        guard deficit > 0 else { return nil }
+        return -CGFloat(deficit) * 1.1
     }
 
     // MARK: Colors
@@ -95,6 +128,11 @@ public struct RenderStyle: Equatable {
 
     var lineSpacing: CGFloat { CGFloat(size * (lineHeight - 1.0)) }
     var tableLineSpacing: CGFloat { max(2, CGFloat(size * 0.16)) }
+
+    /// Tracking added after CJK glyphs in body/inline runs (see `applyCJKKern`). Zero
+    /// packs 中文 tighter than Ulysses-style columns; a fraction of the em restores the
+    /// horizontal breathing room. Driven by the user's 字间距 setting (`letterSpacing`).
+    var bodyKern: CGFloat { CGFloat(size * letterSpacing) }
 
     // MARK: Paragraph styles
 
@@ -183,6 +221,9 @@ private final class RenderContext {
 
     /// Current base font (body or heading — changed per block).
     var baseFont: NSFont
+    /// Intended weight of the current block's base — what the design *asks for*, which
+    /// may exceed what the chosen face actually provides (drives synthetic bold).
+    var baseWeight: NSFont.Weight = .regular
     /// Inline font traits pushed/popped by Strong/Emphasis.
     var traits: NSFontDescriptor.SymbolicTraits = []
     /// Active paragraph style for the current block.
@@ -201,9 +242,21 @@ private final class RenderContext {
         return NSFont(descriptor: desc, size: baseFont.pointSize) ?? baseFont
     }
 
+    /// Synthetic-bold stroke for the current run: the block's intended weight, bumped
+    /// to bold when inside `**…**`. Nil unless the chosen face falls short of it.
+    var currentStroke: CGFloat? {
+        var target = baseWeight
+        if traits.contains(.bold),
+           RenderStyle.managerWeight(target) < RenderStyle.managerWeight(.bold) {
+            target = .bold
+        }
+        return style.synthStroke(of: currentFont, target: target)
+    }
+
     init(style: RenderStyle) {
         self.style = style
         self.baseFont = style.bodyFont
+        self.baseWeight = style.bodyWeight
         self.ps = style.bodyParagraphStyle
     }
 
@@ -243,6 +296,7 @@ private final class RenderContext {
     private func visitHeading(_ heading: Heading, previousBlock: PreviousBlock? = nil) {
         let start = attributed.length
         baseFont = style.headingFont(level: heading.level)
+        baseWeight = style.headingWeight(level: heading.level)
         traits = []
         ps = style.headingParagraphStyle(level: heading.level,
                                          followsHeading: previousBlock == .heading,
@@ -257,6 +311,7 @@ private final class RenderContext {
         ))
         newlines(1)
         baseFont = style.bodyFont
+        baseWeight = style.bodyWeight
         traits = []
         ps = style.bodyParagraphStyle
         activeTextColor = nil
@@ -480,6 +535,7 @@ private final class RenderContext {
 
     private func visitTableCell(_ cell: Markup?, table: NSTextTable, row: Int, column: Int, columnCount: Int, isHeader: Bool, isLastRow: Bool, columnWidthPercent: CGFloat, columnAlignment: Table.ColumnAlignment?) {
         let previousBaseFont = baseFont
+        let previousBaseWeight = baseWeight
         let previousTraits = traits
         let previousParagraphStyle = ps
         let previousTextColor = activeTextColor
@@ -487,6 +543,7 @@ private final class RenderContext {
         let previousLinkURL = linkURL
 
         baseFont = isHeader ? style.tableHeaderFont : style.tableBodyFont
+        baseWeight = isHeader ? .semibold : style.bodyWeight
         traits = []
         activeTextColor = isHeader ? style.tableHeaderTextColor : previousTextColor
         activeKern = isHeader ? style.tableHeaderKern : nil
@@ -510,6 +567,7 @@ private final class RenderContext {
         newlines(1)
 
         baseFont = previousBaseFont
+        baseWeight = previousBaseWeight
         traits = previousTraits
         ps = previousParagraphStyle
         activeTextColor = previousTextColor
@@ -579,7 +637,14 @@ private final class RenderContext {
         switch markup {
         case let t as Text:
             let color: NSColor = linkURL != nil ? style.linkColor : (activeTextColor ?? style.textColor)
-            append(t.string, font: currentFont, color: color, link: linkURL, kern: activeKern)
+            let start = attributed.length
+            // Table headers carry an explicit uniform kern; elsewhere apply tracking
+            // only to CJK glyphs (Latin reads well untouched — only 中文 packs tight).
+            append(t.string, font: currentFont, color: color, link: linkURL,
+                   kern: activeKern, stroke: currentStroke)
+            if activeKern == nil, style.bodyKern > 0 {
+                applyCJKKern(t.string, from: start, kern: style.bodyKern)
+            }
 
         case let strong as Strong:
             traits.insert(.bold)
@@ -627,7 +692,8 @@ private final class RenderContext {
     // MARK: Append helpers
 
     private func append(_ text: String, font: NSFont? = nil, color: NSColor? = nil,
-                        bg: NSColor? = nil, link: String? = nil, kern: CGFloat? = nil) {
+                        bg: NSColor? = nil, link: String? = nil, kern: CGFloat? = nil,
+                        stroke: CGFloat? = nil) {
         var attrs: [NSAttributedString.Key: Any] = [
             .font: font ?? currentFont,
             .foregroundColor: color ?? activeTextColor ?? style.textColor,
@@ -635,11 +701,26 @@ private final class RenderContext {
         ]
         if let bg { attrs[.backgroundColor] = bg }
         if let kern { attrs[.kern] = kern }
+        if let stroke { attrs[.strokeWidth] = stroke }
         if let url = link {
             attrs[.link] = url
             attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
         }
         attributed.append(NSAttributedString(string: text, attributes: attrs))
+    }
+
+    /// Add letter-spacing only to the CJK glyphs of a run already appended at `start`.
+    /// `.kern` adds trailing advance per character, so applying it to Han/CJK scalars
+    /// loosens 中文 (incl. its boundary with Latin) while leaving Latin words untouched.
+    private func applyCJKKern(_ string: String, from start: Int, kern: CGFloat) {
+        var offset = start
+        for ch in string {
+            let len = ch.utf16.count
+            if ch.isCJK {
+                attributed.addAttribute(.kern, value: kern, range: NSRange(location: offset, length: len))
+            }
+            offset += len
+        }
     }
 
     private func newlines(_ n: Int) {
@@ -663,5 +744,25 @@ private final class RenderContext {
         if let c = markup as? InlineCode { s += c.code; return }
         if markup is SoftBreak || markup is LineBreak { s += " "; return }
         for child in markup.children { collectText(child, into: &s) }
+    }
+}
+
+private extension Character {
+    /// True for CJK ideographs and CJK/fullwidth punctuation — the glyphs that pack
+    /// tight without tracking. Latin/ASCII stays false so it reads at its natural spacing.
+    var isCJK: Bool {
+        unicodeScalars.contains { scalar in
+            switch scalar.value {
+            case 0x3000...0x303F,   // CJK symbols & punctuation （。、「」…）
+                 0x3400...0x4DBF,   // CJK Extension A
+                 0x4E00...0x9FFF,   // CJK Unified Ideographs
+                 0xF900...0xFAFF,   // CJK Compatibility Ideographs
+                 0xFF00...0xFFEF,   // Fullwidth forms （，！？fullwidth punctuation）
+                 0x20000...0x2A6DF: // CJK Extension B
+                return true
+            default:
+                return false
+            }
+        }
     }
 }

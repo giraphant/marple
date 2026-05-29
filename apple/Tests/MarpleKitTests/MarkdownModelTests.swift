@@ -216,11 +216,11 @@ import Testing
     }
 
     private static var tableRenderStyle: RenderStyle {
-        RenderStyle(size: 17, design: .sans, lineHeight: 1.6)
+        RenderStyle(size: 17, fontFamily: nil, lineHeight: 1.6)
     }
 
     private static var ulyssesReferenceStyle: RenderStyle {
-        RenderStyle(size: 15, design: .sans, lineHeight: 1.62)
+        RenderStyle(size: 15, fontFamily: nil, lineHeight: 1.62)
     }
 
     private static func renderTable(_ markdown: String) -> RenderedDocument {

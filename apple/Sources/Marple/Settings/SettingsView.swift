@@ -42,6 +42,7 @@ private struct ReadingSettings: View {
     @AppStorage(SettingsKeys.readingFontFamily) private var family = ReadingFontFamily.sans
     @AppStorage(SettingsKeys.readingFontSize) private var size = ReadingDefaults.fontSize
     @AppStorage(SettingsKeys.readingLineHeight) private var lineHeight = ReadingDefaults.lineHeight
+    @AppStorage(SettingsKeys.readingLetterSpacing) private var letterSpacing = ReadingDefaults.letterSpacing
     @AppStorage(SettingsKeys.externalEditor) private var editor = ""
 
     var body: some View {
@@ -65,6 +66,15 @@ private struct ReadingSettings: View {
                     }
                 }
                 .pickerStyle(.segmented)
+
+                Picker("字间距", selection: $letterSpacing) {
+                    ForEach(ReadingDefaults.letterSpacingOptions, id: \.self) {
+                        Text(ReadingDefaults.letterSpacingLabel($0)).tag($0)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("仅作用于中文字符，英文不受影响。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("外部编辑器") {
