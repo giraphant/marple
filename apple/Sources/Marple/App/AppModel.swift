@@ -166,6 +166,7 @@ final class AppModel {
 
     private let stateStore: StateStore?
     private let semantic: (any SemanticBackend)?
+    private let supersetRunner: SupersetRunner
 
     /// True when a vector index exists, so 深度 (semantic) mode can run.
     var semanticAvailable: Bool { semantic != nil }
@@ -178,11 +179,13 @@ final class AppModel {
 
     init(client: VaultClient, stateStore: StateStore? = nil,
          semantic: (any SemanticBackend)? = nil, isFirstRun: Bool = false,
-         workspaceRoot: String = "") {
+         workspaceRoot: String = "",
+         supersetRunner: SupersetRunner = SupersetRunner()) {
         self.client = client
         self.workspaceRoot = workspaceRoot
         self.stateStore = stateStore
         self.semantic = semantic
+        self.supersetRunner = supersetRunner
         self.isFirstRun = isFirstRun
         if let s = stateStore?.load() {
             // QUA-105: seed `loadedCountsSnapshot` BEFORE the property setters
@@ -961,6 +964,117 @@ final class AppModel {
             status = "open-translation failed: \(error)"
             print("[marple] openTranslation FAILED \(slug): \(error)")
         }
+    }
+
+    func runSupersetAction(_ action: SupersetAction) async {
+        guard let path = openPath, let entry = openEntry else {
+            flash("请先打开一篇文档。", symbol: "exclamationmark.triangle.fill")
+            return
+        }
+
+        let defaults = UserDefaults.standard
+        let config = SupersetDispatchConfig(
+            workspaceID: defaults.string(forKey: SettingsKeys.supersetWorkspaceID) ?? "",
+            agent: defaults.string(forKey: SettingsKeys.supersetAgent) ?? "claude",
+            cliPath: defaults.string(forKey: SettingsKeys.supersetCLIPath) ?? "superset",
+            reanalyzePrompt: defaults.string(forKey: SettingsKeys.supersetReanalyzePrompt),
+            formatPrompt: defaults.string(forKey: SettingsKeys.supersetFormatPrompt)
+        )
+
+        do {
+            let raw = try await client.entryText(path: path)
+            let context = try SupersetDispatchContext(
+                workspaceRoot: workspaceRoot,
+                targetPath: path,
+                entry: entry,
+                documentText: raw,
+                related: supersetRelatedContext(for: entry, rawDocumentText: raw)
+            )
+            try await supersetRunner.dispatch(action: action, config: config, context: context)
+            flash("已交给 Superset：\(action.label)", symbol: "sparkles")
+            print("[marple] superset \(action.rawValue) dispatched \(path)")
+        } catch let error as SupersetDispatchError {
+            flash(error.friendlyMessage, symbol: "exclamationmark.triangle.fill")
+            print("[marple] superset \(action.rawValue) FAILED \(path): \(error)")
+        } catch {
+            flash("Superset 调用失败，请查看日志。", symbol: "exclamationmark.triangle.fill")
+            print("[marple] superset \(action.rawValue) FAILED \(path): \(error)")
+        }
+    }
+
+    private func supersetRelatedContext(for entry: Entry, rawDocumentText: String) -> SupersetRelatedContext {
+        let annotations = (openRelations?.annotations.prefix(12) ?? [])
+            .map { SupersetRelatedEntry(entry: $0, reason: "annotation") }
+
+        var bookEntries: [(entry: Entry, reason: String)] = []
+        if let overview = openBook?.overview, overview.path != entry.path {
+            bookEntries.append((overview, "book overview"))
+        }
+        if let chapters = openBook?.chapters {
+            bookEntries.append(contentsOf: chapters
+                .filter { $0.path != entry.path }
+                .prefix(20)
+                .map { (entry: $0, reason: "book chapter") })
+        }
+
+        var relatedEntries: [(entry: Entry, reason: String)] = []
+        if let relations = openRelations {
+            relatedEntries.append(contentsOf: relations.works.map { (entry: $0, reason: "author work") })
+            relatedEntries.append(contentsOf: relations.siblings.map { (entry: $0, reason: "same author") })
+            relatedEntries.append(contentsOf: relations.similar.map { (entry: $0, reason: "shared themes") })
+        }
+
+        return SupersetRelatedContext(
+            annotations: annotations,
+            bookEntries: uniqueSupersetEntries(bookEntries).map { SupersetRelatedEntry(entry: $0.entry, reason: $0.reason) },
+            relatedWorks: Array(uniqueSupersetEntries(relatedEntries).prefix(12))
+                .map { SupersetRelatedEntry(entry: $0.entry, reason: $0.reason) },
+            wikilinks: supersetWikilinks(from: rawDocumentText),
+            sourcePaths: supersetSourcePaths(for: entry)
+        )
+    }
+
+    private func uniqueSupersetEntries(_ entries: [(entry: Entry, reason: String)]) -> [(entry: Entry, reason: String)] {
+        var seen = Set<String>()
+        var unique: [(entry: Entry, reason: String)] = []
+        for item in entries where !seen.contains(item.entry.path) {
+            seen.insert(item.entry.path)
+            unique.append(item)
+        }
+        return unique
+    }
+
+    private func supersetWikilinks(from rawDocumentText: String) -> [SupersetWikiTarget] {
+        let body = Frontmatter.split(rawDocumentText).body
+        let refs = Wikilink.protect(body).refs.values.sorted {
+            if $0.target == $1.target { return $0.label < $1.label }
+            return $0.target < $1.target
+        }
+        var seen = Set<String>()
+        var targets: [SupersetWikiTarget] = []
+        for ref in refs where !seen.contains(ref.target) {
+            seen.insert(ref.target)
+            guard let resolved = WikiResolver.resolve(ref.target, in: entries) else { continue }
+            targets.append(SupersetWikiTarget(
+                target: ref.target,
+                label: ref.label,
+                path: resolved.path,
+                title: resolved.title
+            ))
+        }
+        return targets
+    }
+
+    private func supersetSourcePaths(for entry: Entry) -> [String] {
+        var paths: [String] = []
+        if let slug = pdfEntry(for: entry, in: entries)?.pdfSlug, !slug.isEmpty {
+            paths.append("sources/\(slug).pdf")
+        }
+        for slug in sourceSlugCandidates(for: entry, in: entries) where client.hasTranslation(slug: slug) {
+            paths.append("processing/translations/\(slug)-zh.pdf")
+        }
+        var seen = Set<String>()
+        return paths.filter { seen.insert($0).inserted }
     }
 
     var canOpenPDF: Bool { openPDFSlug != nil }
