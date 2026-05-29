@@ -186,11 +186,13 @@ public enum SupersetContextPackageBuilder {
         if !context.entry.themes.isEmpty {
             lines.append("- Themes: \(context.entry.themes.joined(separator: ", "))")
         }
+        if !context.entry.topics.isEmpty {
+            lines.append("- Topics: \(context.entry.topics.joined(separator: ", "))")
+        }
         appendMetadata("Preview", context.entry.preview, to: &lines)
         lines.append("- Has PDF: \(context.entry.hasPDF)")
         appendMetadata("PDF Slug", context.entry.pdfSlug, to: &lines)
         appendMetadata("Source", context.entry.source, to: &lines)
-        appendMetadata("Topic", context.entry.topic, to: &lines)
         appendMetadata("DOI", context.entry.doi, to: &lines)
         lines.append("")
         lines.append("## Related Context")

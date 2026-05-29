@@ -7,7 +7,6 @@ enum MetadataAction: Equatable {
     case imageAuthor
     case source
     case doi
-    case topic
 }
 
 enum InspectorInfoRow: Equatable {
@@ -20,17 +19,39 @@ enum InspectorInfoRow: Equatable {
 
 // Keep this presentation policy in sync with the Quasi plugin schemas at ~/.agents/plugins/quasi/scripts/schemas.
 func inspectorInfoRows(for entry: Entry, in entries: [Entry] = []) -> [InspectorInfoRow] {
+    var rows: [InspectorInfoRow]
     switch entry.type {
-    case .paper:   return paperRows(for: entry)
-    case .book:    return bookRows(for: entry)
-    case .chapter: return chapterRows(for: entry, in: entries)
-    case .author:  return [.rating]
-    case .topic:   return topicRows(for: entry)
-    case .journal: return journalRows(for: entry)
-    case .note:    return noteRows(for: entry, in: entries)
-    case .image:   return imageRows(for: entry)
-    case .other:   return []
+    case .paper:   rows = paperRows(for: entry)
+    case .book:    rows = bookRows(for: entry)
+    case .chapter: rows = chapterRows(for: entry, in: entries)
+    case .author:  rows = [.rating]
+    case .topic:   rows = topicRows(for: entry)
+    case .journal: rows = journalRows(for: entry)
+    case .note:    rows = noteRows(for: entry, in: entries)
+    case .image:   rows = imageRows(for: entry)
+    case .other:   rows = []
     }
+    // "专题": topic-corpus membership (QUA-137). Read-only; navigation comes
+    // from the doc body's [[wikilink]]s. Inserted before the trailing rating row
+    // so identity/attribution metadata stays grouped above the rating.
+    if let membership = topicsMembershipRow(for: entry, in: entries) {
+        if let last = rows.last, last == .rating {
+            rows.insert(membership, at: rows.count - 1)
+        } else {
+            rows.append(membership)
+        }
+    }
+    return rows
+}
+
+/// Read-only row listing the topic corpora this entry declares membership in
+/// (`topics:` frontmatter). Each slug is resolved to its topic page's display
+/// title when that page is loaded, falling back to the raw slug. Returns nil
+/// when the entry declares no topics.
+private func topicsMembershipRow(for entry: Entry, in entries: [Entry]) -> InspectorInfoRow? {
+    guard !entry.topics.isEmpty else { return nil }
+    let names = entry.topics.map { topicDisplayTitle(forSlug: $0, in: entries) ?? $0 }
+    return .readOnlyScalar(label: "专题", value: names.joined(separator: " · "), copyValue: nil)
 }
 
 private func paperRows(for entry: Entry) -> [InspectorInfoRow] {
@@ -85,9 +106,6 @@ private func topicRows(for entry: Entry) -> [InspectorInfoRow] {
     var rows: [InspectorInfoRow] = []
     if let kind = nonEmpty(entry.kind) {
         rows.append(.readOnlyScalar(label: "类型", value: kindDisplayValue(kind), copyValue: kind))
-    }
-    if let topic = nonEmpty(entry.topic) {
-        rows.append(.readOnlyScalar(label: "专题", value: topic, copyValue: nil))
     }
     return rows
 }
@@ -171,11 +189,10 @@ func conformanceFieldLabel(_ field: String) -> String {
     case "authors", "author": return "作者"
     case "year":      return "年份"
     case "journal":   return "期刊"
-    case "themes":    return "主题"
+    case "themes":    return "标签"
     case "publisher": return "出版"
     case "book":      return "书籍"
     case "kind":      return "类型"
-    case "topic":     return "专题"
     case "created":   return "创建"
     default:          return field
     }

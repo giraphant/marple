@@ -65,7 +65,6 @@ public enum VaultConformance {
         case "book":            return nonEmpty(entry.book)
         case "kind":            return nonEmpty(entry.kind)
         case "journal":         return nonEmpty(entry.journal)
-        case "topic":           return nonEmpty(entry.topic)
         case "created":         return nonEmpty(entry.created)
         case "doi":             return nonEmpty(entry.doi)
         case "isbn":            return nonEmpty(entry.isbn)

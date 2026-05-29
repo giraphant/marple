@@ -441,7 +441,7 @@ struct IndexedEntryTests {
         #expect(entry.searchText.contains("agent loop"))
     }
 
-    // MARK: - Optional fields: topic, source, doi, publisher, isbn, category
+    // MARK: - Optional fields: topics, source, doi, publisher, isbn, category
 
     @Test("optional metadata fields populated correctly")
     func optionalFields() throws {
@@ -451,7 +451,9 @@ struct IndexedEntryTests {
         title: Comprehensive Paper
         author: Jones
         year: 2021
-        topic: cognitive science
+        topics:
+          - cognitive-science
+          - hci
         kind: overview
         journal: Nature Human Behaviour
         source: Nature
@@ -467,7 +469,7 @@ struct IndexedEntryTests {
         guard case .indexed(let entry) = outcome else {
             Issue.record("Expected .indexed"); return
         }
-        #expect(entry.topic == "cognitive science")
+        #expect(entry.topics == ["cognitive-science", "hci"])
         #expect(entry.kind == "overview")
         #expect(entry.journal == "Nature Human Behaviour")
         #expect(entry.source == "Nature")

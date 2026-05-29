@@ -10,12 +10,12 @@ import Testing
         {
           "version": "\(version)",
           "generated_at": "2026-05-28T00:00:00Z",
-          "schema_version": "0.3.0",
+          "schema_version": "0.4.0",
           "types": {
             "author":  {"required": ["name"]},
             "paper":   {"required": ["title", "authors", "year", "journal", "themes"]},
             "book":    {"required": ["title", "authors", "year", "publisher"]},
-            "topic":   {"required": ["kind", "topic"]}
+            "topic":   {"required": ["kind"]}
           }
         }
         """
@@ -85,17 +85,17 @@ import Testing
         "journal": ["kind", "journal"],
         "note":    ["title", "created"],
         "paper":   ["title", "authors", "year", "journal", "themes"],
-        "topic":   ["kind", "topic"],
+        "topic":   ["kind"],
     ])
 
     private func entry(_ type: EntryType, title: String? = nil, author: [String] = [],
                        year: String? = nil, themes: [String] = [], journal: String? = nil,
                        publisher: String? = nil, kind: String? = nil,
-                       topic: String? = nil, book: String? = nil,
+                       book: String? = nil,
                        created: String? = nil) -> Entry {
         Entry(path: "vault/x.md", type: type, title: title, author: author, year: year,
               ratingScore: 0, themes: themes, preview: "", hasPDF: false,
-              book: book, topic: topic, kind: kind, journal: journal,
+              book: book, kind: kind, journal: journal,
               publisher: publisher, created: created)
     }
 

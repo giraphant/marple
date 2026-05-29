@@ -20,8 +20,8 @@ struct EntryListView: View {
     private var title: String {
         switch model.pane {
         case .type(let t):   return "\(t.label) (\(model.visibleEntries.count))"
-        case .theme(let n):  return "主题: \(n) (\(model.visibleEntries.count))"
-        case .themesIndex:   return "主题"
+        case .theme(let n):  return "标签: \(n) (\(model.visibleEntries.count))"
+        case .themesIndex:   return "标签"
         case .trash:         return "回收站"
         }
     }

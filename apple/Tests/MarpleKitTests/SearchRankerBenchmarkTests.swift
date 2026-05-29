@@ -119,11 +119,11 @@ func makeSyntheticEntries(_ n: Int) -> [Entry] {
             year: year,
             ratingScore: Double(i % 5),
             themes: [theme],
+            topics: [topic],
             preview: preview,
             hasPDF: false,
             source: source,
             book: book,
-            topic: topic,
             doi: doi
         ))
     }

@@ -338,6 +338,29 @@ import Testing
         #expect(model.isBootstrapping == true)        // entries haven't loaded
     }
 
+    @MainActor
+    @Test func openTopicPageRelationsIncludeDeclaredMembers() async {
+        let topic = Entry(path: "vault/topics/repair/00-overview.md", type: .topic,
+                          title: "Repair", author: [], year: nil, ratingScore: 0,
+                          themes: [], preview: "", hasPDF: false)
+        let paper = Entry(path: "vault/papers/p.md", type: .paper,
+                          title: "Paper", author: [], year: nil, ratingScore: 1,
+                          themes: [], topics: ["repair"], preview: "", hasPDF: false)
+        let book = Entry(path: "vault/books/b/00-overview.md", type: .book,
+                         title: "Book", author: [], year: nil, ratingScore: 3,
+                         themes: [], topics: ["repair"], preview: "", hasPDF: false)
+        let client = StubVaultClient(
+            entries: [topic, paper, book],
+            texts: [topic.path: "---\ntype: topic\nkind: overview\n---\n# Repair"]
+        )
+        let model = AppModel(client: client)
+
+        await model.loadIndex()
+        await model.open(topic.path)
+
+        #expect(model.openRelations?.topicMembers.map(\.path) == [book.path, paper.path])
+    }
+
     // MARK: helpers
 
     private static func entry(_ path: String) -> Entry {

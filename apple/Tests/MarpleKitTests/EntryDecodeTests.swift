@@ -52,15 +52,26 @@ import Testing
         let entries = try decode("""
         [{"path":"vault/p/a.md","type":"paper","title":"A","rating_score":0,
           "preview":"","mtime":1700000000000,"added":1690000000000,
-          "source":"JSTOR","book":"Some Book","topic":"econ","doi":"10.1/x"}]
+          "source":"JSTOR","book":"Some Book","topics":["econ","tech"],"doi":"10.1/x"}]
         """)
         let e = entries[0]
         #expect(e.mtime == 1700000000000)
         #expect(e.added == 1690000000000)
         #expect(e.source == "JSTOR")
         #expect(e.book == "Some Book")
-        #expect(e.topic == "econ")
+        #expect(e.topics == ["econ", "tech"])
         #expect(e.doi == "10.1/x")
+    }
+
+    @Test func testTopicsDefaultsToEmptyWhenAbsentOrNull() throws {
+        // `topics` is optional in the schema (never required), so a row that omits
+        // it — or sends null — must decode to [] rather than failing (QUA-137).
+        let entries = try decode("""
+        [{"path":"vault/p/a.md","type":"paper","rating_score":0,"preview":""},
+         {"path":"vault/p/b.md","type":"paper","rating_score":0,"preview":"","topics":null}]
+        """)
+        #expect(entries[0].topics == [])
+        #expect(entries[1].topics == [])
     }
 
     @Test func testDecodesBookCanonicalMetadataForInspector() throws {

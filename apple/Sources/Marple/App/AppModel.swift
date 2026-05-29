@@ -107,6 +107,7 @@ final class AppModel {
     // Derived caches — recomputed only when their inputs change, never in a view body.
     private(set) var counts: [EntryType: Int] = [:]
     private(set) var themeIndex: [ThemeCount] = []
+    private(set) var topicMembership: TopicMembership = TopicMembership()
     private(set) var visibleEntries: [Entry] = []
     private(set) var authorIndex: [String: [Entry]] = [:]
     private(set) var annotationIndex: [String: [Entry]] = [:]
@@ -282,7 +283,8 @@ final class AppModel {
     // MARK: derived recompute
 
     /// Rebuild the index-wide caches. Split into two phases:
-    /// - immediate: counts + themeIndex (cheap; the sidebar needs them right away)
+    /// - immediate: counts + themeIndex + topicMembership (cheap; the sidebar and
+    ///   open topic pages need them right away)
     /// - deferred: authorIndex/annotationIndex/searchIndex (heavy; only needed by
     ///   the reading view's relations panel and the Cmd-K palette, neither of
     ///   which is exercised in the first few hundred ms after launch)
@@ -291,6 +293,7 @@ final class AppModel {
         for e in entries { c[e.type, default: 0] += 1 }
         counts = c
         themeIndex = themeCounts(entries)
+        topicMembership = buildTopicMembership(entries)
         scheduleDeferredDerivedRebuild()
     }
 
@@ -344,7 +347,9 @@ final class AppModel {
         openStats = openBody.isEmpty ? nil : computeDocStats(openBody)
         if let e = openEntry {
             openRelations = relations(for: e, in: entries,
-                                      authorIndex: authorIndex, annotationIndex: annotationIndex)
+                                      authorIndex: authorIndex,
+                                      annotationIndex: annotationIndex,
+                                      topicMembership: topicMembership)
             openBook = bookContext(for: e, in: entries)
         } else {
             openRelations = nil
@@ -910,7 +915,7 @@ final class AppModel {
         switch loc.pane {
         case .type(let t):     return t.label
         case .theme(let name): return "#\(name)"
-        case .themesIndex:     return "主题"
+        case .themesIndex:     return "标签"
         case .trash:           return "回收站"
         }
     }
@@ -1290,13 +1295,6 @@ final class AppModel {
         await applyPatch(field: "source",
             { FrontmatterPatch.setScalar($0, key: "source", value: val) },
             local: { $0.with(source: .some(val)) })
-    }
-
-    func setTopic(_ text: String?) async {
-        let val = normalize(text)
-        await applyPatch(field: "topic",
-            { FrontmatterPatch.setScalar($0, key: "topic", value: val) },
-            local: { $0.with(topic: .some(val)) })
     }
 
     func setDoi(_ text: String?) async {
