@@ -10,14 +10,15 @@ import Foundation
 /// is huge), Finder junk (`.DS_Store`), the file-sync journal (`.sync_*`), and
 /// agent/CLI session-state dirs (`.claude`, `.codex`, … — not vault content, and
 /// written constantly by background tools, which would otherwise mark the vault
-/// dirty on every tick and flood the timeline with meaningless snapshots).
-/// Everything else — including user-facing tool configs like `.obsidian` — is
-/// cloned (free under COW).
+/// dirty on every tick and flood the timeline with meaningless snapshots), plus
+/// editor config (`.obsidian`). The snapshot is the library content only —
+/// everything else is cloned (free under COW).
 public enum CloneCopy {
     public static let excludedNames: Set<String> = [
         ".marple", ".git", ".DS_Store",
         ".claude", ".codex", ".factory", ".antigravitycli", ".playwright-mcp", ".superset",
-        ".quasi",  // academic-pipeline cache / intermediate state (rebuildable)
+        ".quasi",     // academic-pipeline cache / intermediate state (rebuildable)
+        ".obsidian",  // editor config — not vault content; snapshot the library only
     ]
 
     public static func isExcluded(_ name: String) -> Bool {
