@@ -19,6 +19,8 @@ import Foundation
         try write(".DS_Store", "junk")
         try write(".sync_abc123.db", "syncjournal")
         try write(".obsidian/app.json", "{}")
+        try write(".claude/session.json", "agent")
+        try write(".superset/state.json", "agent")
         return root
     }
 
@@ -33,11 +35,13 @@ import Foundation
         func exists(_ rel: String) -> Bool { fm.fileExists(atPath: dest.appendingPathComponent(rel).path) }
         #expect(exists("vault/notes/a.md"))
         #expect(exists("sources/x.pdf"))
-        #expect(exists(".obsidian/app.json"))   // small tool config is kept
+        #expect(exists(".obsidian/app.json"))   // user-facing tool config is kept
         #expect(!exists(".marple"))
         #expect(!exists(".git"))
         #expect(!exists(".DS_Store"))
         #expect(!exists(".sync_abc123.db"))
+        #expect(!exists(".claude"))             // agent session state
+        #expect(!exists(".superset"))
 
         let copied = try String(contentsOf: dest.appendingPathComponent("vault/notes/a.md"), encoding: .utf8)
         #expect(copied == "hello")
@@ -49,6 +53,9 @@ import Foundation
         #expect(CloneCopy.isExcluded(".DS_Store"))
         #expect(CloneCopy.isExcluded(".sync_555605ba2bcb.db"))
         #expect(CloneCopy.isExcluded(".sync_555605ba2bcb.db-wal"))
+        #expect(CloneCopy.isExcluded(".claude"))
+        #expect(CloneCopy.isExcluded(".superset"))
+        #expect(CloneCopy.isExcluded(".codex"))
         #expect(!CloneCopy.isExcluded("vault"))
         #expect(!CloneCopy.isExcluded(".obsidian"))
     }

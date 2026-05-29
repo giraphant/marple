@@ -7,10 +7,17 @@ import Foundation
 ///
 /// Excluded from snapshots: rebuildable caches (`.marple`, ~1GB), VCS internals
 /// (`.git` — itself a history mechanism, and on a binary-heavy vault its history
-/// is huge), Finder junk (`.DS_Store`), and the file-sync journal (`.sync_*`).
-/// Everything else — including small tool configs — is cloned (free under COW).
+/// is huge), Finder junk (`.DS_Store`), the file-sync journal (`.sync_*`), and
+/// agent/CLI session-state dirs (`.claude`, `.codex`, … — not vault content, and
+/// written constantly by background tools, which would otherwise mark the vault
+/// dirty on every tick and flood the timeline with meaningless snapshots).
+/// Everything else — including user-facing tool configs like `.obsidian` — is
+/// cloned (free under COW).
 public enum CloneCopy {
-    public static let excludedNames: Set<String> = [".marple", ".git", ".DS_Store"]
+    public static let excludedNames: Set<String> = [
+        ".marple", ".git", ".DS_Store",
+        ".claude", ".codex", ".factory", ".antigravitycli", ".playwright-mcp", ".superset",
+    ]
 
     public static func isExcluded(_ name: String) -> Bool {
         if excludedNames.contains(name) { return true }
