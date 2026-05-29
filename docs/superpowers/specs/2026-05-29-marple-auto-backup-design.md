@@ -52,7 +52,7 @@ Given a list of snapshot timestamps and `now`, returns the set to delete. Tiers 
 Pure function over `[Date]` → `(keep: [Date], delete: [Date])`. Fully unit-tested; this is where the density logic lives so creation cadence can be finer without changing visible density.
 
 ### `MarpleKit/Backup/CloneCopy.swift`
-Thin wrapper over `clonefile(2)` for a directory tree, with a recursive-copy fallback when `clonefile` fails (`EXDEV` cross-volume, non-APFS). Exclusions are applied during copy: skip `.marple/` (rebuildable cache). `.git` is included (it's vault state and clones for free).
+Thin wrapper over `clonefile(2)` for a directory tree, with a recursive-copy fallback when `clonefile` fails (`EXDEV` cross-volume, non-APFS). Exclusions are applied during copy: skip `.marple/` (rebuildable ~1GB cache), `.git` (9.1GB binary-heavy history — itself a history mechanism), `.DS_Store` (Finder junk), and `.sync_*` (Nextcloud/ownCloud sync journal). Everything else is cloned.
 
 ### `MarpleKit/Backup/SnapshotStore.swift`
 Owns the backup root for one vault. API:
@@ -111,7 +111,7 @@ apple/Sources/
 - **Backup root must be outside the vault** to prevent recursive snapshots and git tracking.
 - **Change detection** uses the `VaultWatcher` dirty flag, not a full tree walk per tick.
 - **Cross-volume / non-APFS** silently falls back to full copy (correct, just not space-deduped) — surfaced via the location help note.
-- **`.marple/` excluded** from snapshots (rebuildable); `.git` kept (state, free to clone).
+- **Excluded from snapshots:** `.marple/` (rebuildable), `.git` (9.1GB binary-heavy history), `.DS_Store`, `.sync_*` (sync journal). Everything else cloned.
 - **Restore never overwrites:** single-file-as-copy only.
 
 ## Testing

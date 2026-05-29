@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import MarpleKit
 
 /// The macOS preferences window (⌘,). Three tabs mirror the web SettingsPanel,
@@ -15,6 +16,8 @@ struct SettingsView: View {
                 .tabItem { Label("工具栏", systemImage: "hand.tap") }
             AIBridgeSettings()
                 .tabItem { Label("AI 接入", systemImage: "terminal") }
+            BackupSettings()
+                .tabItem { Label("备份", systemImage: "clock.arrow.circlepath") }
         }
         .frame(width: 480, height: 380)
     }
@@ -160,5 +163,87 @@ private struct AIBridgeSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+// MARK: - 备份
+
+/// QUA-106: local APFS-snapshot backups. Mirrors the Ulysses panel — an enable
+/// toggle, the fixed retention density, last-backup time, manual backup / browse
+/// buttons, and a backup-location picker. Retention tiers and interval are
+/// constants (not user-tunable) to keep the panel as simple as the reference.
+private struct BackupSettings: View {
+    @AppStorage(SettingsKeys.backupEnabled) private var enabled = true
+    @AppStorage(SettingsKeys.backupLocation) private var location = ""
+    @State private var lastBackup: Date?
+
+    private let tick = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Form {
+            Section("自动备份") {
+                Toggle("备份已启用", isOn: $enabled)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("过去 12 小时每小时保留一份")
+                    Text("过去 7 天每天保留一份")
+                    Text("过去 6 个月每周保留一份")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("最新备份") {
+                Text(lastBackup.map(Self.friendly) ?? "尚未备份")
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("立即备份") {
+                        ActiveBackup.scheduler?.backupNow()
+                    }
+                    Button("浏览备份…") {
+                        BackupBrowserPresenter.shared.show()
+                    }
+                }
+            }
+
+            Section("备份位置") {
+                HStack {
+                    Text(displayLocation).lineLimit(1).truncationMode(.middle)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("更改…") { pickLocation() }
+                    if !location.isEmpty {
+                        Button("恢复默认") { location = "" }
+                    }
+                }
+                Text("默认存于本机；改到外挂盘/网络盘会变成完整拷贝（无块去重）。云同步请同步文库本体而非备份目录。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { lastBackup = ActiveBackup.scheduler?.lastBackup }
+        .onReceive(tick) { _ in lastBackup = ActiveBackup.scheduler?.lastBackup }
+    }
+
+    private var displayLocation: String {
+        location.isEmpty
+            ? "~/资源库/Application Support/Marple/Backups/"
+            : (location as NSString).abbreviatingWithTildeInPath
+    }
+
+    private func pickLocation() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "选择"
+        if panel.runModal() == .OK, let url = panel.url {
+            location = url.path
+        }
+    }
+
+    private static func friendly(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.string(from: date)
     }
 }
