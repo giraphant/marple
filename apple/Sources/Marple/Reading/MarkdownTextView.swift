@@ -20,6 +20,16 @@ struct MarkdownTextView: NSViewRepresentable {
             super.layout()
             MarkdownTextView.sizeDocumentView(in: self)
         }
+
+        // On scroll, NSClipView only invalidates the newly-revealed strip (since
+        // macOS 11 this minimization is forced and `copiesOnScroll` is a no-op). That
+        // strip-only repaint intermittently left table cells (custom NSTextBlock
+        // drawing) blank until a selection forced a redraw. Force a full redraw of the
+        // visible document on every scroll, as Apple's docs recommend.
+        override func reflectScrolledClipView(_ cView: NSClipView) {
+            super.reflectScrolledClipView(cView)
+            if let doc = documentView { doc.setNeedsDisplay(doc.visibleRect) }
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -35,6 +45,10 @@ struct MarkdownTextView: NSViewRepresentable {
 
         let textStorage = NSTextStorage()
         let layoutManager = NSLayoutManager()
+        // Force contiguous layout. With the default (non-contiguous) layout, TextKit
+        // lays out regions lazily and a custom table block can stay un-rendered until
+        // selection forces a re-layout — the intermittent blank-cell dropout.
+        layoutManager.allowsNonContiguousLayout = false
         let textContainer = NSTextContainer(
             size: NSSize(width: Reading.measure, height: .greatestFiniteMagnitude)
         )
