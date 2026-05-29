@@ -335,7 +335,7 @@ final class AppModel {
         openEntry = entries.first { $0.path == openPath }
         let preprocessed = Wikilink.preprocessForRendering(openBody)
         let rendered = MarkdownRenderer.render(preprocessed, style: RenderStyle(
-            size: ReadingDefaults.fontSize, design: .sans, lineHeight: ReadingDefaults.lineHeight
+            size: ReadingDefaults.fontSize, fontFamily: nil, lineHeight: ReadingDefaults.lineHeight
         ))
         openOutline = outline(from: rendered.headings)
         openStats = openBody.isEmpty ? nil : computeDocStats(openBody)

@@ -56,9 +56,6 @@ let package = Package(
             ],
             resources: [
                 .process("Resources/Assets.xcassets"),   // app icon catalog (from main)
-                // Bundled reading fonts (binaries git-ignored) — `.copy` keeps the
-                // Fonts/ dir so FontRegistration finds it via Bundle.module.
-                .copy("Resources/Fonts"),
             ]
         ),
         // Standalone semantic-search CLI (build/query the vector index without the

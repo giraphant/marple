@@ -132,11 +132,13 @@ private struct Chrome<Content: View>: View {
     @AppStorage(SettingsKeys.readingFontFamily) private var fontFamily = ReadingFontFamily.sans
     @AppStorage(SettingsKeys.readingFontSize) private var fontSize = ReadingDefaults.fontSize
     @AppStorage(SettingsKeys.readingLineHeight) private var lineHeight = ReadingDefaults.lineHeight
+    @AppStorage(SettingsKeys.readingLetterSpacing) private var letterSpacing = ReadingDefaults.letterSpacing
     @ViewBuilder var content: Content
 
     private var readingFont: ReadingFontConfig {
-        ReadingFontConfig(size: fontSize, design: fontFamily.design,
-                          lineHeight: lineHeight, customName: fontFamily.customFontName)
+        ReadingFontConfig(size: fontSize, fontFamily: fontFamily.systemFamily,
+                          bodyWeight: fontFamily.bodyWeight, lineHeight: lineHeight,
+                          letterSpacing: letterSpacing)
     }
 
     var body: some View {

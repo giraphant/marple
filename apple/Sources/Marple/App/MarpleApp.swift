@@ -141,7 +141,6 @@ struct MarpleApp: App {
 
     init() {
         setvbuf(stdout, nil, _IOLBF, 0)  // line-buffer so logs stream to the captured file
-        FontRegistration.registerBundledFonts()
     }
 
     // The main window is AppKit-owned (see MarpleWindowController) so the split view
