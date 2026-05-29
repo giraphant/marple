@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import MarpleKit
 
 /// UserDefaults keys for user settings. Plain `@AppStorage` rather than a Codable
@@ -8,6 +9,7 @@ enum SettingsKeys {
     static let readingFontFamily = "marple.readingFontFamily"
     static let readingFontSize = "marple.readingFontSize"
     static let readingLineHeight = "marple.readingLineHeight"
+    static let readingLetterSpacing = "marple.readingLetterSpacing"
     static let externalEditor = "marple.externalEditor"
     static let citationFormat = "marple.citationFormat"
     static let citationClickAction = "marple.citationClickAction"
@@ -59,43 +61,52 @@ enum ThemePreference: String, CaseIterable {
     }
 }
 
-/// Reading-column font face. System faces map to a `Font.Design`; the bundled
-/// custom faces (see FontRegistration) carry a PostScript name resolved via
-/// `Font.custom`. Native equivalent of the web 苹方/宋体/等宽 presets, plus the
-/// trial Chinese reading fonts.
+/// Reading-column font face. Each case maps to a system-installed font family the
+/// renderer resolves per-weight via `NSFontManager` (real weight cuts, not faux-bold).
+/// `.sans` uses the system font directly (its CJK face is 苹方).
 enum ReadingFontFamily: String, CaseIterable {
-    case sans, serif, mono
-    case fzPingXianYaSong, fzYouHei, lxgwNeoZhiSong, lxgwWenKai
+    case sans, yingHei, jingXiHei, jingXiRunHei, wenkai, pingXianYaSong, sourceHanSerif, youSong, neoZhiSong
 
     var label: String {
         switch self {
-        case .sans:  return "苹方"
-        case .serif: return "宋体"
-        case .mono:  return "等宽"
-        case .fzPingXianYaSong: return "方正屏显雅宋"
-        case .fzYouHei:         return "方正悠黑"
-        case .lxgwNeoZhiSong:   return "霞鹜新致宋"
-        case .lxgwWenKai:       return "霞鹜文楷(屏阅)"
+        case .sans:           return "苹方"
+        case .yingHei:        return "蒙纳盈黑"
+        case .jingXiHei:      return "文鼎晶熙黑"
+        case .jingXiRunHei:   return "文鼎晶熙润黑"
+        case .wenkai:         return "霞鹜文楷"
+        case .pingXianYaSong: return "方正屏显雅宋"
+        case .sourceHanSerif: return "思源宋体"
+        case .youSong:        return "方正悠宋"
+        case .neoZhiSong:     return "霞鹜新致宋"
         }
     }
 
-    /// System font design; `.default` for custom faces (they carry their own face).
-    var design: Font.Design {
+    /// System font family name, or nil for the default system face (苹方 for CJK).
+    var systemFamily: String? {
         switch self {
-        case .serif: return .serif
-        case .mono:  return .monospaced
-        default:     return .default
+        case .sans:           return nil
+        case .yingHei:        return "M Ying Hei PRC"
+        case .jingXiHei:      return "AR UDJingXiHeiG30"
+        case .jingXiRunHei:   return "AR JingXiRunHeiGB"
+        case .wenkai:         return "LXGW WenKai"
+        case .pingXianYaSong: return "FZPingXianYaSongS-R-GB"
+        case .sourceHanSerif: return "Source Han Serif SC"
+        case .youSong:        return "FZYouSongJ GBK"
+        case .neoZhiSong:     return "LXGW Neo ZhiSong Plus"
         }
     }
 
-    /// PostScript name of the bundled custom font, or nil for system faces.
-    var customFontName: String? {
+    /// Body weight, tuned per-font to its own weight table. High-contrast 宋体 render
+    /// faint on screen, so they get bumped up; how far depends on the family's cuts
+    /// (悠宋's weight-5 member is a Light cut, so it needs semibold to read solid).
+    /// 屏显雅宋 is screen-tuned at regular and stays as a thin-body control. 盈黑 sits at
+    /// its W4 (regular) cut — W5 read a touch heavy. 晶熙黑/润黑 (full G30 families) floor
+    /// at Medium(w6), so medium lands on that real cut — a solid body, real Bold above it.
+    var bodyWeight: NSFont.Weight {
         switch self {
-        case .fzPingXianYaSong: return "FZPingXYSJW--GB1-0"
-        case .fzYouHei:         return "FZYHJW"
-        case .lxgwNeoZhiSong:   return "LXGWNeoZhiSongPlus"
-        case .lxgwWenKai:       return "LXGWWenKaiMonoScreen"
-        default:                return nil
+        case .youSong:                                 return .semibold
+        case .sourceHanSerif, .neoZhiSong, .jingXiHei, .jingXiRunHei: return .medium
+        case .sans, .yingHei, .wenkai, .pingXianYaSong: return .regular
         }
     }
 }
@@ -106,6 +117,20 @@ enum ReadingDefaults {
     static let lineHeight: Double = 1.62
     static let fontSizeOptions: [Double] = [15, 16, 17, 18, 19]
     static let lineHeightOptions: [Double] = [1.62, 1.78, 1.9]
+
+    /// CJK-only letter-spacing, as a fraction of the em (applied as `size * value`).
+    /// Latin text is never tracked; this only loosens 中文.
+    static let letterSpacing: Double = 0.04
+    static let letterSpacingOptions: [Double] = [0.0, 0.02, 0.04, 0.06, 0.08]
+    static func letterSpacingLabel(_ value: Double) -> String {
+        switch value {
+        case ..<0.01:  return "紧凑"
+        case ..<0.03:  return "偏紧"
+        case ..<0.05:  return "标准"
+        case ..<0.07:  return "舒朗"
+        default:       return "宽松"
+        }
+    }
 }
 
 /// Resolved reading-typography config, injected through the environment so the
@@ -113,25 +138,15 @@ enum ReadingDefaults {
 /// unitless line-height multiplier (web model) into SwiftUI's extra-points model.
 struct ReadingFontConfig: Equatable {
     var size: Double
-    var design: Font.Design
+    /// System font family for the reader, or nil for the default system face.
+    var fontFamily: String?
+    var bodyWeight: NSFont.Weight = .regular
     var lineHeight: Double
-    var customName: String? = nil
-
-    /// A font at an arbitrary size/weight honoring the chosen face — custom
-    /// (bundled, by PostScript name) or system (by design). Used for both body
-    /// and headings so the whole reader shares one face.
-    func font(size: Double, weight: Font.Weight = .regular) -> Font {
-        if let customName {
-            return .custom(customName, size: size).weight(weight)
-        }
-        return .system(size: size, weight: weight, design: design)
-    }
-
-    var bodyFont: Font { font(size: size) }
-    var lineSpacing: CGFloat { CGFloat(size * (lineHeight - 1)) }
+    /// CJK letter-spacing as a fraction of the em (see `ReadingDefaults.letterSpacing`).
+    var letterSpacing: Double = ReadingDefaults.letterSpacing
 
     static let `default` = ReadingFontConfig(
-        size: ReadingDefaults.fontSize, design: .default, lineHeight: ReadingDefaults.lineHeight)
+        size: ReadingDefaults.fontSize, fontFamily: nil, lineHeight: ReadingDefaults.lineHeight)
 }
 
 private struct ReadingFontKey: EnvironmentKey {
