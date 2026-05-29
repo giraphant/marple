@@ -33,9 +33,9 @@ import Foundation
         try CloneCopy.snapshotTree(from: root, to: dest)
 
         func exists(_ rel: String) -> Bool { fm.fileExists(atPath: dest.appendingPathComponent(rel).path) }
-        #expect(exists("vault/notes/a.md"))
+        #expect(exists("vault/notes/a.md"))      // library content is kept
         #expect(exists("sources/x.pdf"))
-        #expect(exists(".obsidian/app.json"))   // user-facing tool config is kept
+        #expect(!exists(".obsidian"))            // editor config excluded
         #expect(!exists(".marple"))
         #expect(!exists(".git"))
         #expect(!exists(".DS_Store"))
@@ -59,7 +59,8 @@ import Foundation
         #expect(CloneCopy.isExcluded(".quasi"))
         #expect(CloneCopy.isExcluded(".Ulysses-Group.plist"))
         #expect(CloneCopy.isExcluded(".Ulysses-ActivityHistory"))
+        #expect(CloneCopy.isExcluded(".obsidian"))
         #expect(!CloneCopy.isExcluded("vault"))
-        #expect(!CloneCopy.isExcluded(".obsidian"))
+        #expect(!CloneCopy.isExcluded("sources"))
     }
 }
