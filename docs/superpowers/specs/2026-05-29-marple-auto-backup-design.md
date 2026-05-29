@@ -52,7 +52,7 @@ Given a list of snapshot timestamps and `now`, returns the set to delete. Tiers 
 Pure function over `[Date]` → `(keep: [Date], delete: [Date])`. Fully unit-tested; this is where the density logic lives so creation cadence can be finer without changing visible density.
 
 ### `MarpleKit/Backup/CloneCopy.swift`
-Thin wrapper over `clonefile(2)` for a directory tree, with a recursive-copy fallback when `clonefile` fails (`EXDEV` cross-volume, non-APFS). Exclusions are applied during copy: skip `.marple/` (rebuildable ~1GB cache), `.git` (9.1GB binary-heavy history — itself a history mechanism), `.DS_Store` (Finder junk), `.sync_*` (Nextcloud/ownCloud sync journal), and agent/CLI session-state dirs (`.claude`, `.codex`, `.factory`, `.antigravitycli`, `.playwright-mcp`, `.superset` — not vault content, written constantly by background tools, so including them would mark the vault dirty every tick and flood the timeline). Everything else — including user-facing tool config like `.obsidian` — is cloned.
+Thin wrapper over `clonefile(2)` for a directory tree, with a recursive-copy fallback when `clonefile` fails (`EXDEV` cross-volume, non-APFS). Exclusions are applied during copy: skip `.marple/` (rebuildable ~1GB cache), `.git` (9.1GB binary-heavy history — itself a history mechanism), `.DS_Store` (Finder junk), `.sync_*` (Nextcloud/ownCloud sync journal), agent/CLI session-state dirs (`.claude`, `.codex`, `.factory`, `.antigravitycli`, `.playwright-mcp`, `.superset` — not vault content, written constantly by background tools, so including them would mark the vault dirty every tick and flood the timeline), the academic-pipeline cache (`.quasi`), and stale Ulysses library metadata (`.Ulysses-*`). All of these are rebuildable / disposable. Everything else — including user-facing tool config like `.obsidian` — is cloned.
 
 ### `MarpleKit/Backup/SnapshotStore.swift`
 Owns the backup root for one vault. API:
@@ -111,7 +111,7 @@ apple/Sources/
 - **Backup root must be outside the vault** to prevent recursive snapshots and git tracking.
 - **Change detection** uses the `VaultWatcher` dirty flag, not a full tree walk per tick.
 - **Cross-volume / non-APFS** silently falls back to full copy (correct, just not space-deduped) — surfaced via the location help note.
-- **Excluded from snapshots:** `.marple/` (rebuildable), `.git` (9.1GB binary-heavy history), `.DS_Store`, `.sync_*` (sync journal), and agent/CLI state dirs (`.claude`/`.codex`/`.factory`/`.antigravitycli`/`.playwright-mcp`/`.superset`). Exclusion doubles as change-detection noise suppression — these dirs change constantly and would otherwise trigger empty snapshots. Everything else (incl. `.obsidian`) cloned.
+- **Excluded from snapshots:** `.marple/` (rebuildable), `.git` (9.1GB binary-heavy history), `.DS_Store`, `.sync_*` (sync journal), agent/CLI state dirs (`.claude`/`.codex`/`.factory`/`.antigravitycli`/`.playwright-mcp`/`.superset`), `.quasi` (pipeline cache), and `.Ulysses-*` (stale library metadata). Exclusion doubles as change-detection noise suppression — these dirs change constantly and would otherwise trigger empty snapshots. Everything else (incl. `.obsidian`) cloned.
 - **Restore never overwrites:** single-file-as-copy only.
 
 ## Testing
