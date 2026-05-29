@@ -48,7 +48,7 @@ struct IndexWriterTests {
             ratingJSON: "\"★★★\"",
             ratingScore: 3.0,
             themes: ["animal-behaviour", "psychology"],
-            topic: "canine cognition",
+            topics: ["canine-cognition"],
             source: "Journal of Dogs",
             doi: "10.1234/dogs.2019",
             publisher: nil,
@@ -84,7 +84,7 @@ struct IndexWriterTests {
             ratingJSON: nil,
             ratingScore: 0.0,
             themes: ["philosophy", "animals"],
-            topic: nil,
+            topics: nil,
             source: nil,
             doi: nil,
             publisher: "Kyoto Press",
@@ -119,7 +119,7 @@ struct IndexWriterTests {
             ratingJSON: nil,
             ratingScore: 0.0,
             themes: nil,
-            topic: nil,
+            topics: nil,
             source: nil,
             doi: nil,
             publisher: nil,
@@ -228,6 +228,41 @@ struct IndexWriterTests {
         #expect(e.added == 1_600_000_000_000)
         #expect(e.preview == "Dogs are fascinating creatures that form strong bonds.")
         #expect(e.themes.sorted() == ["animal-behaviour", "psychology"])
+        // QUA-137: topics round-trip through the topics_json column like themes.
+        #expect(e.topics == ["canine-cognition"])
+    }
+
+    @Test("topics frontmatter participates in persisted search")
+    func topicsFrontmatterSearchableThroughTrigram() throws {
+        let text = """
+        ---
+        type: paper
+        title: Unrelated Title
+        topics:
+          - canine-cognition
+        ---
+
+        Neutral body.
+        """
+        let outcome = buildIndexedEntry(
+            text: text,
+            rel: "vault/papers/topic-only.md",
+            fileStem: "topic-only",
+            sourceSlugs: [],
+            mtimeMs: nil
+        )
+        guard case .indexed(let entry) = outcome else {
+            Issue.record("Expected indexed entry, got \(outcome)")
+            return
+        }
+
+        let path = try tempDBPath()
+        let queue = try openAndCreateSchema(at: path)
+        try queue.write { db in try IndexWriter.insert(db, entry) }
+
+        let db = IndexDatabase(indexDBPath: path)
+        let hits = try db.search("canine-cognition", type: nil, minRating: nil, theme: nil, limit: 80)
+        #expect(hits.map(\.entry.path) == ["vault/papers/topic-only.md"])
     }
 
     /// QUA-109: SQLite author column is JSON-encoded so round-trips preserve
@@ -243,7 +278,7 @@ struct IndexWriterTests {
             title: "Test", titleEn: nil, titleCn: nil,
             author: ["Smith, John Jr.", "Jane Doe"],
             yearJSON: "2020", ratingJSON: nil, ratingScore: 0,
-            themes: nil, topic: nil, source: nil, doi: nil,
+            themes: nil, topics: nil, source: nil, doi: nil,
             publisher: nil, isbn: nil,
             translationTitleCn: nil, translationDoubanURL: nil,
             chaptersAnalyzed: nil, annotates: nil, created: nil,

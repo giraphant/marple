@@ -8,7 +8,7 @@ public enum FilterField: String, Sendable, CaseIterable, Hashable, Codable {
         case .rating: return "评分"
         case .year:   return "年份"
         case .author: return "作者"
-        case .theme:  return "主题"
+        case .theme:  return "标签"
         case .source: return "来源"
         case .haspdf: return "有 PDF"
         case .added:  return "入库"

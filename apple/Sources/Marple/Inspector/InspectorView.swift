@@ -371,8 +371,6 @@ private struct InspectorInfoRowsView: View {
             await model.setSource(value)
         case .doi:
             await model.setDoi(value)
-        case .topic:
-            await model.setTopic(value)
         }
     }
 }
@@ -829,7 +827,7 @@ private struct ThemesEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: InspectorStyle.headerSpacing) {
             HStack {
-                SectionHeader("主题")
+                SectionHeader("标签")
                 Spacer()
                 Button { adding.toggle() } label: {
                     Image(systemName: adding ? "xmark" : "plus")
@@ -841,12 +839,12 @@ private struct ThemesEditor: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .help(adding ? "取消" : "添加主题")
+                .help(adding ? "取消" : "添加标签")
                 .onHover { hoveringAdd = $0 }
             }
             if themes.isEmpty {
                 Button { adding = true } label: {
-                    Text("添加主题")
+                    Text("添加标签")
                         .font(Typo.callout)
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
@@ -864,7 +862,7 @@ private struct ThemesEditor: View {
                 }
             }
             if adding {
-                TextField("新主题（逗号分隔可多个）", text: $draft)
+                TextField("新标签（逗号分隔可多个）", text: $draft)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { Task { await model.addThemes(draft); draft = ""; adding = false } }
             }
@@ -969,11 +967,12 @@ private struct RelationsView: View {
                     relGroup("图书", books)
                     relGroup("论文", papers)
                 }
+                relGroup("专题成员", r.topicMembers)
                 let siblingBooks = r.siblings.filter { $0.type == .book }
                 let siblingPapers = r.siblings.filter { $0.type == .paper }
                 relGroup("同作者专著", siblingBooks)
                 relGroup("同作者论文", siblingPapers)
-                relGroup("同主题相似", r.similar)
+                relGroup("同标签相似", r.similar)
             }
         }
     }

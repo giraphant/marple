@@ -11,11 +11,11 @@ import Testing
         year: "2025",
         ratingScore: 4,
         themes: ["AI", "workflow"],
+        topics: ["agents"],
         preview: "Short preview",
         hasPDF: true,
         pdfSlug: "paper-a",
         source: "Journal X",
-        topic: "Agents",
         doi: "10.1234/a"
     )
 

@@ -106,7 +106,7 @@ public final class IndexDatabase: @unchecked Sendable {
             result.reserveCapacity(expected)
             let cursor = try Row.fetchCursor(db, sql: """
                 SELECT path, type, book, title, author, year_json, rating_score,
-                       themes_json, topic, kind, journal, source, doi, publisher, isbn, category,
+                       themes_json, topics_json, kind, journal, source, doi, publisher, isbn, category,
                        annotates, created, has_pdf, pdf_slug, mtime, preview, added
                 FROM entries
                 ORDER BY path
@@ -268,7 +268,7 @@ public final class IndexDatabase: @unchecked Sendable {
         var sql = """
             SELECT e.path AS path, e.type AS type, e.book AS book, e.title AS title,
                    e.author AS author, e.year_json AS year_json, e.rating_score AS rating_score,
-                   e.themes_json AS themes_json, e.topic AS topic, e.kind AS kind,
+                   e.themes_json AS themes_json, e.topics_json AS topics_json, e.kind AS kind,
                    e.journal AS journal, e.source AS source, e.doi AS doi,
                    e.publisher AS publisher, e.isbn AS isbn,
                    e.category AS category, e.annotates AS annotates, e.created AS created,
@@ -315,7 +315,7 @@ public final class IndexDatabase: @unchecked Sendable {
         var sql = """
             SELECT e.path AS path, e.type AS type, e.book AS book, e.title AS title,
                    e.author AS author, e.year_json AS year_json, e.rating_score AS rating_score,
-                   e.themes_json AS themes_json, e.topic AS topic, e.kind AS kind,
+                   e.themes_json AS themes_json, e.topics_json AS topics_json, e.kind AS kind,
                    e.journal AS journal, e.source AS source, e.doi AS doi,
                    e.publisher AS publisher, e.isbn AS isbn,
                    e.category AS category, e.annotates AS annotates, e.created AS created,
@@ -358,6 +358,10 @@ public final class IndexDatabase: @unchecked Sendable {
         let themes: [String] = themesJSON
             .flatMap { $0.data(using: .utf8) }
             .flatMap { try? decoder.decode([String].self, from: $0) } ?? []
+        let topicsJSON: String? = row["topics_json"]
+        let topics: [String] = topicsJSON
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? decoder.decode([String].self, from: $0) } ?? []
         let yearJSON: String? = row["year_json"]
         let year: String? = decodeYear(yearJSON)
         let mtimeRaw: Int64? = row["mtime"]
@@ -386,7 +390,6 @@ public final class IndexDatabase: @unchecked Sendable {
         let preview: String = (row["preview"] as String?) ?? ""
         let source: String? = row["source"]
         let book: String? = row["book"]
-        let topic: String? = row["topic"]
         let kind: String? = row["kind"]
         let journal: String? = row["journal"]
         let doi: String? = row["doi"]
@@ -403,6 +406,7 @@ public final class IndexDatabase: @unchecked Sendable {
             year: year,
             ratingScore: ratingScore,
             themes: themes,
+            topics: topics,
             preview: preview,
             hasPDF: (hasPDFRaw ?? 0) != 0,
             pdfSlug: pdfSlug,
@@ -410,7 +414,6 @@ public final class IndexDatabase: @unchecked Sendable {
             added: added,
             source: source,
             book: book,
-            topic: topic,
             kind: kind,
             journal: journal,
             doi: doi,
