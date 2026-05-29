@@ -14,6 +14,9 @@ final class AppState: ObservableObject {
     // see `applyCLISetting` for the toggle path.
     private var cliServer: CLIServer?
     private var cliSettingObserver: NSObjectProtocol?
+    // QUA-106: periodic local snapshot backups. Constructed during boot,
+    // started/stopped by `applyBackupSetting` per `marple.backupEnabled`.
+    private var backupScheduler: BackupScheduler?
 
     /// Synchronous (no awaits inside) since Phase A — the heavy reconcile +
     /// loadIndex moved to a background Task at the bottom of this method. Lets
@@ -63,6 +66,17 @@ final class AppState: ObservableObject {
         watcher.start()
         self.watcher = watcher
 
+        // QUA-106: backup engine. The store walks the whole workspaceRoot for
+        // change detection, so it's wired independently of the index/watcher.
+        // The backup root lives OUTSIDE the vault (no snapshot-of-snapshots).
+        let store = SnapshotStore(
+            workspaceRoot: URL(fileURLWithPath: paths.workspaceRoot),
+            backupsBase: BackupScheduler.resolveBase())
+        let scheduler = BackupScheduler(store: store)
+        self.backupScheduler = scheduler
+        ActiveBackup.scheduler = scheduler
+        applyBackupSetting()
+
         // QUA-107: construct the CLI socket holder now, but defer the actual
         // listen + UserDefaults observer until the first loadIndex publishes
         // (see the post-loadIndex tail below). Before that, AppModel.entries
@@ -91,7 +105,10 @@ final class AppState: ObservableObject {
                 forName: UserDefaults.didChangeNotification,
                 object: nil, queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.applyCLISetting() }
+                Task { @MainActor in
+                    self?.applyCLISetting()
+                    self?.applyBackupSetting()
+                }
             }
             if canSkip {
                 Task { @MainActor [weak m, indexer] in
@@ -126,6 +143,15 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Start/stop the backup scheduler per `marple.backupEnabled` (default true
+    /// when the key was never set — it's a safety feature, on by default).
+    private func applyBackupSetting() {
+        guard let backupScheduler else { return }
+        let defaults = UserDefaults.standard
+        let wanted = defaults.object(forKey: SettingsKeys.backupEnabled) as? Bool ?? true
+        if wanted { backupScheduler.start() } else { backupScheduler.stop() }
+    }
+
     func shutdownCLIBridge() {
         if let o = cliSettingObserver {
             NotificationCenter.default.removeObserver(o)
@@ -141,7 +167,6 @@ struct MarpleApp: App {
 
     init() {
         setvbuf(stdout, nil, _IOLBF, 0)  // line-buffer so logs stream to the captured file
-        FontRegistration.registerBundledFonts()
     }
 
     // The main window is AppKit-owned (see MarpleWindowController) so the split view
