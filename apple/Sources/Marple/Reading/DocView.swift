@@ -69,14 +69,11 @@ struct DocView: View {
     }
 
     private var renderStyle: RenderStyle {
-        let design: MarkdownFontDesign
-        switch readingFont.design {
-        case .default:     design = .sans
-        case .serif:       design = .serif
-        case .monospaced:  design = .mono
-        default:           design = .sans
-        }
-        return RenderStyle(size: readingFont.size, design: design, lineHeight: readingFont.lineHeight)
+        RenderStyle(size: readingFont.size,
+                    fontFamily: readingFont.fontFamily,
+                    bodyWeight: readingFont.bodyWeight,
+                    letterSpacing: readingFont.letterSpacing,
+                    lineHeight: readingFont.lineHeight)
     }
 
     private var resolvedScrollTarget: NSRange? {
