@@ -383,6 +383,9 @@ public final class VaultIndexer: @unchecked Sendable {
         let required: Set<String> = [
             "title_en", "title_cn", "kind", "journal", "publisher", "isbn", "category",
             "translation_title_cn", "translation_douban_url",
+            // QUA-137: topics_json replaced the dropped singular `topic` column.
+            // Its absence means a pre-0.4.0 DB → force buildFull rebuild.
+            "topics_json",
         ]
 
         var config = Configuration()

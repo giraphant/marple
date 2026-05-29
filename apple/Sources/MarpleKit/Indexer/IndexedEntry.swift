@@ -73,10 +73,11 @@ public struct IndexedEntry: Sendable, Equatable {
     /// Theme tags as a string array.  Column: `themes` (stored as JSON array TEXT).
     public var themes: [String]?
 
-    // MARK: Bibliographic metadata
+    /// Topic-corpus membership slugs.  Column: `topics_json` (JSON array TEXT).
+    /// Mirrors `themes`; optional in the Quasi schema (QUA-137).
+    public var topics: [String]?
 
-    /// Column: `topic`.
-    public var topic: String?
+    // MARK: Bibliographic metadata
 
     /// Column: `kind`.
     public var kind: String?
@@ -307,8 +308,9 @@ public func buildIndexedEntry(
     let ratingJSONValue: String? = ratingSource.flatMap { truthyJSONCell($0) }
     let ratingScoreValue: Double = ratingSource.map { ratingScore($0) } ?? 0.0
 
-    // 8. Themes, author.
+    // 8. Themes, topics, author.
     let themesValue: [String]? = themeArray(field(frontmatter, "themes"))
+    let topicsValue: [String]? = themeArray(field(frontmatter, "topics"))
     let authorValue: [String] = parseAuthors(
         field(frontmatter, "author") ?? field(frontmatter, "authors")
     )
@@ -328,13 +330,14 @@ public func buildIndexedEntry(
     let bodyLenValue: Int64 = Int64(bodyTextValue.unicodeScalars.count)
     let previewValue: String = firstParagraph(body)
 
-    // 11. Search text — 9 parts, same order as Rust.
+    // 11. Search text — composite path/title/metadata/body text for trigram FTS.
     let searchTextValue: String = searchText([
         rel,
         titleValue ?? "",
         titleEnValue ?? "",
         titleCnValue ?? "",
         authorValue.joined(separator: ", "),
+        topicsValue?.joined(separator: " ") ?? "",
         publisherValue ?? "",
         isbnValue ?? "",
         translationTitleCnValue ?? "",
@@ -342,7 +345,6 @@ public func buildIndexedEntry(
     ])
 
     // 12. Remaining optional fields.
-    let topicValue: String? = truthyText(frontmatter, "topic")
     let kindValue: String? = truthyText(frontmatter, "kind")
     let journalValue: String? = truthyText(frontmatter, "journal")
     let sourceValue: String? = truthyText(frontmatter, "source")
@@ -363,7 +365,7 @@ public func buildIndexedEntry(
         ratingJSON: ratingJSONValue,
         ratingScore: ratingScoreValue,
         themes: themesValue,
-        topic: topicValue,
+        topics: topicsValue,
         kind: kindValue,
         journal: journalValue,
         source: sourceValue,
