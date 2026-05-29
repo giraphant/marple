@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import CoreText
 import Markdown
 
 // MARK: - Public types
@@ -20,6 +21,94 @@ public struct RenderedDocument {
 /// Font family for the reading column (mirrors ReadingFontFamily without SwiftUI import).
 public enum MarkdownFontDesign: String, Equatable, Sendable, CaseIterable {
     case sans, serif, mono
+}
+
+// MARK: - Self-drawn table chrome
+//
+// Tables nest a one-cell outer table (the card) around the real data table, so a
+// single `RoundedCardBlock` draws one rounded card + border for the whole table.
+// Overriding `NSTextBlock.drawBackground` lets us draw rounded corners and crisp
+// hairlines with `NSBezierPath` while the cell text stays live (selection / ⌘F /
+// wikilinks). See WWDC 2018 "TextKit Best Practices".
+
+/// Outer wrapper block: draws the rounded card surface + border once for the table.
+final class RoundedCardBlock: NSTextTableBlock {
+    var fillColor: NSColor = .clear
+    var borderColor: NSColor = .separatorColor
+    var cornerRadius: CGFloat = 9
+
+    // The frame from the most recent draw, so cells can clip their own fills/hairlines
+    // to the card's rounded interior. The outer card block draws before the inner
+    // cells, so this is populated by the time a cell draws.
+    private(set) var lastFrame: NSRect = .zero
+
+    // Drawn during NSTextView layout/draw, where NSAppearance.current is already the
+    // view's effective appearance — so the dynamic NSColors resolve for light/dark.
+    override func drawBackground(withFrame frameRect: NSRect, in controlView: NSView,
+                                 characterRange: NSRange, layoutManager: NSLayoutManager) {
+        lastFrame = frameRect
+        let rect = frameRect.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
+        fillColor.setFill()
+        path.fill()
+        path.lineWidth = 1
+        borderColor.setStroke()
+        path.stroke()
+    }
+
+    /// The interior of the card, just inside the 1px border — cell fills and hairlines
+    /// clip to this so they can never bleed past the rounded corners.
+    func interiorClipPath() -> NSBezierPath {
+        let rect = lastFrame.insetBy(dx: 1, dy: 1)
+        let radius = max(cornerRadius - 1, 0)
+        return NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+    }
+}
+
+/// Inner data cell: draws an optional header fill (rounded at the table's top
+/// corners) and a faint hairline beneath body rows. Borders are all self-drawn.
+final class TableCellBlock: NSTextTableBlock {
+    var headerFillColor: NSColor?
+    var rowSeparatorColor: NSColor?
+    var cornerRadius: CGFloat = 9
+    var roundTopLeft = false
+    var roundTopRight = false
+    weak var card: RoundedCardBlock?
+    private(set) var lastFrame: NSRect = .zero
+
+    override func drawBackground(withFrame frameRect: NSRect, in controlView: NSView,
+                                 characterRange: NSRange, layoutManager: NSLayoutManager) {
+        lastFrame = frameRect
+        let cardFrame = card?.lastFrame ?? .zero
+        let hasCard = cardFrame != .zero
+
+        // Clip to the card interior so the header fill and row hairlines take their
+        // rounded corners directly from the card's own path — they can neither spill
+        // past the border nor leave a gap at the corners.
+        NSGraphicsContext.current?.saveGraphicsState()
+        defer { NSGraphicsContext.current?.restoreGraphicsState() }
+        if hasCard { card?.interiorClipPath().setClip() }
+
+        if let fill = headerFillColor {
+            // A plain band spanning to the card's edges (where this column touches
+            // them); the clip above carves the rounded top corners to match the card.
+            let left = (hasCard && roundTopLeft) ? cardFrame.minX : frameRect.minX
+            let right = (hasCard && roundTopRight) ? cardFrame.maxX : frameRect.maxX
+            let top = hasCard ? cardFrame.minY : frameRect.minY
+            let band = NSRect(x: left, y: top, width: right - left, height: frameRect.maxY - top)
+            fill.setFill()
+            band.fill()
+        }
+        if let separator = rowSeparatorColor {
+            let y = frameRect.maxY - 0.5
+            let line = NSBezierPath()
+            line.move(to: NSPoint(x: frameRect.minX, y: y))
+            line.line(to: NSPoint(x: frameRect.maxX, y: y))
+            line.lineWidth = 1
+            separator.setStroke()
+            line.stroke()
+        }
+    }
 }
 
 /// Input parameters for rendering (Equatable via synthesized == on stored properties).
@@ -51,12 +140,14 @@ public struct RenderStyle: Equatable {
     }
 
     var tableBodyFont: NSFont {
+        let base: NSFont
         switch design {
-        case .sans:  return NSFont.systemFont(ofSize: size * 0.90, weight: .regular)
-        case .serif: return NSFont(name: "Songti SC", size: size * 0.90)
+        case .sans:  base = NSFont.systemFont(ofSize: size * 0.90, weight: .regular)
+        case .serif: base = NSFont(name: "Songti SC", size: size * 0.90)
             ?? NSFont.systemFont(ofSize: size * 0.90, weight: .regular)
-        case .mono:  return NSFont.monospacedSystemFont(ofSize: size * 0.90, weight: .regular)
+        case .mono:  base = NSFont.monospacedSystemFont(ofSize: size * 0.90, weight: .regular)
         }
+        return Self.withMonospacedDigits(base)
     }
 
     var tableHeaderFont: NSFont {
@@ -64,6 +155,17 @@ public struct RenderStyle: Equatable {
         let descriptor = bodyFont.fontDescriptor.withSymbolicTraits(.bold)
         return NSFont(descriptor: descriptor, size: bodyFont.pointSize)
             ?? NSFont.systemFont(ofSize: size * 0.90, weight: .semibold)
+    }
+
+    /// Tabular (monospaced) figures so digits align vertically across table rows.
+    private static func withMonospacedDigits(_ font: NSFont) -> NSFont {
+        let descriptor = font.fontDescriptor.addingAttributes([
+            .featureSettings: [[
+                NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
+                NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector
+            ]]
+        ])
+        return NSFont(descriptor: descriptor, size: font.pointSize) ?? font
     }
 
     func headingFont(level: Int) -> NSFont {
@@ -80,10 +182,11 @@ public struct RenderStyle: Equatable {
     var codeBackgroundColor: NSColor { .textColor.withAlphaComponent(0.035) }
     var quoteTextColor: NSColor { .secondaryLabelColor }
     var separatorTextColor: NSColor { .tertiaryLabelColor }
-    var tableBorderColor: NSColor { .separatorColor.withAlphaComponent(0.24) }
-    var tableHeaderBorderColor: NSColor { .separatorColor.withAlphaComponent(0.48) }
-    var tableOuterBorderColor: NSColor { .separatorColor.withAlphaComponent(0.40) }
-    var tableHeaderBackgroundColor: NSColor { .textColor.withAlphaComponent(0.04) }
+    var tableCornerRadius: CGFloat { 9 }
+    var tableCardFillColor: NSColor { .textColor.withAlphaComponent(0.022) }
+    var tableCardBorderColor: NSColor { .separatorColor }
+    var tableHeaderFillColor: NSColor { .textColor.withAlphaComponent(0.04) }
+    var tableRowSeparatorColor: NSColor { .textColor.withAlphaComponent(0.05) }
     var tableHeaderTextColor: NSColor { .secondaryLabelColor }
     var tableHeaderKern: CGFloat { CGFloat(size * 0.03) }
 
@@ -345,6 +448,20 @@ private final class RenderContext {
         let columnCount = max(headerCells.count, bodyColumnCount)
         guard columnCount > 0 else { return }
 
+        // Outer one-cell table whose shared block draws the rounded card + border.
+        let outerTable = NSTextTable()
+        outerTable.numberOfColumns = 1
+        outerTable.layoutAlgorithm = .fixedLayoutAlgorithm
+        outerTable.collapsesBorders = true
+        let card = RoundedCardBlock(table: outerTable, startingRow: 0, rowSpan: 1, startingColumn: 0, columnSpan: 1)
+        card.setValue(100, type: .percentageValueType, for: .width)
+        card.fillColor = style.tableCardFillColor
+        card.borderColor = style.tableCardBorderColor
+        card.cornerRadius = style.tableCornerRadius
+        for edge in [NSRectEdge.minX, .maxX, .minY, .maxY] {
+            card.setWidth(2, type: .absoluteValueType, for: .padding, edge: edge)
+        }
+
         let textTable = NSTextTable()
         textTable.numberOfColumns = columnCount
         textTable.layoutAlgorithm = .fixedLayoutAlgorithm
@@ -354,10 +471,15 @@ private final class RenderContext {
                                                        bodyRows: bodyRows,
                                                        columnCount: columnCount)
         let columnAlignments = table.columnAlignments
+        let effectiveAlignments = (0..<columnCount).map { column -> Table.ColumnAlignment? in
+            if column < columnAlignments.count, let explicit = columnAlignments[column] { return explicit }
+            return isNumericColumn(column, bodyRows: bodyRows) ? .right : nil
+        }
         let lastRow = bodyRows.count
 
         for column in 0..<columnCount {
             visitTableCell(column < headerCells.count ? headerCells[column] : nil,
+                           card: card,
                            table: textTable,
                            row: 0,
                            column: column,
@@ -365,12 +487,13 @@ private final class RenderContext {
                            isHeader: true,
                            isLastRow: lastRow == 0,
                            columnWidthPercent: columnWidths[column],
-                           columnAlignment: column < columnAlignments.count ? columnAlignments[column] : nil)
+                           columnAlignment: effectiveAlignments[column])
         }
 
         for (rowOffset, rowCells) in bodyRows.enumerated() {
             for column in 0..<columnCount {
                 visitTableCell(column < rowCells.count ? rowCells[column] : nil,
+                               card: card,
                                table: textTable,
                                row: rowOffset + 1,
                                column: column,
@@ -378,7 +501,7 @@ private final class RenderContext {
                                isHeader: false,
                                isLastRow: rowOffset + 1 == lastRow,
                                columnWidthPercent: columnWidths[column],
-                               columnAlignment: column < columnAlignments.count ? columnAlignments[column] : nil)
+                               columnAlignment: effectiveAlignments[column])
             }
         }
 
@@ -478,7 +601,33 @@ private final class RenderContext {
         }
     }
 
-    private func visitTableCell(_ cell: Markup?, table: NSTextTable, row: Int, column: Int, columnCount: Int, isHeader: Bool, isLastRow: Bool, columnWidthPercent: CGFloat, columnAlignment: Table.ColumnAlignment?) {
+    /// A column reads as numeric when every non-empty body cell parses as a number,
+    /// so it can be right-aligned even when the Markdown gave no alignment marker.
+    private func isNumericColumn(_ column: Int, bodyRows: [[Markup]]) -> Bool {
+        var sawNumber = false
+        for rowCells in bodyRows where column < rowCells.count {
+            let text = plainText(of: rowCells[column]).trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else { continue }
+            guard Self.isNumericToken(text) else { return false }
+            sawNumber = true
+        }
+        return sawNumber
+    }
+
+    /// Lenient numeric test: tolerates currency, percent, thousands separators and
+    /// accounting-style parentheses before checking the remainder parses as a Double.
+    private static func isNumericToken(_ raw: String) -> Bool {
+        var token = raw
+        if token.hasPrefix("(") && token.hasSuffix(")") {
+            token = String(token.dropFirst().dropLast())
+        }
+        let decorations = Set("$€£¥%, ")
+        token = String(token.filter { !decorations.contains($0) })
+        guard !token.isEmpty else { return false }
+        return Double(token) != nil
+    }
+
+    private func visitTableCell(_ cell: Markup?, card: RoundedCardBlock, table: NSTextTable, row: Int, column: Int, columnCount: Int, isHeader: Bool, isLastRow: Bool, columnWidthPercent: CGFloat, columnAlignment: Table.ColumnAlignment?) {
         let previousBaseFont = baseFont
         let previousTraits = traits
         let previousParagraphStyle = ps
@@ -491,7 +640,8 @@ private final class RenderContext {
         activeTextColor = isHeader ? style.tableHeaderTextColor : previousTextColor
         activeKern = isHeader ? style.tableHeaderKern : nil
         linkURL = nil
-        ps = tableCellParagraphStyle(table: table,
+        ps = tableCellParagraphStyle(card: card,
+                                     table: table,
                                      row: row,
                                      column: column,
                                      columnCount: columnCount,
@@ -517,46 +667,41 @@ private final class RenderContext {
         linkURL = previousLinkURL
     }
 
-    private func tableCellParagraphStyle(table: NSTextTable, row: Int, column: Int, columnCount: Int, isHeader: Bool, isLastRow: Bool, columnWidthPercent: CGFloat, columnAlignment: Table.ColumnAlignment?) -> NSParagraphStyle {
-        let block = NSTextTableBlock(table: table,
-                                     startingRow: row,
-                                     rowSpan: 1,
-                                     startingColumn: column,
-                                     columnSpan: 1)
+    private func tableCellParagraphStyle(card: RoundedCardBlock, table: NSTextTable, row: Int, column: Int, columnCount: Int, isHeader: Bool, isLastRow: Bool, columnWidthPercent: CGFloat, columnAlignment: Table.ColumnAlignment?) -> NSParagraphStyle {
+        let block = TableCellBlock(table: table,
+                                   startingRow: row,
+                                   rowSpan: 1,
+                                   startingColumn: column,
+                                   columnSpan: 1)
         block.setValue(columnWidthPercent, type: .percentageValueType, for: .width)
-        block.setWidth(12, type: .absoluteValueType, for: .padding, edge: .minX)
-        block.setWidth(12, type: .absoluteValueType, for: .padding, edge: .maxX)
-        block.setWidth(7, type: .absoluteValueType, for: .padding, edge: .minY)
-        block.setWidth(7, type: .absoluteValueType, for: .padding, edge: .maxY)
+        block.setWidth(14, type: .absoluteValueType, for: .padding, edge: .minX)
+        block.setWidth(14, type: .absoluteValueType, for: .padding, edge: .maxX)
+        block.setWidth(isHeader ? 14 : 11, type: .absoluteValueType, for: .padding, edge: .minY)
+        block.setWidth(isHeader ? 18 : 11, type: .absoluteValueType, for: .padding, edge: .maxY)
         block.setWidth(0, type: .absoluteValueType, for: .border)
-
-        // Horizontal rules: outer frame top/bottom, stronger rule under the header,
-        // faint hairlines between body rows.
-        if row == 0 {
-            block.setWidth(0.75, type: .absoluteValueType, for: .border, edge: .minY)
-            block.setBorderColor(style.tableOuterBorderColor, for: .minY)
-        }
-        block.setWidth(isHeader || isLastRow ? 0.75 : 0.5, type: .absoluteValueType, for: .border, edge: .maxY)
-        block.setBorderColor(isLastRow ? style.tableOuterBorderColor : (isHeader ? style.tableHeaderBorderColor : style.tableBorderColor), for: .maxY)
-
-        // Vertical rules: outer frame on the leading/trailing columns, faint inner
-        // hairlines between columns (collapsed against the neighbour's edge).
-        block.setWidth(column == 0 ? 0.75 : 0.5, type: .absoluteValueType, for: .border, edge: .minX)
-        block.setBorderColor(column == 0 ? style.tableOuterBorderColor : style.tableBorderColor, for: .minX)
-        if column == columnCount - 1 {
-            block.setWidth(0.75, type: .absoluteValueType, for: .border, edge: .maxX)
-            block.setBorderColor(style.tableOuterBorderColor, for: .maxX)
+        block.cornerRadius = style.tableCornerRadius
+        block.card = card
+        if !isHeader {
+            block.verticalAlignment = .middleAlignment
         }
 
+        // The card draws the outer frame; cells only add a whisper header fill
+        // (rounded at the table's top corners) and faint hairlines between rows.
         if isHeader {
-            block.backgroundColor = style.tableHeaderBackgroundColor
+            block.headerFillColor = style.tableHeaderFillColor
+            block.roundTopLeft = column == 0
+            block.roundTopRight = column == columnCount - 1
+            block.rowSeparatorColor = style.tableRowSeparatorColor
+        } else if !isLastRow {
+            block.rowSeparatorColor = style.tableRowSeparatorColor
         }
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = textAlignment(for: columnAlignment)
         paragraphStyle.lineSpacing = style.tableLineSpacing
+        paragraphStyle.paragraphSpacingBefore = isHeader ? 16 : 0
         paragraphStyle.lineBreakMode = .byWordWrapping
-        paragraphStyle.textBlocks = [block]
+        paragraphStyle.textBlocks = [card, block]
         return paragraphStyle
     }
 

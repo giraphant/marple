@@ -45,27 +45,35 @@ import Testing
         #expect(!rendered.attributedString.string.contains(" | "))
     }
 
-    @Test func renderedTablesUseEnclosedHairlineGridStyling() throws {
-        let rendered = Self.renderTable("| A | B |\n|---|---|\n| 1 | |")
+    @Test func renderedTablesNestCellsInOneSharedRoundedCard() throws {
+        let rendered = Self.renderTable("| A | B |\n|---|---|\n| x | |")
+        let headerStyle = try Self.paragraphStyle(in: rendered, containing: "A")
+        let bodyStyle = try Self.paragraphStyle(in: rendered, containing: "x")
         let headerBlock = try Self.tableBlock(in: rendered, containing: "A")
-        let emptyCellBlock = try Self.tableBlock(in: rendered, containing: "—")
+        let bodyBlock = try Self.tableBlock(in: rendered, containing: "x")
         let headerFont = try Self.font(in: rendered, containing: "A")
-        let bodyFont = try Self.font(in: rendered, containing: "1")
+        let bodyFont = try Self.font(in: rendered, containing: "x")
 
-        #expect(headerBlock.width(for: .padding, edge: .minX) == 12)
-        #expect(headerBlock.width(for: .padding, edge: .maxX) == 12)
-        #expect(headerBlock.width(for: .padding, edge: .minY) == 7)
-        #expect(headerBlock.width(for: .padding, edge: .maxY) == 7)
-        // Outer frame on the leading column + top, stronger rule under the header.
-        #expect(headerBlock.width(for: .border, edge: .minX) == 0.75)
-        #expect(headerBlock.width(for: .border, edge: .minY) == 0.75)
-        #expect(headerBlock.width(for: .border, edge: .maxY) == 0.75)
-        // Trailing column carries the right-hand outer frame; inner edge is a hairline.
-        #expect(emptyCellBlock.width(for: .border, edge: .minX) == 0.5)
-        #expect(emptyCellBlock.width(for: .border, edge: .maxX) == 0.75)
-        #expect(emptyCellBlock.width(for: .border, edge: .maxY) == 0.75)
-        let headerBackground = try #require(headerBlock.backgroundColor)
-        #expect(Self.alpha(of: headerBackground) == 0.04)
+        // Each cell nests inside a shared outer card (rounded surface + border).
+        #expect(headerStyle.textBlocks.count == 2)
+        #expect(headerStyle.textBlocks.first is RoundedCardBlock)
+        #expect(headerStyle.textBlocks.first === bodyStyle.textBlocks.first)
+        #expect(headerStyle.textBlocks.last is TableCellBlock)
+        // Self-drawn chrome means cells set no TextKit borders or background fill.
+        #expect(headerBlock.width(for: .border, edge: .minY) == 0)
+        #expect(headerBlock.width(for: .border, edge: .maxY) == 0)
+        #expect(headerBlock.backgroundColor == nil)
+        // Roomy cell padding inside the card; the header gets extra vertical room.
+        #expect(headerBlock.width(for: .padding, edge: .minX) == 14)
+        #expect(headerBlock.width(for: .padding, edge: .maxX) == 14)
+        #expect(headerBlock.width(for: .padding, edge: .minY) == 14)
+        #expect(headerBlock.width(for: .padding, edge: .maxY) == 18)
+        #expect(headerStyle.paragraphSpacingBefore == 16)
+        let headerGaps = try Self.tableHeaderVerticalGaps(in: rendered, containing: "A")
+        #expect(abs(headerGaps.top - headerGaps.bottom) <= 1)
+        #expect(headerBlock.verticalAlignment == .topAlignment)
+        #expect(bodyBlock.verticalAlignment == .middleAlignment)
+        // Header keeps its weight + tracked gray meta-label treatment.
         #expect(headerFont.pointSize == 15.3)
         #expect(bodyFont.pointSize == 15.3)
         #expect(Self.fontWeight(headerFont) > Self.fontWeight(bodyFont))
@@ -74,21 +82,24 @@ import Testing
         #expect(try Self.foregroundColor(in: rendered, containing: "—") == .tertiaryLabelColor)
     }
 
-    @Test func renderedTablesEncloseColumnsWithoutZebra() throws {
-        let rendered = Self.renderTable("| Term | Value |\n|---|---|\n| Alpha | 1 |\n| Beta | 2 |")
-        let firstColumnInnerRow = try Self.tableBlock(in: rendered, containing: "Alpha")
-        let secondColumnInnerRow = try Self.tableBlock(in: rendered, containing: "1")
-        let firstColumnLastRow = try Self.tableBlock(in: rendered, containing: "Beta")
+    @Test func renderedTablesRightAlignNumericColumnsWithoutMarkers() throws {
+        let rendered = Self.renderTable("| Name | Score |\n|---|---|\n| Ada | 42 |\n| Lin | 1,280 |")
+        let nameStyle = try Self.paragraphStyle(in: rendered, containing: "Ada")
+        let scoreStyle = try Self.paragraphStyle(in: rendered, containing: "42")
 
-        // Body rows carry no fill — the design never stripes.
-        #expect(secondColumnInnerRow.backgroundColor == nil)
-        #expect(firstColumnLastRow.backgroundColor == nil)
-        // Leading column framed; inner column separated by a faint vertical hairline.
-        #expect(firstColumnInnerRow.width(for: .border, edge: .minX) == 0.75)
-        #expect(secondColumnInnerRow.width(for: .border, edge: .minX) == 0.5)
-        #expect(secondColumnInnerRow.width(for: .border, edge: .maxX) == 0.75)
-        // Faint horizontal hairline between body rows (not the heavier outer frame).
-        #expect(firstColumnInnerRow.width(for: .border, edge: .maxY) == 0.5)
+        // Text column keeps its natural flow; the all-numeric column right-aligns.
+        #expect(nameStyle.alignment == .natural)
+        #expect(scoreStyle.alignment == .right)
+    }
+
+    @Test func renderedTableDigitsUseTabularFigures() throws {
+        let rendered = Self.renderTable("| N |\n|---|\n| 18 |")
+        let font = try Self.font(in: rendered, containing: "18")
+        let one = ("1" as NSString).size(withAttributes: [.font: font]).width
+        let eight = ("8" as NSString).size(withAttributes: [.font: font]).width
+
+        // Monospaced figures give every digit the same advance so columns align.
+        #expect(abs(one - eight) < 0.01)
     }
 
     @Test func renderedTablesHonorColumnAlignmentMarkers() throws {
@@ -233,7 +244,30 @@ import Testing
 
     private static func tableBlock(in rendered: RenderedDocument, containing text: String) throws -> NSTextTableBlock {
         let style = try paragraphStyle(in: rendered, containing: text)
-        return try #require(style.textBlocks.first as? NSTextTableBlock)
+        // Cells nest inside a shared outer card block; the innermost block is the cell.
+        return try #require(style.textBlocks.last as? NSTextTableBlock)
+    }
+
+    private static func tableHeaderVerticalGaps(in rendered: RenderedDocument, containing text: String) throws -> (top: CGFloat, bottom: CGFloat) {
+        let range = try range(of: text, in: rendered)
+        let style = try paragraphStyle(in: rendered, containing: text)
+        let card = try #require(style.textBlocks.first as? RoundedCardBlock)
+        let cell = try #require(style.textBlocks.last as? TableCellBlock)
+        let storage = NSTextStorage(attributedString: rendered.attributedString)
+        let layoutManager = NSLayoutManager()
+        layoutManager.allowsNonContiguousLayout = false
+        let textContainer = NSTextContainer(size: NSSize(width: 700, height: 1_000))
+        textContainer.lineFragmentPadding = 0
+        storage.addLayoutManager(layoutManager)
+        layoutManager.addTextContainer(textContainer)
+        layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: storage.length))
+        let image = NSImage(size: NSSize(width: 700, height: 1_000))
+        image.lockFocus()
+        layoutManager.drawBackground(forGlyphRange: NSRange(location: 0, length: layoutManager.numberOfGlyphs), at: .zero)
+        image.unlockFocus()
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let glyphRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        return (glyphRect.minY - card.lastFrame.minY, cell.lastFrame.maxY - glyphRect.maxY)
     }
 
     private static func paragraphStyle(in rendered: RenderedDocument, containing text: String) throws -> NSParagraphStyle {
@@ -279,10 +313,6 @@ import Testing
                                                             at: range.location,
                                                             effectiveRange: nil)
         return try #require(attribute as? Double)
-    }
-
-    private static func alpha(of color: NSColor) -> Double {
-        Double((color.alphaComponent * 1_000).rounded() / 1_000)
     }
 
     private static func range(of text: String, in rendered: RenderedDocument) throws -> NSRange {
