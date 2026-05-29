@@ -56,6 +56,9 @@ import Foundation
         #expect(CloneCopy.isExcluded(".claude"))
         #expect(CloneCopy.isExcluded(".superset"))
         #expect(CloneCopy.isExcluded(".codex"))
+        #expect(CloneCopy.isExcluded(".quasi"))
+        #expect(CloneCopy.isExcluded(".Ulysses-Group.plist"))
+        #expect(CloneCopy.isExcluded(".Ulysses-ActivityHistory"))
         #expect(!CloneCopy.isExcluded("vault"))
         #expect(!CloneCopy.isExcluded(".obsidian"))
     }

@@ -17,11 +17,13 @@ public enum CloneCopy {
     public static let excludedNames: Set<String> = [
         ".marple", ".git", ".DS_Store",
         ".claude", ".codex", ".factory", ".antigravitycli", ".playwright-mcp", ".superset",
+        ".quasi",  // academic-pipeline cache / intermediate state (rebuildable)
     ]
 
     public static func isExcluded(_ name: String) -> Bool {
         if excludedNames.contains(name) { return true }
-        if name.hasPrefix(".sync_") { return true }  // Nextcloud/ownCloud sync journal
+        if name.hasPrefix(".sync_") { return true }     // Nextcloud/ownCloud sync journal
+        if name.hasPrefix(".Ulysses-") { return true }  // stale Ulysses library metadata
         return false
     }
 
