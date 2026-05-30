@@ -73,6 +73,40 @@ public final class SnapshotStore: Sendable {
 
     public var lastBackupDate: Date? { list().first?.date }
 
+    // MARK: - Footprint
+
+    public struct Footprint: Sendable, Equatable {
+        public var bytes: Int64
+        public var snapshotCount: Int
+    }
+
+    /// Real on-disk footprint of all snapshots — not the naive sum Finder/`du`
+    /// report. Every snapshot is an APFS `clonefile` tree sharing blocks with the
+    /// others (and the live vault), so the actual disk cost is ~one snapshot's
+    /// worth regardless of how many exist; the only extra is per-snapshot
+    /// divergence (small for a stable vault). We report the newest snapshot's
+    /// allocated size as that representative figure. (Exact shared-block
+    /// accounting would need private APFS extent APIs — not worth it here.)
+    public func diskFootprint() -> Footprint {
+        let snaps = list()
+        guard let newest = snaps.first else { return Footprint(bytes: 0, snapshotCount: 0) }
+        return Footprint(bytes: allocatedSize(of: newest.url), snapshotCount: snaps.count)
+    }
+
+    private func allocatedSize(of dir: URL) -> Int64 {
+        let fm = FileManager.default
+        let keys: [URLResourceKey] = [.totalFileAllocatedSizeKey, .isRegularFileKey]
+        guard let walker = fm.enumerator(
+            at: dir, includingPropertiesForKeys: keys, options: [], errorHandler: nil
+        ) else { return 0 }
+        var total: Int64 = 0
+        for case let url as URL in walker {
+            let v = try? url.resourceValues(forKeys: Set(keys))
+            if v?.isRegularFile == true { total += Int64(v?.totalFileAllocatedSize ?? 0) }
+        }
+        return total
+    }
+
     // MARK: - Snapshot
 
     /// Clone the vault into a temp dir, then atomically rename to the timestamped
