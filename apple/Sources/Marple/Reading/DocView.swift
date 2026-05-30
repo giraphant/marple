@@ -33,6 +33,7 @@ struct DocView: View {
                 MarkdownTextView(
                     markdown: Wikilink.preprocessForRendering(model.openBody),
                     style: renderStyle,
+                    documentID: model.openPath ?? "",
                     scrollTarget: resolvedScrollTarget,
                     highlightQuery: model.openSearchQuery,
                     jump: model.matchJump,
