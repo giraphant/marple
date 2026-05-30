@@ -144,6 +144,31 @@ import Foundation
         }
     }
 
+    @Test func diskFootprintIsOneSnapshotNotTheSum() throws {
+        let (store, vault, base) = try makeStore()
+        defer { try? fm.removeItem(at: vault); try? fm.removeItem(at: base) }
+
+        _ = try store.snapshot(now: Date(timeIntervalSince1970: 1_780_000_000))
+        let one = store.diskFootprint()
+        #expect(one.snapshotCount == 1)
+        #expect(one.bytes > 0)
+
+        // A second snapshot of the same content shares blocks (clone) — the real
+        // footprint stays a single snapshot's worth, it does not double.
+        _ = try store.snapshot(now: Date(timeIntervalSince1970: 1_780_100_000))
+        let two = store.diskFootprint()
+        #expect(two.snapshotCount == 2)
+        #expect(two.bytes == one.bytes)
+    }
+
+    @Test func diskFootprintEmptyWhenNoSnapshots() throws {
+        let (store, vault, base) = try makeStore()
+        defer { try? fm.removeItem(at: vault); try? fm.removeItem(at: base) }
+        let fp = store.diskFootprint()
+        #expect(fp.snapshotCount == 0)
+        #expect(fp.bytes == 0)
+    }
+
     @Test func documentsListsMarkdownOnly() throws {
         let (store, vault, base) = try makeStore()
         defer { try? fm.removeItem(at: vault); try? fm.removeItem(at: base) }
