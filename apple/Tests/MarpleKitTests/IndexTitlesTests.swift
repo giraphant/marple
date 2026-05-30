@@ -241,16 +241,39 @@ struct IndexTitlesTests {
         #expect(resolveTitle(map, type: "note", body: "just a paragraph") == "FM Name")
     }
 
-    @Test("resolveTitle: non-note ignores body heading, uses frontmatter title")
+    @Test("resolveTitle: non-note/topic ignores body heading, uses frontmatter title")
     func resolveTitleNonNoteIgnoresBody() {
         let map: [(String, YamlValue)] = [("title", .string("FM Title"))]
         #expect(resolveTitle(map, type: "paper", body: "# Body Heading\ntext") == "FM Title")
     }
 
-    @Test("resolveTitle: non-note falls back to name")
+    @Test("resolveTitle: non-note/topic falls back to name")
     func resolveTitleNonNoteName() {
         let map: [(String, YamlValue)] = [("name", .string("FM Name"))]
         #expect(resolveTitle(map, type: "book", body: "# Body Heading") == "FM Name")
+    }
+
+    @Test("resolveTitle: topic uses body heading like note")
+    func resolveTitleTopicFromBodyHeading() {
+        #expect(resolveTitle([], type: "topic", body: "# My Topic\ncontent") == "My Topic")
+    }
+
+    @Test("resolveTitle: topic body heading beats frontmatter title")
+    func resolveTitleTopicHeadingOverFrontmatter() {
+        let map: [(String, YamlValue)] = [("title", .string("FM Title"))]
+        #expect(resolveTitle(map, type: "topic", body: "# Body Heading") == "Body Heading")
+    }
+
+    @Test("resolveTitle: topic falls back to frontmatter title when no heading")
+    func resolveTitleTopicFallbackFrontmatter() {
+        let map: [(String, YamlValue)] = [("title", .string("FM Title"))]
+        #expect(resolveTitle(map, type: "topic", body: "just a paragraph") == "FM Title")
+    }
+
+    @Test("resolveTitle: topic falls back to name when no heading and no title")
+    func resolveTitleTopicFallbackName() {
+        let map: [(String, YamlValue)] = [("name", .string("FM Name"))]
+        #expect(resolveTitle(map, type: "topic", body: "just a paragraph") == "FM Name")
     }
 
     @Test("resolveTitle: strips wiki links from frontmatter")
