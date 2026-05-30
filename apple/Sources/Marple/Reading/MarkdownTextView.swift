@@ -5,6 +5,9 @@ import MarpleKit
 struct MarkdownTextView: NSViewRepresentable {
     let markdown: String
     let style: RenderStyle
+    /// Identity of the open document (its path). Drives per-doc scroll memory:
+    /// switching to a different id restores that doc's remembered offset.
+    let documentID: String
     let scrollTarget: NSRange?
     /// Query whose matches are highlighted in the body (nil = none).
     var highlightQuery: String?
@@ -92,19 +95,42 @@ struct MarkdownTextView: NSViewRepresentable {
         guard let textView = scrollView.documentView as? NSTextView else { return }
         let co = context.coordinator
 
-        if markdown != co.lastMarkdown || style != co.lastStyle {
+        let contentChanged = markdown != co.lastMarkdown
+        // A doc switch is a content change to a *different* identity. (A same-id
+        // content change is an FSEvents reload — keep the reader where it was.)
+        let docSwitched = contentChanged && documentID != co.currentDocID
+
+        // QUA-151: before swapping in the new body, remember the outgoing doc's
+        // scroll position (the old content is still displayed, so the clip offset
+        // is still its own). Restored when we switch back to it.
+        if docSwitched, let outgoing = co.currentDocID {
+            co.scrollOffsets[outgoing] = scrollView.contentView.bounds.origin.y
+        }
+
+        if contentChanged || style != co.lastStyle {
             let rendered = MarkdownRenderer.render(markdown, style: style)
             textView.textStorage?.setAttributedString(rendered.attributedString)
             co.lastMarkdown = markdown
             co.lastStyle = style
             co.headings = rendered.headings
         }
+        if contentChanged { co.currentDocID = documentID }
 
         Self.sizeDocumentView(in: scrollView)
 
+        let hasPendingJump = jump != nil && jump?.id != co.lastJumpID
         if let target = scrollTarget, target != co.lastScrollTarget {
             textView.scrollRangeToVisible(target)
             co.lastScrollTarget = target
+        } else if Self.shouldRepositionOnDocSwitch(docSwitched: docSwitched,
+                                                   hasScrollTarget: scrollTarget != nil,
+                                                   hasPendingJump: hasPendingJump) {
+            // No explicit target/jump: restore this doc's remembered offset, else
+            // open at the top. (NSScrollView keeps the previous doc's clip offset
+            // across setAttributedString — without this the new doc would "drift"
+            // to the old pixel position.)
+            co.lastScrollTarget = nil
+            Self.scroll(scrollView, toY: co.scrollOffsets[documentID] ?? 0)
         }
 
         // Search-match highlight: refresh when the doc or the query changes.
@@ -169,6 +195,25 @@ struct MarkdownTextView: NSViewRepresentable {
         co.lastScrollTarget = target   // keep the outline channel from re-scrolling
     }
 
+    /// Whether a render pass owns repositioning the reader for a document switch
+    /// (restore remembered offset, else top). True only when the body switched to a
+    /// different document AND nothing else wants to drive the scroll (an outline
+    /// target or a one-shot search jump both take precedence).
+    nonisolated static func shouldRepositionOnDocSwitch(docSwitched: Bool,
+                                                        hasScrollTarget: Bool,
+                                                        hasPendingJump: Bool) -> Bool {
+        docSwitched && !hasScrollTarget && !hasPendingJump
+    }
+
+    /// Scroll the clip view to `y`, clamped to the scrollable range.
+    private static func scroll(_ scrollView: NSScrollView, toY y: CGFloat) {
+        let clip = scrollView.contentView
+        let maxY = max(0, (scrollView.documentView?.frame.height ?? 0) - clip.bounds.height)
+        let clamped = min(max(0, y), maxY)
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: clamped))
+        scrollView.reflectScrolledClipView(clip)
+    }
+
     private static func sizeDocumentView(in scrollView: NSScrollView) {
         guard let textView = scrollView.documentView as? NSTextView,
               let lm = textView.layoutManager,
@@ -210,6 +255,12 @@ struct MarkdownTextView: NSViewRepresentable {
         var lastStyle: RenderStyle?
         var lastScrollTarget: NSRange?
         var headings: [HeadingAnchor] = []
+
+        // Per-document scroll memory (QUA-151). `currentDocID` is the doc currently
+        // installed in the text view; `scrollOffsets` remembers each visited doc's
+        // last clip offset so switching back restores it instead of drifting/resetting.
+        var currentDocID: String?
+        var scrollOffsets: [String: CGFloat] = [:]
 
         // Search-match highlight state.
         var lastHighlightQuery: String?

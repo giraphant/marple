@@ -571,6 +571,9 @@ final class AppModel {
     private func clearReaderHighlight() {
         openSearchQuery = nil
         matchJump = nil
+        // QUA-151: drop any outline scroll target left over from the previous doc,
+        // so a stale block index can't hijack the next document's scroll position.
+        scrollTarget = nil
     }
 
     /// Open `path`. Context-dependent (browser-style): from the browse list (browsing)
