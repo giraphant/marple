@@ -266,7 +266,15 @@ struct SidebarOutlineView: NSViewRepresentable {
             var parts: [String] = []
             parts.append("entries:\(model.entries.count)")
             parts.append("browse:\(model.isBrowsing):\(model.pane)")
-            parts.append("active:\(model.activeTabID?.uuidString ?? "nil")")
+            // NOTE: activeTabID is deliberately NOT in the signature. The active
+            // tab changes the row *selection* (driven by selectCurrentItem's
+            // selectRowIndexes), never the row structure or cell content. Folding
+            // it in here forced a full reloadData() on every tab click; because
+            // makeRootItems() mints fresh node identities each pass, the outline
+            // couldn't preserve expansion across that reload, which collapsed the
+            // tree and clamped the scroll origin to the top — the viewport "jump".
+            // An active-only change now hits the no-op-reload path (selection
+            // update only), leaving the scroll position untouched.
             parts.append("types:\(model.typeOrder.map(String.init(describing:)).joined(separator: ","))")
             parts.append("counts:\(model.typeOrder.map { "\($0)=\(model.counts[$0] ?? 0)" }.joined(separator: ","))")
             parts.append("tabs:\(model.tabs.map { "\($0.id.uuidString):\($0.location):\($0.pinned):\($0.customTitle ?? "")" }.joined(separator: ","))")
@@ -415,14 +423,26 @@ struct SidebarOutlineView: NSViewRepresentable {
             // the viewport to a non-selected row is a surprise.
             if outline.selectedRowIndexes.count > 1 {
                 if outline.selectedRowIndexes.contains(row) {
-                    outline.scrollRowToVisible(row)
+                    scrollRowIntoViewIfOffscreen(row, in: outline)
                 }
                 return
             }
             isUpdatingSelection = true
             outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-            outline.scrollRowToVisible(row)
+            scrollRowIntoViewIfOffscreen(row, in: outline)
             isUpdatingSelection = false
+        }
+
+        /// Only nudge the viewport when the target row is fully off-screen.
+        /// A row that's still partially showing was either just clicked (the
+        /// user can see it) or is close by — scrolling it flush is a surprise
+        /// that costs the user their place when they're parked at the list's
+        /// far end. Full-offscreen targets (search/keyboard nav to a distant
+        /// tab) still scroll in. Mirrors the multi-selection restraint above.
+        private func scrollRowIntoViewIfOffscreen(_ row: Int, in outline: NSOutlineView) {
+            let rowRect = outline.rect(ofRow: row)
+            guard !outline.visibleRect.intersects(rowRect) else { return }
+            outline.scrollRowToVisible(row)
         }
 
         private func findPaneNode(_ pane: Pane, in nodes: [SidebarOutlineNode]) -> SidebarOutlineNode? {
@@ -686,10 +706,14 @@ struct SidebarOutlineView: NSViewRepresentable {
                     items.append(menuItem(group.isCollapsed ? "展开页面组" : "折叠页面组",
                                           action: #selector(toggleGroupFromMenu(_:)), node: node))
                 }
+                items.append(.separator())
+                items.append(menuItem("复制分享清单", action: #selector(copyShareManifestFromMenu(_:)), node: node))
                 return items
             case .tab(let id):
                 guard let tab = model.tabs.first(where: { $0.id == id }) else { return [] }
                 var items = [menuItem("重命名", action: #selector(renameFromMenu(_:)), node: node)]
+                items.append(.separator())
+                items.append(menuItem("复制分享清单", action: #selector(copyShareManifestFromMenu(_:)), node: node))
                 items.append(.separator())
                 items.append(menuItem(tab.pinned ? "取消固定" : "固定页面",
                                       action: #selector(togglePinFromMenu(_:)), node: node))
@@ -714,6 +738,20 @@ struct SidebarOutlineView: NSViewRepresentable {
         @objc private func renameFromMenu(_ sender: NSMenuItem) {
             guard let node = sender.representedObject as? SidebarOutlineNode else { return }
             beginRename(node)
+        }
+
+        @objc private func copyShareManifestFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode else { return }
+            let markdown: String?
+            switch node.kind {
+            case .tab(let id):   markdown = model.shareManifest(forTab: id)
+            case .group(let id): markdown = model.shareManifest(forGroup: id)
+            default:             markdown = nil
+            }
+            guard let markdown else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(markdown, forType: .string)
+            model.flash("已复制分享清单")
         }
 
         @objc private func toggleGroupFromMenu(_ sender: NSMenuItem) {
