@@ -925,6 +925,61 @@ final class AppModel {
 
     func tabIsDoc(_ tab: NavTab) -> Bool { tab.location.openPath != nil }
 
+    // MARK: share manifest
+
+    /// Markdown manifest for a single tab (one bullet, no header). Nil if the tab is gone.
+    func shareManifest(forTab id: NavTab.ID) -> String? {
+        guard let tab = tabs.first(where: { $0.id == id }) else { return nil }
+        return renderTabShareManifest([shareNode(for: tab)])
+    }
+
+    /// Markdown manifest for a group: an H1 of the group name plus a nested bullet list
+    /// mirroring the folder structure. Nil if the group is gone.
+    func shareManifest(forGroup id: TabGroup.ID) -> String? {
+        guard let group = tabGroups.first(where: { $0.id == id }) else { return nil }
+        return renderTabShareManifest([shareNode(for: group)])
+    }
+
+    private func shareNode(for group: TabGroup) -> TabShareNode {
+        .group(name: group.name, children: group.children.compactMap(shareChild))
+    }
+
+    private func shareChild(_ node: TabNode) -> TabShareNode? {
+        switch node {
+        case .tab(let id):
+            guard let tab = tabs.first(where: { $0.id == id }) else { return nil }
+            return shareNode(for: tab)
+        case .group(let g):
+            return shareNode(for: g)
+        }
+    }
+
+    private func shareNode(for tab: NavTab) -> TabShareNode {
+        .tab(name: tab.customTitle, title: originalTabTitle(tab), absolutePath: absolutePath(of: tab))
+    }
+
+    /// `tabTitle` minus the user-rename override, so the manifest keeps the document's
+    /// own title even when the tab was renamed.
+    private func originalTabTitle(_ tab: NavTab) -> String {
+        let loc = tab.location
+        if let p = loc.openPath {
+            if let live = entries.first(where: { $0.path == p })?.title { return live }
+            if let cached = tab.cachedTitle, !cached.isEmpty { return cached }
+            return (p as NSString).lastPathComponent
+        }
+        switch loc.pane {
+        case .type(let t):     return t.label
+        case .theme(let name): return "#\(name)"
+        case .themesIndex:     return "标签"
+        case .trash:           return "回收站"
+        }
+    }
+
+    private func absolutePath(of tab: NavTab) -> String? {
+        guard let p = tab.location.openPath else { return nil }
+        return URL(fileURLWithPath: workspaceRoot).appendingPathComponent(p).path
+    }
+
     func openExternally() async {
         guard let p = openPath else { return }
         let app = UserDefaults.standard.string(forKey: SettingsKeys.externalEditor) ?? ""
