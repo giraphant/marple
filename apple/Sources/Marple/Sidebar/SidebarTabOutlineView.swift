@@ -755,9 +755,13 @@ struct SidebarOutlineView: NSViewRepresentable {
             case .tab(let id):
                 Task { await model.selectTab(id) }
             case .group:
-                if let first = node.firstTabID {
-                    Task { await model.selectTab(first) }
-                }
+                // Keep the group row selected; do NOT re-route to its first
+                // child. The highlight is derived from `activeTabID` in
+                // `selectCurrentItem`, and a group has no tab identity — so
+                // activating a child here bounces the highlight straight off
+                // the group onto that child, making groups impossible to land
+                // on by arrow key or to target by right-click rename.
+                break
             case .section:
                 break
             }

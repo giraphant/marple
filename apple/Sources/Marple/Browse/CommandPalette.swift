@@ -27,6 +27,11 @@ struct CommandPalette: View {
     @State private var sourceByPath: [String: String] = [:]
     @State private var loading = false
     @State private var selected = 0
+    // Only keyboard nav (↑/↓) should auto-scroll to the selection. Hover also
+    // moves `selected` (for highlight), but must NOT scroll — else the scroll
+    // slides a new row under the stationary cursor, which re-fires .onHover and
+    // the list drifts uncontrollably.
+    @State private var scrollToSelection = false
     @State private var searchTask: Task<Void, Never>?
     @FocusState private var fieldFocused: Bool
 
@@ -152,6 +157,8 @@ struct CommandPalette: View {
                     }
                 }
                 .onChange(of: selected) { _, new in
+                    guard scrollToSelection else { return }
+                    scrollToSelection = false
                     guard flat.indices.contains(new) else { return }
                     proxy.scrollTo(flat[new].path, anchor: .center)
                 }
@@ -230,7 +237,7 @@ struct CommandPalette: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isSel ? Color.accentColor.opacity(0.15) : .clear)
         .contentShape(Rectangle())
-        .onHover { if $0 { selected = index } }
+        .onHover { if $0 { scrollToSelection = false; selected = index } }
         .onTapGesture { openPath(entry.path) }
     }
 
@@ -288,6 +295,7 @@ struct CommandPalette: View {
 
     private func move(_ delta: Int) {
         guard !flat.isEmpty else { return }
+        scrollToSelection = true
         selected = min(max(0, selected + delta), flat.count - 1)
     }
 
