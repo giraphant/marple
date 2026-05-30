@@ -303,6 +303,7 @@ private struct BackupSettings: View {
     @AppStorage(SettingsKeys.backupEnabled) private var enabled = true
     @AppStorage(SettingsKeys.backupLocation) private var location = ""
     @State private var lastBackup: Date?
+    @State private var footprint: SnapshotStore.Footprint?
 
     private let tick = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
@@ -321,6 +322,12 @@ private struct BackupSettings: View {
             Section("最新备份") {
                 Text(lastBackup.map(Self.friendly) ?? "尚未备份")
                     .foregroundStyle(.secondary)
+                if let fp = footprint, fp.snapshotCount > 0 {
+                    Text("占用磁盘约 \(Self.formatBytes(fp.bytes)) · \(fp.snapshotCount) 份快照")
+                        .foregroundStyle(.secondary)
+                    Text("快照以 APFS 克隆共享磁盘块，实际占用约为一份快照；访达「显示简介」会重复累加共享块，显示数倍于此。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 HStack {
                     Button("立即备份") {
                         ActiveBackup.scheduler?.backupNow()
@@ -348,6 +355,14 @@ private struct BackupSettings: View {
         .formStyle(.grouped)
         .onAppear { lastBackup = ActiveBackup.scheduler?.lastBackup }
         .onReceive(tick) { _ in lastBackup = ActiveBackup.scheduler?.lastBackup }
+        .task(id: lastBackup) {
+            guard let store = ActiveBackup.scheduler?.store else { footprint = nil; return }
+            footprint = await Task.detached { store.diskFootprint() }.value
+        }
+    }
+
+    private static func formatBytes(_ n: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: n, countStyle: .file)
     }
 
     private var displayLocation: String {
