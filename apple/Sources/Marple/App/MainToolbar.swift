@@ -195,6 +195,14 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
         Task { await model?.runSupersetAction(.format) }
     }
 
+    @objc private func translateWithSuperset() {
+        Task { await model?.runSupersetAction(.translate) }
+    }
+
+    @objc private func discussWithSuperset() {
+        Task { await model?.runSupersetAction(.discuss) }
+    }
+
     /// Click on 引用: per the setting, copy the default format or pop the menu.
     @objc private func citationPrimary(_ sender: NSButton) {
         let mode = CitationClickAction(
@@ -266,6 +274,20 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
         format.target = self
         format.isEnabled = model?.openPath != nil
         menu.addItem(format)
+
+        let translate = NSMenuItem(title: SupersetAction.translate.label,
+                                   action: #selector(translateWithSuperset),
+                                   keyEquivalent: "")
+        translate.target = self
+        translate.isEnabled = model?.openPath != nil
+        menu.addItem(translate)
+
+        let discuss = NSMenuItem(title: SupersetAction.discuss.label,
+                                 action: #selector(discussWithSuperset),
+                                 keyEquivalent: "")
+        discuss.target = self
+        discuss.isEnabled = model?.openPath != nil
+        menu.addItem(discuss)
     }
 
     private func defaultCitationFormat() -> CitationFormat {

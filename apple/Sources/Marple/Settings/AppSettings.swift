@@ -19,6 +19,8 @@ enum SettingsKeys {
     static let supersetCLIPath = "marple.supersetCLIPath"
     static let supersetReanalyzePrompt = "marple.supersetReanalyzePrompt"
     static let supersetFormatPrompt = "marple.supersetFormatPrompt"
+    static let supersetTranslatePrompt = "marple.supersetTranslatePrompt"
+    static let supersetDiscussPrompt = "marple.supersetDiscussPrompt"
     // QUA-107: opt-in switch for the local CLI socket server (off by default).
     static let cliServerEnabled = "marple.cliServerEnabled"
     // QUA-106: local APFS-snapshot backups. Enabled by default (cheap + a safety

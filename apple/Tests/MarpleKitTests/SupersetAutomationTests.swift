@@ -34,12 +34,28 @@ import Testing
         #expect(markdown.contains("## Action\n重新分析"))
         #expect(markdown.contains("Workspace-relative path: vault/papers/a.md"))
         #expect(markdown.contains("Absolute path: /tmp/marple-workspace/vault/papers/a.md"))
-        #expect(markdown.contains("Only edit the target file above. Do not edit this context package."))
+        #expect(markdown.contains("Default to editing the target file above. If reanalysis requires completing the same book, edits may include same-book overview/chapter analysis files only. Do not edit this context package."))
         #expect(markdown.contains("- Type: paper"))
         #expect(markdown.contains("- Title: Paper A"))
         #expect(markdown.contains("- Author: Jane Doe"))
         #expect(markdown.contains("- Themes: AI, workflow"))
         #expect(markdown.contains("# Old analysis"))
+    }
+
+    @Test func discussionContextPackageUsesNoEditBoundary() throws {
+        let context = try SupersetDispatchContext(
+            workspaceRoot: "/tmp/marple-workspace",
+            targetPath: "vault/papers/a.md",
+            entry: entry,
+            documentText: "Body",
+            related: SupersetRelatedContext()
+        )
+
+        let markdown = SupersetContextPackageBuilder.markdown(for: .discuss, context: context)
+
+        #expect(markdown.contains("## Action\n对话讨论"))
+        #expect(markdown.contains("Do not edit, create, or delete files for this discussion action."))
+        #expect(!markdown.contains("Only edit the target file above."))
     }
 
     @Test func contextPackageIncludesRelatedEntriesWikilinksAndSources() throws {
@@ -76,6 +92,10 @@ import Testing
         #expect(markdown.contains("processing/translations/paper-a-zh.pdf"))
     }
 
+    @Test func actionLabelsIncludeTranslateAndDiscuss() {
+        #expect(SupersetAction.allCases.map(\.label) == ["重新分析", "格式整理", "制作译本", "对话讨论"])
+    }
+
     @Test func promptBuilderUsesDistinctActionIntentAndStablePaths() {
         let reanalyze = SupersetPromptBuilder.prompt(
             action: .reanalyze,
@@ -89,20 +109,37 @@ import Testing
             targetAbsolutePath: "/tmp/marple-workspace/vault/papers/a.md",
             contextPackagePath: "/tmp/context.md"
         )
+        let translate = SupersetPromptBuilder.prompt(
+            action: .translate,
+            targetRelativePath: "vault/papers/a.md",
+            targetAbsolutePath: "/tmp/marple-workspace/vault/papers/a.md",
+            contextPackagePath: "/tmp/context.md"
+        )
+        let discuss = SupersetPromptBuilder.prompt(
+            action: .discuss,
+            targetRelativePath: "vault/papers/a.md",
+            targetAbsolutePath: "/tmp/marple-workspace/vault/papers/a.md",
+            contextPackagePath: "/tmp/context.md"
+        )
 
         #expect(reanalyze.contains("重新分析"))
         #expect(reanalyze.contains("analyse-agent"))
         #expect(reanalyze.contains("synthesis-agent"))
         #expect(format.contains("格式整理"))
-        #expect(format.contains("audit-agent"))
-        #expect(format.contains("quasi-audit"))
+        #expect(format.contains("quasi:audit-agent"))
+        #expect(format.contains("quasi-audit --path vault/papers/a.md"))
+        #expect(translate.contains("制作译本"))
+        #expect(translate.contains("quasi:translate-agent"))
+        #expect(translate.contains("quasi-translate"))
+        #expect(discuss.contains("对话讨论"))
+        #expect(discuss.contains("客观、中立、批判性"))
         #expect(reanalyze.contains("vault/papers/a.md"))
         #expect(reanalyze.contains("/tmp/marple-workspace/vault/papers/a.md"))
         #expect(format.contains("vault/papers/a.md"))
         #expect(format.contains("/tmp/marple-workspace/vault/papers/a.md"))
-        #expect(reanalyze.contains("/tmp/context.md"))
-        #expect(format.contains("/tmp/context.md"))
-        #expect(reanalyze != format)
+        #expect(translate.contains("/tmp/context.md"))
+        #expect(discuss.contains("/tmp/context.md"))
+        #expect(Set([reanalyze, format, translate, discuss]).count == 4)
     }
 
     @Test func promptBuilderRendersCustomTemplateAndKeepsSafetyBoundary() {
@@ -118,7 +155,36 @@ import Testing
         #expect(!prompt.contains("{{action}}"))
         #expect(!prompt.contains("{{target_relative_path}}"))
         #expect(prompt.contains("请先阅读上下文包。只编辑目标文件，不要编辑上下文包或其他文件。"))
+        #expect(prompt.contains("quasi-audit 是唯一入口"))
         #expect(!prompt.contains("不要改变核心观点"))
+    }
+
+    @Test func reanalysisPromptAllowsSameBookCompletionWhenNeeded() {
+        let prompt = SupersetPromptBuilder.prompt(
+            action: .reanalyze,
+            targetRelativePath: "vault/books/book-a/00-overview.md",
+            targetAbsolutePath: "/tmp/marple-workspace/vault/books/book-a/00-overview.md",
+            contextPackagePath: "/tmp/context.md"
+        )
+
+        #expect(prompt.contains("默认优先编辑目标文件"))
+        #expect(prompt.contains("同一本书目录内缺失的章节分析文件"))
+        #expect(prompt.contains("不要因为默认目标文件边界而跳过必要的章节补全"))
+        #expect(!prompt.contains("只编辑目标文件，不要编辑上下文包或其他文件。"))
+    }
+
+    @Test func discussionPromptUsesNoEditBoundary() {
+        let prompt = SupersetPromptBuilder.prompt(
+            action: .discuss,
+            targetRelativePath: "vault/papers/a.md",
+            targetAbsolutePath: "/tmp/marple-workspace/vault/papers/a.md",
+            contextPackagePath: "/tmp/context.md",
+            promptIntent: "围绕 {{target_relative_path}} 聊聊"
+        )
+
+        #expect(prompt.contains("围绕 vault/papers/a.md 聊聊"))
+        #expect(prompt.contains("本动作只用于对话讨论，不要编辑、创建或删除任何文件。"))
+        #expect(!prompt.contains("只编辑目标文件"))
     }
 
     @Test func dispatchConfigChoosesCustomPromptByActionAndFallsBackForBlankPrompt() {
@@ -134,12 +200,18 @@ import Testing
     }
 
     @Test func defaultPromptsWrapSingleQuasiCapabilities() {
-        #expect(SupersetAction.format.defaultPromptIntent.contains("audit-agent"))
-        #expect(SupersetAction.format.defaultPromptIntent.contains("quasi-audit"))
+        #expect(SupersetAction.format.defaultPromptIntent.contains("quasi:audit-agent"))
+        #expect(SupersetAction.format.defaultPromptIntent.contains("quasi-audit --path {{target_relative_path}}"))
+        #expect(SupersetAction.format.defaultPromptIntent.contains("quasi-audit 是唯一入口"))
+        #expect(SupersetAction.format.defaultPromptIntent.contains("保留原事实和原措辞"))
         #expect(!SupersetAction.format.defaultPromptIntent.contains("analyse-agent"))
         #expect(SupersetAction.reanalyze.defaultPromptIntent.contains("analyse-agent"))
         #expect(SupersetAction.reanalyze.defaultPromptIntent.contains("synthesis-agent"))
+        #expect(SupersetAction.reanalyze.defaultPromptIntent.contains("quasi:process-book"))
         #expect(!SupersetAction.reanalyze.defaultPromptIntent.contains("audit-agent"))
+        #expect(SupersetAction.translate.defaultPromptIntent.contains("quasi:translate-agent"))
+        #expect(SupersetAction.translate.defaultPromptIntent.contains("processing/translations/{slug}-zh.pdf"))
+        #expect(SupersetAction.discuss.defaultPromptIntent.contains("不要编辑任何文件"))
     }
 
     @Test func contextPackageWritesToTemporaryMarkdownFile() throws {

@@ -131,7 +131,9 @@ public struct SupersetRunner: Sendable {
             agent: agent,
             cliPath: config.cliPath,
             reanalyzePrompt: config.reanalyzePrompt,
-            formatPrompt: config.formatPrompt
+            formatPrompt: config.formatPrompt,
+            translatePrompt: config.translatePrompt,
+            discussPrompt: config.discussPrompt
         )
         let contextPackageURL = try SupersetContextPackageBuilder.write(action: action, context: context)
         defer { try? FileManager.default.removeItem(at: contextPackageURL.deletingLastPathComponent()) }

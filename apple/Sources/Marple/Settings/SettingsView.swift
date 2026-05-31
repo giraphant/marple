@@ -199,6 +199,8 @@ private struct AIBridgeSettings: View {
     @AppStorage(SettingsKeys.supersetCLIPath) private var supersetCLIPath = "superset"
     @AppStorage(SettingsKeys.supersetReanalyzePrompt) private var supersetReanalyzePrompt = ""
     @AppStorage(SettingsKeys.supersetFormatPrompt) private var supersetFormatPrompt = ""
+    @AppStorage(SettingsKeys.supersetTranslatePrompt) private var supersetTranslatePrompt = ""
+    @AppStorage(SettingsKeys.supersetDiscussPrompt) private var supersetDiscussPrompt = ""
     @State private var discoveredWorkspaces: [SupersetWorkspace] = []
     @State private var workspaceLookupMessage: String?
     @State private var workspaceLookupIsError = false
@@ -248,7 +250,17 @@ private struct AIBridgeSettings: View {
                     prompt: $supersetFormatPrompt,
                     defaultPrompt: SupersetAction.format.defaultPromptIntent
                 )
-                Text("支持变量：`{{action}}`、`{{target_relative_path}}`、`{{target_absolute_path}}`、`{{context_package_path}}`。Marple 会固定追加安全边界：先读上下文包，只编辑目标文件。")
+                PromptTemplateEditor(
+                    title: SupersetAction.translate.label,
+                    prompt: $supersetTranslatePrompt,
+                    defaultPrompt: SupersetAction.translate.defaultPromptIntent
+                )
+                PromptTemplateEditor(
+                    title: SupersetAction.discuss.label,
+                    prompt: $supersetDiscussPrompt,
+                    defaultPrompt: SupersetAction.discuss.defaultPromptIntent
+                )
+                Text("支持变量：`{{action}}`、`{{target_relative_path}}`、`{{target_absolute_path}}`、`{{context_package_path}}`。Marple 会固定追加安全边界；格式整理会额外强制使用 quasi:audit-agent / quasi-audit。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
