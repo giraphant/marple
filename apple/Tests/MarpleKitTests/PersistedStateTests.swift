@@ -214,6 +214,99 @@ import Foundation
         #expect(ws.tabGroups.first?.name == "TreeGroup")
     }
 
+    @Test func makeSpacesRoundTripsMultipleIndependentSpaces() throws {
+        let firstID = UUID()
+        let secondID = UUID()
+        let firstTree = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "First", isCollapsed: true, children: [.tab(0), .tab(1)])),
+        ])
+        let secondTree = WorkspaceTreeSnapshot(roots: [
+            .tab(0),
+            .group(.init(name: "Second", isCollapsed: false, children: [.tab(1), .tab(2)])),
+        ])
+        let s = PersistedState(
+            browsePane: .type(.note),
+            isBrowsing: false,
+            tabs: [],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "list",
+            spaces: [
+                PersistedWorkspaceSpace(id: firstID, name: "Alpha", isBrowsing: false, tabs: tabsFor(2), activeIndex: 1, tree: firstTree),
+                PersistedWorkspaceSpace(id: secondID, name: "Beta", isBrowsing: true, tabs: tabsFor(3), activeIndex: 2, tree: secondTree),
+            ],
+            activeSpaceID: secondID)
+
+        let data = try JSONEncoder().encode(s)
+        let restored = try JSONDecoder().decode(PersistedState.self, from: data)
+        let made = restored.makeSpaces()
+
+        #expect(made.activeID == secondID)
+        #expect(made.spaces.map(\.id) == [firstID, secondID])
+        #expect(made.spaces.map(\.name) == ["Alpha", "Beta"])
+        #expect(made.spaces.map(\.isBrowsing) == [false, true])
+        let firstWorkspace = try #require(made.spaces[0].workspace)
+        #expect(firstWorkspace.activeTab.location.openPath == "t1.md")
+        #expect(firstWorkspace.tabGroups.first?.isCollapsed == true)
+        let secondWorkspace = try #require(made.spaces[1].workspace)
+        #expect(secondWorkspace.activeTab.location.openPath == "t2.md")
+        #expect(secondWorkspace.tabs.map(\.location.openPath) == ["t0.md", "t1.md", "t2.md"])
+        let activeWorkspace = try #require(restored.makeWorkspace())
+        #expect(activeWorkspace.activeTab.location.openPath == "t2.md")
+    }
+
+    @Test func makeSpacesRestoresLegacySingleSpaceFieldsAsDefaultSpace() throws {
+        let s = PersistedState(
+            browsePane: .type(.paper),
+            isBrowsing: true,
+            tabs: [PersistedTab(location: NavLocation(pane: .type(.paper), openPath: "legacy.md"), pinned: true)],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "grid",
+            currentSpace: PersistedWorkspaceSpace(name: "Legacy", groups: []))
+
+        let made = s.makeSpaces()
+
+        #expect(made.spaces.count == 1)
+        #expect(made.activeID == made.spaces.first?.id)
+        let space = try #require(made.spaces.first)
+        #expect(space.name == "Legacy")
+        #expect(space.isBrowsing)
+        let workspace = try #require(space.workspace)
+        #expect(workspace.tabs.first?.location.openPath == "legacy.md")
+        #expect(workspace.tabs.first?.pinned == true)
+    }
+
+    @Test func emptySpaceRoundTripsAndRestoresNilWorkspace() throws {
+        let id = UUID()
+        let s = PersistedState(
+            browsePane: .type(.note),
+            isBrowsing: false,
+            tabs: [],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "list",
+            spaces: [PersistedWorkspaceSpace(id: id, name: "Empty", isBrowsing: true, tabs: [], activeIndex: 0)],
+            activeSpaceID: id)
+
+        let data = try JSONEncoder().encode(s)
+        let restored = try JSONDecoder().decode(PersistedState.self, from: data)
+        let made = restored.makeSpaces()
+
+        #expect(made.activeID == id)
+        let space = try #require(made.spaces.first)
+        #expect(space.id == id)
+        #expect(space.name == "Empty")
+        #expect(space.isBrowsing)
+        #expect(space.workspace == nil)
+    }
+
     @Test func userDefaultsStoreRoundTrips() throws {
         let suite = "marple.test.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

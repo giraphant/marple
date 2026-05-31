@@ -384,6 +384,168 @@ import Testing
         #expect(model.openRelations?.siblings.map(\.path) == [paper.path])
     }
 
+    // MARK: - Spaces (QUA-172)
+
+    @MainActor
+    @Test func restoresMultipleSpacesAndSwitchesActiveSpace() async throws {
+        let firstID = UUID()
+        let secondID = UUID()
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        store.save(PersistedState(
+            browsePane: .type(.note),
+            isBrowsing: false,
+            tabs: [],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "list",
+            spaces: [
+                PersistedWorkspaceSpace(
+                    id: firstID,
+                    name: "Alpha",
+                    isBrowsing: false,
+                    tabs: [PersistedTab(location: NavLocation(pane: .type(.note), openPath: "alpha.md"), pinned: false)],
+                    activeIndex: 0),
+                PersistedWorkspaceSpace(
+                    id: secondID,
+                    name: "Beta",
+                    isBrowsing: false,
+                    tabs: [PersistedTab(location: NavLocation(pane: .type(.paper), openPath: "beta.md"), pinned: true)],
+                    activeIndex: 0),
+            ],
+            activeSpaceID: secondID))
+
+        let model = AppModel(client: ScriptedDelayedClient(), stateStore: store)
+
+        #expect(model.spaces.map(\.id) == [firstID, secondID])
+        #expect(model.activeSpaceID == secondID)
+        #expect(model.tabs.map(\.location.openPath) == ["beta.md"])
+        #expect(model.tabs.first?.pinned == true)
+
+        await model.selectSpace(firstID)
+
+        #expect(model.activeSpaceID == firstID)
+        #expect(model.tabs.map(\.location.openPath) == ["alpha.md"])
+    }
+
+    @MainActor
+    @Test func addSpaceCreatesEmptyActiveSpace() {
+        let model = AppModel(client: ScriptedDelayedClient())
+        let originalID = model.activeSpaceID
+
+        model.addSpace()
+
+        #expect(model.spaces.count == 2)
+        #expect(model.activeSpaceID != originalID)
+        #expect(model.activeSpace?.workspace == nil)
+        #expect(model.isBrowsing)
+        #expect(model.tabs.isEmpty)
+    }
+
+    @MainActor
+    @Test func movingTabBetweenSpacesRemovesFromSourceAndActivatesDestination() async throws {
+        let model = AppModel(client: ScriptedDelayedClient())
+        await model.open("alpha.md")
+        let sourceID = try #require(model.activeSpaceID)
+        let tabID = try #require(model.tabs.first?.id)
+        model.addSpace()
+        let destinationID = try #require(model.activeSpaceID)
+
+        model.moveItems([.tab(tabID)], from: sourceID, toRootAt: nil)
+
+        #expect(model.activeSpaceID == destinationID)
+        #expect(model.tabs.map(\.location.openPath) == ["alpha.md"])
+        #expect(model.activeTabID == tabID)
+
+        await model.selectSpace(sourceID)
+
+        #expect(model.tabs.isEmpty)
+        #expect(model.isBrowsing)
+    }
+
+    @MainActor
+    @Test func invalidCrossSpaceGroupDropDoesNotRemoveSourceItems() async throws {
+        let model = AppModel(client: ScriptedDelayedClient())
+        await model.open("alpha.md")
+        let sourceID = try #require(model.activeSpaceID)
+        let tabID = try #require(model.tabs.first?.id)
+        model.addSpace()
+        let invalidGroupID = UUID()
+
+        model.moveItems([.tab(tabID)], from: sourceID, toGroup: invalidGroupID)
+
+        await model.selectSpace(sourceID)
+
+        #expect(model.tabs.map(\.id) == [tabID])
+        #expect(model.tabs.map(\.location.openPath) == ["alpha.md"])
+    }
+
+    @MainActor
+    @Test func persistWritesAllSpacesWithActiveSpace() async throws {
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        let model = AppModel(client: ScriptedDelayedClient(), stateStore: store)
+        await model.open("alpha.md")
+        let firstID = try #require(model.activeSpaceID)
+        model.addSpace()
+        await model.open("beta.md")
+        let secondID = try #require(model.activeSpaceID)
+
+        let state = try #require(store.load())
+
+        #expect(state.activeSpaceID == secondID)
+        #expect(state.spaces?.map(\.id) == [firstID, secondID])
+        #expect(state.spaces?.map { $0.tabs.map(\.location.openPath) } == [["alpha.md"], ["beta.md"]])
+        #expect(state.tabs.map(\.location.openPath) == ["beta.md"])
+    }
+
+    @MainActor
+    @Test func reorderSpacesPreservesActiveSpaceAndPersistsOrder() async throws {
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        let model = AppModel(client: ScriptedDelayedClient(), stateStore: store)
+        await model.open("one.md")
+        let firstID = try #require(model.activeSpaceID)
+        model.addSpace()
+        await model.open("two.md")
+        let secondID = try #require(model.activeSpaceID)
+        model.addSpace()
+        await model.open("three.md")
+        let thirdID = try #require(model.activeSpaceID)
+
+        model.moveSpace(from: IndexSet(integer: 2), to: 0)
+
+        #expect(model.spaces.map(\.id) == [thirdID, firstID, secondID])
+        #expect(model.activeSpaceID == thirdID)
+        let state = try #require(store.load())
+        #expect(state.spaces?.map(\.id) == [thirdID, firstID, secondID])
+        #expect(state.activeSpaceID == thirdID)
+    }
+
+    @MainActor
+    @Test func setSpaceIconPersistsIcon() throws {
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        let model = AppModel(client: ScriptedDelayedClient(), stateStore: store)
+        let spaceID = try #require(model.activeSpaceID)
+
+        model.setSpaceIcon("book.closed", for: spaceID)
+
+        #expect(model.spaces.first?.iconName == "book.closed")
+        let state = try #require(store.load())
+        #expect(state.spaces?.first?.iconName == "book.closed")
+    }
+
     // MARK: helpers
 
     private static func entry(_ path: String) -> Entry {

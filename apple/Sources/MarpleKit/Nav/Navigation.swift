@@ -156,12 +156,27 @@ public struct WorkspaceTreeSnapshot: Codable, Sendable, Equatable {
 public struct WorkspaceSpace: Identifiable, Sendable {
     public let id: UUID
     public var name: String
-    public var workspace: Workspace
+    public var workspace: Workspace?
+    public var isBrowsing: Bool
+    public var iconName: String?
 
-    public init(id: UUID = UUID(), name: String, workspace: Workspace) {
+    public init(id: UUID = UUID(), name: String, workspace: Workspace?, isBrowsing: Bool = false,
+                iconName: String? = nil) {
         self.id = id
         self.name = name
         self.workspace = workspace
+        self.isBrowsing = isBrowsing
+        self.iconName = iconName
+    }
+}
+
+public struct WorkspaceTransferBundle: Sendable, Equatable {
+    public var tabs: [NavTab]
+    public var nodes: [TabNode]
+
+    public init(tabs: [NavTab], nodes: [TabNode]) {
+        self.tabs = tabs
+        self.nodes = nodes
     }
 }
 
@@ -237,6 +252,8 @@ public struct Workspace: Sendable {
     }
 
     public var activeTab: NavTab { tabs.first { $0.id == activeID } ?? tabs[0] }
+
+    public var isEmpty: Bool { tabs.isEmpty }
 
     /// The recursive 页面 forest, for view code that renders nesting directly.
     public var rootNodes: [TabNode] { root }
@@ -524,6 +541,71 @@ public struct Workspace: Sendable {
         let newGroup = TabGroup(name: nextTabGroupName(), children: sorted.map { .tab($0) })
         _ = Self.insert(.group(newGroup), intoParent: placementParent, at: placementIdx, nodes: &root)
         normalize()
+    }
+
+    public mutating func extractItemsForTransfer(_ items: [WorkspaceItem]) -> WorkspaceTransferBundle {
+        let existing = Self.uniquedItems(items).filter { existsItem($0) }
+        let tabIDs = existing.compactMap { item in if case .tab(let id) = item { id } else { nil } }
+        let groupIDs = existing.compactMap { item in if case .group(let id) = item { id } else { nil } }
+        let ancestorsOnly = payloadAncestorFilter(tabIDs: tabIDs, groupIDs: groupIDs)
+        let allowedTabs = Set(ancestorsOnly.tabs)
+        let allowedGroups = Set(ancestorsOnly.groups)
+        let filtered = existing.filter { item in
+            switch item {
+            case .tab(let id): return allowedTabs.contains(id)
+            case .group(let id): return allowedGroups.contains(id)
+            }
+        }
+        guard !filtered.isEmpty else { return WorkspaceTransferBundle(tabs: [], nodes: []) }
+        let tabByID = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
+        var nodes: [TabNode] = []
+        var movedIDs: [NavTab.ID] = []
+        for item in filtered {
+            switch item {
+            case .tab(let id):
+                if Self.removeTab(id, from: &root) {
+                    nodes.append(.tab(id))
+                    movedIDs.append(id)
+                }
+            case .group(let id):
+                if let group = Self.removeGroup(id, from: &root) {
+                    nodes.append(.group(group))
+                    movedIDs.append(contentsOf: Self.leafIDs(group.children))
+                }
+            }
+        }
+        let movedSet = Set(movedIDs)
+        let movedTabs = movedIDs.compactMap { tabByID[$0] }
+        tabs.removeAll { movedSet.contains($0.id) }
+        if let first = tabs.first, !tabs.contains(where: { $0.id == activeID }) {
+            activeID = first.id
+        }
+        normalize()
+        return WorkspaceTransferBundle(tabs: movedTabs, nodes: nodes)
+    }
+
+    public mutating func insertTransferBundleToRoot(_ bundle: WorkspaceTransferBundle, at index: Int?) {
+        insertTransferBundle(bundle, toGroup: nil, at: index)
+    }
+
+    public mutating func insertTransferBundle(_ bundle: WorkspaceTransferBundle, toGroup groupID: TabGroup.ID, at childIndex: Int?) {
+        insertTransferBundle(bundle, toGroup: Optional(groupID), at: childIndex)
+    }
+
+    private mutating func insertTransferBundle(_ bundle: WorkspaceTransferBundle, toGroup groupID: TabGroup.ID?, at childIndex: Int?) {
+        guard !bundle.tabs.isEmpty, groupID == nil || Self.findGroup(groupID!, in: root) != nil else { return }
+        let existing = Set(tabs.map(\.id))
+        tabs.append(contentsOf: bundle.tabs.filter { !existing.contains($0.id) })
+        let count = groupID.flatMap { Self.findGroup($0, in: root)?.children.count } ?? root.count
+        var insertAt = childIndex.map { min(max($0, 0), count) } ?? count
+        for node in bundle.nodes {
+            _ = Self.insert(node, intoParent: groupID, at: insertAt, nodes: &root)
+            insertAt += 1
+        }
+        normalize()
+        if let first = tabs.first, !tabs.contains(where: { $0.id == activeID }) {
+            activeID = first.id
+        }
     }
 
     /// Move every tab in `ids` (in input order) into `groupID`, anchoring the run
