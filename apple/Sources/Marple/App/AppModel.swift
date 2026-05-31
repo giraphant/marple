@@ -1041,7 +1041,9 @@ final class AppModel {
             agent: defaults.string(forKey: SettingsKeys.supersetAgent) ?? "claude",
             cliPath: defaults.string(forKey: SettingsKeys.supersetCLIPath) ?? "superset",
             reanalyzePrompt: defaults.string(forKey: SettingsKeys.supersetReanalyzePrompt),
-            formatPrompt: defaults.string(forKey: SettingsKeys.supersetFormatPrompt)
+            formatPrompt: defaults.string(forKey: SettingsKeys.supersetFormatPrompt),
+            translatePrompt: defaults.string(forKey: SettingsKeys.supersetTranslatePrompt),
+            discussPrompt: defaults.string(forKey: SettingsKeys.supersetDiscussPrompt)
         )
 
         do {
