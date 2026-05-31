@@ -9,11 +9,19 @@ enum MetadataAction: Equatable {
     case doi
 }
 
+struct InspectorInfoChip: Equatable {
+    let title: String
+    let path: String?
+    let copyValue: String?
+}
+
 enum InspectorInfoRow: Equatable {
     case rating
     case authors
     case editableScalar(label: String, value: String?, action: MetadataAction)
     case readOnlyScalar(label: String, value: String, copyValue: String?)
+    case linkedScalar(label: String, value: String, path: String, copyValue: String?)
+    case chips(label: String, values: [InspectorInfoChip])
     case identifier(label: String, displayValue: String, fullValue: String)
 }
 
@@ -21,7 +29,7 @@ enum InspectorInfoRow: Equatable {
 func inspectorInfoRows(for entry: Entry, in entries: [Entry] = []) -> [InspectorInfoRow] {
     var rows: [InspectorInfoRow]
     switch entry.type {
-    case .paper:   rows = paperRows(for: entry)
+    case .paper:   rows = paperRows(for: entry, in: entries)
     case .book:    rows = bookRows(for: entry)
     case .chapter: rows = chapterRows(for: entry, in: entries)
     case .author:  rows = [.rating]
@@ -31,9 +39,9 @@ func inspectorInfoRows(for entry: Entry, in entries: [Entry] = []) -> [Inspector
     case .image:   rows = imageRows(for: entry)
     case .other:   rows = []
     }
-    // "专题": topic-corpus membership (QUA-137). Read-only; navigation comes
-    // from the doc body's [[wikilink]]s. Inserted before the trailing rating row
-    // so identity/attribution metadata stays grouped above the rating.
+    // "专题": topic-corpus membership (QUA-137). Read-only chips inserted before
+    // the trailing rating row so identity/attribution metadata stays grouped above
+    // the rating.
     if let membership = topicsMembershipRow(for: entry, in: entries) {
         if let last = rows.last, last == .rating {
             rows.insert(membership, at: rows.count - 1)
@@ -50,17 +58,33 @@ func inspectorInfoRows(for entry: Entry, in entries: [Entry] = []) -> [Inspector
 /// when the entry declares no topics.
 private func topicsMembershipRow(for entry: Entry, in entries: [Entry]) -> InspectorInfoRow? {
     guard !entry.topics.isEmpty else { return nil }
-    let names = entry.topics.map { topicDisplayTitle(forSlug: $0, in: entries) ?? $0 }
-    return .readOnlyScalar(label: "专题", value: names.joined(separator: " · "), copyValue: nil)
+    let membership = buildTopicMembership(entries)
+    let chips = entry.topics.map { slug in
+        InspectorInfoChip(
+            title: topicDisplayTitle(forSlug: slug, in: entries) ?? slug,
+            path: membership.topicEntryBySlug[slug]?.path,
+            copyValue: slug
+        )
+    }
+    return .chips(label: "专题", values: chips)
 }
 
-private func paperRows(for entry: Entry) -> [InspectorInfoRow] {
+private func paperRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRow] {
     var rows: [InspectorInfoRow] = [.authors]
     if let year = nonEmpty(entry.year) {
         rows.append(.readOnlyScalar(label: "年份", value: year, copyValue: nil))
     }
     if let journal = nonEmpty(entry.journal) ?? nonEmpty(entry.source) {
-        rows.append(.readOnlyScalar(label: "期刊", value: journal, copyValue: nil))
+        if let target = journalEntry(for: journal, in: entries) {
+            rows.append(.linkedScalar(
+                label: "期刊",
+                value: journalDisplayTitle(for: target) ?? journal,
+                path: target.path,
+                copyValue: journal
+            ))
+        } else {
+            rows.append(.readOnlyScalar(label: "期刊", value: journal, copyValue: nil))
+        }
     }
     if let doi = nonEmpty(entry.doi) {
         rows.append(.identifier(label: "DOI", displayValue: doiDisplayValue(doi), fullValue: doi))
@@ -74,6 +98,32 @@ private func bookRows(for entry: Entry) -> [InspectorInfoRow] {
     if let year = nonEmpty(entry.year) {
         rows.append(.readOnlyScalar(label: "年份", value: year, copyValue: nil))
     }
+    rows.append(contentsOf: bookDetailRows(for: entry))
+    rows.append(.rating)
+    return rows
+}
+
+private func chapterRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRow] {
+    var rows: [InspectorInfoRow] = [.authors]
+    if let year = nonEmpty(entry.year) {
+        rows.append(.readOnlyScalar(label: "年份", value: year, copyValue: nil))
+    }
+    let context = bookContext(for: entry, in: entries)
+    if let book = nonEmpty(entry.book) ?? context?.slug {
+        if let overview = context?.overview {
+            rows.append(.linkedScalar(label: "书籍", value: displayTitle(for: overview) ?? book,
+                                      path: overview.path, copyValue: book))
+            rows.append(contentsOf: bookDetailRows(for: overview))
+        } else {
+            rows.append(.readOnlyScalar(label: "书籍", value: book, copyValue: book))
+        }
+    }
+    rows.append(.rating)
+    return rows
+}
+
+private func bookDetailRows(for entry: Entry) -> [InspectorInfoRow] {
+    var rows: [InspectorInfoRow] = []
     if let publisher = nonEmpty(entry.publisher) {
         rows.append(.readOnlyScalar(label: "出版", value: publisher, copyValue: nil))
     }
@@ -85,20 +135,6 @@ private func bookRows(for entry: Entry) -> [InspectorInfoRow] {
     } else if let doi = nonEmpty(entry.doi) {
         rows.append(.identifier(label: "DOI", displayValue: doiDisplayValue(doi), fullValue: doi))
     }
-    rows.append(.rating)
-    return rows
-}
-
-private func chapterRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRow] {
-    var rows: [InspectorInfoRow] = [.authors]
-    if let year = nonEmpty(entry.year) {
-        rows.append(.readOnlyScalar(label: "年份", value: year, copyValue: nil))
-    }
-    if let book = nonEmpty(entry.book) {
-        let overview = bookContext(for: entry, in: entries)?.overview
-        rows.append(.readOnlyScalar(label: "书籍", value: displayTitle(for: overview) ?? book, copyValue: book))
-    }
-    rows.append(.rating)
     return rows
 }
 
@@ -143,6 +179,57 @@ private func displayTitle(for entry: Entry?) -> String? {
     }
     guard let path = entry?.path else { return nil }
     return (path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+}
+
+private func journalDisplayTitle(for entry: Entry?) -> String? {
+    nonEmpty(entry?.journal) ?? displayTitle(for: entry)
+}
+
+private func journalEntry(for value: String, in entries: [Entry]) -> Entry? {
+    let needle = journalKeys(value)
+    guard !needle.isEmpty else { return nil }
+    return entries.first { entry in
+        guard entry.type == .journal else { return false }
+        let keys = journalKeys(entry.journal)
+            .union(journalKeys(entry.title))
+            .union(journalKeys(journalSlug(entry.path)))
+            .union(journalKeys(fileStem(entry.path)))
+        return !needle.isDisjoint(with: keys)
+    }
+}
+
+private func journalSlug(_ rel: String) -> String? {
+    guard rel.hasPrefix("vault/journals/") else { return nil }
+    let rest = String(rel.dropFirst("vault/journals/".count))
+    guard let first = rest.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first else {
+        return nil
+    }
+    return String(first).replacingOccurrences(of: ".md", with: "")
+}
+
+private func fileStem(_ rel: String) -> String {
+    (rel as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+}
+
+private func journalKeys(_ value: String?) -> Set<String> {
+    guard let key = normalizedJournalKey(value) else { return [] }
+    var keys: Set<String> = [key]
+    let slug = slugKey(key)
+    if !slug.isEmpty { keys.insert(slug) }
+    return keys
+}
+
+private func normalizedJournalKey(_ value: String?) -> String? {
+    guard let trimmed = nonEmpty(value) else { return nil }
+    let folded = trimmed.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+    let collapsed = folded.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    return collapsed.lowercased()
+}
+
+private func slugKey(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "-", options: .regularExpression)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
 }
 
 private func nonEmpty(_ value: String?) -> String? {

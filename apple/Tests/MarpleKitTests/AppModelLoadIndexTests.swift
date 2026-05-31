@@ -361,6 +361,29 @@ import Testing
         #expect(model.openRelations?.topicMembers.map(\.path) == [book.path, paper.path])
     }
 
+    @MainActor
+    @Test func openChapterRelationsBorrowParentBookAfterIndexLoad() async {
+        let overview = Entry(path: "vault/books/smith-2020/00-overview.md", type: .book,
+                             title: "Smith Book", author: ["Jane Doe"], year: nil, ratingScore: 0,
+                             themes: [], preview: "", hasPDF: false)
+        let chapter = Entry(path: "vault/books/smith-2020/ch01.md", type: .chapter,
+                            title: "Chapter", author: [], year: nil, ratingScore: 0,
+                            themes: [], preview: "", hasPDF: false, book: "smith-2020")
+        let paper = Entry(path: "vault/papers/p.md", type: .paper,
+                          title: "Paper", author: ["Jane Doe"], year: nil, ratingScore: 0,
+                          themes: [], preview: "", hasPDF: false)
+        let client = StubVaultClient(
+            entries: [overview, chapter, paper],
+            texts: [chapter.path: "---\ntype: chapter\nbook: smith-2020\n---\n# Chapter"]
+        )
+        let model = AppModel(client: client)
+
+        await model.loadIndex()
+        await model.open(chapter.path)
+
+        #expect(model.openRelations?.siblings.map(\.path) == [paper.path])
+    }
+
     // MARK: helpers
 
     private static func entry(_ path: String) -> Entry {

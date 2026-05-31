@@ -98,12 +98,28 @@ import Testing
         #expect(rel.similar.map(\.path) == ["vault/papers/b.md"])
     }
 
+    @Test func chapterBorrowsOverviewAuthorRelations() {
+        let overview = mk("vault/books/smith-2020/00-overview.md", "book", author: "Jane Doe")
+        let chapter = mk("vault/books/smith-2020/ch01.md", "chapter", book: "smith-2020")
+        let sameAuthorPaper = mk("vault/papers/p.md", "paper", author: "Jane Doe", rating: 3)
+        let sameAuthorBook = mk("vault/books/other/00-overview.md", "book", author: "Jane Doe", rating: 2)
+        let sameAuthorChapter = mk("vault/books/other/ch01.md", "chapter", author: "Jane Doe", rating: 4, book: "other")
+        let entries = [overview, chapter, sameAuthorPaper, sameAuthorBook, sameAuthorChapter]
+
+        let rel = relations(for: chapter, in: entries,
+                            authorIndex: buildAuthorIndex(entries),
+                            annotationIndex: buildAnnotationIndex(entries))
+
+        #expect(rel.siblings.map(\.path) == ["vault/papers/p.md", "vault/books/other/00-overview.md"])
+    }
+
     @Test func topicPageShowsEntriesDeclaringTopicMembership() {
         let topic = mk("vault/topics/repair/00-overview.md", "topic", title: "Repair")
         let paper = mk("vault/papers/p.md", "paper", topics: ["repair"], rating: 2)
         let book = mk("vault/books/b/00-overview.md", "book", topics: ["repair"], rating: 3)
+        let chapter = mk("vault/books/b/ch01.md", "chapter", topics: ["repair"], rating: 4, book: "b")
         let other = mk("vault/papers/other.md", "paper", topics: ["hci"], rating: 5)
-        let entries = [topic, paper, book, other]
+        let entries = [topic, paper, book, chapter, other]
         let topicMembership = buildTopicMembership(entries)
 
         let rel = relations(for: topic, in: entries,

@@ -74,11 +74,28 @@ import Testing
             journal: "Journal of Repair Studies",
             doi: "10.1234/paper"
         )
+        let journal = Entry(
+            path: "vault/journals/journal-of-repair-studies.md",
+            type: .journal,
+            title: "Repair Studies",
+            author: [],
+            year: nil,
+            ratingScore: 0,
+            themes: [],
+            preview: "",
+            hasPDF: false,
+            journal: "Journal of Repair Studies"
+        )
 
-        #expect(inspectorInfoRows(for: entry) == [
+        #expect(inspectorInfoRows(for: entry, in: [entry, journal]) == [
             .authors,
             .readOnlyScalar(label: "年份", value: "2024", copyValue: nil),
-            .readOnlyScalar(label: "期刊", value: "Journal of Repair Studies", copyValue: nil),
+            .linkedScalar(
+                label: "期刊",
+                value: "Journal of Repair Studies",
+                path: "vault/journals/journal-of-repair-studies.md",
+                copyValue: "Journal of Repair Studies"
+            ),
             .identifier(label: "DOI", displayValue: "10.1234/pap…", fullValue: "10.1234/paper"),
             .rating,
         ])
@@ -125,15 +142,27 @@ import Testing
             ratingScore: 0,
             themes: [],
             preview: "",
-            hasPDF: false
+            hasPDF: false,
+            publisher: "Beacon",
+            isbn: "978-0-262-13472-9",
+            category: "monograph"
         )
 
-        #expect(inspectorInfoRows(for: entry, in: [entry, book]) == [
+        let rows = inspectorInfoRows(for: entry, in: [entry, book])
+        #expect(rows.prefix(3) == [
             .authors,
             .readOnlyScalar(label: "年份", value: "2024", copyValue: nil),
-            .readOnlyScalar(label: "书籍", value: "Masking in the Pandemic", copyValue: "abbott-masking-in-the-pandemic-2023"),
-            .rating,
+            .linkedScalar(
+                label: "书籍",
+                value: "Masking in the Pandemic",
+                path: "vault/books/abbott-masking-in-the-pandemic-2023/00-overview.md",
+                copyValue: "abbott-masking-in-the-pandemic-2023"
+            ),
         ])
+        #expect(rows.contains(.readOnlyScalar(label: "出版", value: "Beacon", copyValue: nil)))
+        #expect(rows.contains(.readOnlyScalar(label: "类型", value: "专著", copyValue: "monograph")))
+        #expect(rows.contains(.identifier(label: "ISBN", displayValue: "978…4729", fullValue: "978-0-262-13472-9")))
+        #expect(rows.last == .rating)
     }
 
     @Test func authorRowsOnlyShowRating() {
@@ -175,7 +204,7 @@ import Testing
 
     @Test func topicsMembershipRowResolvesSlugsToTopicTitlesBeforeRating() {
         // A paper declaring `topics:` membership shows a read-only "专题"
-        // row, with each slug resolved to its topic page's title when loaded
+        // chip row, with each slug resolved to its topic page's title when loaded
         // (falling back to the raw slug), inserted just above the rating row.
         let paper = Entry(
             path: "vault/papers/p.md",
@@ -204,7 +233,14 @@ import Testing
         #expect(inspectorInfoRows(for: paper, in: [paper, topicPage]) == [
             .authors,
             .readOnlyScalar(label: "年份", value: "2024", copyValue: nil),
-            .readOnlyScalar(label: "专题", value: "智能手机维修 · unknown-slug", copyValue: nil),
+            .chips(label: "专题", values: [
+                InspectorInfoChip(
+                    title: "智能手机维修",
+                    path: "vault/topics/smartphone-repair/00-overview.md",
+                    copyValue: "smartphone-repair"
+                ),
+                InspectorInfoChip(title: "unknown-slug", path: nil, copyValue: "unknown-slug"),
+            ]),
             .rating,
         ])
     }
