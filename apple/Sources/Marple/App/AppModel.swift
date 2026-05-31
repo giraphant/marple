@@ -56,13 +56,41 @@ final class AppModel {
     // selecting a category never touches the open document tabs.
     private(set) var browsePane: Pane = .type(.paper) { didSet { persist() } }
 
-    // Browsing the category list (true) vs reading an open document tab (false).
-    private(set) var isBrowsing: Bool = true { didSet { persist() } }
+    // Arc-style Spaces: each Space owns an independent document-tab workspace.
+    // The computed workspace/isBrowsing properties below preserve the previous
+    // single-workspace call sites by pointing them at the active Space.
+    private(set) var spaces: [WorkspaceSpace] = [] { didSet { persist() } }
+    private(set) var activeSpaceID: WorkspaceSpace.ID? { didSet { persist() } }
+
+    private var activeSpaceIndex: Int? {
+        guard let activeSpaceID else { return spaces.indices.first }
+        return spaces.firstIndex { $0.id == activeSpaceID }
+    }
+
+    var activeSpace: WorkspaceSpace? {
+        activeSpaceIndex.map { spaces[$0] }
+    }
+
+    // Browsing the category list (true) vs reading an open document tab (false),
+    // scoped to the active Space.
+    private(set) var isBrowsing: Bool {
+        get { activeSpaceIndex.map { spaces[$0].isBrowsing } ?? true }
+        set {
+            guard let index = activeSpaceIndex else { return }
+            spaces[index].isBrowsing = newValue
+        }
+    }
 
     // Open DOCUMENT tabs (browser-style), nil until the first doc is opened and back
     // to nil when the last closes. Each tab carries its own back/forward history
-    // (e.g. following wikilinks). Categories are NOT tabs.
-    private(set) var workspace: Workspace? { didSet { persist() } }
+    // (e.g. following wikilinks). Categories are NOT tabs. Scoped to the active Space.
+    private(set) var workspace: Workspace? {
+        get { activeSpaceIndex.flatMap { spaces[$0].workspace } }
+        set {
+            guard let index = activeSpaceIndex else { return }
+            spaces[index].workspace = newValue
+        }
+    }
 
     var pane: Pane { browsePane }
     var openPath: String? { isBrowsing ? nil : workspace?.activeTab.location.openPath }
@@ -73,11 +101,11 @@ final class AppModel {
     var canGoBack: Bool { !isBrowsing && (workspace?.activeTab.history.canGoBack ?? false) }
     var canGoForward: Bool { !isBrowsing && (workspace?.activeTab.history.canGoForward ?? false) }
 
-    /// Mutate the optional doc-tab workspace in place (struct value semantics).
+    /// Mutate the active Space's optional doc-tab workspace in place (struct value semantics).
     private func mutateWorkspace(_ f: (inout Workspace) -> Void) {
         guard var ws = workspace else { return }
         f(&ws)
-        workspace = ws
+        workspace = ws.isEmpty ? nil : ws
     }
 
     // The doc whose body/blocks/derived caches are currently loaded — lets tab and
@@ -199,12 +227,19 @@ final class AppModel {
                 loadedCountsSnapshot = restored
             }
             browsePane = s.browsePane
-            workspace = s.makeWorkspace()
-            isBrowsing = workspace == nil ? true : s.isBrowsing
+            let restoredSpaces = s.makeSpaces()
+            spaces = restoredSpaces.spaces
+            activeSpaceID = restoredSpaces.activeID
+            if workspace == nil { isBrowsing = true }
             sortClauses = s.sortClauses
             filterClauses = s.filterClauses
             filterMatch = s.filterMatch
             browseMode = BrowseMode(rawValue: s.browseMode) ?? .grid
+        }
+        if spaces.isEmpty {
+            let initial = WorkspaceSpace(name: "Space 1", workspace: nil, isBrowsing: true)
+            spaces = [initial]
+            activeSpaceID = initial.id
         }
         loadTypeOrder()
     }
@@ -217,16 +252,14 @@ final class AppModel {
     /// bootstrap completes, the live `counts` is authoritative. QUA-105.
     private var loadedCountsSnapshot: [EntryType: Int]?
 
-    /// Save the current place (browse category + doc tabs + controls). Cheap — a small
-    /// JSON blob to UserDefaults; invoked from the state properties' didSet, so every
-    /// mutation auto-saves without per-intent hooks.
+    /// Save the current place (browse category + Spaces + doc tabs + controls). Cheap —
+    /// a small JSON blob to UserDefaults; invoked from state properties' didSet.
     private func persist() {
         guard let stateStore else { return }
-        let ws = workspace
         let liveByPath: [String: Entry] = Dictionary(
             entries.lazy.compactMap { e -> (String, Entry)? in (e.path, e) },
             uniquingKeysWith: { a, _ in a })
-        let savedTabs = ws?.tabs.map { tab -> PersistedTab in
+        func persistedTab(_ tab: NavTab) -> PersistedTab {
             // Title + type snapshot: prefer the live entry; if entries haven't
             // loaded (bootstrap window) or the path no longer resolves (file
             // was deleted), carry over whatever we previously cached so the
@@ -239,22 +272,36 @@ final class AppModel {
                                 customTitle: tab.customTitle,
                                 cachedTitle: cachedTitle,
                                 cachedType: cachedType)
-        } ?? []
-        let idx = ws.flatMap { w in w.tabs.firstIndex { $0.id == w.activeID } } ?? 0
+        }
+        let savedSpaces = spaces.map { space -> PersistedWorkspaceSpace in
+            let ws = space.workspace
+            let savedTabs = ws?.tabs.map(persistedTab) ?? []
+            let idx = ws.flatMap { w in w.tabs.firstIndex { $0.id == w.activeID } } ?? 0
+            return PersistedWorkspaceSpace(id: space.id,
+                                           name: space.name,
+                                           isBrowsing: ws == nil ? true : space.isBrowsing,
+                                           tabs: savedTabs,
+                                           activeIndex: idx,
+                                           iconName: space.iconName,
+                                           tree: ws?.treeSnapshot)
+        }
+        let activeSavedSpace = activeSpaceID.flatMap { id in savedSpaces.first { $0.id == id } } ?? savedSpaces.first
         // Same round-trip discipline for counts — during bootstrap, write back
         // the loaded snapshot rather than the still-empty `counts` dict.
         let persistedCounts: [EntryType: Int]? =
             isBootstrapping ? loadedCountsSnapshot : counts
         stateStore.save(PersistedState(
             browsePane: browsePane,
-            isBrowsing: isBrowsing,
-            tabs: savedTabs,
-            activeIndex: idx,
+            isBrowsing: activeSavedSpace?.isBrowsing ?? true,
+            tabs: activeSavedSpace?.tabs ?? [],
+            activeIndex: activeSavedSpace?.activeIndex ?? 0,
             sortClauses: sortClauses,
             filterClauses: filterClauses,
             filterMatch: filterMatch,
             browseMode: browseMode.rawValue,
-            currentSpace: ws.map { PersistedWorkspaceSpace(tree: $0.treeSnapshot) },
+            currentSpace: activeSavedSpace,
+            spaces: savedSpaces,
+            activeSpaceID: activeSavedSpace?.id,
             counts: persistedCounts))
     }
 
@@ -385,6 +432,129 @@ final class AppModel {
     }
 
     // MARK: actions
+
+    func addSpace() {
+        let nextNumber = spaces.count + 1
+        let space = WorkspaceSpace(name: "Space \(nextNumber)", workspace: nil, isBrowsing: true)
+        spaces.append(space)
+        activeSpaceID = space.id
+        isBrowsing = true
+        Task { await loadDoc(nil) }
+    }
+
+    func selectSpace(_ id: WorkspaceSpace.ID) async {
+        guard spaces.contains(where: { $0.id == id }) else { return }
+        guard activeSpaceID != id else { return }
+        activeSpaceID = id
+        if workspace == nil {
+            isBrowsing = true
+            await loadDoc(nil)
+        } else if isBrowsing {
+            await loadDoc(nil)
+        } else {
+            await syncToActiveLocation()
+        }
+    }
+
+    func moveSpace(from source: IndexSet, to destination: Int) {
+        spaces.move(fromOffsets: source, toOffset: destination)
+    }
+
+    func moveSpace(_ id: WorkspaceSpace.ID, before targetID: WorkspaceSpace.ID) {
+        guard id != targetID,
+              let from = spaces.firstIndex(where: { $0.id == id }),
+              let to = spaces.firstIndex(where: { $0.id == targetID }) else { return }
+        spaces.move(fromOffsets: IndexSet(integer: from), toOffset: to)
+    }
+
+    func moveSpace(_ id: WorkspaceSpace.ID, after targetID: WorkspaceSpace.ID) {
+        guard id != targetID,
+              let from = spaces.firstIndex(where: { $0.id == id }),
+              let to = spaces.firstIndex(where: { $0.id == targetID }) else { return }
+        spaces.move(fromOffsets: IndexSet(integer: from), toOffset: to + 1)
+    }
+
+    func setSpaceIcon(_ iconName: String?, for id: WorkspaceSpace.ID) {
+        guard let index = spaces.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = iconName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        spaces[index].iconName = trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    private func mutateSpace(_ id: WorkspaceSpace.ID, _ body: (inout WorkspaceSpace) -> Void) {
+        guard let index = spaces.firstIndex(where: { $0.id == id }) else { return }
+        var space = spaces[index]
+        body(&space)
+        if space.workspace?.isEmpty == true {
+            space.workspace = nil
+            space.isBrowsing = true
+        }
+        spaces[index] = space
+    }
+
+    private func firstMovedTabID(in bundle: WorkspaceTransferBundle) -> NavTab.ID? {
+        for node in bundle.nodes {
+            switch node {
+            case .tab(let id): return id
+            case .group(let group):
+                if let id = firstTabID(in: group.children) { return id }
+            }
+        }
+        return bundle.tabs.first?.id
+    }
+
+    private func firstTabID(in nodes: [TabNode]) -> NavTab.ID? {
+        for node in nodes {
+            switch node {
+            case .tab(let id): return id
+            case .group(let group):
+                if let id = firstTabID(in: group.children) { return id }
+            }
+        }
+        return nil
+    }
+
+    func moveItems(_ items: [WorkspaceItem], from sourceSpaceID: WorkspaceSpace.ID, toRootAt index: Int? = nil) {
+        guard activeSpaceID != nil else { return }
+        var bundle = WorkspaceTransferBundle(tabs: [], nodes: [])
+        mutateSpace(sourceSpaceID) { source in
+            guard var ws = source.workspace else { return }
+            bundle = ws.extractItemsForTransfer(items)
+            source.workspace = ws.isEmpty ? nil : ws
+            if source.workspace == nil { source.isBrowsing = true }
+        }
+        guard !bundle.tabs.isEmpty, let destinationID = activeSpaceID else { return }
+        mutateSpace(destinationID) { destination in
+            if destination.workspace == nil, let first = bundle.tabs.first {
+                var ws = Workspace(initial: first.location)
+                _ = ws.extractItemsForTransfer([.tab(ws.activeID)])
+                ws.insertTransferBundleToRoot(bundle, at: index)
+                destination.workspace = ws
+            } else {
+                destination.workspace?.insertTransferBundleToRoot(bundle, at: index)
+            }
+            if let moved = firstMovedTabID(in: bundle) { destination.workspace?.select(moved) }
+            destination.isBrowsing = false
+        }
+    }
+
+    func moveItems(_ items: [WorkspaceItem], from sourceSpaceID: WorkspaceSpace.ID,
+                   toGroup groupID: TabGroup.ID, at childIndex: Int? = nil) {
+        guard let destinationID = activeSpaceID,
+              spaces.first(where: { $0.id == destinationID })?.workspace?.tabGroups.contains(where: { $0.id == groupID }) == true else { return }
+        var bundle = WorkspaceTransferBundle(tabs: [], nodes: [])
+        mutateSpace(sourceSpaceID) { source in
+            guard var ws = source.workspace else { return }
+            bundle = ws.extractItemsForTransfer(items)
+            source.workspace = ws.isEmpty ? nil : ws
+            if source.workspace == nil { source.isBrowsing = true }
+        }
+        guard !bundle.tabs.isEmpty else { return }
+        mutateSpace(destinationID) { destination in
+            destination.workspace?.insertTransferBundle(bundle, toGroup: groupID, at: childIndex)
+            if let moved = firstMovedTabID(in: bundle) { destination.workspace?.select(moved) }
+            destination.isBrowsing = false
+        }
+    }
 
     /// `loadIndex()` runs concurrently with itself in practice: the fast-path boot
     /// kicks a deferred reconcile that calls loadIndex on completion, the FSEvents
