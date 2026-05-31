@@ -4,24 +4,55 @@ import Foundation
 public enum SupersetAction: String, CaseIterable, Sendable, Equatable {
     case reanalyze
     case format
+    case translate
+    case discuss
 
     public var label: String {
         switch self {
         case .reanalyze: return "重新分析"
         case .format: return "格式整理"
+        case .translate: return "制作译本"
+        case .discuss: return "对话讨论"
         }
     }
 
     public var defaultPromptIntent: String {
         switch self {
+        case .reanalyze: return ReaderAIPrompts.reanalyze
+        case .format: return ReaderAIPrompts.formatAudit
+        case .translate: return ReaderAIPrompts.translatePDF
+        case .discuss: return ReaderAIPrompts.discuss
+        }
+    }
+
+    var finalBoundary: String {
+        switch self {
         case .reanalyze:
-            return """
-            当前目标文件的分析质量需要重新处理。请先阅读上下文包，再按 Quasi 既有分析能力路由：paper / chapter 类分析文件优先使用 analyse-agent 的规范重新分析；book overview、author profile、topic synthesis 或其他综合型页面优先使用 synthesis-agent 的相应规范重新综合。可以重写目标文件，但不要创建与当前任务无关的文件；保留并修正符合 Quasi schema 的 frontmatter；不要编造不存在的文献、DOI、页码、引文或事实。
-            """
+            return ReaderAIPrompts.reanalysisBoundary
+        case .discuss:
+            return ReaderAIPrompts.discussionBoundary
+        case .format, .translate:
+            return ReaderAIPrompts.targetEditBoundary
+        }
+    }
+
+    var contextBoundary: String {
+        switch self {
+        case .reanalyze:
+            return ReaderAIPrompts.contextReanalysisBoundary
+        case .discuss:
+            return ReaderAIPrompts.contextDiscussionBoundary
+        case .format, .translate:
+            return ReaderAIPrompts.contextTargetEditBoundary
+        }
+    }
+
+    var requiredGuardrail: String? {
+        switch self {
         case .format:
-            return """
-            当前目标文件需要做规范检查与格式整理。请优先调用 Quasi 的 audit 能力处理目标文件，例如 audit-agent 或 quasi-audit --path {{target_relative_path}}。只做 audit 语义下的局部最小修复，包括 frontmatter/schema、标题层级、必需小节、metadata 与机械格式问题；不要重新分析正文，不要扩写观点，不要新增无依据内容。
-            """
+            return ReaderAIPrompts.auditGuardrail
+        case .reanalyze, .translate, .discuss:
+            return nil
         }
     }
 }
@@ -32,25 +63,33 @@ public struct SupersetDispatchConfig: Sendable, Equatable {
     public let cliPath: String
     public let reanalyzePrompt: String?
     public let formatPrompt: String?
+    public let translatePrompt: String?
+    public let discussPrompt: String?
 
     public init(
         workspaceID: String,
         agent: String = "claude",
         cliPath: String = "superset",
         reanalyzePrompt: String? = nil,
-        formatPrompt: String? = nil
+        formatPrompt: String? = nil,
+        translatePrompt: String? = nil,
+        discussPrompt: String? = nil
     ) {
         self.workspaceID = workspaceID
         self.agent = agent
         self.cliPath = cliPath
         self.reanalyzePrompt = reanalyzePrompt
         self.formatPrompt = formatPrompt
+        self.translatePrompt = translatePrompt
+        self.discussPrompt = discussPrompt
     }
 
     public func promptIntent(for action: SupersetAction) -> String {
         let customPrompt = switch action {
         case .reanalyze: reanalyzePrompt
         case .format: formatPrompt
+        case .translate: translatePrompt
+        case .discuss: discussPrompt
         }
         let trimmed = customPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? action.defaultPromptIntent : trimmed
@@ -175,7 +214,7 @@ public enum SupersetContextPackageBuilder {
         lines.append("Workspace-relative path: \(context.targetPath)")
         lines.append("Absolute path: \(context.targetAbsolutePath)")
         lines.append("")
-        lines.append("Only edit the target file above. Do not edit this context package.")
+        lines.append(action.contextBoundary)
         lines.append("")
         lines.append("## Entry Metadata")
         lines.append("- Type: \(context.entry.type.rawValue)")
@@ -289,6 +328,16 @@ public enum SupersetPromptBuilder {
             targetAbsolutePath: targetAbsolutePath,
             contextPackagePath: contextPackagePath
         )
+        let renderedGuardrail = action.requiredGuardrail.map {
+            renderTemplate(
+                $0,
+                action: action,
+                targetRelativePath: targetRelativePath,
+                targetAbsolutePath: targetAbsolutePath,
+                contextPackagePath: contextPackagePath
+            )
+        }
+        let guardrailBlock = renderedGuardrail.map { "\n\n\($0)" } ?? ""
         return """
         请执行 Marple Superset 动作：\(action.label)
 
@@ -296,9 +345,9 @@ public enum SupersetPromptBuilder {
         目标文件（绝对路径）：\(targetAbsolutePath)
         上下文包：\(contextPackagePath)
 
-        \(renderedIntent)
+        \(renderedIntent)\(guardrailBlock)
 
-        请先阅读上下文包。只编辑目标文件，不要编辑上下文包或其他文件。
+        \(action.finalBoundary)
         """
     }
 
