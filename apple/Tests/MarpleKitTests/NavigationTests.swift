@@ -310,6 +310,99 @@ import Foundation
         w.renameGroup(groupID, to: "   ")
         #expect(w.tabGroups.first?.name == "Reading Stack")
     }
+
+    @Test func extractSingleTabForTransferRemovesFromSourceAndTargetInsertsAtRootPreservingFields() throws {
+        var source = Workspace(initial: a)
+        let tabID = source.activeID
+        source.togglePin(tabID)
+        source.renameTab(tabID, to: "Desk")
+        let cachedTab = NavTab(id: UUID(), location: NavLocation(pane: .type(.book), openPath: "cached.md"), pinned: false, cachedTitle: "Cached", cachedType: .book)
+        source.insertTransferBundleToRoot(WorkspaceTransferBundle(tabs: [cachedTab], nodes: [.tab(cachedTab.id)]), at: nil)
+        source.newTab(b)
+        var target = Workspace(initial: c)
+
+        let bundle = source.extractItemsForTransfer([.tab(tabID), .tab(cachedTab.id)])
+        target.insertTransferBundleToRoot(bundle, at: 0)
+
+        #expect(source.tabs.map(\.id).contains(tabID) == false)
+        #expect(source.tabs.map(\.id).contains(cachedTab.id) == false)
+        let inserted = try #require(target.tabs.first { $0.id == tabID })
+        #expect(inserted.location == a)
+        #expect(inserted.pinned)
+        #expect(inserted.customTitle == "Desk")
+        let insertedCached = try #require(target.tabs.first { $0.id == cachedTab.id })
+        #expect(insertedCached.cachedTitle == "Cached")
+        #expect(insertedCached.cachedType == .book)
+        #expect(target.rootNodes.prefix(2).map(\.tabID) == [tabID, cachedTab.id])
+    }
+
+    @Test func transferNestedGroupPreservesChildOrderAndCollapsedState() throws {
+        let tabSpecs = (0..<4).map { (location: NavLocation(pane: .type(.note), openPath: "t\($0).md"), pinned: false, customTitle: String?.none, cachedTitle: String?.none, cachedType: EntryType?.none) }
+        let snap = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "Outer", isCollapsed: true, children: [
+                .tab(0),
+                .group(.init(name: "Inner", isCollapsed: false, children: [.tab(1), .tab(2)])),
+                .tab(3),
+            ])),
+        ])
+        var source = try #require(Workspace(restoring: tabSpecs, activeIndex: 0, tree: snap))
+        let outerID = try #require(source.tabGroups.first { $0.name == "Outer" }?.id)
+        let childOrder = source.tabs.map(\.id)
+        var target = Workspace(initial: c)
+
+        let bundle = source.extractItemsForTransfer([.group(outerID)])
+        target.insertTransferBundleToRoot(bundle, at: 1)
+
+        #expect(source.isEmpty)
+        let restoredOuter = try #require(target.tabGroups.first { $0.id == outerID })
+        #expect(restoredOuter.isCollapsed)
+        #expect(target.tabs.filter { childOrder.contains($0.id) }.map(\.id) == childOrder)
+        let restoredInner = try #require(restoredOuter.children.compactMap(\.group).first)
+        #expect(restoredInner.children.map(\.tabID) == [childOrder[1], childOrder[2]])
+    }
+
+    @Test func extractingActiveTabFallsBackAndEmptyWorkspaceReportsEmpty() throws {
+        var source = Workspace(initial: a)
+        let firstID = source.activeID
+        source.newTab(b)
+        let secondID = source.activeID
+
+        _ = source.extractItemsForTransfer([.tab(secondID)])
+        #expect(source.activeID == firstID)
+        #expect(!source.isEmpty)
+
+        _ = source.extractItemsForTransfer([.tab(firstID)])
+        #expect(source.isEmpty)
+    }
+
+    @Test func insertingIntoWorkspaceEmptiedByTransferMakesInsertedTabActive() throws {
+        var workspace = Workspace(initial: a)
+        _ = workspace.extractItemsForTransfer([.tab(workspace.activeID)])
+        #expect(workspace.isEmpty)
+        let inserted = NavTab(location: b)
+
+        workspace.insertTransferBundleToRoot(WorkspaceTransferBundle(tabs: [inserted], nodes: [.tab(inserted.id)]), at: 0)
+
+        #expect(workspace.activeID == inserted.id)
+        #expect(workspace.activeTab.id == inserted.id)
+    }
+
+    @Test func extractTransferFiltersDescendantTabsWhenParentGroupSelected() throws {
+        var source = Workspace(initial: a)
+        source.newTab(b)
+        let ids = source.tabs.map(\.id)
+        source.groupTab(ids[1], onto: ids[0])
+        let groupID = try #require(source.tabGroups.first?.id)
+        var target = Workspace(initial: c)
+
+        let bundle = source.extractItemsForTransfer([.tab(ids[0]), .group(groupID)])
+        target.insertTransferBundleToRoot(bundle, at: 0)
+
+        #expect(bundle.nodes.count == 1)
+        #expect(bundle.nodes.first?.group?.id == groupID)
+        let transferredGroup = try #require(target.group(groupID))
+        #expect(transferredGroup.tabIDs == ids)
+    }
 }
 
 @Suite struct NestedTabGroupTests {

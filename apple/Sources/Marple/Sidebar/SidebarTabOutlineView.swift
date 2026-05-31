@@ -2,6 +2,10 @@ import AppKit
 import SwiftUI
 import MarpleKit
 
+enum SidebarDragPasteboard {
+    static let tabItem = NSPasteboard.PasteboardType("com.marple.sidebar-tab-item")
+}
+
 private enum SidebarOutlineSection {
     case objects
     case tabs
@@ -28,25 +32,30 @@ private final class SidebarOutlineNode: NSObject {
     let iconName: String?
     let pinned: Bool
     let entryType: EntryType?
+    let sourceSpaceID: WorkspaceSpace.ID?
     var children: [SidebarOutlineNode]
 
     init(kind: Kind, title: String, count: Int? = nil, iconName: String? = nil,
-         pinned: Bool = false, entryType: EntryType? = nil, children: [SidebarOutlineNode] = []) {
+         pinned: Bool = false, entryType: EntryType? = nil,
+         sourceSpaceID: WorkspaceSpace.ID? = nil, children: [SidebarOutlineNode] = []) {
         self.kind = kind
         self.title = title
         self.count = count
         self.iconName = iconName
         self.pinned = pinned
         self.entryType = entryType
+        self.sourceSpaceID = sourceSpaceID
         self.children = children
     }
 
     var payload: String? {
         switch kind {
         case .tab(let id):
-            return "tab:\(id.uuidString)"
+            guard let sourceSpaceID else { return "tab:\(id.uuidString)" }
+            return "tab:\(sourceSpaceID.uuidString):\(id.uuidString)"
         case .group(let id):
-            return "group:\(id.uuidString)"
+            guard let sourceSpaceID else { return "group:\(id.uuidString)" }
+            return "group:\(sourceSpaceID.uuidString):\(id.uuidString)"
         case .pane(.type(let type)):
             return "type:\(type.rawValue)"
         case .section, .pane:
@@ -69,21 +78,38 @@ private final class SidebarOutlineNode: NSObject {
 }
 
 private enum SidebarTabPayload {
-    case tab(NavTab.ID)
-    case group(TabGroup.ID)
+    case tab(spaceID: WorkspaceSpace.ID?, id: NavTab.ID)
+    case group(spaceID: WorkspaceSpace.ID?, id: TabGroup.ID)
     case type(EntryType)
+
+    var sourceSpaceID: WorkspaceSpace.ID? {
+        switch self {
+        case .tab(let spaceID, _), .group(let spaceID, _): return spaceID
+        case .type: return nil
+        }
+    }
 
     init?(_ raw: String?) {
         guard let raw else { return nil }
-        let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2 else { return nil }
+        let parts = raw.split(separator: ":").map(String.init)
+        guard parts.count >= 2 else { return nil }
         switch parts[0] {
         case "tab":
-            guard let id = UUID(uuidString: parts[1]) else { return nil }
-            self = .tab(id)
+            if parts.count == 3 {
+                guard let spaceID = UUID(uuidString: parts[1]), let id = UUID(uuidString: parts[2]) else { return nil }
+                self = .tab(spaceID: spaceID, id: id)
+            } else {
+                guard let id = UUID(uuidString: parts[1]) else { return nil }
+                self = .tab(spaceID: nil, id: id)
+            }
         case "group":
-            guard let id = UUID(uuidString: parts[1]) else { return nil }
-            self = .group(id)
+            if parts.count == 3 {
+                guard let spaceID = UUID(uuidString: parts[1]), let id = UUID(uuidString: parts[2]) else { return nil }
+                self = .group(spaceID: spaceID, id: id)
+            } else {
+                guard let id = UUID(uuidString: parts[1]) else { return nil }
+                self = .group(spaceID: nil, id: id)
+            }
         case "type":
             self = .type(EntryType(rawValue: parts[1]))
         default:
@@ -121,7 +147,7 @@ struct SidebarOutlineView: NSViewRepresentable {
         menu.delegate = context.coordinator
         outline.menu = menu
         context.coordinator.outlineView = outline
-        outline.registerForDraggedTypes([Coordinator.pasteboardType])
+        outline.registerForDraggedTypes([SidebarDragPasteboard.tabItem])
         outline.setDraggingSourceOperationMask(.move, forLocal: true)
         outline.draggingDestinationFeedbackStyle = .sourceList
 
@@ -144,8 +170,6 @@ struct SidebarOutlineView: NSViewRepresentable {
     }
 
     @MainActor final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate, NSTextFieldDelegate {
-        static let pasteboardType = NSPasteboard.PasteboardType("com.marple.sidebar-tab-item")
-
         var model: AppModel
         weak var outlineView: NSOutlineView?
         private var rootItems: [SidebarOutlineNode] = []
@@ -156,6 +180,7 @@ struct SidebarOutlineView: NSViewRepresentable {
         private var isRestoringExpansion = false
         private var pendingReload = false
         private var lastReloadSignature: String?
+        private var lastReloadSpaceID: WorkspaceSpace.ID?
         private var stickyRowDropTarget: SidebarOutlineNode?
         // Row split for tab-on-tab grouping: top/bottom edge bands reorder, the
         // narrow center band triggers grouping. Exit ratio is the hysteresis that
@@ -195,6 +220,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 _ = model.counts
                 _ = model.tabs
                 _ = model.tabRootNodes
+                _ = model.spaces
+                _ = model.activeSpaceID
             } onChange: { [weak self] in
                 Task { @MainActor in
                     guard let self else { return }
@@ -216,10 +243,17 @@ struct SidebarOutlineView: NSViewRepresentable {
             // selection that covers the active row across no-op reloads — this
             // extends the same guarantee to structural reloads (QUA-98).
             let preservedPayloads = capturedMultiSelectionPayloads(in: outline)
+            let spaceTransition = sidebarSpaceTransition(in: outline)
             lastReloadSignature = signature
+            lastReloadSpaceID = model.activeSpaceID
             stickyRowDropTarget = nil
             rootItems = makeRootItems()
-            outline.reloadData()
+            if let spaceTransition, let clipView = outline.enclosingScrollView?.contentView {
+                clipView.layer?.add(spaceTransition, forKey: "space-switch")
+                outline.reloadData()
+            } else {
+                outline.reloadData()
+            }
             restoreExpansion(in: outline)
             restoreMultiSelection(payloads: preservedPayloads, in: outline)
             selectCurrentItem(in: outline)
@@ -228,6 +262,23 @@ struct SidebarOutlineView: NSViewRepresentable {
         /// Payload set of a multi-row selection (>=2 rows). Returns empty for a
         /// single-row selection — `selectCurrentItem` will re-pick that case
         /// from the active tab/pane on its own.
+        private func sidebarSpaceTransition(in outline: NSOutlineView) -> CATransition? {
+            guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+                  let oldID = lastReloadSpaceID,
+                  let newID = model.activeSpaceID,
+                  oldID != newID,
+                  let oldIndex = model.spaces.firstIndex(where: { $0.id == oldID }),
+                  let newIndex = model.spaces.firstIndex(where: { $0.id == newID }) else { return nil }
+            outline.enclosingScrollView?.contentView.wantsLayer = true
+            let transition = CATransition()
+            transition.type = .push
+            transition.subtype = newIndex > oldIndex ? .fromRight : .fromLeft
+            transition.duration = 0.10
+            transition.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            transition.isRemovedOnCompletion = true
+            return transition
+        }
+
         private func capturedMultiSelectionPayloads(in outline: NSOutlineView) -> [SidebarTabPayload] {
             let indices = outline.selectedRowIndexes
             guard indices.count > 1 else { return [] }
@@ -256,8 +307,8 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         private func findNode(for payload: SidebarTabPayload, in nodes: [SidebarOutlineNode]) -> SidebarOutlineNode? {
             switch payload {
-            case .tab(let id): return findTabNode(id, in: nodes)
-            case .group(let id): return findGroupNode(id, in: nodes)
+            case .tab(_, let id): return findTabNode(id, in: nodes)
+            case .group(_, let id): return findGroupNode(id, in: nodes)
             case .type(let type): return findPaneNode(.type(type), in: nodes)
             }
         }
@@ -279,6 +330,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             parts.append("counts:\(model.typeOrder.map { "\($0)=\(model.counts[$0] ?? 0)" }.joined(separator: ","))")
             parts.append("tabs:\(model.tabs.map { "\($0.id.uuidString):\($0.location):\($0.pinned):\($0.customTitle ?? "")" }.joined(separator: ","))")
             parts.append("tree:\(Self.treeSignature(model.tabRootNodes))")
+            parts.append("spaces:\(model.activeSpaceID?.uuidString ?? "nil"):\(model.spaces.map(\.id.uuidString).joined(separator: ","))")
             return parts.joined(separator: "|")
         }
 
@@ -304,33 +356,33 @@ struct SidebarOutlineView: NSViewRepresentable {
                                                           iconName: type.symbolName)
                                    })
             ]
-            if !model.tabs.isEmpty {
-                sections.append(SidebarOutlineNode(kind: .section(.tabs),
-                                                   title: SidebarOutlineSection.tabs.title,
-                                                   children: makeTabRootItems(entryByPath: entryByPath)))
-            }
+            sections.append(SidebarOutlineNode(kind: .section(.tabs),
+                                               title: SidebarOutlineSection.tabs.title,
+                                               children: makeTabRootItems(entryByPath: entryByPath)))
             return sections
         }
 
         private func makeTabRootItems(entryByPath: [String: Entry]) -> [SidebarOutlineNode] {
-            model.tabRootNodes.compactMap { outlineNode($0, entryByPath: entryByPath) }
+            let sourceSpaceID = model.activeSpaceID
+            return model.tabRootNodes.compactMap { outlineNode($0, entryByPath: entryByPath, sourceSpaceID: sourceSpaceID) }
         }
 
-        private func outlineNode(_ node: TabNode, entryByPath: [String: Entry]) -> SidebarOutlineNode? {
+        private func outlineNode(_ node: TabNode, entryByPath: [String: Entry], sourceSpaceID: WorkspaceSpace.ID?) -> SidebarOutlineNode? {
             switch node {
             case .tab(let id):
                 guard let tab = model.tabs.first(where: { $0.id == id }) else { return nil }
-                return tabNode(tab, entryByPath: entryByPath)
+                return tabNode(tab, entryByPath: entryByPath, sourceSpaceID: sourceSpaceID)
             case .group(let group):
                 return SidebarOutlineNode(kind: .group(group.id),
                                           title: group.name,
                                           count: nil,
                                           iconName: "folder",
-                                          children: group.children.compactMap { outlineNode($0, entryByPath: entryByPath) })
+                                          sourceSpaceID: sourceSpaceID,
+                                          children: group.children.compactMap { outlineNode($0, entryByPath: entryByPath, sourceSpaceID: sourceSpaceID) })
             }
         }
 
-        private func tabNode(_ tab: NavTab, entryByPath: [String: Entry]) -> SidebarOutlineNode {
+        private func tabNode(_ tab: NavTab, entryByPath: [String: Entry], sourceSpaceID: WorkspaceSpace.ID?) -> SidebarOutlineNode {
             let entry = tab.location.openPath.flatMap { entryByPath[$0] }
             // QUA-105: during bootstrap entries is empty so `entry?.type` is
             // nil, which would drop the row to the generic list.bullet icon.
@@ -342,7 +394,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                                       title: tabTitle(tab, entry: entry),
                                       iconName: "list.bullet",
                                       pinned: tab.pinned,
-                                      entryType: resolvedType)
+                                      entryType: resolvedType,
+                                      sourceSpaceID: sourceSpaceID)
         }
 
         private func tabTitle(_ tab: NavTab, entry: Entry?) -> String {
@@ -387,7 +440,11 @@ struct SidebarOutlineView: NSViewRepresentable {
         }
 
         private var tabRootItems: [SidebarOutlineNode] {
-            rootItems.first { $0.isTabsSection }?.children ?? []
+            tabsSection?.children ?? []
+        }
+
+        private var tabsSection: SidebarOutlineNode? {
+            rootItems.first { $0.isTabsSection }
         }
 
         private var objectsSection: SidebarOutlineNode? {
@@ -822,7 +879,7 @@ struct SidebarOutlineView: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
             guard let node = item as? SidebarOutlineNode, let payload = node.payload else { return nil }
             let pasteboardItem = NSPasteboardItem()
-            pasteboardItem.setString(payload, forType: Self.pasteboardType)
+            pasteboardItem.setString(payload, forType: SidebarDragPasteboard.tabItem)
             return pasteboardItem
         }
 
@@ -838,8 +895,25 @@ struct SidebarOutlineView: NSViewRepresentable {
         private func payloads(from info: NSDraggingInfo) -> [SidebarTabPayload] {
             guard let items = info.draggingPasteboard.pasteboardItems else { return [] }
             return items.compactMap { item in
-                item.string(forType: Self.pasteboardType).flatMap(SidebarTabPayload.init)
+                item.string(forType: SidebarDragPasteboard.tabItem).flatMap(SidebarTabPayload.init)
             }
+        }
+
+        private func sourceSpaceID(for payload: SidebarTabPayload) -> WorkspaceSpace.ID? {
+            payload.sourceSpaceID ?? model.activeSpaceID
+        }
+
+        private func singleSourceSpaceID(for payloads: [SidebarTabPayload]) -> WorkspaceSpace.ID? {
+            var source: WorkspaceSpace.ID?
+            for payload in payloads {
+                guard case .type = payload else {
+                    let spaceID = sourceSpaceID(for: payload)
+                    if source == nil { source = spaceID }
+                    else if source != spaceID { return nil }
+                    continue
+                }
+            }
+            return source
         }
 
         func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo,
@@ -850,7 +924,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                                          item: item, childIndex: index)
             }
             guard let payload = allPayloads.first
-                    ?? SidebarTabPayload(info.draggingPasteboard.string(forType: Self.pasteboardType)) else { return [] }
+                    ?? SidebarTabPayload(info.draggingPasteboard.string(forType: SidebarDragPasteboard.tabItem)) else { return [] }
             let point = draggingPoint(in: outlineView, info: info)
             logDrop("validate proposed=\(describe(item as? SidebarOutlineNode)) index=\(index) row=\(rowAtY(point.y, in: outlineView)) x=\(String(format: "%.1f", point.x)) y=\(String(format: "%.1f", point.y)) sticky=\(describe(stickyRowDropTarget)) payload=\(describe(payload))")
             if case .type = payload {
@@ -860,6 +934,10 @@ struct SidebarOutlineView: NSViewRepresentable {
                 logDrop("validate retarget sticky=\(describe(stickyRowDropTarget))")
                 return .move
             }
+            if item == nil, let section = tabsSection, point.y >= outlineView.rect(ofRow: outlineView.row(forItem: section)).minY {
+                outlineView.setDropItem(section, dropChildIndex: tabRootItems.count)
+                return .move
+            }
             guard let node = item as? SidebarOutlineNode else { return [] }
             switch node.kind {
             case .section(.tabs):
@@ -867,12 +945,12 @@ struct SidebarOutlineView: NSViewRepresentable {
             case .group(let targetGroupID):
                 // drop-on (center) nests; drop-between reorders/nests at an index.
                 // Reject group payloads that would form a cycle (self / descendant).
-                if case .group(let sourceID) = payload {
+                if case .group(_, let sourceID) = payload, sourceSpaceID(for: payload) == model.activeSpaceID {
                     return model.canNestGroup(sourceID, into: targetGroupID) ? .move : []
                 }
                 return .move
             case .tab(let targetID):
-                if case .group(let sourceID) = payload, model.groupContainsTab(sourceID, targetID) { return [] }
+                if case .group(_, let sourceID) = payload, sourceSpaceID(for: payload) == model.activeSpaceID, model.groupContainsTab(sourceID, targetID) { return [] }
                 // Coerce to drop-on only for tab payloads (the tab-on-tab grouping
                 // gesture). Group payloads keep AppKit's between proposal so an edge
                 // drop reorders beside the tab instead of grouping onto it.
@@ -896,7 +974,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 return accepted
             }
             guard let payload = allPayloads.first
-                    ?? SidebarTabPayload(info.draggingPasteboard.string(forType: Self.pasteboardType)) else { return false }
+                    ?? SidebarTabPayload(info.draggingPasteboard.string(forType: SidebarDragPasteboard.tabItem)) else { return false }
             if case .type(let type) = payload {
                 let accepted = acceptType(type, into: item as? SidebarOutlineNode, childIndex: index,
                                           outlineView: outlineView, info: info)
@@ -922,6 +1000,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 case .section, .pane:
                     accepted = false
                 }
+            } else if let section = tabsSection, point.y >= outlineView.rect(ofRow: outlineView.row(forItem: section)).minY {
+                accepted = accept(payload, into: nil, childIndex: NSOutlineViewDropOnItemIndex)
             } else {
                 accepted = false
             }
@@ -938,8 +1018,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             var rawGroups: [TabGroup.ID] = []
             for p in payloads {
                 switch p {
-                case .tab(let id): rawTabs.append(id)
-                case .group(let id): rawGroups.append(id)
+                case .tab(_, let id): rawTabs.append(id)
+                case .group(_, let id): rawGroups.append(id)
                 case .type: break   // pane reorder doesn't participate in batch DnD
                 }
             }
@@ -956,8 +1036,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             let allowedGroups = Set(groups)
             return payloads.compactMap { payload in
                 switch payload {
-                case .tab(let id): return allowedTabs.contains(id) ? .tab(id) : nil
-                case .group(let id): return allowedGroups.contains(id) ? .group(id) : nil
+                case .tab(_, let id): return allowedTabs.contains(id) ? .tab(id) : nil
+                case .group(_, let id): return allowedGroups.contains(id) ? .group(id) : nil
                 case .type: return nil
                 }
             }
@@ -966,6 +1046,8 @@ struct SidebarOutlineView: NSViewRepresentable {
         private func validateMultiDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
                                        payloads: [SidebarTabPayload],
                                        item: Any?, childIndex index: Int) -> NSDragOperation {
+            guard let sourceSpaceID = singleSourceSpaceID(for: payloads) else { return [] }
+            let crossSpace = sourceSpaceID != model.activeSpaceID
             let (tabs, groups) = classifyAndFilter(payloads)
             guard !(tabs.isEmpty && groups.isEmpty) else { return [] }
             // Drop on the root tabs section or between rows.
@@ -975,7 +1057,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 return .move
             case .group(let targetGroupID):
                 // Reject the whole batch if any group payload would cycle.
-                if groups.contains(where: { !model.canNestGroup($0, into: targetGroupID) }) { return [] }
+                if !crossSpace, groups.contains(where: { !model.canNestGroup($0, into: targetGroupID) }) { return [] }
                 // Reject if any tab payload is already a descendant of target via
                 // a *different* group also in selection — but ancestor filter
                 // already pruned that case. So allow.
@@ -997,6 +1079,8 @@ struct SidebarOutlineView: NSViewRepresentable {
         private func acceptMultiDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
                                      payloads: [SidebarTabPayload],
                                      item: Any?, childIndex index: Int) -> Bool {
+            guard let sourceSpaceID = singleSourceSpaceID(for: payloads) else { return false }
+            let crossSpace = sourceSpaceID != model.activeSpaceID
             let items = orderedItems(payloads)
             guard !items.isEmpty else { return false }
             logDrop("acceptMulti items=\(items.count) target=\(describe(item as? SidebarOutlineNode)) index=\(index)")
@@ -1004,13 +1088,21 @@ struct SidebarOutlineView: NSViewRepresentable {
             if item == nil
                 || (item as? SidebarOutlineNode).map({ if case .section(.tabs) = $0.kind { return true } else { return false } }) == true {
                 let safeIndex: Int? = index >= 0 ? index : nil
-                model.moveItemsToRoot(items, at: safeIndex)
+                if crossSpace {
+                    model.moveItems(items, from: sourceSpaceID, toRootAt: safeIndex)
+                } else {
+                    model.moveItemsToRoot(items, at: safeIndex)
+                }
                 return true
             }
             guard let node = item as? SidebarOutlineNode else { return false }
             switch node.kind {
             case .group(let targetGroupID):
-                model.moveItems(items, toGroup: targetGroupID, at: index >= 0 ? index : nil)
+                if crossSpace {
+                    model.moveItems(items, from: sourceSpaceID, toGroup: targetGroupID, at: index >= 0 ? index : nil)
+                } else {
+                    model.moveItems(items, toGroup: targetGroupID, at: index >= 0 ? index : nil)
+                }
                 return true
             case .tab(let targetID):
                 // Pure-tab onto-tab forms a new group of [target, ...dragged].
@@ -1021,7 +1113,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                     if case .tab(let id) = item { return id }
                     return nil
                 }
-                guard tabIDs.count == items.count else { return false }
+                guard !crossSpace, tabIDs.count == items.count else { return false }
                 let combined = [targetID] + tabIDs.filter { $0 != targetID }
                 model.groupTabs(combined)
                 return true
@@ -1097,14 +1189,17 @@ struct SidebarOutlineView: NSViewRepresentable {
         }
 
         private func canDrop(_ payload: SidebarTabPayload, on node: SidebarOutlineNode) -> Bool {
+            let crossSpace = sourceSpaceID(for: payload) != model.activeSpaceID
             switch (payload, node.kind) {
-            case (.tab(let sourceID), .tab(let targetID)) where sourceID != targetID:
+            case (.tab(_, let sourceID), .tab(let targetID)) where !crossSpace && sourceID != targetID:
                 return true
             case (.tab, .group):
                 return true
-            case (.group(let sourceID), .group(let targetID)) where sourceID != targetID:
+            case (.group, .group) where crossSpace:
+                return true
+            case (.group(_, let sourceID), .group(let targetID)) where sourceID != targetID:
                 return model.canNestGroup(sourceID, into: targetID)
-            case (.group(let sourceID), .tab(let targetID)):
+            case (.group(_, let sourceID), .tab(let targetID)) where !crossSpace:
                 return !model.groupContainsTab(sourceID, targetID)
             default:
                 return false
@@ -1134,8 +1229,8 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         private func describe(_ payload: SidebarTabPayload) -> String {
             switch payload {
-            case .tab(let id): return "tab(\(id.uuidString.prefix(6)))"
-            case .group(let id): return "group(\(id.uuidString.prefix(6)))"
+            case .tab(_, let id): return "tab(\(id.uuidString.prefix(6)))"
+            case .group(_, let id): return "group(\(id.uuidString.prefix(6)))"
             case .type(let type): return "type(\(type.rawValue))"
             }
         }
@@ -1151,11 +1246,12 @@ struct SidebarOutlineView: NSViewRepresentable {
         }
 
         private func accept(_ payload: SidebarTabPayload, into node: SidebarOutlineNode?, childIndex: Int) -> Bool {
+            let sourceSpaceID = sourceSpaceID(for: payload)
             switch payload {
-            case .tab(let sourceID):
-                return acceptTab(sourceID, into: node, childIndex: childIndex)
-            case .group(let groupID):
-                return acceptGroup(groupID, into: node, childIndex: childIndex)
+            case .tab(_, let sourceID):
+                return acceptTab(sourceID, sourceSpaceID: sourceSpaceID, into: node, childIndex: childIndex)
+            case .group(_, let groupID):
+                return acceptGroup(groupID, sourceSpaceID: sourceSpaceID, into: node, childIndex: childIndex)
             case .type(let type):
                 return acceptType(type, into: node, childIndex: childIndex)
             }
@@ -1185,43 +1281,61 @@ struct SidebarOutlineView: NSViewRepresentable {
             return true
         }
 
-        private func acceptTab(_ sourceID: NavTab.ID, into node: SidebarOutlineNode?, childIndex: Int) -> Bool {
-            guard model.tabs.contains(where: { $0.id == sourceID }) else { return false }
+        private func acceptTab(_ sourceID: NavTab.ID, sourceSpaceID: WorkspaceSpace.ID?, into node: SidebarOutlineNode?, childIndex: Int) -> Bool {
+            let crossSpace = sourceSpaceID != model.activeSpaceID
+            if !crossSpace, !model.tabs.contains(where: { $0.id == sourceID }) { return false }
             guard let node else {
-                model.moveTabToRoot(sourceID, beforeTab: tabRootItem(at: childIndex)?.firstTabID)
+                if let sourceSpaceID, crossSpace {
+                    model.moveItems([.tab(sourceID)], from: sourceSpaceID, toRootAt: childIndex >= 0 ? childIndex : nil)
+                } else {
+                    model.moveTabToRoot(sourceID, beforeTab: tabRootItem(at: childIndex)?.firstTabID)
+                }
                 return true
             }
             switch node.kind {
             case .tab(let targetID):
-                guard sourceID != targetID else { return false }
+                guard !crossSpace, sourceID != targetID else { return false }
                 model.groupTab(sourceID, onto: targetID)
                 return true
             case .group(let groupID):
-                model.moveTab(sourceID, toGroup: groupID, at: childIndex >= 0 ? childIndex : nil)
+                if let sourceSpaceID, crossSpace {
+                    model.moveItems([.tab(sourceID)], from: sourceSpaceID, toGroup: groupID, at: childIndex >= 0 ? childIndex : nil)
+                } else {
+                    model.moveTab(sourceID, toGroup: groupID, at: childIndex >= 0 ? childIndex : nil)
+                }
                 return true
             case .section, .pane:
                 return false
             }
         }
 
-        private func acceptGroup(_ groupID: TabGroup.ID, into node: SidebarOutlineNode?, childIndex: Int) -> Bool {
-            guard model.tabGroups.contains(where: { $0.id == groupID }) else { return false }
+        private func acceptGroup(_ groupID: TabGroup.ID, sourceSpaceID: WorkspaceSpace.ID?, into node: SidebarOutlineNode?, childIndex: Int) -> Bool {
+            let crossSpace = sourceSpaceID != model.activeSpaceID
+            if !crossSpace, !model.tabGroups.contains(where: { $0.id == groupID }) { return false }
             guard let node else {
                 // Root-section drop between rows: place at root by index (never nest).
-                model.moveGroupToRoot(groupID, at: childIndex >= 0 ? childIndex : nil)
+                if let sourceSpaceID, crossSpace {
+                    model.moveItems([.group(groupID)], from: sourceSpaceID, toRootAt: childIndex >= 0 ? childIndex : nil)
+                } else {
+                    model.moveGroupToRoot(groupID, at: childIndex >= 0 ? childIndex : nil)
+                }
                 return true
             }
             switch node.kind {
             case .tab(let targetID):
-                guard !model.groupContainsTab(groupID, targetID) else { return false }
+                guard !crossSpace, !model.groupContainsTab(groupID, targetID) else { return false }
                 model.moveGroup(groupID, beforeTab: targetID)
                 return true
             case .group(let targetGroupID):
-                guard groupID != targetGroupID, model.canNestGroup(groupID, into: targetGroupID) else { return false }
-                if childIndex < 0 {
-                    model.moveGroup(groupID, intoGroup: targetGroupID)   // drop-on: nest at end
+                if let sourceSpaceID, crossSpace {
+                    model.moveItems([.group(groupID)], from: sourceSpaceID, toGroup: targetGroupID, at: childIndex >= 0 ? childIndex : nil)
                 } else {
-                    model.moveGroup(groupID, intoGroup: targetGroupID, at: childIndex)
+                    guard groupID != targetGroupID, model.canNestGroup(groupID, into: targetGroupID) else { return false }
+                    if childIndex < 0 {
+                        model.moveGroup(groupID, intoGroup: targetGroupID)   // drop-on: nest at end
+                    } else {
+                        model.moveGroup(groupID, intoGroup: targetGroupID, at: childIndex)
+                    }
                 }
                 return true
             case .section, .pane:
