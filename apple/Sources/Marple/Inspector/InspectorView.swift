@@ -62,6 +62,7 @@ private enum InspectorStyle {
     static let sectionSpacing: CGFloat = 22
     static let headerSpacing: CGFloat = 10
     static let fieldLabelWidth: CGFloat = 62
+    static let metadataChipMaxWidth: CGFloat = 160
     static let rowHeight: CGFloat = 26
     static let rowCorner: CGFloat = 7
     static let markerSize: CGFloat = 9
@@ -98,10 +99,10 @@ private struct FieldRow<Value: View>: View {
                 .fontWeight(.medium)
                 .foregroundStyle(InspectorStyle.rowLabelColor)
                 .frame(width: InspectorStyle.fieldLabelWidth, alignment: .leading)
-            Spacer(minLength: 0)
             value
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .frame(minHeight: InspectorStyle.rowHeight)
+        .frame(maxWidth: .infinity, minHeight: InspectorStyle.rowHeight)
     }
 }
 
@@ -353,6 +354,17 @@ private struct InspectorInfoRowsView: View {
                 ScalarRow(model: model, label: label, value: value) { await commit($0, action: action) }
             case .readOnlyScalar(let label, let value, let copyValue):
                 ReadOnlyScalarRow(label: label, value: value, copyValue: copyValue)
+            case .linkedScalar(let label, let value, let path, let copyValue):
+                MetadataChipsRow(
+                    label: label,
+                    values: [InspectorInfoChip(title: value, path: path, copyValue: copyValue)]
+                ) { path in
+                    Task { await model.open(path) }
+                }
+            case .chips(let label, let values):
+                MetadataChipsRow(label: label, values: values) { path in
+                    Task { await model.open(path) }
+                }
             case .identifier(let label, let displayValue, let fullValue):
                 ReadOnlyScalarRow(label: label, value: displayValue, copyValue: fullValue)
             }
@@ -417,7 +429,7 @@ private struct ScalarRow: View {
             if editing {
                 TextField(label, text: $draft)
                     .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 170, alignment: .trailing)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .onSubmit { Task { await commit(draft); editing = false } }
             } else {
                 Button {
@@ -457,16 +469,125 @@ private struct ReadOnlyScalarRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 170, alignment: .trailing)
+                .frame(maxWidth: .infinity, alignment: .trailing)
                 .help(copyValue ?? value)
                 .contextMenu {
-                    Button("复制") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(copyValue ?? value, forType: .string)
-                    }
+                    Button("复制") { copy(copyValue ?? value) }
                 }
         }
     }
+}
+
+private struct MetadataChipsRow: View {
+    let label: String
+    let values: [InspectorInfoChip]
+    let onTap: (String) -> Void
+
+    var body: some View {
+        FieldRow(label) {
+            TrailingFlowLayout(spacing: Space.s2, lineSpacing: Space.s2) {
+                ForEach(Array(values.enumerated()), id: \.offset) { _, value in
+                    MetadataChip(value: value) { path in onTap(path) }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+}
+
+private struct TrailingFlowLayout: Layout {
+    var spacing: CGFloat = Space.s2
+    var lineSpacing: CGFloat = Space.s2
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        let rows = computeRows(maxWidth: maxWidth, subviews: subviews)
+        let height = rows.reduce(CGFloat.zero) { $0 + $1.height }
+            + CGFloat(max(0, rows.count - 1)) * lineSpacing
+        let width = rows.map(\.width).max() ?? 0
+        return CGSize(width: maxWidth.isFinite ? maxWidth : width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = computeRows(maxWidth: bounds.width, subviews: subviews)
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.maxX - row.width
+            for item in row.items {
+                subviews[item.index].place(
+                    at: CGPoint(x: x, y: y),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(width: item.width, height: item.height)
+                )
+                x += item.width + spacing
+            }
+            y += row.height + lineSpacing
+        }
+    }
+
+    private struct Item { var index: Int; var width: CGFloat; var height: CGFloat }
+    private struct Row { var items: [Item] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func computeRows(maxWidth: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var current = Row()
+        for index in subviews.indices {
+            let remaining = maxWidth.isFinite ? maxWidth : InspectorStyle.metadataChipMaxWidth
+            let proposedWidth = min(remaining, InspectorStyle.metadataChipMaxWidth)
+            let size = subviews[index].sizeThatFits(ProposedViewSize(width: proposedWidth, height: nil))
+            let item = Item(index: index, width: min(size.width, proposedWidth), height: size.height)
+            let projected = current.items.isEmpty ? item.width : current.width + spacing + item.width
+            if !current.items.isEmpty, projected > maxWidth {
+                rows.append(current)
+                current = Row(items: [item], width: item.width, height: item.height)
+            } else {
+                current.width = current.items.isEmpty ? item.width : current.width + spacing + item.width
+                current.items.append(item)
+                current.height = max(current.height, item.height)
+            }
+        }
+        if !current.items.isEmpty { rows.append(current) }
+        return rows
+    }
+}
+
+private struct MetadataChip: View {
+    let value: InspectorInfoChip
+    let onTap: (String) -> Void
+
+    var body: some View {
+        Group {
+            if let path = value.path {
+                Button { onTap(path) } label: { chipText }
+                    .buttonStyle(.plain)
+            } else {
+                chipText
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(.quaternary, in: Capsule())
+        .help(value.copyValue ?? value.title)
+        .contextMenu {
+            if let path = value.path {
+                Button("跳转到 \(value.title)") { onTap(path) }
+            }
+            Button("复制") { copy(value.copyValue ?? value.title) }
+        }
+    }
+
+    private var chipText: some View {
+        Text(value.title)
+            .font(.system(size: 11.5, weight: .medium))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private func copy(_ value: String) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(value, forType: .string)
 }
 
 private struct AuthorRow: View {
@@ -614,10 +735,7 @@ private struct AuthorChip: View {
             }
             Button("编辑此作者名…") { onEdit() }
             Button("从此条目移除", role: .destructive) { onRemove() }
-            Button("复制") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(name, forType: .string)
-            }
+            Button("复制") { copy(name) }
             Divider()
             Button("编辑全部作者…") { onEditAll() }
         }

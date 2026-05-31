@@ -76,48 +76,61 @@ public struct Relations: Equatable, Sendable {
 
 private func byRatingDesc(_ a: Entry, _ b: Entry) -> Bool { a.ratingScore > b.ratingScore }
 
+private func relationPanelType(_ entry: Entry) -> EntryType? {
+    switch entry.type {
+    case .paper, .book: return entry.type
+    default: return nil
+    }
+}
+
 /// Compute knowledge relations for `entry`. Ports the PropertyPanel backlinks memo.
 public func relations(for entry: Entry, in entries: [Entry],
                       authorIndex: [String: [Entry]],
                       annotationIndex: [String: [Entry]],
                       topicMembership: TopicMembership = TopicMembership()) -> Relations {
     var out = Relations()
+    let liveAuthorIndex = authorIndex.isEmpty ? buildAuthorIndex(entries) : authorIndex
     let anchor = annotationAnchor(for: entry, in: entries)
     out.annotations = (annotationIndex[anchor.path] ?? []).sorted(by: byRatingDesc)
 
     if entry.type == .topic, let slug = topicSlug(entry.path) {
         out.topicMembers = (topicMembership.membersBySlug[slug] ?? [])
-            .filter { $0.path != entry.path }
+            .filter { $0.path != entry.path && relationPanelType($0) != nil }
             .sorted(by: byRatingDesc)
     }
 
     if entry.type == .author {
         let key = (entry.title ?? "").lowercased().trimmingCharacters(in: .whitespaces)
-        out.works = key.isEmpty ? [] : (authorIndex[key] ?? [])
+        out.works = key.isEmpty ? [] : (liveAuthorIndex[key] ?? [])
             .filter { $0.path != entry.path }
             .sorted(by: byRatingDesc)
     }
 
-    if entry.type == .paper || entry.type == .book {
+    let relationEntry = entry.type == .chapter ? bookContext(for: entry, in: entries)?.overview : entry
+    if let relationEntry, relationEntry.type == .paper || relationEntry.type == .book {
         var siblings: [Entry] = []
         var seen = Set<String>()
-        for name in entry.author {
+        for name in relationEntry.author {
             let key = name.lowercased()
             if out.authorProfile == nil {
                 out.authorProfile = entries.first {
                     $0.type == .author && ($0.title ?? "").lowercased() == key
                 }
             }
-            for w in authorIndex[key] ?? [] where w.path != entry.path && !seen.contains(w.path) {
+            for w in liveAuthorIndex[key] ?? []
+                where w.path != relationEntry.path
+                    && w.path != entry.path
+                    && relationPanelType(w) != nil
+                    && !seen.contains(w.path) {
                 seen.insert(w.path); siblings.append(w)
             }
         }
         out.siblings = siblings.sorted(by: byRatingDesc)
 
-        let own = Set(entry.themes)
+        let own = Set(relationEntry.themes)
         if own.count >= 2 {
             var scored: [(n: Int, entry: Entry)] = []
-            for e in entries where e.path != entry.path && e.type == entry.type {
+            for e in entries where e.path != relationEntry.path && e.path != entry.path && e.type == relationEntry.type {
                 let n = e.themes.filter { own.contains($0) }.count
                 if n >= 2 { scored.append((n, e)) }
             }
