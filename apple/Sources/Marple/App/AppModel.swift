@@ -15,6 +15,13 @@ final class AppModel {
     /// `.quasi/schema.json` conformance snapshot. Empty in stub-backed tests.
     let workspaceRoot: String
 
+    /// The vault indexer, injected at boot. Lets the CLI surface self-heal the
+    /// FSEvents watcher race: when an agent writes a vault file and immediately
+    /// calls `open`/`read`/`search`, the 0.4s-debounced watcher hasn't reconciled
+    /// yet, so the just-written file is absent from `entries`/the index. The CLI
+    /// handlers trigger a synchronous reconcile through this. nil in stub tests.
+    var cliIndexer: VaultIndexer?
+
     /// The vault's self-describing schema snapshot, reloaded on every index load.
     /// nil when the vault has no `.quasi/schema.json` (or it's stale/unreadable) —
     /// in which case the conformance feature stays dark. See [[SchemaSnapshot]].

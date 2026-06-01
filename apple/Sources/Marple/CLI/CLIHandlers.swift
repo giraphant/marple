@@ -39,7 +39,8 @@ enum CLIHandlers {
         guard let path = req.path else {
             return .failure(code: CLIErrorCode.badRequest, message: "missing path")
         }
-        guard let entry = model.cliEntry(path: path) else {
+        guard await model.cliEnsureIndexed(path: path),
+              let entry = model.cliEntry(path: path) else {
             return .failure(code: CLIErrorCode.notFound, message: "not found: \(path)")
         }
         let (fm, body) = try await model.cliReadEntry(path: path)
