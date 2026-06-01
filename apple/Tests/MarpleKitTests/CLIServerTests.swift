@@ -72,6 +72,45 @@ import Darwin
         #expect(model.openPath == first.path)
     }
 
+    /// Regression: an agent writes a vault file and immediately `open`s it,
+    /// before the 0.4s-debounced FSEvents watcher has reconciled. The CLI must
+    /// self-heal via a synchronous reconcile instead of returning
+    /// "entry not in index". A path with no file on disk still returns notFound.
+    @MainActor
+    @Test func openSelfHealsFileWrittenAfterLastIndexLoad() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cli-selfheal-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("vault/papers"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let index = IndexDatabase(indexDBPath: root.appendingPathComponent(".marple/index.sqlite").path)
+        let client = LocalVaultClient(workspaceRoot: root.path, index: index)
+        let indexer = VaultIndexer(workspaceRoot: root.path)
+        let model = AppModel(client: client, workspaceRoot: root.path)
+        model.cliIndexer = indexer
+
+        // Index the empty vault — no target file exists yet.
+        _ = try indexer.reconcile()
+        await model.loadIndex()
+        #expect(model.cliEntry(path: "vault/papers/new.md") == nil)
+
+        // Agent writes the file directly; the watcher has NOT fired.
+        try "---\ntype: paper\ntitle: New\n---\n\nbody".write(
+            to: root.appendingPathComponent("vault/papers/new.md"), atomically: true, encoding: .utf8)
+
+        let response = await CLIHandlers.handle(
+            CLIRequest(method: "open", path: "vault/papers/new.md"), model: model, indexer: indexer)
+        #expect(response.ok)
+        #expect(model.openPath == "vault/papers/new.md")
+
+        // A path with no file on disk stays notFound (genuine miss, not the race).
+        let missing = await CLIHandlers.handle(
+            CLIRequest(method: "open", path: "vault/papers/ghost.md"), model: model, indexer: indexer)
+        #expect(missing.ok == false)
+        #expect(missing.error?.code == CLIErrorCode.notFound)
+    }
+
     @MainActor
     @Test func retiredCliMethodsAreRejected() async {
         let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))

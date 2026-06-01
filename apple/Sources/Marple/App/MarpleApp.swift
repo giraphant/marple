@@ -48,6 +48,7 @@ final class AppState: ObservableObject {
                          semantic: semantic, isFirstRun: !canSkip,
                          workspaceRoot: paths.workspaceRoot)
         self.model = m
+        m.cliIndexer = indexer
         self.booting = false
 
         // Wire the FSEvents watcher and CLI server up front — they're safe to
