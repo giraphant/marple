@@ -81,11 +81,23 @@ private enum SidebarTabPayload {
     case tab(spaceID: WorkspaceSpace.ID?, id: NavTab.ID)
     case group(spaceID: WorkspaceSpace.ID?, id: TabGroup.ID)
     case type(EntryType)
+    /// A browse card dragged from the grid — "open this entry path as a tab".
+    /// Lets a card drop flow through the exact same tab-drop machinery (insertion
+    /// indicators, tab-on-tab grouping, Space dots) as a real tab. QUA-114.
+    case entry(path: String)
 
     var sourceSpaceID: WorkspaceSpace.ID? {
         switch self {
         case .tab(let spaceID, _), .group(let spaceID, _): return spaceID
-        case .type: return nil
+        case .type, .entry: return nil
+        }
+    }
+
+    /// Whether dropping this onto a tab should form a group (tab-on-tab gesture).
+    var coercesOntoTab: Bool {
+        switch self {
+        case .tab, .entry: return true
+        case .group, .type: return false
         }
     }
 
@@ -112,6 +124,9 @@ private enum SidebarTabPayload {
             }
         case "type":
             self = .type(EntryType(rawValue: parts[1]))
+        case "entry":
+            // Path may itself contain ":" — rejoin everything after the prefix.
+            self = .entry(path: parts[1...].joined(separator: ":"))
         default:
             return nil
         }
@@ -310,6 +325,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             case .tab(_, let id): return findTabNode(id, in: nodes)
             case .group(_, let id): return findGroupNode(id, in: nodes)
             case .type(let type): return findPaneNode(.type(type), in: nodes)
+            case .entry: return nil   // not an existing node
             }
         }
 
@@ -954,7 +970,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 // Coerce to drop-on only for tab payloads (the tab-on-tab grouping
                 // gesture). Group payloads keep AppKit's between proposal so an edge
                 // drop reorders beside the tab instead of grouping onto it.
-                if case .tab = payload, index != NSOutlineViewDropOnItemIndex {
+                if payload.coercesOntoTab, index != NSOutlineViewDropOnItemIndex {
                     outlineView.setDropItem(node, dropChildIndex: NSOutlineViewDropOnItemIndex)
                 }
                 return .move
@@ -1020,7 +1036,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 switch p {
                 case .tab(_, let id): rawTabs.append(id)
                 case .group(_, let id): rawGroups.append(id)
-                case .type: break   // pane reorder doesn't participate in batch DnD
+                case .type, .entry: break   // not part of batch tab/group DnD
                 }
             }
             return model.payloadAncestorFilter(tabIDs: rawTabs, groupIDs: rawGroups)
@@ -1038,7 +1054,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 switch payload {
                 case .tab(_, let id): return allowedTabs.contains(id) ? .tab(id) : nil
                 case .group(_, let id): return allowedGroups.contains(id) ? .group(id) : nil
-                case .type: return nil
+                case .type, .entry: return nil
                 }
             }
         }
@@ -1232,6 +1248,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             case .tab(_, let id): return "tab(\(id.uuidString.prefix(6)))"
             case .group(_, let id): return "group(\(id.uuidString.prefix(6)))"
             case .type(let type): return "type(\(type.rawValue))"
+            case .entry(let path): return "entry(\((path as NSString).lastPathComponent))"
             }
         }
 
@@ -1254,7 +1271,29 @@ struct SidebarOutlineView: NSViewRepresentable {
                 return acceptGroup(groupID, sourceSpaceID: sourceSpaceID, into: node, childIndex: childIndex)
             case .type(let type):
                 return acceptType(type, into: node, childIndex: childIndex)
+            case .entry(let path):
+                return acceptEntry(path, into: node, childIndex: childIndex)
             }
+        }
+
+        /// Open a browse-card entry as a tab in the active space, then position the
+        /// new tab exactly like a dropped tab would land (root index / into a group /
+        /// grouped onto a tab). Mirrors `acceptTab`.
+        private func acceptEntry(_ path: String, into node: SidebarOutlineNode?, childIndex: Int) -> Bool {
+            let beforeTabID = node == nil ? tabRootItem(at: childIndex)?.firstTabID : nil
+            let kind = node?.kind
+            Task { @MainActor in
+                guard let newID = await model.openEntryTab(path) else { return }
+                switch kind {
+                case .tab(let targetID)?:
+                    model.groupTab(newID, onto: targetID)
+                case .group(let groupID)?:
+                    model.moveTab(newID, toGroup: groupID, at: childIndex >= 0 ? childIndex : nil)
+                default:
+                    model.moveTabToRoot(newID, beforeTab: beforeTabID)
+                }
+            }
+            return true
         }
 
         private func acceptType(_ type: EntryType, into node: SidebarOutlineNode?, childIndex: Int,
