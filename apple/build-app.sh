@@ -144,6 +144,13 @@ if [ "${SIGN:-}" = "1" ]; then
     echo "Signing with: $CODESIGN_IDENTITY"
     codesign --force --options runtime --timestamp \
         --sign "$CODESIGN_IDENTITY" "$APP/MacOS/marple-cli"
+    # mlx.metallib lives in MacOS/ (colocated lookup), so codesign treats it as
+    # nested code that must be signed before the wrapper — it's data, not an
+    # executable, so no hardened-runtime option, just a timestamped signature.
+    if [ -f "$APP/MacOS/mlx.metallib" ]; then
+        codesign --force --timestamp \
+            --sign "$CODESIGN_IDENTITY" "$APP/MacOS/mlx.metallib"
+    fi
     codesign --force --options runtime --timestamp \
         --sign "$CODESIGN_IDENTITY" "$APP/MacOS/Marple"
     codesign --force --options runtime --timestamp \
