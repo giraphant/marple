@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- MLX compiles/loads Metal kernels at runtime. Under hardened runtime (required
+       for notarization) these are rejected without relaxing JIT + library validation.
+       Start here; narrow if a notarized build launches and 深度 search runs fine. -->
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict>
+</plist>

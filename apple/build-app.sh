@@ -3,14 +3,26 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PKG_ROOT=.build/arm64-apple-macosx/debug
+# CONFIG=debug (default, dev) or release. Selects the swift build flag and the
+# matching .build output dir. SIGN=1 enables Developer ID + hardened-runtime
+# codesigning (release/dist); unset keeps the old unsigned dev bundle.
+CONFIG="${CONFIG:-debug}"
+PKG_ROOT=".build/arm64-apple-macosx/$CONFIG"
 APP="Marple.app/Contents"
 APPICONSET="Sources/Marple/Resources/Assets.xcassets/AppIcon.appiconset"
 BUNDLE_ID="com.marple.app"
-VERSION="1.0"
+ENTITLEMENTS="Resources/Marple.entitlements"
+# Marketing version from the VERSION file (source of truth); build number is the
+# monotonic commit count so notarytool accepts repeat submissions of one version.
+VERSION="${VERSION:-$(cat VERSION)}"
+BUILD="${BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 
-echo "Building..."
-swift build
+echo "Building ($CONFIG)..."
+if [ "$CONFIG" = "release" ]; then
+    swift build -c release
+else
+    swift build
+fi
 
 # MLX looks for `default.metallib` at the package root so 深度 (semantic) mode
 # can load its Metal kernels. The file is gitignored (~3 MB binary blob), so a
@@ -102,7 +114,7 @@ cat > "$APP/Info.plist" <<PLIST
   <key>CFBundleName</key><string>Marple</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleVersion</key><string>${BUILD}</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>NSHighResolutionCapable</key><true/>
@@ -122,8 +134,32 @@ cat > "$APP/Info.plist" <<PLIST
 </plist>
 PLIST
 
-echo "Done: Marple.app"
+# Codesign for release/dist. Sign inner-out (nested marple-cli first, then the
+# main executable, then the .app wrapper) with hardened runtime — `--deep` is
+# deprecated and unreliable for notarization. CODESIGN_IDENTITY is the Developer
+# ID, passed in by the Makefile from Makefile.local. Resources (mlx.metallib,
+# .icns) are data, not code, so they need no separate signing.
+if [ "${SIGN:-}" = "1" ]; then
+    : "${CODESIGN_IDENTITY:?SIGN=1 requires CODESIGN_IDENTITY (set DEVELOPER_ID_IDENTITY in Makefile.local)}"
+    echo "Signing with: $CODESIGN_IDENTITY"
+    codesign --force --options runtime --timestamp \
+        --sign "$CODESIGN_IDENTITY" "$APP/MacOS/marple-cli"
+    codesign --force --options runtime --timestamp \
+        --sign "$CODESIGN_IDENTITY" "$APP/MacOS/Marple"
+    codesign --force --options runtime --timestamp \
+        --entitlements "$ENTITLEMENTS" \
+        --sign "$CODESIGN_IDENTITY" Marple.app
+    codesign --verify --strict --verbose=2 Marple.app
+fi
+
+echo "Done: Marple.app (v$VERSION build $BUILD)"
 echo "Run with:  open Marple.app"
+
+# Release builds are distributed via the DMG / Homebrew cask, which puts
+# marple-cli on PATH — so only the dev (debug) flow self-symlinks here.
+if [ "$CONFIG" = "release" ]; then
+    exit 0
+fi
 
 # QUA-107: install / refresh the marple-cli symlink so AI agents can call it
 # by bare name. We symlink into the bundle so every rebuild stays current.
