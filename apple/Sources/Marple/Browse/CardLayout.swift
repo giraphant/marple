@@ -48,15 +48,28 @@ enum CardLayout {
         ceil(font.ascender - font.descender + font.leading)
     }
 
-    /// Rendered height of `text` wrapped to `width`, capped at `maxLines`.
+    /// Estimated rendered height of `text` wrapped to `width`, capped at `maxLines`.
+    ///
+    /// A fast ANALYTICAL wrap estimate — not `boundingRect`. `boundingRect` lays
+    /// the text out and, on a 12k-item pane, froze the main thread ~10s (≈0.8ms ×
+    /// 12k), and re-ran in full whenever the column width changed (opening the
+    /// reader narrows the grid). Here we just sum approximate glyph advances
+    /// (CJK/full-width ≈ 1 em, others ≈ 0.5 em) over a capped prefix → O(1)-ish,
+    /// ~tens of ms for 12k. The masonry tolerates the small slack, and the cell
+    /// uses this same estimate so reserved == laid-out.
     static func textHeight(_ text: String, font: NSFont, width: CGFloat, maxLines: Int) -> CGFloat {
         guard !text.isEmpty, width > 0 else { return 0 }
         let lh = lineHeight(font)
-        let bounds = (text as NSString).boundingRect(
-            with: NSSize(width: width, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font])
-        let lines = max(1, Int(ceil(bounds.height / lh)))
+        let em = font.pointSize
+        let cap = max(1, maxLines) * 80
+        var advance: CGFloat = 0
+        var n = 0
+        for scalar in text.unicodeScalars {
+            advance += scalar.value >= 0x1100 ? em : em * 0.5   // rough full-width cutoff
+            n += 1
+            if n >= cap { break }
+        }
+        let lines = max(1, Int(ceil(advance / width)))
         return CGFloat(min(lines, maxLines)) * lh
     }
 

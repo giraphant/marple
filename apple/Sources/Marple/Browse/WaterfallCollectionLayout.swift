@@ -14,6 +14,11 @@ final class WaterfallCollectionLayout: NSCollectionViewLayout {
     var heightForItem: ((Int, CGFloat) -> CGFloat)?
 
     private var cache: [NSCollectionViewLayoutAttributes] = []
+    /// `cache` sorted by frame.minY, for a binary-searched visible window so
+    /// `layoutAttributesForElements(in:)` isn't an O(n) scan of every item on
+    /// every scroll/redraw (that was the large-list stutter).
+    private var sortedByMinY: [NSCollectionViewLayoutAttributes] = []
+    private var maxItemHeight: CGFloat = 0
     private var contentHeight: CGFloat = 0
     private var contentWidth: CGFloat = 0
 
@@ -21,6 +26,8 @@ final class WaterfallCollectionLayout: NSCollectionViewLayout {
         super.prepare()
         guard let collectionView else { return }
         cache.removeAll(keepingCapacity: true)
+        sortedByMinY.removeAll(keepingCapacity: true)
+        maxItemHeight = 0
         contentHeight = 0
 
         contentWidth = collectionView.bounds.width
@@ -42,9 +49,11 @@ final class WaterfallCollectionLayout: NSCollectionViewLayout {
             let attr = NSCollectionViewLayoutAttributes(forItemWith: IndexPath(item: item, section: 0))
             attr.frame = NSRect(x: x, y: y, width: colW, height: height)
             cache.append(attr)
+            maxItemHeight = max(maxItemHeight, height)
             columnHeights[col] = y + height + interItemSpacing
         }
         contentHeight = (columnHeights.max() ?? sectionInset.top) + sectionInset.bottom
+        sortedByMinY = cache.sorted { $0.frame.minY < $1.frame.minY }
     }
 
     override var collectionViewContentSize: NSSize {
@@ -52,7 +61,22 @@ final class WaterfallCollectionLayout: NSCollectionViewLayout {
     }
 
     override func layoutAttributesForElements(in rect: NSRect) -> [NSCollectionViewLayoutAttributes] {
-        cache.filter { $0.frame.intersects(rect) }
+        guard !sortedByMinY.isEmpty else { return [] }
+        // Any item that intersects `rect` has minY in [rect.minY - maxItemHeight, rect.maxY].
+        // Binary-search that band and scan only it, instead of all N items.
+        let lowerY = rect.minY - maxItemHeight
+        var lo = 0, hi = sortedByMinY.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if sortedByMinY[mid].frame.minY < lowerY { lo = mid + 1 } else { hi = mid }
+        }
+        var result: [NSCollectionViewLayoutAttributes] = []
+        var i = lo
+        while i < sortedByMinY.count, sortedByMinY[i].frame.minY <= rect.maxY {
+            if sortedByMinY[i].frame.intersects(rect) { result.append(sortedByMinY[i]) }
+            i += 1
+        }
+        return result
     }
 
     override func layoutAttributesForItem(at indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {

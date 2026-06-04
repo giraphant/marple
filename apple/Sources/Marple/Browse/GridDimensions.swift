@@ -70,10 +70,6 @@ final class GridDimensions {
         return h
     }
 
-    /// Drop memoised heights — call when the entry set changes (pane switch /
-    /// filter / edit), since a path's content may differ.
-    func invalidateHeights() { heightCache.removeAll(keepingCapacity: true) }
-
     nonisolated private static func pixelAspect(of url: URL) -> CGFloat? {
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],

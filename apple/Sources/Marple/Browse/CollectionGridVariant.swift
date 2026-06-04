@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Quartz
 import MarpleKit
 
 /// Variant ② — native `NSCollectionView` with a custom waterfall layout and a
@@ -34,6 +35,13 @@ struct CollectionGridVariant: NSViewRepresentable {
         }
         collectionView.menuForItem = { [weak coordinator] item in
             coordinator?.contextMenu(forItem: item)
+        }
+        collectionView.previewURL = { [weak coordinator] item in
+            guard let coordinator, let entry = coordinator.entries[safe: item] else { return nil }
+            if entry.type == .image {
+                return try? await coordinator.model.client.imageOriginalURL(forImageEntryPath: entry.path)
+            }
+            return coordinator.model.client.fileURL(for: entry.path)
         }
 
         let layout = WaterfallCollectionLayout()
@@ -70,7 +78,9 @@ struct CollectionGridVariant: NSViewRepresentable {
         let newEntries = model.visibleEntries
         if newEntries.map(\.path) != coordinator.entries.map(\.path) {
             coordinator.entries = newEntries
-            dims.invalidateHeights()
+            // Do NOT clear the height cache here: it's keyed by path+width, so
+            // switching between panes reuses each entry's already-measured height
+            // (the boundingRect re-measure of a whole pane was the switch hitch).
             collectionView.reloadData()
             coordinator.trackDims()
         }
@@ -169,11 +179,18 @@ private final class ClosureMenuItem: NSMenuItem {
 /// ourselves via `beginDraggingSession` (the same mechanism the sidebar Space
 /// reorder uses, which does deliver), suppressing the built-in one by not
 /// forwarding `mouseDragged` to super. QUA-114.
-private final class ClickableCollectionView: NSCollectionView {
+private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
     var onOpen: ((Int) -> Void)?
     var onDragPath: ((Int) -> String?)?
     var menuForItem: ((Int) -> NSMenu?)?
+    /// Resolve the file URL to Quick Look for an item (image original / vault .md).
+    var previewURL: ((Int) async -> URL?)?
     private var selectionAnchor: Int?
+    private var quickLookURLs: [URL] = []
+
+    override var acceptsFirstResponder: Bool { true }
+
+    private var focusedIndex: Int? { selectionAnchor ?? selectionIndexPaths.map(\.item).min() }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
@@ -202,6 +219,7 @@ private final class ClickableCollectionView: NSCollectionView {
             super.mouseDown(with: event)   // empty area: marquee / deselect
             return
         }
+        window?.makeFirstResponder(self)   // so arrow keys / space act on the grid
         if event.clickCount == 2 { onOpen?(index); return }
 
         let ip = IndexPath(item: index, section: 0)
@@ -273,6 +291,96 @@ private final class ClickableCollectionView: NSCollectionView {
         let image = NSImage(size: view.bounds.size)
         image.addRepresentation(rep)
         return image
+    }
+
+    // MARK: Keyboard
+
+    private enum NavDir { case left, right, up, down }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 123: moveSelection(.left)
+        case 124: moveSelection(.right)
+        case 125: moveSelection(.down)
+        case 126: moveSelection(.up)
+        case 36, 76:   // return / enter → open
+            if let i = focusedIndex { onOpen?(i) }
+        case 49:       // space → Quick Look
+            showQuickLook()
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    private func moveSelection(_ dir: NavDir) {
+        guard numberOfItems(inSection: 0) > 0 else { return }
+        let target = focusedIndex.flatMap { neighbor(of: $0, direction: dir) } ?? 0
+        let ip = IndexPath(item: target, section: 0)
+        deselectItems(at: selectionIndexPaths)
+        selectItems(at: [ip], scrollPosition: [])
+        selectionAnchor = target
+        if let frame = layoutAttributesForItem(at: ip)?.frame {
+            scrollToVisible(frame.insetBy(dx: 0, dy: -16))
+        }
+        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible {
+            showQuickLook()   // keep the open preview in sync with arrow nav
+        }
+    }
+
+    /// Nearest item in a direction by frame center — favours staying aligned on
+    /// the cross axis, so up/down step a visual row in the waterfall.
+    private func neighbor(of index: Int, direction: NavDir) -> Int? {
+        guard let cur = layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { return nil }
+        let c = CGPoint(x: cur.midX, y: cur.midY)
+        var best: (idx: Int, score: CGFloat)?
+        for i in 0..<numberOfItems(inSection: 0) where i != index {
+            guard let f = layoutAttributesForItem(at: IndexPath(item: i, section: 0))?.frame else { continue }
+            let dx = f.midX - c.x, dy = f.midY - c.y
+            let inDir: Bool, primary: CGFloat, secondary: CGFloat
+            switch direction {
+            case .right: inDir = dx > 1;  primary = dx;  secondary = abs(dy)
+            case .left:  inDir = dx < -1; primary = -dx; secondary = abs(dy)
+            case .down:  inDir = dy > 1;  primary = dy;  secondary = abs(dx)
+            case .up:    inDir = dy < -1; primary = -dy; secondary = abs(dx)
+            }
+            guard inDir else { continue }
+            let score = primary + secondary * 2
+            if best == nil || score < best!.score { best = (i, score) }
+        }
+        return best?.idx
+    }
+
+    // MARK: Quick Look (space)
+
+    private func showQuickLook() {
+        let selected = selectionIndexPaths.map(\.item).sorted()
+        let ordered = focusedIndex.map { f in [f] + selected.filter { $0 != f } } ?? selected
+        guard !ordered.isEmpty else { return }
+        Task { @MainActor in
+            var urls: [URL] = []
+            for i in ordered { if let u = await previewURL?(i) { urls.append(u) } }
+            guard !urls.isEmpty else { return }
+            quickLookURLs = urls
+            guard let panel = QLPreviewPanel.shared() else { return }
+            if panel.isVisible { panel.reloadData() } else { panel.makeKeyAndOrderFront(nil) }
+        }
+    }
+
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { true }
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        panel.dataSource = self
+        panel.delegate = self
+    }
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {}
+
+    nonisolated func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        MainActor.assumeIsolated { quickLookURLs.count }
+    }
+    nonisolated func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
+        let url: URL? = MainActor.assumeIsolated {
+            quickLookURLs.indices.contains(index) ? quickLookURLs[index] : nil
+        }
+        return url as NSURL?
     }
 
     /// During live resize the layout repacks with stale (cached) heights for
