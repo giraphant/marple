@@ -1059,9 +1059,68 @@ struct SidebarOutlineView: NSViewRepresentable {
             }
         }
 
+        /// Paths if every payload is a browse-card entry (a multi-card drag), else nil.
+        private func allEntryPaths(_ payloads: [SidebarTabPayload]) -> [String]? {
+            var paths: [String] = []
+            for p in payloads {
+                guard case .entry(let path) = p else { return nil }
+                paths.append(path)
+            }
+            return paths.isEmpty ? nil : paths
+        }
+
+        /// Open a batch of dragged cards as tabs, preserving selection order, then
+        /// position them like a multi-tab drop (root index / into group / grouped
+        /// onto a tab). Mirrors `acceptMultiDrop`'s tab handling. QUA-114.
+        private func acceptEntryBatch(_ paths: [String], into node: SidebarOutlineNode?, childIndex: Int) -> Bool {
+            let rootDrop: Bool = {
+                guard let node else { return true }
+                if case .section(.tabs) = node.kind { return true }
+                return false
+            }()
+            let beforeTabID = rootDrop ? tabRootItem(at: childIndex)?.firstTabID : nil
+            let kind = node?.kind
+            Task { @MainActor in
+                var newIDs: [NavTab.ID] = []
+                for path in paths {
+                    if let id = await model.openEntryTab(path) { newIDs.append(id) }
+                }
+                guard !newIDs.isEmpty else { return }
+                if rootDrop {
+                    for id in newIDs { model.moveTabToRoot(id, beforeTab: beforeTabID) }
+                    return
+                }
+                switch kind {
+                case .tab(let targetID)?:
+                    model.groupTabs([targetID] + newIDs)
+                case .group(let groupID)?:
+                    var at = childIndex >= 0 ? childIndex : nil
+                    for id in newIDs {
+                        model.moveTab(id, toGroup: groupID, at: at)
+                        if at != nil { at! += 1 }
+                    }
+                default:
+                    for id in newIDs { model.moveTabToRoot(id, beforeTab: nil) }
+                }
+            }
+            return true
+        }
+
         private func validateMultiDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
                                        payloads: [SidebarTabPayload],
                                        item: Any?, childIndex index: Int) -> NSDragOperation {
+            if allEntryPaths(payloads) != nil {
+                guard let node = item as? SidebarOutlineNode else { return .move }
+                switch node.kind {
+                case .section(.tabs), .group: return .move
+                case .tab:
+                    if index != NSOutlineViewDropOnItemIndex {
+                        outlineView.setDropItem(node, dropChildIndex: NSOutlineViewDropOnItemIndex)
+                    }
+                    return .move
+                case .section, .pane: return []
+                }
+            }
             guard let sourceSpaceID = singleSourceSpaceID(for: payloads) else { return [] }
             let crossSpace = sourceSpaceID != model.activeSpaceID
             let (tabs, groups) = classifyAndFilter(payloads)
@@ -1095,6 +1154,11 @@ struct SidebarOutlineView: NSViewRepresentable {
         private func acceptMultiDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
                                      payloads: [SidebarTabPayload],
                                      item: Any?, childIndex index: Int) -> Bool {
+            if let paths = allEntryPaths(payloads) {
+                let accepted = acceptEntryBatch(paths, into: item as? SidebarOutlineNode, childIndex: index)
+                stickyRowDropTarget = nil
+                return accepted
+            }
             guard let sourceSpaceID = singleSourceSpaceID(for: payloads) else { return false }
             let crossSpace = sourceSpaceID != model.activeSpaceID
             let items = orderedItems(payloads)

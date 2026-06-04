@@ -173,6 +173,7 @@ private final class ClickableCollectionView: NSCollectionView {
     var onOpen: ((Int) -> Void)?
     var onDragPath: ((Int) -> String?)?
     var menuForItem: ((Int) -> NSMenu?)?
+    private var selectionAnchor: Int?
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
@@ -196,51 +197,73 @@ private final class ClickableCollectionView: NSCollectionView {
     /// sidebar Space drop targets, while still handling click-select + double-click.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        let index = indexPathForItem(at: point)?.item
-        guard let index else {
+        guard let index = indexPathForItem(at: point)?.item else {
+            selectionAnchor = nil
             super.mouseDown(with: event)   // empty area: marquee / deselect
             return
         }
         if event.clickCount == 2 { onOpen?(index); return }
 
+        let ip = IndexPath(item: index, section: 0)
         let start = event.locationInWindow
-        let path = onDragPath?(index)
         while let next = window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
             if next.type == .leftMouseUp {
-                selectSingle(index, modifiers: event.modifierFlags)
+                selectClick(index, modifiers: event.modifierFlags)
                 return
             }
             let p = next.locationInWindow
-            if let path, hypot(p.x - start.x, p.y - start.y) > 4 {
-                startManualDrag(index: index, path: path, event: next)
-                return
+            guard hypot(p.x - start.x, p.y - start.y) > 4 else { continue }
+            // Drag the whole selection if this card is part of it; otherwise this
+            // is a fresh single drag — select it first, then drag just it.
+            let dragIndices: [Int]
+            if selectionIndexPaths.contains(ip) {
+                dragIndices = selectionIndexPaths.map(\.item).sorted()
+            } else {
+                deselectItems(at: selectionIndexPaths)
+                selectItems(at: [ip], scrollPosition: [])
+                selectionAnchor = index
+                dragIndices = [index]
             }
+            startManualDrag(indices: dragIndices, event: next)
+            return
         }
     }
 
-    private func selectSingle(_ index: Int, modifiers: NSEvent.ModifierFlags) {
+    /// Click selection: ⇧ = range from anchor, ⌘ = toggle, plain = single.
+    private func selectClick(_ index: Int, modifiers: NSEvent.ModifierFlags) {
         let ip = IndexPath(item: index, section: 0)
-        if modifiers.contains(.command) {
+        if modifiers.contains(.shift), let anchor = selectionAnchor {
+            let range = Set((min(anchor, index)...max(anchor, index)).map { IndexPath(item: $0, section: 0) })
+            deselectItems(at: selectionIndexPaths.subtracting(range))
+            selectItems(at: range, scrollPosition: [])
+        } else if modifiers.contains(.command) {
             if selectionIndexPaths.contains(ip) { deselectItems(at: [ip]) }
             else { selectItems(at: [ip], scrollPosition: []) }
+            selectionAnchor = index
         } else {
             deselectItems(at: selectionIndexPaths)
             selectItems(at: [ip], scrollPosition: [])
+            selectionAnchor = index
         }
     }
 
-    private func startManualDrag(index: Int, path: String, event: NSEvent) {
-        // Write the SAME payload as a tab drag (an `entry:` variant) so every tab
-        // drop target — the tab outline (insertion indicators / grouping) and the
-        // Space dots — accepts it with one unified interaction. QUA-114.
-        let pbItem = NSPasteboardItem()
-        pbItem.setString("entry:\(path)", forType: SidebarDragPasteboard.tabItem)
-        let dragItem = NSDraggingItem(pasteboardWriter: pbItem)
-        let frame = layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame
-            ?? NSRect(origin: convert(event.locationInWindow, from: nil),
-                      size: NSSize(width: 220, height: 80))
-        dragItem.setDraggingFrame(frame, contents: itemSnapshot(index))
-        beginDraggingSession(with: [dragItem], event: event, source: self)
+    /// Begin a drag carrying one `entry:<path>` pasteboard item per selected card
+    /// (the SAME payload as a tab drag). Multiple items stack into a pile image and
+    /// arrive on the drop side as multiple payloads → the tab outline's multi-drop.
+    private func startManualDrag(indices: [Int], event: NSEvent) {
+        let items: [NSDraggingItem] = indices.compactMap { i in
+            guard let path = onDragPath?(i) else { return nil }
+            let pb = NSPasteboardItem()
+            pb.setString("entry:\(path)", forType: SidebarDragPasteboard.tabItem)
+            let dragItem = NSDraggingItem(pasteboardWriter: pb)
+            let frame = layoutAttributesForItem(at: IndexPath(item: i, section: 0))?.frame
+                ?? NSRect(origin: convert(event.locationInWindow, from: nil),
+                          size: NSSize(width: 220, height: 80))
+            dragItem.setDraggingFrame(frame, contents: itemSnapshot(i))
+            return dragItem
+        }
+        guard !items.isEmpty else { return }
+        beginDraggingSession(with: items, event: event, source: self)
     }
 
     private func itemSnapshot(_ index: Int) -> NSImage? {
