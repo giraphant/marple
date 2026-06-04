@@ -1,0 +1,12 @@
+# Copy to Makefile.local (gitignored) and fill in your Apple signing config.
+# Reuse the same Developer ID + notary profile you set up for dousha.
+#
+#   cp Makefile.local.example Makefile.local
+#
+# Find your identity:  security find-identity -v -p codesigning
+# Create the notary profile (one time, reused from dousha):
+#   xcrun notarytool store-credentials "<YourNotaryProfile>" \
+#       --apple-id "you@example.com" --team-id "<TEAMID>" --password "<app-specific-pw>"
+
+DEVELOPER_ID_IDENTITY := Developer ID Application: Your Name (TEAMID)
+NOTARY_PROFILE        := YourNotaryProfile
