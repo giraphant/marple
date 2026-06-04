@@ -12,7 +12,6 @@ let package = Package(
         // swift-markdown ships via branch, not tagged release. If `main` fails to
         // resolve against the local toolchain, pin to the matching `release/x.y`.
         .package(url: "https://github.com/swiftlang/swift-markdown.git", branch: "main"),
-        .package(url: "https://github.com/ciaranrobrien/SwiftUILazyContainer.git", from: "2.0.0"),
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.0.0"),
         // Capped to 1.0.x to share a single resolution with mlx-swift-examples
@@ -52,7 +51,6 @@ let package = Package(
             dependencies: [
                 "MarpleKit",
                 "MarpleEmbeddings",
-                .product(name: "SwiftUILazyContainer", package: "SwiftUILazyContainer"),
             ],
             resources: [
                 .process("Resources/Assets.xcassets"),   // app icon catalog (from main)

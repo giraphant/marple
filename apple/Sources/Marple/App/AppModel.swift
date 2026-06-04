@@ -463,6 +463,25 @@ final class AppModel {
         }
     }
 
+    /// Open `path` as a document tab in a specific Space (QUA-114, drag a browse
+    /// card onto a Space). Dropping on the active Space opens + shows it; dropping
+    /// on another Space files it there as a tab without yanking focus.
+    func openInSpace(_ path: String, space id: WorkspaceSpace.ID) async {
+        if id == activeSpaceID {
+            await openNewTab(path)
+            return
+        }
+        let loc = NavLocation(pane: browsePane, openPath: path)
+        mutateSpace(id) { space in
+            if space.workspace == nil {
+                space.workspace = Workspace(initial: loc)
+            } else {
+                space.workspace?.newTab(loc)
+            }
+            space.isBrowsing = false
+        }
+    }
+
     func moveSpace(from source: IndexSet, to destination: Int) {
         spaces.move(fromOffsets: source, toOffset: destination)
     }
@@ -856,6 +875,13 @@ final class AppModel {
 
     /// Always open `path` in a new tab (right-click / ⌘-click).
     func openInNewTab(_ path: String) async { await openNewTab(path) }
+
+    /// Open `path` as a new tab in the active space and return the new tab's id, so
+    /// a drop handler can then position it (root index / group). QUA-114.
+    func openEntryTab(_ path: String) async -> NavTab.ID? {
+        await openNewTab(path)
+        return workspace?.activeID
+    }
 
     // MARK: - Command palette (⌘T)
 

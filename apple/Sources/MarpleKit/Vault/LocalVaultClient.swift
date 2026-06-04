@@ -88,6 +88,8 @@ public struct LocalVaultClient: VaultClient {
         return FileManager.default.fileExists(atPath: url.path)
     }
 
+    public func fileURL(for path: String) -> URL? { absURL(path) }
+
     public func imageOriginalURL(forImageEntryPath path: String) async throws -> URL? {
         let dir = absURL(path).deletingLastPathComponent()
         let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []

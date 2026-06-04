@@ -38,6 +38,9 @@ public protocol VaultClient: Sendable {
     func openTranslation(slug: String) async throws
     func hasTranslation(slug: String) -> Bool
     func imageOriginalURL(forImageEntryPath path: String) async throws -> URL?
+    /// Absolute file URL for an entry's vault path (for Quick Look / reveal). nil
+    /// when the client can't resolve a real file (e.g. the test stub).
+    func fileURL(for path: String) -> URL?
     func createImageObject(from sourceURL: URL, title: String?) async throws -> Entry
     func writeFile(path: String, text: String) async throws
     func createNote(path: String, text: String) async throws
@@ -96,6 +99,7 @@ public struct StubVaultClient: VaultClient {
     public func openTranslation(slug: String) async throws {}
     public func hasTranslation(slug: String) -> Bool { false }
     public func imageOriginalURL(forImageEntryPath path: String) async throws -> URL? { nil }
+    public func fileURL(for path: String) -> URL? { nil }
     public func createImageObject(from sourceURL: URL, title: String?) async throws -> Entry {
         let name = title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? title!.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -105,6 +105,7 @@ private struct SpaceIconPaletteView: View {
     }
 }
 
+/// A Space dot that also accepts a dragged browse card (`.string` entry path) via
 private struct SpaceControlView: NSViewRepresentable {
     let index: Int
     let spaceID: WorkspaceSpace.ID

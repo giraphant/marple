@@ -50,7 +50,9 @@ Sources/Marple/
 ├── Sidebar/       左轨:6 类型 + 主题 + 回收站
 │                  SidebarView
 ├── Browse/        中列:列表 / 卡片 / 主题 / 回收站 各 pane
-│                  EntryListView · EntryGridView(瀑布流)· EntryRow · EntryCard
+│                  EntryListView · EntryRow(列表)
+│                  EntryGridView(瀑布流外壳)· CollectionGridVariant(NSCollectionView)
+│                  WaterfallCollectionLayout · EntryCardItem(纯 AppKit 卡片)· CardLayout · GridDimensions
 │                  ThemesView · TrashView
 ├── Reading/       阅读视图
 │                  DocView · MarkdownBlocksView
