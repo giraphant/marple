@@ -1,61 +1,87 @@
 import SwiftUI
 import MarpleKit
-import SwiftUILazyContainer
 
-/// Multi-column masonry browse of `visibleEntries`. Lazy per column (only
-/// on-screen cards render), so it scales to the full vault. Card heights for
-/// column balancing come from CardMetrics (estimated from preview length).
+/// Multi-column masonry browse of `visibleEntries` (QUA-114), backed by a native
+/// `NSCollectionView` + custom waterfall layout + pure-AppKit cells
+/// (`CollectionGridVariant`). Native scrolling, single-click select, ⌘/⇧
+/// multi-select, rubber-band marquee, item drag, double-click to open. Image card
+/// heights come from real pixel aspect ratios (`GridDimensions`). A density slider
+/// sets the target column width.
 struct EntryGridView: View {
     let model: AppModel
+    @State private var columnWidth: CGFloat = 260
+    @State private var dims: GridDimensions?
     @State private var isDropTargeted = false
 
     var body: some View {
-        ZStack {
-            ScrollView {
-                LazyVMasonry(model.visibleEntries, id: \.path,
-                             columns: .adaptive(minSize: 260), spacing: Space.s5) { entry in
-                    EntryCard(entry: entry,
-                              nonConforming: model.conformance(for: entry)?.isConforming == false) { path in
-                        try? await model.client.imageOriginalURL(forImageEntryPath: path)
-                    }
-                    .onTapGesture { Task { await model.open(entry.path) } }
-                } contentHeight: { entry in
-                    .fixed(CardMetrics.estimatedHeight(for: entry))
+        VStack(spacing: 0) {
+            header
+            Divider()
+            ZStack {
+                if let dims {
+                    CollectionGridVariant(model: model, dims: dims, columnWidth: columnWidth)
                 }
-                .padding(Space.s6)
-            }
 
-            if acceptsImageDrops && model.visibleEntries.isEmpty {
-                ContentUnavailableView(
-                    "拖拽图片到这里",
-                    systemImage: "photo.on.rectangle",
-                    description: Text("会自动创建 vault/images/<名称>/image.md 和 original.<ext>")
-                )
-                .allowsHitTesting(false)
-            }
-
-            if acceptsImageDrops && isDropTargeted {
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
-                    .padding(Space.s6)
+                if acceptsImageDrops && model.visibleEntries.isEmpty {
+                    ContentUnavailableView(
+                        "拖拽图片到这里",
+                        systemImage: "photo.on.rectangle",
+                        description: Text("会自动创建 vault/images/<名称>/image.md 和 original.<ext>")
+                    )
                     .allowsHitTesting(false)
+                }
+
+                if acceptsImageDrops && isDropTargeted {
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+                        .padding(Space.s6)
+                        .allowsHitTesting(false)
+                }
+            }
+            .dropDestination(for: URL.self, action: handleImageDrop) { targeted in
+                isDropTargeted = acceptsImageDrops && targeted
             }
         }
-        .lazyContainer()
-        .dropDestination(for: URL.self, action: handleImageDrop) { targeted in
-            isDropTargeted = acceptsImageDrops && targeted
+        .task {
+            if dims == nil {
+                dims = GridDimensions { [model] path in
+                    try? await model.client.imageOriginalURL(forImageEntryPath: path)
+                }
+            }
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: Space.s5) {
+            Button { model.browseMode = .list } label: {
+                Image(systemName: "list.bullet")
+            }
+            .buttonStyle(.borderless)
+            .fixedSize()
+            .help("切换到列表")
+
+            Spacer(minLength: Space.s4)
+
+            HStack(spacing: Space.s2) {
+                Image(systemName: "rectangle.grid.3x2").foregroundStyle(.secondary)
+                Slider(value: $columnWidth, in: 180...380)
+                    .frame(width: 120)
+                Image(systemName: "rectangle.grid.1x2").foregroundStyle(.secondary)
+            }
+
+            Text("\(model.visibleEntries.count)")
+                .font(Typo.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, Space.s5)
+        .padding(.vertical, Space.s3)
     }
 
     /// During bootstrap (data still loading) the drop-zone must not appear:
     /// `visibleEntries.isEmpty` is true regardless of whether the vault is
-    /// genuinely empty, so without this gate the image pane would show the
-    /// "拖拽图片到这里" prompt on cold start, and a drop landing then would
-    /// race with the in-flight loadIndex — importImage appends locally, then
-    /// loadIndex publishes a fresh `entries` snapshot from the DB that may
-    /// not yet include the just-imported image (the reconcile picking it up
-    /// runs later). QUA-105.
+    /// genuinely empty. QUA-105.
     private var acceptsImageDrops: Bool {
         guard !model.isBootstrapping else { return false }
         if case .type(.image) = model.pane { return true }

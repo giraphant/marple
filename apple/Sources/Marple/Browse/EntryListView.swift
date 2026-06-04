@@ -33,6 +33,7 @@ struct EntryListView: View {
             SearchField(model: model)
             sortButton
             filterButton
+            gridToggle
         }
         .padding(8)
         .disabled(isThemesIndex)   // header is meaningless on the themes index pane
@@ -40,6 +41,17 @@ struct EntryListView: View {
     }
 
     private var isThemesIndex: Bool { if case .themesIndex = model.pane { return true } else { return false } }
+
+    /// Switch to the grid lab (QUA-114). The app had no list/grid toggle at all;
+    /// browseMode was only ever restored from persisted state.
+    private var gridToggle: some View {
+        Button { model.browseMode = .grid } label: {
+            Image(systemName: "square.grid.2x2")
+        }
+        .buttonStyle(.borderless)
+        .fixedSize()
+        .help("切换到网格")
+    }
 
     private var sortButton: some View {
         Button { showingSorts.toggle() } label: {

@@ -1,5 +1,5 @@
 {
-  "originHash" : "733c20db93200bcd253596e16365fe02835df28f66f7acd261e51d9a51a5472f",
+  "originHash" : "1ac84032f169e1c6bf828bb079f370dd4059b5541f099fa98b149c72a2d284e2",
   "pins" : [
     {
       "identity" : "grdb.swift",
@@ -98,15 +98,6 @@
       "state" : {
         "revision" : "a2e184dddb4757bc943e77fbe99ac6786c53f0b2",
         "version" : "1.0.0"
-      }
-    },
-    {
-      "identity" : "swiftuilazycontainer",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ciaranrobrien/SwiftUILazyContainer.git",
-      "state" : {
-        "revision" : "060287b6c9ae6fdb7fc41d5965b4b0df834fb3e7",
-        "version" : "2.0.0"
       }
     },
     {
