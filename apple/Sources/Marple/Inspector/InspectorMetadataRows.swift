@@ -37,6 +37,8 @@ func inspectorInfoRows(for entry: Entry, in entries: [Entry] = []) -> [Inspector
     case .journal: rows = journalRows(for: entry)
     case .note:    rows = noteRows(for: entry, in: entries)
     case .image:   rows = imageRows(for: entry)
+    case .talk:    rows = talkRows(for: entry, in: entries)
+    case .transcript: rows = transcriptRows(for: entry, in: entries)
     case .other:   rows = []
     }
     // "专题": topic-corpus membership (QUA-137). Read-only chips inserted before
@@ -171,6 +173,40 @@ private func noteRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRo
 
 private func imageRows(for entry: Entry) -> [InspectorInfoRow] {
     [.editableScalar(label: "名称", value: entry.title, action: .title)]
+}
+
+private func talkRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRow] {
+    // `speaker` is indexed into `author`, so reuse the standard authors row
+    // (AuthorChip with author-page links + editing). It renders the label as
+    // 讲者 for talks and writes edits back to the `speaker:` key (see
+    // AppModel.setAuthor), keeping the talk frontmatter schema-correct.
+    var rows: [InspectorInfoRow] = [.authors]
+    // `date` is indexed into `created`.
+    if let date = nonEmpty(entry.created) {
+        rows.append(.readOnlyScalar(label: "日期", value: date, copyValue: nil))
+    }
+    if let transcript = siblingEntry(of: entry, named: "transcript.md", in: entries) {
+        rows.append(.linkedScalar(label: "转写", value: displayTitle(for: transcript) ?? "转写",
+                                  path: transcript.path, copyValue: nil))
+    }
+    rows.append(.rating)
+    return rows
+}
+
+private func transcriptRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRow] {
+    // A transcript's only structured link is back to its talk (the sibling
+    // `talk.md` in the same folder-per-object directory).
+    guard let talk = siblingEntry(of: entry, named: "talk.md", in: entries) else { return [] }
+    return [.linkedScalar(label: "讲座", value: displayTitle(for: talk) ?? "讲座",
+                          path: talk.path, copyValue: nil)]
+}
+
+/// Resolve a sibling object (e.g. `transcript.md` ↔ `talk.md`) within the same
+/// folder-per-object directory.
+private func siblingEntry(of entry: Entry, named filename: String, in entries: [Entry]) -> Entry? {
+    let dir = (entry.path as NSString).deletingLastPathComponent
+    let target = dir.isEmpty ? filename : dir + "/" + filename
+    return entries.first { $0.path == target }
 }
 
 private func displayTitle(for entry: Entry?) -> String? {

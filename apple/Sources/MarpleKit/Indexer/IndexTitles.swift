@@ -57,9 +57,14 @@ public func firstChineseH1(_ body: String) -> String? {
 
 /// Resolve an entry's main title.
 ///
-/// Two distinct conventions, by type:
-/// - `note` / `topic`: free-form documents whose title is the first heading
-///   in the body (any level), falling back to frontmatter `title` then `name`.
+/// Three conventions, by type:
+/// - `note` / `topic` / `journal`: free-form documents whose title is the first
+///   heading in the body (any level), falling back to frontmatter `title` then
+///   `name`.
+/// - `transcript`: prefers its canonical frontmatter `title`, falling back to
+///   the body heading. Auto-generated transcripts in the wild carry only
+///   `type` / `talk` (no `title`), so the heading is the usable source — but
+///   when a `title` is present it must win over a differing H1.
 /// - everything else: structured Quasi entries that always carry a frontmatter
 ///   `title` (or `name`); the body is never consulted.
 ///
@@ -70,6 +75,11 @@ public func resolveTitle(
     type entryType: String,
     body: String
 ) -> String? {
+    if entryType == "transcript" {
+        return truthyText(map, "title").map { stripWiki($0) }
+            ?? firstHeading(body)
+            ?? truthyText(map, "name").map { stripWiki($0) }
+    }
     if entryType == "note" || entryType == "topic" || entryType == "journal" {
         return firstHeading(body)
             ?? truthyText(map, "title").map { stripWiki($0) }

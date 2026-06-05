@@ -311,8 +311,13 @@ public func buildIndexedEntry(
     // 8. Themes, topics, author.
     let themesValue: [String]? = themeArray(field(frontmatter, "themes"))
     let topicsValue: [String]? = themeArray(field(frontmatter, "topics"))
+    // `talk` carries its presenters under `speaker` (a list, → vault/authors),
+    // not `author`/`authors`. Fall back to it so 讲者 populate the same author
+    // surfaces (list attribution, inspector, author links) as every other type.
     let authorValue: [String] = parseAuthors(
-        field(frontmatter, "author") ?? field(frontmatter, "authors")
+        field(frontmatter, "author")
+            ?? field(frontmatter, "authors")
+            ?? (entryType == "talk" ? field(frontmatter, "speaker") : nil)
     )
 
     // 9. Titles (en, cn), publisher, isbn, translation fields.
@@ -351,7 +356,10 @@ public func buildIndexedEntry(
     let doiValue: String? = truthyText(frontmatter, "doi")
     let chaptersAnalyzedValue: Int64? = intValue(field(frontmatter, "chapters_analyzed"))
     let annotatesValue: String? = truthyText(frontmatter, "annotates")
+    // `talk` dates its event under `date` (full ISO day), reusing the `created`
+    // column so the inspector / sort surfaces treat it like any other date.
     let createdValue: String? = textValue(field(frontmatter, "created"))
+        ?? (entryType == "talk" ? textValue(field(frontmatter, "date")) : nil)
 
     let entry = IndexedEntry(
         path: rel,
