@@ -41,6 +41,12 @@ public protocol VaultClient: Sendable {
     /// Absolute file URL for an entry's vault path (for Quick Look / reveal). nil
     /// when the client can't resolve a real file (e.g. the test stub).
     func fileURL(for path: String) -> URL?
+    /// Playable recording sidecar beside a talk/transcript entry (folder-per-object
+    /// layout). nil when the gitignored media is absent (fresh clone) or the
+    /// client can't resolve files.
+    func talkMediaURL(forEntryPath path: String) -> URL?
+    /// `recording.srt` subtitle sidecar beside a talk/transcript entry, if present.
+    func talkSubtitlesURL(forEntryPath path: String) -> URL?
     func createImageObject(from sourceURL: URL, title: String?) async throws -> Entry
     func writeFile(path: String, text: String) async throws
     func createNote(path: String, text: String) async throws
@@ -48,6 +54,13 @@ public protocol VaultClient: Sendable {
     func listTrash() async throws -> [TrashItem]
     func restoreTrash(name: String) async throws -> String
     func purgeTrash(name: String) async throws
+}
+
+public extension VaultClient {
+    /// Default: no media resolution. Clients backed by a real filesystem
+    /// (`LocalVaultClient`) override these; the test stub keeps nil.
+    func talkMediaURL(forEntryPath path: String) -> URL? { nil }
+    func talkSubtitlesURL(forEntryPath path: String) -> URL? { nil }
 }
 
 /// Records the last write so stub-backed tests can assert on it.

@@ -30,6 +30,8 @@ enum CardLayout {
         case .topic:   return NSColor(srgbRed: 0.81, green: 0.31, blue: 0.53, alpha: 1)  // magenta
         case .chapter: return NSColor(srgbRed: 0.20, green: 0.62, blue: 0.62, alpha: 1)  // teal
         case .journal: return NSColor(srgbRed: 0.35, green: 0.42, blue: 0.78, alpha: 1)  // indigo
+        case .talk:    return NSColor(srgbRed: 0.80, green: 0.25, blue: 0.20, alpha: 1)  // red
+        case .transcript: return NSColor(srgbRed: 0.55, green: 0.42, blue: 0.32, alpha: 1)  // brown
         case .note, .other: return NSColor.systemGray
         }
     }

@@ -196,6 +196,43 @@ final class AppModel {
         toast = Toast(text: text, symbol: symbol)
     }
 
+    /// Active talk/transcript media playback. Non-nil presents the lightweight
+    /// player sheet; `seekToken` changes on every timestamp click so the player
+    /// re-seeks without re-presenting. Cleared when the player is closed.
+    struct TalkPlayback: Equatable {
+        let mediaURL: URL
+        let subtitlesURL: URL?
+        let title: String
+        var seconds: Double
+        var seekToken = UUID()
+    }
+    private(set) var talkPlayback: TalkPlayback?
+
+    /// Open (or re-seek) the player for the current talk/transcript at `seconds`.
+    /// No-op with a toast when the gitignored recording is absent on this machine.
+    func playTalk(seconds: Double) {
+        guard let entry = openEntry,
+              entry.type == .talk || entry.type == .transcript,
+              let media = client.talkMediaURL(forEntryPath: entry.path) else {
+            flash("录制文件不存在", symbol: "exclamationmark.triangle.fill")
+            return
+        }
+        let title = entry.title ?? (entry.path as NSString).lastPathComponent
+        if var pb = talkPlayback, pb.mediaURL == media {
+            pb.seconds = seconds
+            pb.seekToken = UUID()
+            talkPlayback = pb
+        } else {
+            talkPlayback = TalkPlayback(
+                mediaURL: media,
+                subtitlesURL: client.talkSubtitlesURL(forEntryPath: entry.path),
+                title: title,
+                seconds: seconds)
+        }
+    }
+
+    func closeTalkPlayback() { talkPlayback = nil }
+
     // Metadata write state.
     private(set) var savingField: String?
     var writeError: String?
@@ -319,8 +356,9 @@ final class AppModel {
     private func loadTypeOrder() {
         guard let data = UserDefaults.standard.data(forKey: Self.typeOrderKey),
               let decoded = try? JSONDecoder().decode([EntryType].self, from: data) else { return }
-        var order = decoded
-        // Append any new modeled types not yet in the saved order.
+        // Drop any persisted types no longer modeled as browse categories (e.g.
+        // a `transcript` saved by an earlier build), then append new modeled types.
+        var order = decoded.filter { EntryType.modeled.contains($0) }
         for t in EntryType.modeled where !order.contains(t) { order.append(t) }
         typeOrder = order
     }
@@ -1518,20 +1556,32 @@ final class AppModel {
     /// Set the author list. Empty list → clear both `author:` and `authors:`
     /// (legacy alias) frontmatter keys; non-empty → write canonical block
     /// list under `author:` per SPEC §5.2.
+    ///
+    /// A `talk` stores its presenters under `speaker:` (not `author:`), so for
+    /// talks the same edit writes the `speaker:` key instead — the inspector
+    /// reuses the authors row for 讲者, and the indexer folds `speaker:` back
+    /// into `author` on reload.
     func setAuthor(_ authors: [String]) async {
         let cleaned = authors
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        let key = openEntry?.type == .talk ? "speaker" : "author"
         await applyPatch(
-            field: "author",
+            field: key,
             { raw in
                 if cleaned.isEmpty {
+                    if key == "speaker" {
+                        return FrontmatterPatch.removeKey(raw, key: "speaker")
+                    }
                     // Double-clear: vault has both `author:` and `authors:`
                     // historic spellings; drop both to guarantee absence.
                     return FrontmatterPatch.removeKey(
                         FrontmatterPatch.removeKey(raw, key: "author"),
                         key: "authors"
                     )
+                }
+                if key == "speaker" {
+                    return FrontmatterPatch.setSequence(raw, key: "speaker", values: cleaned)
                 }
                 // Also drop the alias key so the canonical `author:` is the
                 // only one present after the write.

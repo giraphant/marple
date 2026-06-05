@@ -274,7 +274,12 @@ struct MarkdownTextView: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
-            guard let url = link as? URL else { return false }
+            // The renderer stores `.link` as a String (Link.destination), so the
+            // delegate may receive either an NSURL or an NSString depending on
+            // AppKit's coercion. Accept both so wikilink and `marple://seek`
+            // clicks reliably reach `onLinkClick`.
+            let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
+            guard let url else { return false }
             return onLinkClick(url)
         }
     }

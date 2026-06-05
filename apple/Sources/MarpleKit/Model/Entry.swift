@@ -9,6 +9,8 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
     case journal
     case note
     case image
+    case talk
+    case transcript
     /// Any type the reader doesn't model. The vault is produced by an evolving
     /// pipeline and may carry experimental kinds (e.g. "topic-reading-list").
     /// Holding the raw value here means one unknown type doesn't fail the whole
@@ -26,6 +28,8 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
         case "journal": self = .journal
         case "note":    self = .note
         case "image":   self = .image
+        case "talk":    self = .talk
+        case "transcript": self = .transcript
         default:        self = .other(rawValue)
         }
     }
@@ -40,6 +44,8 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
         case .journal: return "journal"
         case .note:    return "note"
         case .image:   return "image"
+        case .talk:    return "talk"
+        case .transcript: return "transcript"
         case .other(let raw): return raw
         }
     }
@@ -56,10 +62,15 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
 }
 
 public extension EntryType {
-    /// The eight modeled types in the canonical sidebar order (mirrors web TYPES).
+    /// The modeled types in the canonical sidebar order (mirrors web TYPES).
     static let modeled: [EntryType] = [
         .paper, .book, .author,
         .topic, .journal, .chapter, .note, .image,
+        .talk,
+        // `transcript` is intentionally NOT a browse category. It is still a
+        // recognized, indexed type (searchable, openable, and linked from its
+        // talk's inspector), but a transcript is the raw text *of* a talk — you
+        // reach it through the talk, never as a standalone sidebar bucket.
     ]
 
     var label: String {
@@ -72,6 +83,8 @@ public extension EntryType {
         case .chapter: return "章节"
         case .note:    return "笔记"
         case .image:   return "图片"
+        case .talk:    return "讲座"
+        case .transcript: return "转写"
         case .other(let raw): return raw
         }
     }

@@ -148,12 +148,16 @@ import Testing
     }
 
     @Test func testModeledTypesOrderAndLabels() {
+        // `transcript` is recognized but intentionally not a browse category.
         #expect(EntryType.modeled == [.paper, .book, .author,
-                                      .topic, .journal, .chapter, .note, .image])
+                                      .topic, .journal, .chapter, .note, .image,
+                                      .talk])
         #expect(EntryType.paper.label == "论文")
         #expect(EntryType.journal.label == "期刊")
         #expect(EntryType.note.label == "笔记")
         #expect(EntryType.image.label == "图片")
+        #expect(EntryType.talk.label == "讲座")
+        #expect(EntryType.transcript.label == "转写")
         #expect(EntryType.other("topic-reading-list").label == "topic-reading-list")
     }
 }

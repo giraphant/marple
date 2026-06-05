@@ -186,6 +186,7 @@ import Darwin
         func openTranslation(slug: String) async throws {}
         func hasTranslation(slug: String) -> Bool { false }
         func imageOriginalURL(forImageEntryPath path: String) async throws -> URL? { nil }
+        func fileURL(for path: String) -> URL? { nil }
         func createImageObject(from sourceURL: URL, title: String?) async throws -> Entry { throw VaultError.notFound(sourceURL.path) }
         func writeFile(path: String, text: String) async throws {}
         func createNote(path: String, text: String) async throws {}
