@@ -90,6 +90,20 @@ public struct LocalVaultClient: VaultClient {
 
     public func fileURL(for path: String) -> URL? { absURL(path) }
 
+    public func talkMediaURL(forEntryPath path: String) -> URL? {
+        let dir = absURL(path).deletingLastPathComponent()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        guard let file = TalkMedia.mediaFilename(among: names) else { return nil }
+        return dir.appendingPathComponent(file)
+    }
+
+    public func talkSubtitlesURL(forEntryPath path: String) -> URL? {
+        let dir = absURL(path).deletingLastPathComponent()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        guard let file = TalkMedia.subtitlesFilename(among: names) else { return nil }
+        return dir.appendingPathComponent(file)
+    }
+
     public func imageOriginalURL(forImageEntryPath path: String) async throws -> URL? {
         let dir = absURL(path).deletingLastPathComponent()
         let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []

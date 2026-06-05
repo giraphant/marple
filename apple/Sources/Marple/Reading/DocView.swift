@@ -17,6 +17,18 @@ enum WikiURL {
     }
 }
 
+// MARK: - SeekURL
+
+/// `marple://seek/<seconds>` — emitted by `TalkTimeline` for a talk/transcript
+/// timestamp; intercepted to seek the media player.
+enum SeekURL {
+    static func seconds(from url: URL) -> Double? {
+        guard url.scheme == TalkTimeline.scheme, url.host == TalkTimeline.host else { return nil }
+        let raw = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
+        return Double(raw)
+    }
+}
+
 // MARK: - DocView
 
 struct DocView: View {
@@ -31,13 +43,17 @@ struct DocView: View {
                 ImageObjectDetailView(model: model)
             } else {
                 MarkdownTextView(
-                    markdown: Wikilink.preprocessForRendering(model.openBody),
+                    markdown: renderedMarkdown,
                     style: renderStyle,
                     documentID: model.openPath ?? "",
                     scrollTarget: resolvedScrollTarget,
                     highlightQuery: model.openSearchQuery,
                     jump: model.matchJump,
                     onLinkClick: { url in
+                        if let seconds = SeekURL.seconds(from: url) {
+                            model.playTalk(seconds: seconds)
+                            return true
+                        }
                         if let target = WikiURL.target(from: url) {
                             Task { await model.follow(target) }
                             return true
@@ -47,6 +63,17 @@ struct DocView: View {
                 )
             }
         }
+        // Non-modal floating player: a `.sheet` would disable the reader and make
+        // timestamp-to-timestamp re-seeking impossible. A bottom-trailing overlay
+        // keeps the body clickable so each `[mm:ss]` drives the player.
+        .overlay(alignment: .bottomTrailing) {
+            if model.talkPlayback != nil {
+                TalkPlayerView(model: model)
+                    .padding(Space.s6)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.34, dampingFraction: 0.84), value: model.talkPlayback != nil)
         .overlay(alignment: .top) { toastOverlay }
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.toast)
         // QUA-105: same bootstrap fade-in as BrowseColumn. Doc area starts
@@ -67,6 +94,17 @@ struct DocView: View {
                     if model.toast?.id == toast.id { model.toast = nil }
                 }
         }
+    }
+
+    /// Wikilink-preprocessed body, additionally linkifying `[mm:ss]` timestamps
+    /// for talk/transcript documents — but only when the recording exists on this
+    /// machine, so media-less clones keep plain (non-dead) timestamps.
+    private var renderedMarkdown: String {
+        let wikis = Wikilink.preprocessForRendering(model.openBody)
+        guard let entry = model.openEntry,
+              entry.type == .talk || entry.type == .transcript,
+              model.client.talkMediaURL(forEntryPath: entry.path) != nil else { return wikis }
+        return TalkTimeline.linkifyTimestamps(wikis)
     }
 
     private var renderStyle: RenderStyle {

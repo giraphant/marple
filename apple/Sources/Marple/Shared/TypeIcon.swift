@@ -15,6 +15,8 @@ extension EntryType {
         case .chapter: return "list.bullet.rectangle"
         case .note:    return "note.text"
         case .image:   return "photo"
+        case .talk:    return "waveform"
+        case .transcript: return "text.quote"
         case .other:   return "questionmark.square.dashed"
         }
     }
@@ -29,6 +31,8 @@ extension EntryType {
         case .chapter: return .indigo
         case .note:    return .yellow
         case .image:   return .pink
+        case .talk:    return .red
+        case .transcript: return .brown
         case .other:   return .gray
         }
     }

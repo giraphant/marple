@@ -196,6 +196,43 @@ final class AppModel {
         toast = Toast(text: text, symbol: symbol)
     }
 
+    /// Active talk/transcript media playback. Non-nil presents the lightweight
+    /// player sheet; `seekToken` changes on every timestamp click so the player
+    /// re-seeks without re-presenting. Cleared when the player is closed.
+    struct TalkPlayback: Equatable {
+        let mediaURL: URL
+        let subtitlesURL: URL?
+        let title: String
+        var seconds: Double
+        var seekToken = UUID()
+    }
+    private(set) var talkPlayback: TalkPlayback?
+
+    /// Open (or re-seek) the player for the current talk/transcript at `seconds`.
+    /// No-op with a toast when the gitignored recording is absent on this machine.
+    func playTalk(seconds: Double) {
+        guard let entry = openEntry,
+              entry.type == .talk || entry.type == .transcript,
+              let media = client.talkMediaURL(forEntryPath: entry.path) else {
+            flash("录制文件不存在", symbol: "exclamationmark.triangle.fill")
+            return
+        }
+        let title = entry.title ?? (entry.path as NSString).lastPathComponent
+        if var pb = talkPlayback, pb.mediaURL == media {
+            pb.seconds = seconds
+            pb.seekToken = UUID()
+            talkPlayback = pb
+        } else {
+            talkPlayback = TalkPlayback(
+                mediaURL: media,
+                subtitlesURL: client.talkSubtitlesURL(forEntryPath: entry.path),
+                title: title,
+                seconds: seconds)
+        }
+    }
+
+    func closeTalkPlayback() { talkPlayback = nil }
+
     // Metadata write state.
     private(set) var savingField: String?
     var writeError: String?

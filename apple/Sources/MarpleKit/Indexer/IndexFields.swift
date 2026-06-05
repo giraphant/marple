@@ -147,12 +147,12 @@ public func parseAuthors(_ v: YamlValue?) -> [String] {
 
 // MARK: - canonicalType  (QUA-119)
 
-/// Recognize a raw `type` field value as one of the eight canonical Quasi
+/// Recognize a raw `type` field value as one of the canonical Quasi
 /// schema short forms, or reject it.
 ///
 /// - "" and "A" → nil (sentinel "skip entry" values from the legacy pipeline)
-/// - one of `paper / book / chapter / author / topic / journal / note / image`
-///   → the same string
+/// - one of `paper / book / chapter / author / topic / journal / note / image /
+///   talk / transcript` → the same string
 /// - anything else (including pre-QUA-119 long forms like `paper-analysis` /
 ///   `book-overview` and the older free-text aliases like `monograph` /
 ///   `reading-list` / `concept-note`) → nil, so `buildIndexedEntry` returns
@@ -164,7 +164,8 @@ public func parseAuthors(_ v: YamlValue?) -> [String] {
 public func canonicalType(_ raw: String) -> String? {
     switch raw {
     case "paper", "book", "chapter", "author",
-         "topic", "journal", "note", "image":
+         "topic", "journal", "note", "image",
+         "talk", "transcript":
         return raw
     default:
         return nil
