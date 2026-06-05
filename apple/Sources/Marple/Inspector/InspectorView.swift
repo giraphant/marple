@@ -598,8 +598,11 @@ private struct AuthorRow: View {
     @State private var editingIndex: Int? = nil
     @State private var editingAll = false
 
+    /// Talks store presenters under `speaker:`, so label this row 讲者 for them.
+    private var noun: String { entry.type == .talk ? "讲者" : "作者" }
+
     var body: some View {
-        FieldRow("作者") {
+        FieldRow(noun) {
             let names = entry.author
             if names.isEmpty {
                 // Empty-state affordance so the user can re-add authors after
@@ -608,7 +611,7 @@ private struct AuthorRow: View {
                 Button {
                     editingAll = true
                 } label: {
-                    Label("添加作者", systemImage: "plus")
+                    Label("添加\(noun)", systemImage: "plus")
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 9)

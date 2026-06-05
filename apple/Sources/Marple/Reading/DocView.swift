@@ -34,6 +34,7 @@ enum SeekURL {
 struct DocView: View {
     @Bindable var model: AppModel
     @Environment(\.readingFont) private var readingFont
+    @State private var playerEnlarged = false
 
     var body: some View {
         Group {
@@ -65,12 +66,16 @@ struct DocView: View {
         }
         // Non-modal floating player: a `.sheet` would disable the reader and make
         // timestamp-to-timestamp re-seeking impossible. A bottom-trailing overlay
-        // keeps the body clickable so each `[mm:ss]` drives the player.
+        // keeps the body clickable so each `[mm:ss]` drives the player. The
+        // GeometryReader hands the player the reader size so "放大" can fit 16:9.
         .overlay(alignment: .bottomTrailing) {
             if model.talkPlayback != nil {
-                TalkPlayerView(model: model)
-                    .padding(Space.s6)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                GeometryReader { geo in
+                    TalkPlayerView(model: model, availableSize: geo.size, enlarged: $playerEnlarged)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .padding(Space.s6)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.84), value: model.talkPlayback != nil)

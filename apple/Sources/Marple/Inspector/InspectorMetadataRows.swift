@@ -176,19 +176,11 @@ private func imageRows(for entry: Entry) -> [InspectorInfoRow] {
 }
 
 private func talkRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRow] {
-    var rows: [InspectorInfoRow] = []
-    // `speaker` is indexed into `author` (optional; silent recordings omit it),
-    // but talk frontmatter stores it under `speaker:` and forbids `author:`.
-    // Render read-only chips (best-effort linked to author pages) rather than the
-    // editable `.authors` row, whose edit/remove would write a schema-invalid
-    // `author:` key and never touch the real `speaker:`.
-    if !entry.author.isEmpty {
-        let chips = entry.author.map { name in
-            InspectorInfoChip(title: name, path: authorEntry(named: name, in: entries)?.path,
-                              copyValue: name)
-        }
-        rows.append(.chips(label: "讲者", values: chips))
-    }
+    // `speaker` is indexed into `author`, so reuse the standard authors row
+    // (AuthorChip with author-page links + editing). It renders the label as
+    // 讲者 for talks and writes edits back to the `speaker:` key (see
+    // AppModel.setAuthor), keeping the talk frontmatter schema-correct.
+    var rows: [InspectorInfoRow] = [.authors]
     // `date` is indexed into `created`.
     if let date = nonEmpty(entry.created) {
         rows.append(.readOnlyScalar(label: "日期", value: date, copyValue: nil))
@@ -207,18 +199,6 @@ private func transcriptRows(for entry: Entry, in entries: [Entry]) -> [Inspector
     guard let talk = siblingEntry(of: entry, named: "talk.md", in: entries) else { return [] }
     return [.linkedScalar(label: "讲座", value: displayTitle(for: talk) ?? "讲座",
                           path: talk.path, copyValue: nil)]
-}
-
-/// Best-effort match of a speaker name to an `author` page, by exact
-/// (case-insensitive) title. Transcription-approximate names (e.g. "音近待核")
-/// simply won't resolve, leaving an unlinked chip — never a wrong link.
-private func authorEntry(named name: String, in entries: [Entry]) -> Entry? {
-    let needle = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    guard !needle.isEmpty else { return nil }
-    return entries.first {
-        $0.type == .author
-            && $0.title?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == needle
-    }
 }
 
 /// Resolve a sibling object (e.g. `transcript.md` ↔ `talk.md`) within the same

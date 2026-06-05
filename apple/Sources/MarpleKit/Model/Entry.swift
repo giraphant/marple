@@ -66,7 +66,11 @@ public extension EntryType {
     static let modeled: [EntryType] = [
         .paper, .book, .author,
         .topic, .journal, .chapter, .note, .image,
-        .talk, .transcript,
+        .talk,
+        // `transcript` is intentionally NOT a browse category. It is still a
+        // recognized, indexed type (searchable, openable, and linked from its
+        // talk's inspector), but a transcript is the raw text *of* a talk — you
+        // reach it through the talk, never as a standalone sidebar bucket.
     ]
 
     var label: String {

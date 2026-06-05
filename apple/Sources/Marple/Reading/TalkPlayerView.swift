@@ -55,17 +55,35 @@ final class TalkPlayerController: ObservableObject {
 /// the sheet up and just moves the playhead.
 struct TalkPlayerView: View {
     @Bindable var model: AppModel
+    /// Size of the reader area the player floats over, used to fit the enlarged
+    /// video without overflowing.
+    var availableSize: CGSize
+    @Binding var enlarged: Bool
     @StateObject private var controller = TalkPlayerController()
+
+    private static let compactWidth: CGFloat = 460
+
+    /// 16:9 video size: compact is a fixed corner card; enlarged grows to fill
+    /// the reader area (bounded by both width and height so it always fits).
+    private var videoSize: CGSize {
+        let chrome: CGFloat = 24 + 40   // overlay padding + header height
+        let maxW = max(320, availableSize.width - 24)
+        let maxH = max(200, availableSize.height - chrome)
+        var w = enlarged ? maxW : min(Self.compactWidth, maxW)
+        var h = w * 9 / 16
+        if h > maxH { h = maxH; w = h * 16 / 9 }
+        return CGSize(width: w, height: h)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             ZStack(alignment: .bottom) {
-                VideoPlayer(player: controller.player)
-                    .frame(width: 460, height: 460 * 9 / 16)   // 16:9, explicit to avoid collapse
+                AVPlayerViewRepresentable(player: controller.player)
+                    .frame(width: videoSize.width, height: videoSize.height)
                 if !controller.caption.isEmpty {
                     Text(controller.caption)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: enlarged ? 16 : 13, weight: .medium))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 10)
@@ -76,13 +94,14 @@ struct TalkPlayerView: View {
                 }
             }
         }
-        // A compact, non-modal floating panel: the reader stays interactive so
-        // clicking another `[mm:ss]` re-seeks this player (the seekToken path).
-        .frame(width: 460)
+        // A non-modal floating panel: the reader stays interactive so clicking
+        // another `[mm:ss]` re-seeks this player (the seekToken path).
+        .frame(width: videoSize.width)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator.opacity(0.5), lineWidth: 0.5))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.22), radius: 16, y: 6)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: enlarged)
         .onAppear { if let pb = model.talkPlayback { controller.apply(pb) } }
         .onChange(of: model.talkPlayback?.seekToken) { _, _ in
             if let pb = model.talkPlayback { controller.apply(pb) }
@@ -100,6 +119,17 @@ struct TalkPlayerView: View {
                 .truncationMode(.middle)
             Spacer()
             Button {
+                enlarged.toggle()
+            } label: {
+                Image(systemName: enlarged
+                      ? "arrow.down.right.and.arrow.up.left"
+                      : "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(enlarged ? "还原" : "放大")
+            Button {
                 model.closeTalkPlayback()
             } label: {
                 Image(systemName: "xmark.circle.fill")
@@ -111,5 +141,26 @@ struct TalkPlayerView: View {
         }
         .padding(.horizontal, Space.s5)
         .padding(.vertical, Space.s3)
+    }
+}
+
+/// AppKit `AVPlayerView` wrapper. SwiftUI's `VideoPlayer` aborts at runtime in a
+/// bare SPM executable ("failed to demangle superclass … AVPlayerView") because
+/// its generic metadata over `AVPlayerView` can't be resolved without an app
+/// bundle. Wrapping `AVPlayerView` directly sidesteps that and gives the native
+/// inline transport controls.
+private struct AVPlayerViewRepresentable: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .inline
+        view.videoGravity = .resizeAspect
+        return view
+    }
+
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        if nsView.player !== player { nsView.player = player }
     }
 }

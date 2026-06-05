@@ -18,11 +18,11 @@ struct TalkInspectorRowsTests {
               ratingScore: 0, themes: [], preview: "", hasPDF: false)
     }
 
-    @Test("talk rows: speaker chips (read-only), 日期, transcript link, rating")
+    @Test("talk rows: authors row (讲者), 日期, transcript link, rating")
     func talkRows() {
         let entries = [talk(speaker: ["Wang"], date: "2024-11-08"), transcript()]
         #expect(inspectorInfoRows(for: entries[0], in: entries) == [
-            .chips(label: "讲者", values: [InspectorInfoChip(title: "Wang", path: nil, copyValue: "Wang")]),
+            .authors,
             .readOnlyScalar(label: "日期", value: "2024-11-08", copyValue: nil),
             .linkedScalar(label: "转写", value: "Network Society — 转写",
                           path: "vault/talks/network-society-20241108/transcript.md", copyValue: nil),
@@ -30,20 +30,11 @@ struct TalkInspectorRowsTests {
         ])
     }
 
-    @Test("talk rows: speaker chip links to a matching author page")
-    func talkSpeakerLinksToAuthor() {
-        let author = Entry(path: "vault/authors/wang.md", type: .author, title: "Wang",
-                           author: [], year: nil, ratingScore: 0, themes: [], preview: "", hasPDF: false)
-        let entries = [talk(speaker: ["Wang"], date: "2024-11-08"), author]
-        let rows = inspectorInfoRows(for: entries[0], in: entries)
-        #expect(rows.first == .chips(label: "讲者",
-            values: [InspectorInfoChip(title: "Wang", path: "vault/authors/wang.md", copyValue: "Wang")]))
-    }
-
-    @Test("talk rows: silent talk omits authors row")
+    @Test("talk rows: silent talk still shows the authors row (add-讲者 affordance)")
     func talkSilent() {
         let entry = talk(speaker: [], date: "2024-10-02")
         #expect(inspectorInfoRows(for: entry, in: [entry]) == [
+            .authors,
             .readOnlyScalar(label: "日期", value: "2024-10-02", copyValue: nil),
             .rating,
         ])
