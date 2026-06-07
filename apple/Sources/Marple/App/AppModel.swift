@@ -165,6 +165,7 @@ final class AppModel {
     private(set) var openStats: DocStats?
     private(set) var openRelations: Relations?
     private(set) var openBook: BookContext?
+    private(set) var openTopic: TopicContext?
 
     // Inspector → reader scroll channel; an outline tap sets this, DocView observes.
     var scrollTarget: Int?
@@ -383,6 +384,9 @@ final class AppModel {
     private func rebuildIndexDerived() {
         var c: [EntryType: Int] = [:]
         for e in entries { c[e.type, default: 0] += 1 }
+        // QUA-189: the 专题 bucket folds to one row per topic (overview), so its
+        // count must match the folded list, not the raw page total.
+        if c[.topic] != nil { c[.topic] = topicBrowseSubset(entries).count }
         counts = c
         themeIndex = themeCounts(entries)
         topicMembership = buildTopicMembership(entries)
@@ -443,9 +447,11 @@ final class AppModel {
                                       annotationIndex: annotationIndex,
                                       topicMembership: topicMembership)
             openBook = bookContext(for: e, in: entries)
+            openTopic = topicContext(for: e, in: entries)
         } else {
             openRelations = nil
             openBook = nil
+            openTopic = nil
         }
     }
 

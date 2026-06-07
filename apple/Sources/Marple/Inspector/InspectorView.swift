@@ -188,6 +188,9 @@ private struct OutlineSection: View {
             if let book = model.openBook {
                 BookNavGroup(model: model, book: book)
             }
+            if let topic = model.openTopic {
+                TopicNavGroup(model: model, topic: topic)
+            }
             PageOutlineGroup(model: model)
         }
     }
@@ -221,6 +224,39 @@ private struct BookNavGroup: View {
     }
 
     private func chapterLabel(_ e: Entry) -> String {
+        if let t = e.title, !t.isEmpty { return t }
+        return (e.path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+    }
+}
+
+/// EPUB-style "本专题" navigation: the topic's overview + its resources pages,
+/// mirroring BookNavGroup. Topic pages share one type and are split by `kind`
+/// (see TopicContext), so the same overview-plus-children affordance applies.
+private struct TopicNavGroup: View {
+    @Bindable var model: AppModel
+    let topic: TopicContext
+    var body: some View {
+        VStack(alignment: .leading, spacing: InspectorStyle.headerSpacing) {
+            SectionHeader("本专题")
+            VStack(alignment: .leading, spacing: 0) {
+                if let ov = topic.overview {
+                    BookNavRow(label: "概述",
+                               active: model.openPath == ov.path) { navigate(to: ov.path) }
+                }
+                ForEach(topic.pages) { page in
+                    BookNavRow(label: pageLabel(page),
+                               active: model.openPath == page.path) { navigate(to: page.path) }
+                }
+            }
+        }
+    }
+
+    private func navigate(to path: String) {
+        guard path != model.openPath else { return }
+        Task { await model.open(path) }
+    }
+
+    private func pageLabel(_ e: Entry) -> String {
         if let t = e.title, !t.isEmpty { return t }
         return (e.path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
     }
