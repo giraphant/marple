@@ -58,6 +58,7 @@ struct TalkIndexingTests {
         #expect(entry.title == "Network Society")
         #expect(entry.author == ["Wang", "Melina Lim"])      // speaker → author
         #expect(entry.created == "2024-11-08")                // date → created
+        #expect(entry.media == "recording.mov")              // media → media column
         #expect(entry.themes?.contains("network-society") == true)
     }
 
@@ -110,6 +111,8 @@ struct TalkIndexingTests {
         }
         #expect(entry.entryType == "transcript")
         #expect(entry.title == "Network Society — 转写")
+        // `talk` back-ref folded into the annotates column (QUA-185).
+        #expect(entry.annotates == "network-society-20241108")
     }
 
     @Test("transcript: canonical frontmatter title wins over a differing body H1")
@@ -133,16 +136,34 @@ struct TalkIndexingTests {
         #expect(entry.title == "Network Society — Transcript")
     }
 
-    @Test("conformance: talk `date` is verified (via created); `media` not false-flagged")
+    @Test("conformance: talk verifies title, date (via created) and media (QUA-185)")
     func talkConformance() {
         let snap = SchemaSnapshot(requiredByType: ["talk": ["title", "date", "media"]])
-        func talk(date: String?) -> Entry {
+        func talk(date: String?, media: String?) -> Entry {
             Entry(path: "vault/talks/x/talk.md", type: .talk, title: "T", author: [],
-                  year: nil, ratingScore: 0, themes: [], preview: "", hasPDF: false, created: date)
+                  year: nil, ratingScore: 0, themes: [], preview: "", hasPDF: false,
+                  created: date, media: media)
         }
-        // title + date present; `media` is unmodeled → must not be reported missing.
-        #expect(VaultConformance.check(talk(date: "2024-11-08"), against: snap)?.isConforming == true)
-        // missing date → flagged via the created mapping (media still not flagged).
-        #expect(VaultConformance.check(talk(date: nil), against: snap)?.missingRequired == ["date"])
+        // title + date + media all present → conforming.
+        #expect(VaultConformance.check(talk(date: "2024-11-08", media: "recording.mov"),
+                                       against: snap)?.isConforming == true)
+        // missing date (via created) and media → both flagged, in schema order.
+        #expect(VaultConformance.check(talk(date: nil, media: nil),
+                                       against: snap)?.missingRequired == ["date", "media"])
+    }
+
+    @Test("conformance: transcript verifies title and talk back-ref via annotates (QUA-185)")
+    func transcriptConformance() {
+        let snap = SchemaSnapshot(requiredByType: ["transcript": ["title", "talk"]])
+        func transcript(talk: String?) -> Entry {
+            // The indexer folds the `talk` frontmatter key into `annotates`.
+            Entry(path: "vault/talks/x/transcript.md", type: .transcript, title: "T",
+                  author: [], year: nil, ratingScore: 0, themes: [], preview: "",
+                  hasPDF: false, annotates: talk)
+        }
+        #expect(VaultConformance.check(transcript(talk: "network-society-20241108"),
+                                       against: snap)?.isConforming == true)
+        #expect(VaultConformance.check(transcript(talk: nil),
+                                       against: snap)?.missingRequired == ["talk"])
     }
 }

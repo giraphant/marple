@@ -114,10 +114,17 @@ public struct IndexedEntry: Sendable, Equatable {
     public var chaptersAnalyzed: Int64?
 
     /// Path/slug of the entry this one annotates.  Column: `annotates`.
+    /// `transcript` reuses this column for its required back-ref to its talk
+    /// (the `talk:` frontmatter key) so conformance can verify it (QUA-185).
     public var annotates: String?
 
     /// Free-text creation date from frontmatter.  Column: `created`.
     public var created: String?
+
+    /// `talk` recording filename from the `media:` frontmatter key.  Indexed
+    /// only so conformance can verify talk's required `media` key; the player
+    /// resolves the real file on disk via `TalkMedia`.  Column: `media`.
+    public var media: String? = nil
 
     // MARK: Source PDF
 
@@ -355,7 +362,15 @@ public func buildIndexedEntry(
     let sourceValue: String? = truthyText(frontmatter, "source")
     let doiValue: String? = truthyText(frontmatter, "doi")
     let chaptersAnalyzedValue: Int64? = intValue(field(frontmatter, "chapters_analyzed"))
+    // `transcript`'s required back-ref to its talk lives under `talk` (a slug);
+    // fold it into the `annotates` column so conformance can verify it (QUA-185).
+    // It never collides with `note`'s `annotates` — the relations index keys off
+    // type, and a transcript carries no `annotates` key of its own.
     let annotatesValue: String? = truthyText(frontmatter, "annotates")
+        ?? (entryType == "transcript" ? truthyText(frontmatter, "talk") : nil)
+    // `talk`'s required `media` key (recording filename, e.g. `recording.mov`),
+    // carried for conformance only (QUA-185); playback uses TalkMedia on disk.
+    let mediaValue: String? = entryType == "talk" ? truthyText(frontmatter, "media") : nil
     // `talk` dates its event under `date` (full ISO day), reusing the `created`
     // column so the inspector / sort surfaces treat it like any other date.
     let createdValue: String? = textValue(field(frontmatter, "created"))
@@ -386,6 +401,7 @@ public func buildIndexedEntry(
         chaptersAnalyzed: chaptersAnalyzedValue,
         annotates: annotatesValue,
         created: createdValue,
+        media: mediaValue,
         pdfSlug: pdfSlugValue,
         hasPDF: hasPDFValue,
         mtime: mtimeMs,

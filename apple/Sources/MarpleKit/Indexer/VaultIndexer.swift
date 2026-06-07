@@ -386,6 +386,9 @@ public final class VaultIndexer: @unchecked Sendable {
             // QUA-137: topics_json replaced the dropped singular `topic` column.
             // Its absence means a pre-0.4.0 DB → force buildFull rebuild.
             "topics_json",
+            // QUA-185: `media` carries talk's recording filename for conformance.
+            // Its absence means a pre-QUA-185 DB → force buildFull rebuild.
+            "media",
         ]
 
         var config = Configuration()
