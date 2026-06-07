@@ -3,6 +3,11 @@ import Testing
 @testable import MarpleKit
 
 @Suite struct SupersetAutomationTests {
+    private final class LogBox: @unchecked Sendable {
+        private(set) var entries: [String] = []
+        func append(_ message: String) { entries.append(message) }
+    }
+
     private let entry = Entry(
         path: "vault/papers/a.md",
         type: .paper,
@@ -412,13 +417,18 @@ import Testing
     }
 
     @Test func runnerReportsWorkspaceListLaunchFailure() async {
-        let runner = SupersetRunner { _ in
-            throw SupersetDispatchError.launchFailed("No such file")
-        }
+        let log = LogBox()
+        let runner = SupersetRunner(
+            execute: { _ in throw SupersetDispatchError.launchFailed("No such file") },
+            log: { log.append($0) }
+        )
 
         await #expect(throws: SupersetWorkspaceListError.launchFailed("No such file")) {
             try await runner.listWorkspaceIDs(cliPath: "superset")
         }
+
+        #expect(log.entries.count == 1)
+        #expect(log.entries.first?.contains("No such file") == true)
     }
 
     @Test func runnerRejectsMissingWorkspaceID() async throws {
@@ -451,10 +461,14 @@ import Testing
             documentText: "Body",
             related: SupersetRelatedContext()
         )
-        let runner = SupersetRunner { invocation in
-            #expect(invocation.arguments.contains("--attachment"))
-            return SupersetProcessResult(terminationStatus: 2, stdout: "", stderr: "bad workspace")
-        }
+        let log = LogBox()
+        let runner = SupersetRunner(
+            execute: { invocation in
+                #expect(invocation.arguments.contains("--attachment"))
+                return SupersetProcessResult(terminationStatus: 2, stdout: "", stderr: "bad workspace")
+            },
+            log: { log.append($0) }
+        )
 
         await #expect(throws: SupersetDispatchError.failed(status: 2, stderr: "bad workspace")) {
             try await runner.dispatch(
@@ -463,6 +477,72 @@ import Testing
                 context: context
             )
         }
+
+        // QUA-192: exit code and stderr land in the persistent log behind the
+        // "请查看日志" hint instead of a print() the GUI never shows.
+        let entry = try #require(log.entries.first)
+        #expect(entry.contains("退出码 2"))
+        #expect(entry.contains("bad workspace"))
+        #expect(entry.contains("vault/papers/a.md"))
+    }
+
+    @Test func runnerLogsStdoutWhenStderrEmptyOnFailure() async throws {
+        let context = try SupersetDispatchContext(
+            workspaceRoot: "/tmp/marple-workspace",
+            targetPath: "vault/papers/a.md",
+            entry: entry,
+            documentText: "Body",
+            related: SupersetRelatedContext()
+        )
+        let log = LogBox()
+        let runner = SupersetRunner(
+            execute: { _ in SupersetProcessResult(terminationStatus: 1, stdout: "fatal: boom", stderr: "") },
+            log: { log.append($0) }
+        )
+
+        await #expect(throws: SupersetDispatchError.failed(status: 1, stderr: "")) {
+            try await runner.dispatch(
+                action: .reanalyze,
+                config: SupersetDispatchConfig(workspaceID: "ws_123"),
+                context: context
+            )
+        }
+
+        #expect(log.entries.first?.contains("fatal: boom") == true)
+    }
+
+    @Test func runnerDoesNotLogAuthFailureAsError() async {
+        let log = LogBox()
+        let runner = SupersetRunner(
+            execute: { _ in SupersetProcessResult(terminationStatus: 1, stdout: "", stderr: "Error: Not logged in") },
+            log: { log.append($0) }
+        )
+
+        await #expect(throws: SupersetWorkspaceListError.notAuthenticated) {
+            try await runner.listWorkspaceIDs(cliPath: "superset")
+        }
+
+        #expect(log.entries.isEmpty)
+    }
+
+    @Test func supersetLogFormatsTimestampedLineWithTrailingNewline() {
+        let line = SupersetLog.line("boom", timestamp: Date(timeIntervalSince1970: 0))
+
+        #expect(line == "[1970-01-01T00:00:00Z] boom\n")
+    }
+
+    @Test func supersetLogAppendsToFile() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("marple-superset-log-test-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("superset.log")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let log = SupersetLog(fileURL: fileURL)
+        log.append("first", timestamp: Date(timeIntervalSince1970: 0))
+        log.append("second", timestamp: Date(timeIntervalSince1970: 1))
+
+        let contents = try String(contentsOf: fileURL, encoding: .utf8)
+        #expect(contents == "[1970-01-01T00:00:00Z] first\n[1970-01-01T00:00:01Z] second\n")
     }
 
     @Test func runnerExecutesSuccessfulDispatch() async throws {
