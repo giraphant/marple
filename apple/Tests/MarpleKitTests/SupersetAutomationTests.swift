@@ -282,7 +282,7 @@ import Testing
 
         #expect(invocation.executablePath == "/usr/bin/env")
         #expect(invocation.arguments == [
-            "superset", "agents", "run",
+            "superset", "agents", "create",
             "--workspace", "ws_123",
             "--agent", "claude",
             "--prompt", "Prompt text",
@@ -350,6 +350,16 @@ import Testing
     @Test func runnerReportsWorkspaceListAuthFailure() async {
         let runner = SupersetRunner { _ in
             SupersetProcessResult(terminationStatus: 1, stdout: "", stderr: "Error: Not logged in")
+        }
+
+        await #expect(throws: SupersetWorkspaceListError.notAuthenticated) {
+            try await runner.listWorkspaceIDs(cliPath: "superset")
+        }
+    }
+
+    @Test func runnerTreatsInvalidAPIKeyAsAuthFailure() async {
+        let runner = SupersetRunner { _ in
+            SupersetProcessResult(terminationStatus: 1, stdout: "", stderr: "Error: Invalid API key.")
         }
 
         await #expect(throws: SupersetWorkspaceListError.notAuthenticated) {
