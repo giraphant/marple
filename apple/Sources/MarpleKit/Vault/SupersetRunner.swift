@@ -129,7 +129,7 @@ public struct SupersetRunner: Sendable {
         let trimmedConfig = SupersetDispatchConfig(
             workspaceID: workspaceID,
             agent: agent,
-            cliPath: config.cliPath,
+            cliPath: Self.resolveCLIPath(config.cliPath),
             reanalyzePrompt: config.reanalyzePrompt,
             formatPrompt: config.formatPrompt,
             translatePrompt: config.translatePrompt,
@@ -161,7 +161,7 @@ public struct SupersetRunner: Sendable {
             throw SupersetWorkspaceListError.missingCLIPath
         }
 
-        let invocation = Self.workspaceListInvocation(cliPath: trimmedCLIPath)
+        let invocation = Self.workspaceListInvocation(cliPath: Self.resolveCLIPath(trimmedCLIPath))
         let result: SupersetProcessResult
         do {
             result = try await execute(invocation)
@@ -222,6 +222,32 @@ public struct SupersetRunner: Sendable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .filter { seen.insert($0).inserted }
+    }
+
+    // GUI-launched apps don't inherit the shell's PATH, so a bare `superset`
+    // run via `/usr/bin/env` exits 127 ("not found") even when the CLI is
+    // installed. Resolve a bare/empty command name against the known install
+    // locations to an absolute path; only fall back to PATH lookup if nothing
+    // matches. An explicit path (contains "/") is always respected as-is.
+    static func resolveCLIPath(
+        _ cliPath: String,
+        searchDirectories: [String] = SupersetRunner.defaultSearchDirectories,
+        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
+    ) -> String {
+        guard !cliPath.contains("/") else { return cliPath }
+        let name = cliPath.isEmpty ? "superset" : cliPath
+        for directory in searchDirectories {
+            let candidate = directory.hasSuffix("/") ? directory + name : directory + "/" + name
+            if isExecutable(candidate) {
+                return candidate
+            }
+        }
+        return cliPath
+    }
+
+    static var defaultSearchDirectories: [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return ["\(home)/.superset/bin", "/opt/homebrew/bin", "/usr/local/bin"]
     }
 
     private static func invocation(cliPath: String, arguments: [String]) -> SupersetInvocation {
