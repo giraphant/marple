@@ -4,7 +4,6 @@ APP_BUNDLE  := $(APP_NAME).app
 INSTALL_DIR := /Applications
 DIST_DIR    := $(BUILD_DIR)/dist
 DIST_DMG    := $(DIST_DIR)/$(APP_NAME).dmg
-DMG_STAGING := $(BUILD_DIR)/dmg-staging
 
 # Marketing version comes from the VERSION file (single source of truth).
 # Override on the CLI only to double-check: `make release VERSION=0.1.0`.
@@ -39,15 +38,24 @@ install: build
 	@echo "Installed to $(INSTALL_DIR)/$(APP_BUNDLE)"
 
 # Release bundle (signed, hardened runtime) packaged into a signed DMG.
+#
+# The repo lives under ~/Documents, an iCloud File Provider mount that keeps
+# re-stamping com.apple.FinderInfo onto any .app directory — which invalidates
+# the signature and fails notarization. So we assemble, sign, and package the
+# DMG entirely in a temp dir on the local volume (off iCloud), then copy only
+# the finished DMG (a single file, immune to the FinderInfo problem) back.
 dist:
-	CONFIG=release SIGN=1 VERSION=$(VERSION) \
-		CODESIGN_IDENTITY="$(DEVELOPER_ID_IDENTITY)" ./build-app.sh
-	@rm -rf "$(DIST_DIR)" "$(DMG_STAGING)"
-	@mkdir -p "$(DIST_DIR)" "$(DMG_STAGING)"
-	@cp -R "$(APP_BUNDLE)" "$(DMG_STAGING)/$(APP_BUNDLE)"
-	@ln -s /Applications "$(DMG_STAGING)/Applications"
-	@hdiutil create -volname "$(APP_NAME)" -srcfolder "$(DMG_STAGING)" -ov -format UDZO "$(DIST_DMG)" >/dev/null
-	@codesign --force --sign "$(DEVELOPER_ID_IDENTITY)" --timestamp "$(DIST_DMG)"
+	@rm -rf "$(DIST_DIR)"
+	@mkdir -p "$(DIST_DIR)"
+	@work=$$(mktemp -d /tmp/marple-dist.XXXXXX); \
+	staging="$$work/dmg"; mkdir -p "$$staging"; \
+	CONFIG=release SIGN=1 VERSION=$(VERSION) APP_DIR="$$staging/$(APP_BUNDLE)" \
+		CODESIGN_IDENTITY="$(DEVELOPER_ID_IDENTITY)" ./build-app.sh || exit 1; \
+	ln -s /Applications "$$staging/Applications"; \
+	hdiutil create -volname "$(APP_NAME)" -srcfolder "$$staging" -ov -format UDZO "$$work/$(APP_NAME).dmg" >/dev/null; \
+	codesign --force --sign "$(DEVELOPER_ID_IDENTITY)" --timestamp "$$work/$(APP_NAME).dmg"; \
+	cp "$$work/$(APP_NAME).dmg" "$(DIST_DMG)"; \
+	rm -rf "$$work"
 	@echo "Packaged $(DIST_DMG)"
 
 notarize: dist

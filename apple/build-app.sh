@@ -8,7 +8,12 @@ cd "$(dirname "$0")"
 # codesigning (release/dist); unset keeps the old unsigned dev bundle.
 CONFIG="${CONFIG:-debug}"
 PKG_ROOT=".build/arm64-apple-macosx/$CONFIG"
-APP="Marple.app/Contents"
+# Bundle output dir. Defaults to ./Marple.app for dev builds. `make dist`
+# overrides it to a path off the iCloud-synced tree: the File Provider keeps
+# re-stamping com.apple.FinderInfo onto a synced .app, which codesign rejects
+# ("resource fork, Finder information, or similar detritus not allowed").
+APP_DIR="${APP_DIR:-Marple.app}"
+APP="$APP_DIR/Contents"
 APPICONSET="Sources/Marple/Resources/Assets.xcassets/AppIcon.appiconset"
 BUNDLE_ID="com.marple.app"
 ENTITLEMENTS="Resources/Marple.entitlements"
@@ -59,7 +64,7 @@ if [ ! -f default.metallib ]; then
 fi
 
 echo "Assembling .app bundle..."
-rm -rf Marple.app
+rm -rf "$APP_DIR"
 mkdir -p "$APP/MacOS"
 mkdir -p "$APP/Resources"
 
@@ -144,7 +149,7 @@ if [ "${SIGN:-}" = "1" ]; then
     echo "Signing with: $CODESIGN_IDENTITY"
     # Strip resource forks / Finder info / quarantine xattrs that codesign
     # rejects ("resource fork, Finder information, or similar detritus").
-    xattr -cr Marple.app
+    xattr -cr "$APP_DIR"
     codesign --force --options runtime --timestamp \
         --sign "$CODESIGN_IDENTITY" "$APP/MacOS/marple-cli"
     # mlx.metallib lives in MacOS/ (colocated lookup), so codesign treats it as
@@ -158,12 +163,12 @@ if [ "${SIGN:-}" = "1" ]; then
         --sign "$CODESIGN_IDENTITY" "$APP/MacOS/Marple"
     codesign --force --options runtime --timestamp \
         --entitlements "$ENTITLEMENTS" \
-        --sign "$CODESIGN_IDENTITY" Marple.app
-    codesign --verify --strict --verbose=2 Marple.app
+        --sign "$CODESIGN_IDENTITY" "$APP_DIR"
+    codesign --verify --strict --verbose=2 "$APP_DIR"
 fi
 
-echo "Done: Marple.app (v$VERSION build $BUILD)"
-echo "Run with:  open Marple.app"
+echo "Done: $APP_DIR (v$VERSION build $BUILD)"
+echo "Run with:  open \"$APP_DIR\""
 
 # Release builds are distributed via the DMG / Homebrew cask, which puts
 # marple-cli on PATH — so only the dev (debug) flow self-symlinks here.
