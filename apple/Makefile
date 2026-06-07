@@ -87,14 +87,13 @@ update-cask:
 	@if [ -z "$(VERSION)" ]; then echo "Usage: make update-cask VERSION=0.1.0"; exit 1; fi
 	@if [ ! -f "$(DIST_DMG)" ]; then echo "ERROR: $(DIST_DMG) not found. Run 'make dist' first."; exit 1; fi
 	@sha=$$(shasum -a 256 "$(DIST_DMG)" | awk '{print $$1}'); \
-	url="https://github.com/giraphant/marple/releases/download/v$(VERSION)/$(APP_NAME).dmg"; \
 	tmp=$$(mktemp -d); \
 	trap 'rm -rf "$$tmp"' EXIT; \
 	echo "Cloning $(TAP_REPO)..."; \
 	gh repo clone "$(TAP_REPO)" "$$tmp" -- -q || exit 1; \
 	if [ ! -f "$$tmp/$(CASK_PATH)" ]; then \
 		mkdir -p "$$tmp/Casks"; \
-		printf 'cask "marple" do\n  version "%s"\n  sha256 "%s"\n\n  url "%s"\n  name "Marple"\n  desc "Native macOS reader for your knowledge vault"\n  homepage "https://github.com/giraphant/marple"\n\n  depends_on macos: ">= :sequoia"\n\n  app "Marple.app"\n  binary "#{appdir}/Marple.app/Contents/MacOS/marple-cli"\n\n  zap trash: [\n    "~/Library/Application Support/com.marple.app",\n    "~/Library/Preferences/com.marple.app.plist",\n  ]\nend\n' "$(VERSION)" "$$sha" "$$url" > "$$tmp/$(CASK_PATH)"; \
+		printf 'cask "marple" do\n  version "%s"\n  sha256 "%s"\n\n  url "https://github.com/giraphant/marple/releases/download/v#{version}/$(APP_NAME).dmg"\n  name "Marple"\n  desc "Native macOS reader for your knowledge vault"\n  homepage "https://github.com/giraphant/marple"\n\n  depends_on macos: ">= :sequoia"\n\n  app "Marple.app"\n  binary "#{appdir}/Marple.app/Contents/MacOS/marple-cli"\n\n  zap trash: [\n    "~/Library/Application Support/com.marple.app",\n    "~/Library/Preferences/com.marple.app.plist",\n  ]\nend\n' "$(VERSION)" "$$sha" > "$$tmp/$(CASK_PATH)"; \
 	else \
 		sed -i '' -E "s|^  version \".*\"|  version \"$(VERSION)\"|" "$$tmp/$(CASK_PATH)"; \
 		sed -i '' -E "s|^  sha256 \".*\"|  sha256 \"$$sha\"|" "$$tmp/$(CASK_PATH)"; \
