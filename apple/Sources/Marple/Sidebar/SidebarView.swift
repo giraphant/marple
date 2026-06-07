@@ -174,7 +174,9 @@ private struct SpaceControlView: NSViewRepresentable {
         }
 
         private func drawSymbol(_ image: NSImage, color: NSColor) {
-            guard let configured = image.withSymbolConfiguration(.init(pointSize: 14, weight: isActive ? .semibold : .medium)) else { return }
+            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: isActive ? .semibold : .medium)
+                .applying(.init(paletteColors: [color]))
+            guard let configured = image.withSymbolConfiguration(config) else { return }
             let maxSize: CGFloat = 16
             let imageSize = configured.size
             let scale = min(maxSize / imageSize.width, maxSize / imageSize.height)
@@ -183,7 +185,6 @@ private struct SpaceControlView: NSViewRepresentable {
                               y: bounds.midY - drawSize.height / 2,
                               width: drawSize.width,
                               height: drawSize.height)
-            color.set()
             configured.draw(in: rect,
                             from: NSRect(origin: .zero, size: imageSize),
                             operation: .sourceOver,
