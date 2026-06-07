@@ -302,6 +302,46 @@ import Testing
         #expect(invocation.arguments.contains("superset"))
     }
 
+    @Test func resolveCLIPathPrefersKnownInstallLocationForBareName() {
+        let resolved = SupersetRunner.resolveCLIPath(
+            "superset",
+            searchDirectories: ["/opt/missing", "/Users/me/.superset/bin"],
+            isExecutable: { $0 == "/Users/me/.superset/bin/superset" }
+        )
+
+        #expect(resolved == "/Users/me/.superset/bin/superset")
+    }
+
+    @Test func resolveCLIPathResolvesEmptyPathToSupersetBinary() {
+        let resolved = SupersetRunner.resolveCLIPath(
+            "",
+            searchDirectories: ["/Users/me/.superset/bin"],
+            isExecutable: { $0 == "/Users/me/.superset/bin/superset" }
+        )
+
+        #expect(resolved == "/Users/me/.superset/bin/superset")
+    }
+
+    @Test func resolveCLIPathRespectsExplicitPathWithSlash() {
+        let resolved = SupersetRunner.resolveCLIPath(
+            "/custom/superset",
+            searchDirectories: ["/Users/me/.superset/bin"],
+            isExecutable: { _ in true }
+        )
+
+        #expect(resolved == "/custom/superset")
+    }
+
+    @Test func resolveCLIPathFallsBackToInputWhenNotFound() {
+        let resolved = SupersetRunner.resolveCLIPath(
+            "superset",
+            searchDirectories: ["/opt/missing", "/also/missing"],
+            isExecutable: { _ in false }
+        )
+
+        #expect(resolved == "superset")
+    }
+
     @Test func workspaceListInvocationUsesJSONLocalWorkspacesCommand() {
         let invocation = SupersetRunner.workspaceListInvocation(cliPath: "superset")
 
@@ -333,7 +373,11 @@ import Testing
 
     @Test func runnerListsWorkspaceIDs() async throws {
         let runner = SupersetRunner { invocation in
-            #expect(invocation.arguments == ["superset", "workspaces", "list", "--json", "--local"])
+            // Resolution may turn a bare `superset` into an absolute executable
+            // (dropping the leading argv) when the CLI is installed locally;
+            // assert the workspaces command regardless of how it's targeted.
+            #expect(invocation.executablePath.hasSuffix("superset") || invocation.arguments.first == "superset")
+            #expect(Array(invocation.arguments.suffix(4)) == ["workspaces", "list", "--json", "--local"])
             return SupersetProcessResult(terminationStatus: 0, stdout: """
             [
               {"id":"ws_123","name":"Current","branch":"main","projectName":"marple","hostName":"RamuG","type":"worktree"},
@@ -444,9 +488,12 @@ import Testing
             context: context
         )
 
-        #expect(box.invocation?.executablePath == "/usr/bin/env")
-        #expect(box.invocation?.arguments.contains("--workspace") == true)
-        #expect(box.invocation?.arguments.contains("ws_123") == true)
+        // env-fallback ("/usr/bin/env" + "superset" argv) or a locally-resolved
+        // absolute path — either way the invocation must target the superset CLI.
+        let invocation = try #require(box.invocation)
+        #expect(invocation.executablePath.hasSuffix("superset") || invocation.arguments.first == "superset")
+        #expect(invocation.arguments.contains("--workspace"))
+        #expect(invocation.arguments.contains("ws_123"))
     }
 
     @Test func runnerPassesCustomPromptIntentToInvocation() async throws {
