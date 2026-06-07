@@ -165,6 +165,22 @@ if [ "${SIGN:-}" = "1" ]; then
         --entitlements "$ENTITLEMENTS" \
         --sign "$CODESIGN_IDENTITY" "$APP_DIR"
     codesign --verify --strict --verbose=2 "$APP_DIR"
+else
+    # QUA-190: dev builds must still be sealed as a *bundle*, not just left with
+    # the bare ad-hoc signature `swift build` stamps on the executable. An
+    # unsealed bundle reports `Info.plist=not bound` and carries no Designated
+    # Requirement, so macOS TCC has no stable identity to attach the "allow
+    # Documents access" grant to — it re-prompts on every file the vault indexer
+    # touches (the user sees an endless approve→prompt→approve loop). Ad-hoc
+    # signing the whole bundle inner-out seals it and gives a cdhash-based DR
+    # that TCC can record consent against. cdhash changes per rebuild, so expect
+    # one fresh prompt after each rebuild — but no within-session loop.
+    codesign --force --sign - "$APP/MacOS/marple-cli"
+    if [ -f "$APP/MacOS/mlx.metallib" ]; then
+        codesign --force --sign - "$APP/MacOS/mlx.metallib"
+    fi
+    codesign --force --sign - "$APP/MacOS/Marple"
+    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_DIR"
 fi
 
 echo "Done: $APP_DIR (v$VERSION build $BUILD)"
