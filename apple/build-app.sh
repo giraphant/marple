@@ -142,6 +142,9 @@ PLIST
 if [ "${SIGN:-}" = "1" ]; then
     : "${CODESIGN_IDENTITY:?SIGN=1 requires CODESIGN_IDENTITY (set DEVELOPER_ID_IDENTITY in Makefile.local)}"
     echo "Signing with: $CODESIGN_IDENTITY"
+    # Strip resource forks / Finder info / quarantine xattrs that codesign
+    # rejects ("resource fork, Finder information, or similar detritus").
+    xattr -cr Marple.app
     codesign --force --options runtime --timestamp \
         --sign "$CODESIGN_IDENTITY" "$APP/MacOS/marple-cli"
     # mlx.metallib lives in MacOS/ (colocated lookup), so codesign treats it as
