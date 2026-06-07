@@ -175,6 +175,10 @@ else
     # signing the whole bundle inner-out seals it and gives a cdhash-based DR
     # that TCC can record consent against. cdhash changes per rebuild, so expect
     # one fresh prompt after each rebuild — but no within-session loop.
+    # Strip resource forks / Finder info the iCloud File Provider stamps onto the
+    # copied binary; codesign rejects them ("detritus not allowed"). Mirrors the
+    # SIGN=1 branch above — dev builds on a synced tree need it too.
+    xattr -cr "$APP_DIR"
     codesign --force --sign - "$APP/MacOS/marple-cli"
     if [ -f "$APP/MacOS/mlx.metallib" ]; then
         codesign --force --sign - "$APP/MacOS/mlx.metallib"
