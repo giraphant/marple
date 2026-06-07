@@ -169,12 +169,19 @@ public struct SupersetRunner: Sendable {
             throw SupersetWorkspaceListError.launchFailed(message)
         }
         guard result.terminationStatus == 0 else {
-            if result.stderr.localizedCaseInsensitiveContains("not logged in") {
+            if Self.isAuthFailure(stderr: result.stderr) {
                 throw SupersetWorkspaceListError.notAuthenticated
             }
             throw SupersetWorkspaceListError.failed(status: result.terminationStatus, stderr: result.stderr)
         }
         return try Self.workspaces(from: result.stdout)
+    }
+
+    // Superset CLI phrases auth failures differently for OAuth ("not logged in")
+    // and API-key ("Invalid API key.") sessions; treat both as not-authenticated.
+    static func isAuthFailure(stderr: String) -> Bool {
+        let markers = ["not logged in", "invalid api key", "unauthorized"]
+        return markers.contains { stderr.localizedCaseInsensitiveContains($0) }
     }
 
     public func listWorkspaceIDs(cliPath: String) async throws -> [String] {
@@ -187,7 +194,7 @@ public struct SupersetRunner: Sendable {
         contextPackagePath: String
     ) -> SupersetInvocation {
         let runArguments = [
-            "agents", "run",
+            "agents", "create",
             "--workspace", config.workspaceID,
             "--agent", config.agent,
             "--prompt", prompt,
