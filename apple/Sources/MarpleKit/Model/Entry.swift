@@ -124,6 +124,11 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public let category: String?
     public let annotates: String?
     public let created: String?
+    /// Talk recording filename from the `media:` frontmatter key (e.g.
+    /// `recording.mov`). Carried only so `VaultConformance` can verify talk's
+    /// required `media` key is present — playback resolves the file on disk via
+    /// `TalkMedia`, not this value. nil for every non-talk type (QUA-185).
+    public let media: String?
 
     enum CodingKeys: String, CodingKey {
         case path, type, title, author, year, preview
@@ -131,7 +136,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         case themes, topics
         case hasPDF = "has_pdf"
         case pdfSlug = "pdf_slug"
-        case mtime, added, source, book, kind, journal, doi, publisher, isbn, category, annotates, created
+        case mtime, added, source, book, kind, journal, doi, publisher, isbn, category, annotates, created, media
     }
 
     public init(from decoder: Decoder) throws {
@@ -175,6 +180,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         category = (try? c.decodeIfPresent(String.self, forKey: .category)) ?? nil
         annotates = (try? c.decodeIfPresent(String.self, forKey: .annotates)) ?? nil
         created = (try? c.decodeIfPresent(String.self, forKey: .created)) ?? nil
+        media = (try? c.decodeIfPresent(String.self, forKey: .media)) ?? nil
     }
 
     public init(path: String, type: EntryType, title: String?, author: [String],
@@ -185,7 +191,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
                 book: String? = nil, kind: String? = nil,
                 journal: String? = nil, doi: String? = nil, publisher: String? = nil,
                 isbn: String? = nil, category: String? = nil, annotates: String? = nil,
-                created: String? = nil) {
+                created: String? = nil, media: String? = nil) {
         self.path = path
         self.type = type
         self.title = title
@@ -209,6 +215,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         self.category = category
         self.annotates = annotates
         self.created = created
+        self.media = media
     }
 }
 
@@ -228,6 +235,6 @@ public extension Entry {
               pdfSlug: pdfSlug, mtime: mtime, added: added, source: source ?? self.source,
               book: book, kind: kind, journal: journal,
               doi: doi ?? self.doi, publisher: publisher, isbn: isbn, category: category,
-              annotates: annotates, created: created)
+              annotates: annotates, created: created, media: media)
     }
 }

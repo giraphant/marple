@@ -107,7 +107,7 @@ public final class IndexDatabase: @unchecked Sendable {
             let cursor = try Row.fetchCursor(db, sql: """
                 SELECT path, type, book, title, author, year_json, rating_score,
                        themes_json, topics_json, kind, journal, source, doi, publisher, isbn, category,
-                       annotates, created, has_pdf, pdf_slug, mtime, preview, added
+                       annotates, created, media, has_pdf, pdf_slug, mtime, preview, added
                 FROM entries
                 ORDER BY path
                 """)
@@ -272,6 +272,7 @@ public final class IndexDatabase: @unchecked Sendable {
                    e.journal AS journal, e.source AS source, e.doi AS doi,
                    e.publisher AS publisher, e.isbn AS isbn,
                    e.category AS category, e.annotates AS annotates, e.created AS created,
+                   e.media AS media,
                    e.has_pdf AS has_pdf,
                    e.pdf_slug AS pdf_slug,
                    e.mtime AS mtime, e.preview AS preview, e.added AS added,
@@ -319,6 +320,7 @@ public final class IndexDatabase: @unchecked Sendable {
                    e.journal AS journal, e.source AS source, e.doi AS doi,
                    e.publisher AS publisher, e.isbn AS isbn,
                    e.category AS category, e.annotates AS annotates, e.created AS created,
+                   e.media AS media,
                    e.has_pdf AS has_pdf,
                    e.pdf_slug AS pdf_slug,
                    e.mtime AS mtime, e.preview AS preview, e.added AS added,
@@ -398,6 +400,7 @@ public final class IndexDatabase: @unchecked Sendable {
         let category: String? = row["category"]
         let annotates: String? = row["annotates"]
         let created: String? = row["created"]
+        let media: String? = row["media"]
         return Entry(
             path: path,
             type: EntryType(rawValue: typeRaw),
@@ -421,7 +424,8 @@ public final class IndexDatabase: @unchecked Sendable {
             isbn: isbn,
             category: category,
             annotates: annotates,
-            created: created
+            created: created,
+            media: media
         )
     }
 

@@ -67,17 +67,19 @@ public enum VaultConformance {
         case "journal":         return nonEmpty(entry.journal)
         case "created":         return nonEmpty(entry.created)
         // `talk` requires `date`; the indexer folds it into the `created` column
-        // (same as `note`'s `created`), so verify it there. The type's other
-        // required fields — `media` (talk) and `talk` (transcript's back-ref) —
-        // are not carried in the index; they fall through to the `default: true`
-        // graceful-degradation path below, leaving the vault audit authoritative
-        // for them (QUA-185 tracks indexing them for full coverage).
+        // (same as `note`'s `created`), so verify it there.
         case "date":            return nonEmpty(entry.created)
         case "doi":             return nonEmpty(entry.doi)
         case "isbn":            return nonEmpty(entry.isbn)
         case "category":        return nonEmpty(entry.category)
         case "annotates":       return nonEmpty(entry.annotates)
         case "source":          return nonEmpty(entry.source)
+        // `talk`'s required recording filename, indexed into the `media` column
+        // (QUA-185).
+        case "media":           return nonEmpty(entry.media)
+        // `transcript`'s required back-ref to its talk. The indexer folds the
+        // `talk` frontmatter key into the `annotates` column (QUA-185).
+        case "talk":            return nonEmpty(entry.annotates)
         default:                return true
         }
     }
