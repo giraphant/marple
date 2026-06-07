@@ -106,9 +106,14 @@ public enum SupersetWorkspaceListError: Error, Equatable, LocalizedError, Sendab
 
 public struct SupersetRunner: Sendable {
     public let execute: @Sendable (SupersetInvocation) async throws -> SupersetProcessResult
+    public let log: @Sendable (String) -> Void
 
-    public init(execute: @escaping @Sendable (SupersetInvocation) async throws -> SupersetProcessResult = SupersetRunner.defaultExecute) {
+    public init(
+        execute: @escaping @Sendable (SupersetInvocation) async throws -> SupersetProcessResult = SupersetRunner.defaultExecute,
+        log: @escaping @Sendable (String) -> Void = { SupersetLog.shared.append($0) }
+    ) {
         self.execute = execute
+        self.log = log
     }
 
     public func dispatch(
@@ -149,8 +154,20 @@ public struct SupersetRunner: Sendable {
             prompt: prompt,
             contextPackagePath: contextPackageURL.path
         )
-        let result = try await execute(invocation)
+        let result: SupersetProcessResult
+        do {
+            result = try await execute(invocation)
+        } catch SupersetDispatchError.launchFailed(let message) {
+            log("[\(action.rawValue)] \(context.targetPath) — 启动失败: \(message)")
+            throw SupersetDispatchError.launchFailed(message)
+        }
         guard result.terminationStatus == 0 else {
+            log(Self.failureDetail(
+                label: "[\(action.rawValue)] \(context.targetPath)",
+                status: result.terminationStatus,
+                stdout: result.stdout,
+                stderr: result.stderr
+            ))
             throw SupersetDispatchError.failed(status: result.terminationStatus, stderr: result.stderr)
         }
     }
@@ -166,15 +183,35 @@ public struct SupersetRunner: Sendable {
         do {
             result = try await execute(invocation)
         } catch SupersetDispatchError.launchFailed(let message) {
+            log("[workspaces list] 启动失败: \(message)")
             throw SupersetWorkspaceListError.launchFailed(message)
         }
         guard result.terminationStatus == 0 else {
+            // Not-authenticated has its own actionable message ("先登录"),
+            // so it isn't logged as a failure; genuine failures are.
             if Self.isAuthFailure(stderr: result.stderr) {
                 throw SupersetWorkspaceListError.notAuthenticated
             }
+            log(Self.failureDetail(
+                label: "[workspaces list]",
+                status: result.terminationStatus,
+                stdout: result.stdout,
+                stderr: result.stderr
+            ))
             throw SupersetWorkspaceListError.failed(status: result.terminationStatus, stderr: result.stderr)
         }
         return try Self.workspaces(from: result.stdout)
+    }
+
+    // Builds a single log entry carrying the exit code plus stderr (falling
+    // back to stdout when stderr is empty, e.g. the CLI prints errors to
+    // stdout) — the diagnostic the "请查看日志" hint promises.
+    static func failureDetail(label: String, status: Int32, stdout: String, stderr: String) -> String {
+        let trimmedStderr = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedStdout = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let output = trimmedStderr.isEmpty ? trimmedStdout : trimmedStderr
+        let detail = output.isEmpty ? "(无输出)" : output
+        return "\(label) — 退出码 \(status)\n\(detail)"
     }
 
     // Superset CLI phrases auth failures differently for OAuth ("not logged in")
