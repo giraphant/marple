@@ -22,7 +22,7 @@ import GRDB
                   rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topics_json TEXT, kind TEXT, journal TEXT, source TEXT,
                   doi TEXT, publisher TEXT, isbn TEXT, category TEXT, translation_title_cn TEXT,
                   translation_douban_url TEXT, chapters_analyzed INTEGER, annotates TEXT,
-                  created TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
+                  created TEXT, media TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
                   preview TEXT NOT NULL DEFAULT '', body_len INTEGER NOT NULL DEFAULT 0,
                   added INTEGER NOT NULL DEFAULT 0
                 );
@@ -116,8 +116,9 @@ import GRDB
         let queue = try DatabaseQueue(path: path)
         try queue.write { db in
             try db.execute(
-                sql: "UPDATE entries SET kind = ?, journal = ?, created = ? WHERE path = ?",
-                arguments: ["overview", "American Journal of Sociology", "2026-05-27", "vault/journals/ajs.md"]
+                sql: "UPDATE entries SET kind = ?, journal = ?, created = ?, media = ? WHERE path = ?",
+                arguments: ["overview", "American Journal of Sociology", "2026-05-27",
+                            "recording.mov", "vault/journals/ajs.md"]
             )
         }
 
@@ -127,6 +128,7 @@ import GRDB
         #expect(e.kind == "overview")
         #expect(e.journal == "American Journal of Sociology")
         #expect(e.created == "2026-05-27")
+        #expect(e.media == "recording.mov")   // QUA-185: media column round-trips
     }
 
     @Test func loadEntriesReturnsEmptyWhenDBMissing() throws {
@@ -219,7 +221,7 @@ import GRDB
                       rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topics_json TEXT, kind TEXT, journal TEXT, source TEXT,
                       doi TEXT, publisher TEXT, isbn TEXT, category TEXT, translation_title_cn TEXT,
                       translation_douban_url TEXT, chapters_analyzed INTEGER, annotates TEXT,
-                      created TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
+                      created TEXT, media TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
                       preview TEXT NOT NULL DEFAULT '', body_len INTEGER NOT NULL DEFAULT 0,
                       added INTEGER NOT NULL DEFAULT 0
                     );

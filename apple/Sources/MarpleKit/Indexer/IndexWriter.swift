@@ -66,6 +66,7 @@ public enum IndexWriter {
               chapters_analyzed INTEGER,
               annotates TEXT,
               created TEXT,
+              media TEXT,
               pdf_slug TEXT,
               has_pdf INTEGER NOT NULL DEFAULT 0,
               mtime INTEGER,
@@ -171,8 +172,8 @@ public enum IndexWriter {
                   path, type, book, title, title_en, title_cn, author, year_json, rating_json,
                   rating_score, themes_json, topics_json, kind, journal, source, doi, publisher, isbn, category,
                   translation_title_cn, translation_douban_url, chapters_analyzed,
-                  annotates, created, pdf_slug, has_pdf, mtime, preview, body_len, added
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  annotates, created, media, pdf_slug, has_pdf, mtime, preview, body_len, added
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
             arguments: [
                 entry.path,
@@ -199,6 +200,7 @@ public enum IndexWriter {
                 entry.chaptersAnalyzed,
                 entry.annotates,
                 entry.created,
+                entry.media,
                 entry.pdfSlug,
                 entry.hasPDF ? 1 : 0,
                 entry.mtime,
