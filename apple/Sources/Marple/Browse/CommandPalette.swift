@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import MarpleKit
 
 /// One scored palette row (entry + relevance + match source for the badge).
@@ -24,6 +25,9 @@ struct CommandPalette: View {
     // Computed once per (debounced) search, NOT per keystroke render — sectioning
     // over *all* matches in `body` made typing janky.
     @State private var sections: [PaletteSection] = []
+    // Already-open tabs whose entry matched this search — shown as an Arc-style
+    // "切换到标签页" section above the type sections (de-duped by path).
+    @State private var openMatches: [Entry] = []
     @State private var sourceByPath: [String: String] = [:]
     @State private var loading = false
     @State private var selected = 0
@@ -32,6 +36,11 @@ struct CommandPalette: View {
     // slides a new row under the stationary cursor, which re-fires .onHover and
     // the list drifts uncontrollably.
     @State private var scrollToSelection = false
+    // Cursor position captured at the last ↑/↓. A hover firing while the cursor
+    // is still here was triggered by the list scrolling under a stationary mouse,
+    // not a real move — honoring it would yank `selected` back to the row under
+    // the cursor, so keyboard nav appears stuck. We ignore those (see .onHover).
+    @State private var keyboardNavCursor: NSPoint?
     @State private var searchTask: Task<Void, Never>?
     @FocusState private var fieldFocused: Bool
 
@@ -41,7 +50,9 @@ struct CommandPalette: View {
         if case .type(let t) = model.browsePane { return t } else { return nil }
     }
 
-    private var flat: [Entry] { sections.flatMap { $0.top } }
+    // Open-tab matches sit first so keyboard nav lands on them before the type
+    // sections (mirrors their visual order).
+    private var flat: [Entry] { openMatches + sections.flatMap { $0.top } }
 
     private var hasQuery: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -96,7 +107,7 @@ struct CommandPalette: View {
                 .textFieldStyle(.plain)
                 .font(Typo.title3)
                 .focused($fieldFocused)
-                .onSubmit { openSelected() }
+                .onSubmit { activate(selected) }
 
             if loading {
                 ProgressView().controlSize(.small)
@@ -145,12 +156,13 @@ struct CommandPalette: View {
     @ViewBuilder private var results: some View {
         if mode == .deep && !model.semanticAvailable {
             placeholder("深度检索需要先建立向量索引（构建中）")
-        } else if sections.isEmpty {
+        } else if sections.isEmpty && openMatches.isEmpty {
             placeholder(loading ? "搜索中…" : "没有匹配的条目")
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        if !openMatches.isEmpty { switchSection }
                         ForEach(Array(sectionBases), id: \.section.id) { item in
                             sectionView(item.section, base: item.base)
                         }
@@ -167,11 +179,33 @@ struct CommandPalette: View {
     }
 
     /// Pair each section with the flat index of its first row (for ↑/↓ tracking).
+    /// The open-tab matches occupy the first `openMatches.count` flat slots.
     private var sectionBases: [(section: PaletteSection, base: Int)] {
         var out: [(PaletteSection, Int)] = []
-        var n = 0
+        var n = openMatches.count
         for s in sections { out.append((s, n)); n += s.top.count }
         return out
+    }
+
+    /// Arc-style "switch to an already-open tab" group, pinned above the results.
+    private var switchSection: some View {
+        Section {
+            ForEach(Array(openMatches.enumerated()), id: \.element.path) { offset, entry in
+                row(entry, index: offset, isOpenTab: true)
+            }
+        } header: {
+            HStack(spacing: Space.s3) {
+                Image(systemName: "arrow.right.square")
+                    .foregroundStyle(Color.accentColor)
+                Text("切换到标签页").font(Typo.caption).foregroundStyle(.primary)
+                Text("(\(openMatches.count))").font(Typo.caption2).foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Spacer()
+            }
+            .padding(.horizontal, Space.s5)
+            .padding(.vertical, Space.s2)
+            .background(.thinMaterial)
+        }
     }
 
     private func sectionView(_ section: PaletteSection, base: Int) -> some View {
@@ -207,7 +241,7 @@ struct CommandPalette: View {
         }
     }
 
-    private func row(_ entry: Entry, index: Int) -> some View {
+    private func row(_ entry: Entry, index: Int, isOpenTab: Bool = false) -> some View {
         let isSel = index == selected
         return HStack(spacing: Space.s4) {
             TypeBadge(type: entry.type, size: 18)
@@ -231,14 +265,28 @@ struct CommandPalette: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
+            if isOpenTab {
+                Image(systemName: "arrow.right")
+                    .font(Typo.caption)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.horizontal, Space.s5)
         .padding(.vertical, Space.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isSel ? Color.accentColor.opacity(0.15) : .clear)
         .contentShape(Rectangle())
-        .onHover { if $0 { scrollToSelection = false; selected = index } }
-        .onTapGesture { openPath(entry.path) }
+        .onHover { hovering in
+            guard hovering else { return }
+            // Scroll-under-stationary-cursor: the pointer hasn't moved since the
+            // last ↑/↓, so this hover is the scroll passing a row beneath it —
+            // ignore it so keyboard nav can advance past the row under the mouse.
+            if let c = keyboardNavCursor, NSEvent.mouseLocation == c { return }
+            keyboardNavCursor = nil
+            scrollToSelection = false
+            selected = index
+        }
+        .onTapGesture { activate(index) }
     }
 
     private func placeholder(_ text: String) -> some View {
@@ -252,6 +300,7 @@ struct CommandPalette: View {
 
     private func clearResults() {
         sections = []
+        openMatches = []
         sourceByPath = [:]
         selected = 0
     }
@@ -274,11 +323,20 @@ struct CommandPalette: View {
             }
             let result = await model.commandSearch(q, mode: currentMode)
             if Task.isCancelled { return }
-            let secs = paletteSections(result.map { (entry: $0.entry, score: $0.score) },
+            // Pull matched-and-already-open docs into the "switch to tab" group so
+            // picking one jumps to the existing tab; the rest section normally.
+            let openSet = model.openTabPaths
+            var seenOpen = Set<String>()
+            let opens = openSet.isEmpty ? [] : result.filter {
+                openSet.contains($0.entry.path) && seenOpen.insert($0.entry.path).inserted
+            }
+            let rest = openSet.isEmpty ? result : result.filter { !openSet.contains($0.entry.path) }
+            let secs = paletteSections(rest.map { (entry: $0.entry, score: $0.score) },
                                        order: model.typeOrder, promote: promote, perType: perType,
                                        minimumInlineScoreRatio: currentMode.paletteInlineScoreFloorRatio)
             var src: [String: String] = [:]
             for r in result where r.source != nil { src[r.entry.path] = r.source }
+            openMatches = opens.prefix(perType).map(\.entry)
             sections = secs
             sourceByPath = src
             selected = 0
@@ -295,20 +353,24 @@ struct CommandPalette: View {
 
     private func move(_ delta: Int) {
         guard !flat.isEmpty else { return }
+        keyboardNavCursor = NSEvent.mouseLocation
         scrollToSelection = true
         selected = min(max(0, selected + delta), flat.count - 1)
     }
 
-    /// The palette always opens results in a NEW tab — it's a "find & open"
-    /// action (⌘T), so it must never replace whatever the current tab is showing.
-    private func openSelected() {
-        guard flat.indices.contains(selected) else { return }
-        openPath(flat[selected].path)
-    }
-
-    private func openPath(_ path: String) {
+    /// Activate the row at `index`: an open-tab match switches to its existing tab,
+    /// anything else opens in a NEW tab. ⌘T is a "find & open" action, so opening
+    /// must never replace whatever the current tab is showing — but switching to a
+    /// tab the user already has open is exactly what they asked for (Arc-style).
+    private func activate(_ index: Int) {
+        guard flat.indices.contains(index) else { return }
+        let entry = flat[index]
         onClose()
-        Task { await model.openFromPalette(path, newTab: true) }
+        if index < openMatches.count {
+            Task { await model.switchToOpenTab(path: entry.path) }
+        } else {
+            Task { await model.openFromPalette(entry.path, newTab: true) }
+        }
     }
 
     private func fileStem(_ path: String) -> String {
