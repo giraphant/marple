@@ -984,6 +984,22 @@ final class AppModel {
         setSearchText(query)
     }
 
+    /// Active-Space document paths currently open in a tab, minus the one already
+    /// on screen. The palette surfaces matches among these as "switch to tab"
+    /// (Arc-style) so picking one jumps to the existing tab instead of opening a
+    /// duplicate. Scoped to the active Space — each Space is its own workspace.
+    var openTabPaths: Set<String> {
+        var paths = Set(tabs.compactMap { $0.location.openPath })
+        if let current = openPath { paths.remove(current) }
+        return paths
+    }
+
+    /// Switch to the active-Space tab currently showing `path` (first match).
+    func switchToOpenTab(path: String) async {
+        guard let id = tabs.first(where: { $0.location.openPath == path })?.id else { return }
+        await selectTab(id)
+    }
+
     func selectTab(_ id: NavTab.ID) async {
         mutateWorkspace { $0.select(id) }
         isBrowsing = false
