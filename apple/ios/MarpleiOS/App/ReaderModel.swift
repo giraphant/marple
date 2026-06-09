@@ -11,18 +11,26 @@ final class ReaderModel {
     private(set) var entries: [Entry] = []
     private var client: IOSVaultClient?
     private var workspaceRoot: String?
+    /// The security-scoped URL we currently hold access to. Released before we
+    /// acquire a new one so repeated picks/launches don't leak kernel handles.
+    private var scopedURL: URL?
+    /// Guards against overlapping foreground refreshes (scene can flip
+    /// .inactive→.active more than once in quick succession).
+    private var refreshing = false
 
     /// App container path for the private index DB (never the synced vault).
-    private var containerDBPath: String {
+    /// Computed once: the directory is created here at init.
+    private let containerDBPath: String = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MarpleIndex", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("index.sqlite").path
-    }
+    }()
 
     /// Resolve a saved folder bookmark and boot; otherwise wait for a pick.
     func boot() async {
-        guard let url = VaultBookmark.resolve() else { phase = .needsFolder; return }
+        guard let (url, isStale) = VaultBookmark.resolve() else { phase = .needsFolder; return }
+        if isStale { try? VaultBookmark.save(url) }   // freshen the moved-file bookmark
         await start(folder: url)
     }
 
@@ -33,9 +41,14 @@ final class ReaderModel {
     }
 
     private func start(folder url: URL) async {
+        // Release any previously held scope before acquiring a new one (re-pick
+        // or a second boot) — security-scoped handles are a limited per-process pool.
+        scopedURL?.stopAccessingSecurityScopedResource()
+        scopedURL = nil
         guard url.startAccessingSecurityScopedResource() else {
             phase = .failed("无法访问所选文件夹"); return
         }
+        scopedURL = url
         let root = url.path
         workspaceRoot = root
         phase = .indexing
@@ -59,7 +72,9 @@ final class ReaderModel {
 
     /// Re-index on foreground (cheap incremental reconcile).
     func refresh() async {
-        guard let root = workspaceRoot, case .ready = phase else { return }
+        guard !refreshing, let root = workspaceRoot, case .ready = phase else { return }
+        refreshing = true
+        defer { refreshing = false }
         let dbPath = containerDBPath
         do {
             try await materializeMarkdown(under: root)
@@ -67,7 +82,9 @@ final class ReaderModel {
                 _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).reconcile()
             }.value
             if let c = client { self.entries = try await c.index() }
-        } catch { /* keep last good entries */ }
+        } catch {
+            print("[marple] refresh failed (keeping last entries): \(error)")
+        }
     }
 
     func text(for entry: Entry) async -> String {
