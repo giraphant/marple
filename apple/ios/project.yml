@@ -26,16 +26,22 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.quasifish.marpleios
         GENERATE_INFOPLIST_FILE: YES
+        # App icon from Assets.xcassets (required by App Store Connect / TestFlight).
+        # actool emits the canonical CFBundleIcons.CFBundlePrimaryIcon block.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # iPhone only (TARGETED_DEVICE_FAMILY 1) — matches the iPhone-only scope.
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "2"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         # Supported orientations (iPhone): portrait + both landscapes.
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        # Signing left to the developer's Apple ID (set the team in Xcode). Simulator
-        # builds need no signing; device builds require selecting a team.
+        # Export compliance: reader uses only standard HTTPS/iCloud (exempt) — skips
+        # the per-upload encryption prompt in App Store Connect.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        # Baked-in team so `xcodegen generate` doesn't wipe the signing selection.
+        DEVELOPMENT_TEAM: 2E5N3Q45BG
         CODE_SIGN_STYLE: Automatic
 
   MarpleiOSTests:
