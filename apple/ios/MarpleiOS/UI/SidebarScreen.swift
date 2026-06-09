@@ -3,9 +3,30 @@ import MarpleKit
 
 struct SidebarScreen: View {
     @Bindable var model: ReaderModel
+    @State private var query = ""
+    @State private var results: [Entry] = []
 
     var body: some View {
-        // Count per type once (O(n)), not once-per-row (9×O(n)).
+        Group {
+            if query.isEmpty {
+                typeList
+            } else {
+                resultsList
+            }
+        }
+        .navigationTitle("文库")
+        .searchable(text: $query, prompt: "搜索全部文档")
+        .task(id: query) {
+            let q = query
+            guard !q.isEmpty else { results = []; return }
+            let r = await model.search(q)
+            // Guard against a stale async result if the query changed meanwhile.
+            if q == query { results = r }
+        }
+    }
+
+    private var typeList: some View {
+        // Count per type once (O(n)), not once-per-row.
         let counts = Dictionary(model.entries.map { ($0.type, 1) }, uniquingKeysWith: +)
         return List(EntryType.modeled, id: \.rawValue) { type in
             NavigationLink {
@@ -15,7 +36,19 @@ struct SidebarScreen: View {
                     .badge(counts[type] ?? 0)
             }
         }
-        .navigationTitle("文库")
+    }
+
+    private var resultsList: some View {
+        List(results) { entry in
+            NavigationLink {
+                DocScreen(model: model, entry: entry)
+            } label: {
+                GlobalResultRow(entry: entry)
+            }
+        }
+        .overlay {
+            if results.isEmpty { ContentUnavailableView.search(text: query) }
+        }
     }
 
     private func symbol(for type: EntryType) -> String {
@@ -25,5 +58,27 @@ struct SidebarScreen: View {
         case .note: "note.text"; case .image: "photo"; case .talk: "mic"
         default: "doc"
         }
+    }
+}
+
+/// A global-search result row: title + a small type chip + author.
+private struct GlobalResultRow: View {
+    let entry: Entry
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(entry.title ?? (entry.path as NSString).lastPathComponent)
+                .font(.body).lineLimit(2)
+            HStack(spacing: 6) {
+                Text(entry.type.label)
+                    .font(.caption2)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+                if !entry.author.isEmpty {
+                    Text(entry.author.joined(separator: ", "))
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
