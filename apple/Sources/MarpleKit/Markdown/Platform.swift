@@ -24,3 +24,23 @@ extension UIColor {
     static var separatorColor: UIColor { .separator }
 }
 #endif
+
+/// Bold/italic symbolic-trait cases differ by platform: AppKit spells them
+/// `.bold`/`.italic`, UIKit `.traitBold`/`.traitItalic`. These aliases let the
+/// renderer use one name for both.
+extension PlatformFontDescriptor.SymbolicTraits {
+    static var boldTrait: PlatformFontDescriptor.SymbolicTraits {
+        #if canImport(AppKit)
+        .bold
+        #else
+        .traitBold
+        #endif
+    }
+    static var italicTrait: PlatformFontDescriptor.SymbolicTraits {
+        #if canImport(AppKit)
+        .italic
+        #else
+        .traitItalic
+        #endif
+    }
+}

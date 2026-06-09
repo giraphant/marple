@@ -126,7 +126,12 @@ public struct EntryDetail: Codable, Sendable {
 /// directory if missing; client connects to the same path.
 public enum CLISocket {
     public static func defaultPath() -> String {
+        #if os(macOS)
         let home = FileManager.default.homeDirectoryForCurrentUser.path
+        #else
+        // iOS never runs the CLI socket; this just needs to compile.
+        let home = NSHomeDirectory()
+        #endif
         return home + "/Library/Application Support/Marple/cli.sock"
     }
 }

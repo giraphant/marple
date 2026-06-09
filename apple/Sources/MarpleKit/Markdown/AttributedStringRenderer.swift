@@ -416,7 +416,7 @@ private final class RenderContext {
     /// to bold when inside `**…**`. Nil unless the chosen face falls short of it.
     var currentStroke: CGFloat? {
         var target = baseWeight
-        if traits.contains(.bold),
+        if traits.contains(.boldTrait),
            RenderStyle.managerWeight(target) < RenderStyle.managerWeight(.bold) {
             target = .bold
         }
@@ -887,14 +887,14 @@ private final class RenderContext {
             }
 
         case let strong as Strong:
-            traits.insert(.bold)
+            traits.insert(.boldTrait)
             walkInlines(strong.children)
-            traits.remove(.bold)
+            traits.remove(.boldTrait)
 
         case let em as Emphasis:
-            traits.insert(.italic)
+            traits.insert(.italicTrait)
             walkInlines(em.children)
-            traits.remove(.italic)
+            traits.remove(.italicTrait)
 
         case let strikethrough as Strikethrough:
             let start = attributed.length
