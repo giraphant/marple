@@ -14,14 +14,17 @@ enum VaultBookmark {
         UserDefaults.standard.set(data, forKey: key)
     }
 
-    /// Resolve the persisted bookmark to a URL. Returns nil if none saved.
-    /// `isStale` true means re-save (caller should re-pick if resolution fails).
-    static func resolve() -> URL? {
+    /// Resolve the persisted bookmark. Returns nil if none saved or unresolvable.
+    /// `isStale` true means the bookmark still resolved but should be re-saved to
+    /// freshen it (e.g. the iCloud file moved). Note: `.withSecurityScope` is
+    /// macOS-only — on iOS the minimal bookmark created by `save` is correct, and
+    /// the resolved URL is security-scoped for the picker-granted folder.
+    static func resolve() -> (url: URL, isStale: Bool)? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         var stale = false
         guard let url = try? URL(resolvingBookmarkData: data, options: [],
                                  relativeTo: nil, bookmarkDataIsStale: &stale) else { return nil }
-        return url
+        return (url, stale)
     }
 
     static func clear() { UserDefaults.standard.removeObject(forKey: key) }

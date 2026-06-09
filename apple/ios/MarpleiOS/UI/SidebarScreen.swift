@@ -5,12 +5,14 @@ struct SidebarScreen: View {
     @Bindable var model: ReaderModel
 
     var body: some View {
-        List(EntryType.modeled, id: \.rawValue) { type in
+        // Count per type once (O(n)), not once-per-row (9×O(n)).
+        let counts = Dictionary(model.entries.map { ($0.type, 1) }, uniquingKeysWith: +)
+        return List(EntryType.modeled, id: \.rawValue) { type in
             NavigationLink {
                 EntryListScreen(model: model, type: type)
             } label: {
                 Label(type.label, systemImage: symbol(for: type))
-                    .badge(model.entries.filter { $0.type == type }.count)
+                    .badge(counts[type] ?? 0)
             }
         }
         .navigationTitle("文库")
