@@ -1,13 +1,17 @@
 import SwiftUI
-import MarpleKit
 
 @main
 struct MarpleiOSApp: App {
+    @State private var model = ReaderModel()
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some Scene {
         WindowGroup {
-            // Minimal scaffold entry (Task 6). The phase router + reader UI land in
-            // later tasks. Importing MarpleKit here proves the library links for iOS.
-            Text("Marple")
+            RootView(model: model)
+                .task { await model.boot() }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { Task { await model.refresh() } }
+                }
         }
     }
 }

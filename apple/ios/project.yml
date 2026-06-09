@@ -37,3 +37,19 @@ targets:
         # Signing left to the developer's Apple ID (set the team in Xcode). Simulator
         # builds need no signing; device builds require selecting a team.
         CODE_SIGN_STYLE: Automatic
+
+  MarpleiOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - MarpleiOSTests
+    dependencies:
+      # Host in the app target; MarpleKit comes transitively. Linking the package
+      # product directly here double-links Tokenizers/OrderedCollections and breaks
+      # the test bundle link.
+      - target: MarpleiOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.quasifish.marpleios.tests
+        GENERATE_INFOPLIST_FILE: YES
