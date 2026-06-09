@@ -19,3 +19,6 @@ legacy/rust/target/
 
 # Local machine config (legacy)
 legacy/marple.config.json
+
+# iOS release secrets (key id/issuer; .p8 lives in ~/.appstoreconnect)
+apple/ios/.release.env
