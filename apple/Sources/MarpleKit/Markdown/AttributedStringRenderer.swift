@@ -228,7 +228,11 @@ public struct RenderStyle: Equatable {
 
     /// Tabular (monospaced) figures so digits align vertically across table rows.
     private static func withMonospacedDigits(_ font: PlatformFont) -> PlatformFont {
-        // `.selectorIdentifier` is AppKit-only; UIKit names the same key `.selector`.
+        // The two feature keys are named differently per platform. CRUCIAL on iOS:
+        // `UIFontDescriptor.FeatureKey.typeIdentifier` is a DEPRECATED ALIAS of
+        // `.selector` (not the type key) — using it alongside `.selector` makes a
+        // dictionary with two identical keys and crashes ("duplicate keys"). The
+        // current, distinct iOS keys are `.type` and `.selector`.
         #if canImport(AppKit)
         let feature: [PlatformFontDescriptor.FeatureKey: Any] = [
             .typeIdentifier: kNumberSpacingType,
@@ -236,7 +240,7 @@ public struct RenderStyle: Equatable {
         ]
         #else
         let feature: [PlatformFontDescriptor.FeatureKey: Any] = [
-            .typeIdentifier: kNumberSpacingType,
+            .type: kNumberSpacingType,
             .selector: kMonospacedNumbersSelector
         ]
         #endif
