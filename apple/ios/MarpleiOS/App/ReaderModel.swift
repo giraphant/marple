@@ -9,6 +9,10 @@ final class ReaderModel {
 
     private(set) var phase: Phase = .needsFolder
     private(set) var entries: [Entry] = []
+    /// Documents currently open on the Mac, resolved to local entries — the
+    /// read-only "Mac 上打开的" sidebar group. Published by the Mac into the synced
+    /// folder; refreshed whenever entries change. Empty if the Mac never published.
+    private(set) var openOnMac: [Entry] = []
     /// Field-weighted in-memory search index (same engine as the Mac's 快速 palette).
     /// Rebuilt off-actor whenever `entries` change.
     private var searchIndex: SearchIndex = .empty
@@ -157,6 +161,22 @@ final class ReaderModel {
         self.searchIndex = await Task.detached(priority: .utility) {
             buildSearchIndex(newEntries)
         }.value
+        if let root = workspaceRoot { await loadSession(root: root) }
+    }
+
+    /// Read the Mac-published open-tabs file from the synced folder and resolve each
+    /// workspace-relative path to a local entry. Best-effort: a missing/未同步/legacy
+    /// file just yields an empty list (the sidebar group then hides).
+    private func loadSession(root: String) async {
+        let url = SessionFile.url(workspaceRoot: root)
+        try? await ICloudMaterializer.ensureDownloaded(url)
+        guard let data = try? Data(contentsOf: url),
+              let snap = try? JSONDecoder().decode(SessionSnapshot.self, from: data) else {
+            openOnMac = []
+            return
+        }
+        let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
+        openOnMac = snap.openDocs.compactMap { byPath[$0.path] }
     }
 
     /// Force-download the vault's `.md` files from iCloud, concurrently, in
