@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 import CoreText
 import Markdown
 
@@ -28,50 +32,63 @@ public struct RenderedDocument {
 
 /// Outer wrapper block: draws the rounded card surface + border once for the table.
 final class RoundedCardBlock: NSTextTableBlock {
-    var fillColor: NSColor = .clear
-    var borderColor: NSColor = .separatorColor
+    var fillColor: PlatformColor = .clear
+    var borderColor: PlatformColor = .separatorColor
     var cornerRadius: CGFloat = 9
 
     // The frame from the most recent draw, so cells can clip their own fills/hairlines
     // to the card's rounded interior. The outer card block draws before the inner
     // cells, so this is populated by the time a cell draws.
-    private(set) var lastFrame: NSRect = .zero
+    private(set) var lastFrame: CGRect = .zero
 
     // Drawn during NSTextView layout/draw, where NSAppearance.current is already the
     // view's effective appearance — so the dynamic NSColors resolve for light/dark.
-    override func drawBackground(withFrame frameRect: NSRect, in controlView: NSView,
+    override func drawBackground(withFrame frameRect: CGRect, in controlView: PlatformView,
                                  characterRange: NSRange, layoutManager: NSLayoutManager) {
         lastFrame = frameRect
         let rect = frameRect.insetBy(dx: 0.5, dy: 0.5)
+        #if canImport(AppKit)
         let path = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
         fillColor.setFill()
         path.fill()
         path.lineWidth = 1
         borderColor.setStroke()
         path.stroke()
+        #elseif canImport(UIKit)
+        let path = UIBezierPath(roundedRect: rect, cornerRadius: cornerRadius)
+        fillColor.setFill()
+        path.fill()
+        path.lineWidth = 1
+        borderColor.setStroke()
+        path.stroke()
+        #endif
     }
 
     /// The interior of the card, just inside the 1px border — cell fills and hairlines
     /// clip to this so they can never bleed past the rounded corners.
-    func interiorClipPath() -> NSBezierPath {
+    func interiorClipPath() -> PlatformBezierPath {
         let rect = lastFrame.insetBy(dx: 1, dy: 1)
         let radius = max(cornerRadius - 1, 0)
+        #if canImport(AppKit)
         return NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+        #elseif canImport(UIKit)
+        return UIBezierPath(roundedRect: rect, cornerRadius: radius)
+        #endif
     }
 }
 
 /// Inner data cell: draws an optional header fill (rounded at the table's top
 /// corners) and a faint hairline beneath body rows. Borders are all self-drawn.
 final class TableCellBlock: NSTextTableBlock {
-    var headerFillColor: NSColor?
-    var rowSeparatorColor: NSColor?
+    var headerFillColor: PlatformColor?
+    var rowSeparatorColor: PlatformColor?
     var cornerRadius: CGFloat = 9
     var roundTopLeft = false
     var roundTopRight = false
     weak var card: RoundedCardBlock?
-    private(set) var lastFrame: NSRect = .zero
+    private(set) var lastFrame: CGRect = .zero
 
-    override func drawBackground(withFrame frameRect: NSRect, in controlView: NSView,
+    override func drawBackground(withFrame frameRect: CGRect, in controlView: PlatformView,
                                  characterRange: NSRange, layoutManager: NSLayoutManager) {
         lastFrame = frameRect
         let cardFrame = card?.lastFrame ?? .zero
@@ -80,9 +97,16 @@ final class TableCellBlock: NSTextTableBlock {
         // Clip to the card interior so the header fill and row hairlines take their
         // rounded corners directly from the card's own path — they can neither spill
         // past the border nor leave a gap at the corners.
+        #if canImport(AppKit)
         NSGraphicsContext.current?.saveGraphicsState()
         defer { NSGraphicsContext.current?.restoreGraphicsState() }
         if hasCard { card?.interiorClipPath().setClip() }
+        #elseif canImport(UIKit)
+        let ctx = UIGraphicsGetCurrentContext()
+        ctx?.saveGState()
+        defer { ctx?.restoreGState() }
+        if hasCard { card?.interiorClipPath().addClip() }
+        #endif
 
         if let fill = headerFillColor {
             // A plain band spanning to the card's edges (where this column touches
@@ -90,15 +114,24 @@ final class TableCellBlock: NSTextTableBlock {
             let left = (hasCard && roundTopLeft) ? cardFrame.minX : frameRect.minX
             let right = (hasCard && roundTopRight) ? cardFrame.maxX : frameRect.maxX
             let top = hasCard ? cardFrame.minY : frameRect.minY
-            let band = NSRect(x: left, y: top, width: right - left, height: frameRect.maxY - top)
+            let band = CGRect(x: left, y: top, width: right - left, height: frameRect.maxY - top)
             fill.setFill()
+            #if canImport(AppKit)
             band.fill()
+            #elseif canImport(UIKit)
+            UIBezierPath(rect: band).fill()
+            #endif
         }
         if let separator = rowSeparatorColor {
             let y = frameRect.maxY - 0.5
-            let line = NSBezierPath()
+            let line = PlatformBezierPath()
+            #if canImport(AppKit)
             line.move(to: NSPoint(x: frameRect.minX, y: y))
             line.line(to: NSPoint(x: frameRect.maxX, y: y))
+            #elseif canImport(UIKit)
+            line.move(to: CGPoint(x: frameRect.minX, y: y))
+            line.addLine(to: CGPoint(x: frameRect.maxX, y: y))
+            #endif
             line.lineWidth = 1
             separator.setStroke()
             line.stroke()
@@ -117,13 +150,13 @@ public struct RenderStyle: Equatable {
     /// (thin horizontals); a heavier body holds up for long reading — resolved to a
     /// real cut where the family has one, light synthesis where it doesn't. Each family
     /// names/orders its weights differently, so this is set per-font, not a flag.
-    public let bodyWeight: NSFont.Weight
+    public let bodyWeight: PlatformFont.Weight
     public let lineHeight: Double
     /// CJK letter-spacing as a fraction of the em; applied as `size * letterSpacing`
     /// to 中文 glyphs only (see `bodyKern`). 0 = packed (system default), no Latin effect.
     public let letterSpacing: Double
 
-    public init(size: Double, fontFamily: String?, bodyWeight: NSFont.Weight = .regular,
+    public init(size: Double, fontFamily: String?, bodyWeight: PlatformFont.Weight = .regular,
                 letterSpacing: Double = 0, lineHeight: Double) {
         self.size = size
         self.fontFamily = fontFamily
@@ -138,19 +171,28 @@ public struct RenderStyle: Equatable {
     /// nearest *actual* member for a given weight — no faux-bold synthesis — which is
     /// the whole point: many CJK families ship one file per weight. Falls back to the
     /// system font (its CJK face is 苹方) when no family is chosen or it won't resolve.
-    func font(_ size: Double, weight: NSFont.Weight) -> NSFont {
+    func font(_ size: Double, weight: PlatformFont.Weight) -> PlatformFont {
         if let fontFamily {
+            #if canImport(AppKit)
             if let f = NSFontManager.shared.font(
                 withFamily: fontFamily, traits: [], weight: Self.managerWeight(weight), size: size) {
                 return f
             }
             if let f = NSFont(name: fontFamily, size: size) { return f }
+            #elseif canImport(UIKit)
+            let base = UIFont.systemFont(ofSize: size, weight: weight)
+            let desc = base.fontDescriptor.withFamily(fontFamily)
+                .addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: weight]])
+            let resolved = UIFont(descriptor: desc, size: size)
+            if resolved.familyName == fontFamily { return resolved }
+            if let f = UIFont(name: fontFamily, size: size) { return f }
+            #endif
         }
-        return NSFont.systemFont(ofSize: size, weight: weight)
+        return PlatformFont.systemFont(ofSize: size, weight: weight)
     }
 
     /// `NSFont.Weight` → `NSFontManager`'s 0–15 weight scale (regular≈5, bold≈9).
-    static func managerWeight(_ weight: NSFont.Weight) -> Int {
+    static func managerWeight(_ weight: PlatformFont.Weight) -> Int {
         switch weight {
         case .ultraLight: return 2
         case .thin, .light: return 3
@@ -163,32 +205,32 @@ public struct RenderStyle: Equatable {
         }
     }
 
-    var bodyFont: NSFont { font(size, weight: bodyWeight) }
+    var bodyFont: PlatformFont { font(size, weight: bodyWeight) }
 
-    var codeFont: NSFont {
-        NSFont.monospacedSystemFont(ofSize: size * 0.92, weight: .regular)
+    var codeFont: PlatformFont {
+        PlatformFont.monospacedSystemFont(ofSize: size * 0.92, weight: .regular)
     }
 
-    var tableBodyFont: NSFont { Self.withMonospacedDigits(font(size * 0.90, weight: bodyWeight)) }
+    var tableBodyFont: PlatformFont { Self.withMonospacedDigits(font(size * 0.90, weight: bodyWeight)) }
 
-    var tableHeaderFont: NSFont { font(size * 0.90, weight: .semibold) }
+    var tableHeaderFont: PlatformFont { font(size * 0.90, weight: .semibold) }
 
-    func headingWeight(level: Int) -> NSFont.Weight {
+    func headingWeight(level: Int) -> PlatformFont.Weight {
         [.bold, .semibold, .medium, .medium, .regular, .regular][min(level, 6) - 1]
     }
 
     /// Tabular (monospaced) figures so digits align vertically across table rows.
-    private static func withMonospacedDigits(_ font: NSFont) -> NSFont {
+    private static func withMonospacedDigits(_ font: PlatformFont) -> PlatformFont {
         let descriptor = font.fontDescriptor.addingAttributes([
             .featureSettings: [[
-                NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
-                NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector
+                PlatformFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
+                PlatformFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector
             ]]
         ])
-        return NSFont(descriptor: descriptor, size: font.pointSize) ?? font
+        return PlatformFont(descriptor: descriptor, size: font.pointSize) ?? font
     }
 
-    func headingFont(level: Int) -> NSFont {
+    func headingFont(level: Int) -> PlatformFont {
         let clamped = min(level, 6) - 1
         let scale: Double = [1.8, 1.5, 1.25, 1.125, 1.0, 1.0][clamped]
         return font(size * scale, weight: headingWeight(level: level))
@@ -199,29 +241,33 @@ public struct RenderStyle: Equatable {
     /// `target`, thicken strokes in proportion to the weight gap. Returns nil for the
     /// system font and whenever a real weight cut already covers the target — so 苹方
     /// and real-weight families (霞鹜文楷) are byte-for-byte unaffected.
-    func synthStroke(of resolved: NSFont, target: NSFont.Weight) -> CGFloat? {
+    func synthStroke(of resolved: PlatformFont, target: PlatformFont.Weight) -> CGFloat? {
         guard fontFamily != nil else { return nil }
+        #if canImport(AppKit)
         let deficit = Self.managerWeight(target) - NSFontManager.shared.weight(of: resolved)
         guard deficit > 0 else { return nil }
         return -CGFloat(deficit) * 1.1
+        #else
+        return nil
+        #endif
     }
 
     // MARK: Colors
 
-    var textColor: NSColor { .textColor }
-    var linkColor: NSColor { .linkColor }
-    var codeBackgroundColor: NSColor { .textColor.withAlphaComponent(0.035) }
-    var quoteTextColor: NSColor { .secondaryLabelColor }
-    var separatorTextColor: NSColor { .tertiaryLabelColor }
+    var textColor: PlatformColor { .textColor }
+    var linkColor: PlatformColor { .linkColor }
+    var codeBackgroundColor: PlatformColor { .textColor.withAlphaComponent(0.035) }
+    var quoteTextColor: PlatformColor { .secondaryLabelColor }
+    var separatorTextColor: PlatformColor { .tertiaryLabelColor }
     var tableCornerRadius: CGFloat { 9 }
-    var tableCardFillColor: NSColor { .textColor.withAlphaComponent(0.022) }
-    var tableCardBorderColor: NSColor { .separatorColor }
-    var tableHeaderFillColor: NSColor { .textColor.withAlphaComponent(0.04) }
-    var tableRowSeparatorColor: NSColor { .textColor.withAlphaComponent(0.05) }
-    var tableHeaderTextColor: NSColor { .secondaryLabelColor }
+    var tableCardFillColor: PlatformColor { .textColor.withAlphaComponent(0.022) }
+    var tableCardBorderColor: PlatformColor { .separatorColor }
+    var tableHeaderFillColor: PlatformColor { .textColor.withAlphaComponent(0.04) }
+    var tableRowSeparatorColor: PlatformColor { .textColor.withAlphaComponent(0.05) }
+    var tableHeaderTextColor: PlatformColor { .secondaryLabelColor }
     var tableHeaderKern: CGFloat { CGFloat(size * 0.03) }
 
-    func headingColor(level: Int) -> NSColor {
+    func headingColor(level: Int) -> PlatformColor {
         level >= 6 ? .secondaryLabelColor : textColor
     }
 
@@ -321,26 +367,31 @@ private final class RenderContext {
     var headings: [HeadingAnchor] = []
 
     /// Current base font (body or heading — changed per block).
-    var baseFont: NSFont
+    var baseFont: PlatformFont
     /// Intended weight of the current block's base — what the design *asks for*, which
     /// may exceed what the chosen face actually provides (drives synthetic bold).
-    var baseWeight: NSFont.Weight = .regular
+    var baseWeight: PlatformFont.Weight = .regular
     /// Inline font traits pushed/popped by Strong/Emphasis.
-    var traits: NSFontDescriptor.SymbolicTraits = []
+    var traits: PlatformFontDescriptor.SymbolicTraits = []
     /// Active paragraph style for the current block.
     var ps: NSParagraphStyle
     /// Active block text color, used for quotes and dim headings.
-    var activeTextColor: NSColor?
+    var activeTextColor: PlatformColor?
     /// Active kerning (letter-spacing) for the current run; used for table headers.
     var activeKern: CGFloat?
     /// Active link URL (non-nil when inside a Link element).
     var linkURL: String?
 
-    var currentFont: NSFont {
+    var currentFont: PlatformFont {
         guard !traits.isEmpty else { return baseFont }
         let combinedTraits = baseFont.fontDescriptor.symbolicTraits.union(traits)
+        #if canImport(AppKit)
         let desc = baseFont.fontDescriptor.withSymbolicTraits(combinedTraits)
         return NSFont(descriptor: desc, size: baseFont.pointSize) ?? baseFont
+        #elseif canImport(UIKit)
+        guard let desc = baseFont.fontDescriptor.withSymbolicTraits(combinedTraits) else { return baseFont }
+        return UIFont(descriptor: desc, size: baseFont.pointSize)
+        #endif
     }
 
     /// Synthetic-bold stroke for the current run: the block's intended weight, bumped
@@ -610,14 +661,14 @@ private final class RenderContext {
     }
 
     /// Width of `text` laid out on a single line.
-    private func singleLineWidth(_ text: String, font: NSFont) -> CGFloat {
+    private func singleLineWidth(_ text: String, font: PlatformFont) -> CGFloat {
         guard !text.isEmpty else { return 0 }
         return (text as NSString).size(withAttributes: [.font: font]).width
     }
 
     /// Width of the widest run the line-breaker won't split: whitespace and CJK
     /// boundaries allow breaks, so Latin words stay whole while CJK measures per char.
-    private func longestUnbreakableWidth(_ text: String, font: NSFont) -> CGFloat {
+    private func longestUnbreakableWidth(_ text: String, font: PlatformFont) -> CGFloat {
         guard !text.isEmpty else { return 0 }
         var maxWidth: CGFloat = 0
         var token = ""
@@ -779,7 +830,7 @@ private final class RenderContext {
     private func visitInline(_ markup: Markup) {
         switch markup {
         case let t as Text:
-            let color: NSColor = linkURL != nil ? style.linkColor : (activeTextColor ?? style.textColor)
+            let color: PlatformColor = linkURL != nil ? style.linkColor : (activeTextColor ?? style.textColor)
             let start = attributed.length
             // Table headers carry an explicit uniform kern; elsewhere apply tracking
             // only to CJK glyphs (Latin reads well untouched — only 中文 packs tight).
@@ -834,8 +885,8 @@ private final class RenderContext {
 
     // MARK: Append helpers
 
-    private func append(_ text: String, font: NSFont? = nil, color: NSColor? = nil,
-                        bg: NSColor? = nil, link: String? = nil, kern: CGFloat? = nil,
+    private func append(_ text: String, font: PlatformFont? = nil, color: PlatformColor? = nil,
+                        bg: PlatformColor? = nil, link: String? = nil, kern: CGFloat? = nil,
                         stroke: CGFloat? = nil) {
         var attrs: [NSAttributedString.Key: Any] = [
             .font: font ?? currentFont,
