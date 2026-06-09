@@ -30,6 +30,11 @@ public struct RenderedDocument {
 // hairlines with `NSBezierPath` while the cell text stays live (selection / ⌘F /
 // wikilinks). See WWDC 2018 "TextKit Best Practices".
 
+// NSTextTable / NSTextTableBlock are AppKit-only (no UIKit equivalent), so the
+// self-drawn table chrome compiles on macOS only. iOS falls back to plain stacked
+// text in `visitTable`.
+#if canImport(AppKit)
+
 /// Outer wrapper block: draws the rounded card surface + border once for the table.
 final class RoundedCardBlock: NSTextTableBlock {
     var fillColor: PlatformColor = .clear
@@ -139,6 +144,8 @@ final class TableCellBlock: NSTextTableBlock {
     }
 }
 
+#endif
+
 /// Input parameters for rendering (Equatable via synthesized == on stored properties).
 /// AppKit types (NSFont, NSColor, NSParagraphStyle) are computed lazily.
 public struct RenderStyle: Equatable {
@@ -221,13 +228,24 @@ public struct RenderStyle: Equatable {
 
     /// Tabular (monospaced) figures so digits align vertically across table rows.
     private static func withMonospacedDigits(_ font: PlatformFont) -> PlatformFont {
-        let descriptor = font.fontDescriptor.addingAttributes([
-            .featureSettings: [[
-                PlatformFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
-                PlatformFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector
-            ]]
-        ])
-        return PlatformFont(descriptor: descriptor, size: font.pointSize) ?? font
+        // `.selectorIdentifier` is AppKit-only; UIKit names the same key `.selector`.
+        #if canImport(AppKit)
+        let feature: [PlatformFontDescriptor.FeatureKey: Any] = [
+            .typeIdentifier: kNumberSpacingType,
+            .selectorIdentifier: kMonospacedNumbersSelector
+        ]
+        #else
+        let feature: [PlatformFontDescriptor.FeatureKey: Any] = [
+            .typeIdentifier: kNumberSpacingType,
+            .selector: kMonospacedNumbersSelector
+        ]
+        #endif
+        let descriptor = font.fontDescriptor.addingAttributes([.featureSettings: [feature]])
+        #if canImport(AppKit)
+        return NSFont(descriptor: descriptor, size: font.pointSize) ?? font
+        #else
+        return UIFont(descriptor: descriptor, size: font.pointSize)
+        #endif
     }
 
     func headingFont(level: Int) -> PlatformFont {
@@ -546,6 +564,7 @@ private final class RenderContext {
     }
 
     private func visitTable(_ table: Table) {
+        #if canImport(AppKit)
         let headerCells = Array(table.head.cells)
         let bodyRows = Array(table.body.rows.map { Array($0.cells) })
         let bodyColumnCount = bodyRows.reduce(0) { max($0, $1.count) }
@@ -611,8 +630,34 @@ private final class RenderContext {
 
         newlines(1)
         ps = style.bodyParagraphStyle
+        #else
+        // iOS: NSTextTable doesn't exist in UIKit. Render rows as plain stacked text —
+        // header cells in the table-header font, body cells in the table-body font,
+        // cells separated by a tab, one line per row.
+        ps = style.bodyParagraphStyle
+        let headerCells = Array(table.head.cells)
+        func emitRow(_ cells: [Markup], header: Bool) {
+            for (i, cell) in cells.enumerated() {
+                if i > 0 { append("\t", color: style.separatorTextColor) }
+                let prevFont = baseFont, prevWeight = baseWeight, prevColor = activeTextColor
+                baseFont = header ? style.tableHeaderFont : style.tableBodyFont
+                baseWeight = header ? .semibold : style.bodyWeight
+                activeTextColor = header ? style.tableHeaderTextColor : prevColor
+                let start = attributed.length
+                walkInlines(cell.children)
+                if attributed.length == start { append("—", color: .tertiaryLabelColor) }
+                baseFont = prevFont; baseWeight = prevWeight; activeTextColor = prevColor
+            }
+            newlines(1)
+        }
+        if !headerCells.isEmpty { emitRow(headerCells, header: true) }
+        for row in table.body.rows { emitRow(Array(row.cells), header: false) }
+        newlines(1)
+        ps = style.bodyParagraphStyle
+        #endif
     }
 
+    #if canImport(AppKit)
     /// Column widths driven by real text measurement (mirrors Reading.measure = 700).
     /// Each column is given at least the width of its widest unbreakable token (so Latin
     /// words and short CJK headers never break mid-word), then the remaining budget is
@@ -820,6 +865,7 @@ private final class RenderContext {
         case nil: return .natural
         }
     }
+    #endif
 
     // MARK: Inline visitors
 
