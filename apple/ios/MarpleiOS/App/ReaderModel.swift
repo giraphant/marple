@@ -36,11 +36,10 @@ final class ReaderModel {
 
     /// Called by the picker with a freshly chosen folder.
     func didPickFolder(_ url: URL) async {
-        try? VaultBookmark.save(url)
-        await start(folder: url)
+        await start(folder: url, freshPick: true)
     }
 
-    private func start(folder url: URL) async {
+    private func start(folder url: URL, freshPick: Bool = false) async {
         // Release any previously held scope before acquiring a new one (re-pick
         // or a second boot) — security-scoped handles are a limited per-process pool.
         scopedURL?.stopAccessingSecurityScopedResource()
@@ -50,6 +49,19 @@ final class ReaderModel {
         }
         scopedURL = url
         let root = url.path
+        // The workspace root must contain a `vault/` subdirectory (the app reads
+        // <root>/vault/*.md). Picking the vault folder itself, or an unrelated
+        // folder, lands here with a clear message instead of a silent empty library.
+        var isDir: ObjCBool = false
+        let vaultDir = url.appendingPathComponent("vault").path
+        guard FileManager.default.fileExists(atPath: vaultDir, isDirectory: &isDir), isDir.boolValue else {
+            phase = .failed("这个文件夹里没有 vault 子目录。\n请选择「包含 vault 的」文库根目录,而不是 vault 本身。")
+            return
+        }
+        // Persist the bookmark only after access succeeds and the folder validates,
+        // so we never save an unusable or wrong folder (and the bookmark is created
+        // while the security scope is active, as iOS requires).
+        if freshPick { try? VaultBookmark.save(url) }
         workspaceRoot = root
         phase = .indexing
         let dbPath = containerDBPath
