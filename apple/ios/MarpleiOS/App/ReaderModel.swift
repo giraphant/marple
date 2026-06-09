@@ -2,6 +2,21 @@ import Foundation
 import SwiftUI
 import MarpleKit
 
+/// The Mac's open-tab forest resolved for display: a document leaf (carrying the
+/// resolved entry for navigation + the Mac's display label) or a named group with
+/// children. `id` is a stable per-node tag assigned during resolution.
+enum MacTabNode: Identifiable {
+    case doc(id: String, entry: Entry, label: String)
+    case group(id: String, name: String, isCollapsed: Bool, children: [MacTabNode])
+
+    var id: String {
+        switch self {
+        case .doc(let id, _, _): return id
+        case .group(let id, _, _, _): return id
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class ReaderModel {
@@ -9,10 +24,11 @@ final class ReaderModel {
 
     private(set) var phase: Phase = .needsFolder
     private(set) var entries: [Entry] = []
-    /// Documents currently open on the Mac, resolved to local entries — the
-    /// read-only "Mac 上打开的" sidebar group. Published by the Mac into the synced
-    /// folder; refreshed whenever entries change. Empty if the Mac never published.
-    private(set) var openOnMac: [Entry] = []
+    /// The Mac's open-tab forest (groups + names + nesting), resolved to local
+    /// entries — the read-only "Mac 上打开的" sidebar. Published by the Mac into the
+    /// synced folder; refreshed whenever entries change. Empty if the Mac never
+    /// published.
+    private(set) var openOnMacRoots: [MacTabNode] = []
     /// Field-weighted in-memory search index (same engine as the Mac's 快速 palette).
     /// Rebuilt off-actor whenever `entries` change.
     private var searchIndex: SearchIndex = .empty
@@ -164,19 +180,36 @@ final class ReaderModel {
         if let root = workspaceRoot { await loadSession(root: root) }
     }
 
-    /// Read the Mac-published open-tabs file from the synced folder and resolve each
-    /// workspace-relative path to a local entry. Best-effort: a missing/未同步/legacy
-    /// file just yields an empty list (the sidebar group then hides).
+    /// Read the Mac-published open-tabs file from the synced folder and resolve its
+    /// forest into `MacTabNode`s, keeping group names + nesting + the Mac's display
+    /// label (custom name). Best-effort: a missing/未同步/legacy file yields an empty
+    /// forest (the sidebar group then hides). Unresolved docs and groups that end up
+    /// empty are pruned.
     private func loadSession(root: String) async {
         let url = SessionFile.url(workspaceRoot: root)
         try? await ICloudMaterializer.ensureDownloaded(url)
         guard let data = try? Data(contentsOf: url),
               let snap = try? JSONDecoder().decode(SessionSnapshot.self, from: data) else {
-            openOnMac = []
+            openOnMacRoots = []
             return
         }
         let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
-        openOnMac = snap.openDocs.compactMap { byPath[$0.path] }
+        var counter = 0
+        func resolve(_ nodes: [SessionNode]) -> [MacTabNode] {
+            nodes.compactMap { node -> MacTabNode? in
+                counter += 1
+                switch node {
+                case .doc(let d):
+                    guard let entry = byPath[d.path] else { return nil }
+                    return .doc(id: "n\(counter)", entry: entry, label: d.title)
+                case .group(let name, let collapsed, let children):
+                    let kids = resolve(children)
+                    guard !kids.isEmpty else { return nil }
+                    return .group(id: "n\(counter)", name: name, isCollapsed: collapsed, children: kids)
+                }
+            }
+        }
+        openOnMacRoots = resolve(snap.roots)
     }
 
     /// Force-download the vault's `.md` files from iCloud, concurrently, in

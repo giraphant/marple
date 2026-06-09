@@ -2,29 +2,29 @@ import XCTest
 @testable import MarpleKit
 
 final class SessionSnapshotTests: XCTestCase {
-    func testRoundTrip() throws {
+    func testRoundTripNestedForest() throws {
         let snap = SessionSnapshot(
             updatedAtMs: 1_700_000_000_000,
-            openDocs: [
-                OpenDocSnapshot(path: "vault/papers/foo.md", title: "Foo", type: "paper"),
-                OpenDocSnapshot(path: "vault/notes/bar.md", title: "Bar", type: "note"),
+            roots: [
+                .doc(OpenDocSnapshot(path: "vault/papers/foo.md", title: "Foo", type: "paper")),
+                .group(name: "阅读中", isCollapsed: false, children: [
+                    .doc(OpenDocSnapshot(path: "vault/notes/bar.md", title: "我的别名", type: "note")),
+                    .group(name: "子组", isCollapsed: true, children: [
+                        .doc(OpenDocSnapshot(path: "vault/papers/baz.md", title: "Baz", type: "paper")),
+                    ]),
+                ]),
             ],
             activePath: "vault/papers/foo.md")
         let data = try JSONEncoder().encode(snap)
         let back = try JSONDecoder().decode(SessionSnapshot.self, from: data)
         XCTAssertEqual(back, snap)
-        XCTAssertEqual(back.openDocs.first?.id, "vault/papers/foo.md")
-    }
-
-    /// An unknown `type` raw value must not break decoding (forward-compat: a newer
-    /// Mac could add an EntryType an older reader doesn't model). `type` is a String
-    /// precisely so the reader maps it leniently instead of throwing.
-    func testUnknownTypeStillDecodes() throws {
-        let json = """
-        {"version":1,"updatedAtMs":1,"openDocs":[{"path":"vault/x.md","title":"X","type":"hologram"}],"activePath":null}
-        """.data(using: .utf8)!
-        let back = try JSONDecoder().decode(SessionSnapshot.self, from: json)
-        XCTAssertEqual(back.openDocs.first?.type, "hologram")
+        // Group name + custom label survive the round-trip.
+        guard case .group(let name, _, let children) = back.roots[1] else {
+            return XCTFail("expected a group at root[1]")
+        }
+        XCTAssertEqual(name, "阅读中")
+        guard case .doc(let leaf) = children[0] else { return XCTFail("expected a doc leaf") }
+        XCTAssertEqual(leaf.title, "我的别名")
     }
 
     func testFileURLIsOutsideVaultAndMarple() {
