@@ -9,6 +9,10 @@ final class ReaderModel {
 
     private(set) var phase: Phase = .needsFolder
     private(set) var entries: [Entry] = []
+    /// Progress during the indexing phase. nil = indeterminate (e.g. the build step).
+    private(set) var progress: (done: Int, total: Int)?
+    /// Human-readable status under the progress bar.
+    private(set) var statusLabel: String = ""
     private var client: IOSVaultClient?
     private var workspaceRoot: String?
     /// The security-scoped URL we currently hold access to. Released before we
@@ -64,9 +68,13 @@ final class ReaderModel {
         if freshPick { try? VaultBookmark.save(url) }
         workspaceRoot = root
         phase = .indexing
+        progress = nil
+        statusLabel = "正在准备…"
         let dbPath = containerDBPath
         do {
-            try await materializeMarkdown(under: root)
+            await materializeMarkdown(under: root, report: true)
+            progress = nil
+            statusLabel = "正在建立索引…"
             try await Task.detached(priority: .utility) {
                 let indexer = VaultIndexer(workspaceRoot: root, indexDBPath: dbPath)
                 if indexer.canSkipFullBuild() { _ = try indexer.reconcile() }
@@ -89,7 +97,7 @@ final class ReaderModel {
         defer { refreshing = false }
         let dbPath = containerDBPath
         do {
-            try await materializeMarkdown(under: root)
+            await materializeMarkdown(under: root, report: false)
             try await Task.detached(priority: .utility) {
                 _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).reconcile()
             }.value
@@ -107,14 +115,42 @@ final class ReaderModel {
         (try? await client?.search(SearchQuery(q: q, limit: 80))) ?? []
     }
 
-    /// Force-download only `.md` files (skip heavy media/PDFs).
-    private func materializeMarkdown(under root: String) async throws {
+    /// Force-download the vault's `.md` files from iCloud, concurrently, in
+    /// batches — far faster than serial for a multi-thousand-file vault. When
+    /// `report` is true, drives the `progress`/`statusLabel` UI. Files iCloud
+    /// hasn't surfaced yet aren't enumerated; the indexer skips any that still
+    /// fail to read, and a later foreground `refresh()` picks them up.
+    /// (Only `.md`; heavy media/PDFs stay evicted — v2.)
+    private func materializeMarkdown(under root: String, report: Bool) async {
         let vault = URL(fileURLWithPath: root).appendingPathComponent("vault")
         let fm = FileManager.default
-        guard let en = fm.enumerator(at: vault, includingPropertiesForKeys: nil,
-                                     options: [.skipsHiddenFiles]) else { return }
-        for case let url as URL in en where url.pathExtension == "md" {
-            try? await ICloudMaterializer.ensureDownloaded(url)
+        var urls: [URL] = []
+        if let en = fm.enumerator(at: vault, includingPropertiesForKeys: nil,
+                                  options: [.skipsHiddenFiles]) {
+            for case let url as URL in en where url.pathExtension == "md" { urls.append(url) }
+        }
+        let total = urls.count
+        if report {
+            progress = (0, total)
+            statusLabel = "正在从 iCloud 下载文库…"
+        }
+        guard total > 0 else { return }
+
+        let batchSize = 12
+        var done = 0
+        var idx = 0
+        while idx < urls.count {
+            let batch = Array(urls[idx..<min(idx + batchSize, urls.count)])
+            idx += batch.count
+            // Download this batch concurrently; the group is a barrier (awaits all).
+            // Tasks only capture a Sendable URL — no shared mutable state.
+            await withTaskGroup(of: Void.self) { group in
+                for url in batch {
+                    group.addTask { try? await ICloudMaterializer.ensureDownloaded(url) }
+                }
+            }
+            done += batch.count
+            if report { progress = (done, total) }
         }
     }
 }
