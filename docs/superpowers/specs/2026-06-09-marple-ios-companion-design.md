@@ -66,14 +66,30 @@ iOS and would otherwise fail to compile.
 | `Vault/VaultWatcher.swift` | FSEvents (macOS-only) | `#if os(macOS)` whole file; iOS does not use it |
 | `Vault/SupersetRunner.swift` | `Process` (macOS-only) | `#if os(macOS)` whole file; iOS does not use it |
 | `Vault/LocalVaultClient.swift` | `NSWorkspace` / `Process` open methods | `#if os(macOS)` whole file; iOS gets its own client (Workstream B) |
-| `Markdown/AttributedStringRenderer.swift` | `NSFont` / `NSColor` | introduce `PlatformFont` / `PlatformColor` typealiases (`NSFont`/`NSColor` ↔ `UIFont`/`UIColor`) so the markdown styling compiles on both |
+| `Markdown/AttributedStringRenderer.swift` | `NSFont` / `NSColor` **and AppKit table-drawing chrome** | full cross-platform port (see below) |
 
-`AttributedStringRenderer.swift` is the one non-trivial port — it computes
-fonts/weights/colors for the markdown reader and must work on iOS. The rest are
-whole-file `#if os(macOS)` exclusions.
+`AttributedStringRenderer.swift` is the **largest port**, bigger than fonts/colors
+alone. Beyond `NSFont`/`NSColor`, its rounded-card table rendering is genuine
+AppKit drawing: `RoundedCardBlock`/`TableCellBlock` subclass `NSTextTableBlock`
+and override `drawBackground(...)` using `NSBezierPath` + `NSGraphicsContext`
+(the "path D" live-text table chrome). The port:
 
-A small `Platform.swift` in MarpleKit holds the `PlatformFont`/`PlatformColor`
-typealiases.
+- `Platform.swift` (new): `PlatformFont`/`PlatformColor`/`PlatformBezierPath`
+  typealiases (`NSFont`/`NSColor`/`NSBezierPath` ↔ `UIFont`/`UIColor`/`UIBezierPath`),
+  plus the few diverging calls (`NSFontManager` weights, `addLine`/`line(to:)`,
+  graphics-context save/restore/clip).
+- The `drawBackground(...)` signatures differ by platform (`in controlView: NSView`
+  vs `UIView`); guard those method bodies per-platform while sharing the geometry.
+- `NSTextTable`/`NSTextTableBlock`/`NSParagraphStyle`/`NSMutableParagraphStyle`/
+  `NSTextTab` exist in UIKit's TextKit, so the layout math is shared.
+- Output stays an `NSAttributedString` (a cross-platform class), so the **reading
+  experience is identical to the Mac**.
+
+The rendered `NSAttributedString` is displayed on iOS in a **`UITextView`**
+(`UIViewRepresentable`), mirroring the Mac's `MarkdownTextView` (`NSTextView`,
+`NSViewRepresentable`). This is the chosen path over degrading tables or
+re-rendering blocks natively in SwiftUI — highest fidelity, maximum reuse, no
+divergence from the Mac renderer.
 
 ### Workstream B — iOS file access (the only genuinely new logic)
 
@@ -111,9 +127,11 @@ typealiases.
 - `NavigationStack`: `SidebarScreen` (6 types) → `EntryListScreen(type)` →
   `DocScreen(entry)`. Single-column push navigation (iPhone-only).
 - Search: `.searchable` on the list, querying `IndexDatabase` FTS5.
-- `DocScreen`: renders the reused `MarkdownModel` blocks via the ported
-  renderer. Inspector is a sheet / expandable section built on `Derivation`'s
-  `DocStats` / `DocOutline`.
+- `DocScreen`: wraps a `UITextView` (`UIViewRepresentable`) that displays the
+  `NSAttributedString` from `MarkdownRenderer.render(...)`, fed by
+  `Wikilink.preprocessForRendering(body)` + `RenderStyle(...)` — same pipeline as
+  the Mac's `DocView`/`MarkdownTextView`. Inspector is a sheet built on
+  `Derivation`'s `computeDocStats(...)` / `outline(from:)`.
 - A lean iOS `ReaderModel` (`@Observable`). The Mac's `AppModel` lives in the
   macOS UI target and is not reusable, but a read-only model is far simpler, and
   all derivations come from MarpleKit.
@@ -155,11 +173,14 @@ IndexDatabase  →  IOSVaultClient  →  ReaderModel  →  SwiftUI
 
 ## 8. Effort
 
-**~1–1.5 weeks focused.** Reuse-heavy in A and C. Risk concentrated in:
+**~1.5–2 weeks focused** (revised up: the `AttributedStringRenderer` table-chrome
+port is bigger than first scoped). Reuse-heavy in B's index path and C. Risk
+concentrated in:
 
+- **A** — porting the AppKit table-drawing chrome in `AttributedStringRenderer`
+  to UIKit (`NSBezierPath`→`UIBezierPath`, graphics context, per-platform
+  `drawBackground`). The rest of A is mechanical `#if os(macOS)`.
 - **B** — iCloud materialization timing and the not-yet-downloaded UX.
-- **D** — the markdown rendering UI (model is reused; the SwiftUI presentation
-  is new).
 
 ## 9. Open follow-ups (file in Linear before merge if they survive)
 
