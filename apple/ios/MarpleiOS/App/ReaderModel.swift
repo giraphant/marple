@@ -67,18 +67,33 @@ final class ReaderModel {
         // while the security scope is active, as iOS requires).
         if freshPick { try? VaultBookmark.save(url) }
         workspaceRoot = root
+        let dbPath = containerDBPath
+
+        // Warm launch: an index already exists → show the library immediately from
+        // it, then sync (download new + reconcile) in the background. This is what
+        // makes a re-open instant instead of re-running the whole download/index
+        // flow with the progress screen every time.
+        if FileManager.default.fileExists(atPath: dbPath) {
+            let c = IOSVaultClient(workspaceRoot: root, db: IndexDatabase(indexDBPath: dbPath))
+            if let warm = try? await c.index() {
+                self.client = c
+                self.entries = warm
+                phase = .ready
+                Task { await self.backgroundSync(root: root, dbPath: dbPath) }
+                return
+            }
+        }
+
+        // Cold first run: no usable index yet → show progress while building.
         phase = .indexing
         progress = nil
         statusLabel = "正在准备…"
-        let dbPath = containerDBPath
         do {
             await materializeMarkdown(under: root, report: true)
             progress = nil
             statusLabel = "正在建立索引…"
             try await Task.detached(priority: .utility) {
-                let indexer = VaultIndexer(workspaceRoot: root, indexDBPath: dbPath)
-                if indexer.canSkipFullBuild() { _ = try indexer.reconcile() }
-                else { _ = try indexer.buildFull() }
+                _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).buildFull()
             }.value
             let db = IndexDatabase(indexDBPath: dbPath)
             let c = IOSVaultClient(workspaceRoot: root, db: db)
@@ -90,20 +105,28 @@ final class ReaderModel {
         }
     }
 
-    /// Re-index on foreground (cheap incremental reconcile).
+    /// Foreground refresh — runs the background sync, never blocking the UI or
+    /// showing the progress screen.
     func refresh() async {
-        guard !refreshing, let root = workspaceRoot, case .ready = phase else { return }
+        guard case .ready = phase, let root = workspaceRoot else { return }
+        await backgroundSync(root: root, dbPath: containerDBPath)
+    }
+
+    /// Download newly-synced `.md`, reconcile, and refresh entries — all in the
+    /// background. Coalesced via `refreshing` so overlapping launches/foregrounds
+    /// don't double-run. Keeps `phase == .ready`, so reading is never interrupted.
+    private func backgroundSync(root: String, dbPath: String) async {
+        guard !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
-        let dbPath = containerDBPath
+        await materializeMarkdown(under: root, report: false)
         do {
-            await materializeMarkdown(under: root, report: false)
             try await Task.detached(priority: .utility) {
                 _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).reconcile()
             }.value
             if let c = client { self.entries = try await c.index() }
         } catch {
-            print("[marple] refresh failed (keeping last entries): \(error)")
+            print("[marple] background sync failed (keeping last entries): \(error)")
         }
     }
 
