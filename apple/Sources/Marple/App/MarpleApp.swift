@@ -167,7 +167,11 @@ struct MarpleApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
-        setvbuf(stdout, nil, _IOLBF, 0)  // line-buffer so logs stream to the captured file
+        // Persist stdout/stderr to ~/Library/Logs/Marple/marple.log (also sets
+        // line buffering). A Finder-launched .app otherwise drops print() to
+        // /dev/null, leaving no trail when something runs away (e.g. the 48 GB
+        // memory blow-up during a Terminal book-creation storm).
+        MarpleLog.redirectToFile()
     }
 
     // The main window is AppKit-owned (see MarpleWindowController) so the split view
@@ -182,6 +186,7 @@ struct MarpleApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: MarpleWindowController?
+    private let memoryWatchdog = MemoryWatchdog()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -189,6 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wc = MarpleWindowController()
         windowController = wc
         wc.start()
+        memoryWatchdog.start()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
