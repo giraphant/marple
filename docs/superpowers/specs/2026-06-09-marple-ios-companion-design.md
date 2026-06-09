@@ -78,18 +78,25 @@ and override `drawBackground(...)` using `NSBezierPath` + `NSGraphicsContext`
   typealiases (`NSFont`/`NSColor`/`NSBezierPath` ↔ `UIFont`/`UIColor`/`UIBezierPath`),
   plus the few diverging calls (`NSFontManager` weights, `addLine`/`line(to:)`,
   graphics-context save/restore/clip).
-- The `drawBackground(...)` signatures differ by platform (`in controlView: NSView`
-  vs `UIView`); guard those method bodies per-platform while sharing the geometry.
-- `NSTextTable`/`NSTextTableBlock`/`NSParagraphStyle`/`NSMutableParagraphStyle`/
-  `NSTextTab` exist in UIKit's TextKit, so the layout math is shared.
-- Output stays an `NSAttributedString` (a cross-platform class), so the **reading
-  experience is identical to the Mac**.
+- `NSParagraphStyle`/`NSMutableParagraphStyle`/`NSTextTab`/`NSAttributedString`
+  exist on both platforms, so the body/heading/quote/list/code layout math is
+  fully shared and renders **identically to the Mac**.
+- **Tables are the one exception.** `NSTextTable`/`NSTextTableBlock` are
+  **macOS-only** — Apple never ported the AppKit text-table API to UIKit
+  (confirmed by compiling against the iOS SDK). The `RoundedCardBlock`/
+  `TableCellBlock` chrome and the table layout helpers are therefore gated behind
+  `#if canImport(AppKit)`. On iOS, `visitTable` falls back to **plain stacked
+  text** (header row in the table-header font, cells tab-separated, one line per
+  row) — readable, but without the rounded-card chrome. This is a deliberate v1
+  degradation for tables only; everything non-table is pixel-identical. (Richer
+  iOS tables via native SwiftUI are a possible v2 — tracked in Linear.)
+- One iOS-only API name differs: `NSFontDescriptor.FeatureKey.selectorIdentifier`
+  (monospaced digits) is `.selector` on UIKit — branched per platform.
 
 The rendered `NSAttributedString` is displayed on iOS in a **`UITextView`**
 (`UIViewRepresentable`), mirroring the Mac's `MarkdownTextView` (`NSTextView`,
-`NSViewRepresentable`). This is the chosen path over degrading tables or
-re-rendering blocks natively in SwiftUI — highest fidelity, maximum reuse, no
-divergence from the Mac renderer.
+`NSViewRepresentable`). Maximum reuse, single-text-view simplicity, no divergence
+from the Mac renderer except the table fallback above.
 
 ### Workstream B — iOS file access (the only genuinely new logic)
 
