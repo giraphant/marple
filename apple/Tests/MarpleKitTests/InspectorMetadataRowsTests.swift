@@ -165,6 +165,114 @@ import Testing
         #expect(rows.last == .rating)
     }
 
+    @Test func bookTranslationRowLinksToDoubanAboveRating() {
+        // A book whose ISBN resolves in the cndouban sidecar surfaces a "译本"
+        // row linking to its Douban edition, directly above the rating (and below
+        // 专题). ISBN matching is digits-only, so the dashed form still resolves.
+        let entry = Entry(
+            path: "vault/books/book.md",
+            type: .book,
+            title: "Engineering Rules",
+            author: ["JoAnne Yates"],
+            year: "2019",
+            ratingScore: 0,
+            themes: [],
+            topics: ["iphone-screws"],
+            preview: "",
+            hasPDF: false,
+            publisher: "Johns Hopkins University Press",
+            isbn: "978-1-4214-2889-5",
+            category: "monograph"
+        )
+        let topicPage = Entry(
+            path: "vault/topics/iphone-screws/00-overview.md",
+            type: .topic, title: "iPhone 螺丝", author: [], year: nil,
+            ratingScore: 0, themes: [], preview: "", hasPDF: false
+        )
+        let localise = CnDoubanIndex(byISBN: [
+            "9781421428895": .init(titleCn: "工程规则",
+                                   doubanURL: "https://book.douban.com/subject/12345/"),
+        ])
+
+        let rows = inspectorInfoRows(for: entry, in: [entry, topicPage], localise: localise)
+        // 专题 (chips) immediately followed by 译本, then rating last.
+        #expect(rows.suffix(3) == [
+            .chips(label: "专题", values: [
+                InspectorInfoChip(title: "iPhone 螺丝",
+                                  path: "vault/topics/iphone-screws/00-overview.md",
+                                  copyValue: "iphone-screws"),
+            ]),
+            .linkedScalar(label: "译本", value: "工程规则",
+                          path: "https://book.douban.com/subject/12345/",
+                          copyValue: "https://book.douban.com/subject/12345/"),
+            .rating,
+        ])
+    }
+
+    @Test func chapterTranslationRowResolvesFromBookOverviewISBN() {
+        // A chapter has no ISBN of its own; the 译本 row is resolved from its
+        // parent book overview's ISBN, mirroring how 出版/类型/ISBN are sourced.
+        let chapter = Entry(
+            path: "vault/books/yates-engineering-rules-2019/ch01.md",
+            type: .chapter, title: "Chapter", author: ["JoAnne Yates"], year: "2019",
+            ratingScore: 0, themes: [], preview: "", hasPDF: false,
+            book: "yates-engineering-rules-2019"
+        )
+        let book = Entry(
+            path: "vault/books/yates-engineering-rules-2019/00-overview.md",
+            type: .book, title: "Engineering Rules", author: ["JoAnne Yates"], year: "2019",
+            ratingScore: 0, themes: [], preview: "", hasPDF: false,
+            isbn: "9781421428895"
+        )
+        let localise = CnDoubanIndex(byISBN: [
+            "9781421428895": .init(titleCn: "工程规则",
+                                   doubanURL: "https://book.douban.com/subject/12345/"),
+        ])
+
+        let rows = inspectorInfoRows(for: chapter, in: [chapter, book], localise: localise)
+        #expect(rows.contains(
+            .linkedScalar(label: "译本", value: "工程规则",
+                          path: "https://book.douban.com/subject/12345/",
+                          copyValue: "https://book.douban.com/subject/12345/")
+        ))
+        #expect(rows.last == .rating)
+    }
+
+    @Test func translationRowOmittedWhenNoSidecarOrNoMatch() {
+        // No sidecar → no 译本 row. ISBN not in the sidecar → no row either.
+        let book = Entry(
+            path: "vault/books/book.md", type: .book, title: "Untranslated",
+            author: ["A"], year: "2010", ratingScore: 0, themes: [], preview: "",
+            hasPDF: false, isbn: "9780000000000"
+        )
+        #expect(!inspectorInfoRows(for: book).contains { row in
+            if case .linkedScalar(let label, _, _, _) = row { return label == "译本" }
+            if case .readOnlyScalar(let label, _, _) = row { return label == "译本" }
+            return false
+        })
+        let localise = CnDoubanIndex(byISBN: [
+            "9781421428895": .init(titleCn: "工程规则", doubanURL: nil),
+        ])
+        #expect(!inspectorInfoRows(for: book, in: [book], localise: localise).contains { row in
+            if case .readOnlyScalar(let label, _, _) = row { return label == "译本" }
+            return false
+        })
+    }
+
+    @Test func translationRowShowsPlainTextWhenNoDoubanURL() {
+        // A resolved edition without a usable Douban URL renders as plain text.
+        let book = Entry(
+            path: "vault/books/book.md", type: .book, title: "Book",
+            author: ["A"], year: "2010", ratingScore: 0, themes: [], preview: "",
+            hasPDF: false, isbn: "9781421428895"
+        )
+        let localise = CnDoubanIndex(byISBN: [
+            "9781421428895": .init(titleCn: "中文书名", doubanURL: nil),
+        ])
+        let rows = inspectorInfoRows(for: book, in: [book], localise: localise)
+        #expect(rows.contains(.readOnlyScalar(label: "译本", value: "中文书名", copyValue: nil)))
+    }
+
     @Test func authorRowsOnlyShowRating() {
         let entry = Entry(
             path: "vault/authors/alice.md",

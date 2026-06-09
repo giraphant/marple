@@ -27,6 +27,11 @@ final class AppModel {
     /// in which case the conformance feature stays dark. See [[SchemaSnapshot]].
     private(set) var schemaSnapshot: SchemaSnapshot?
 
+    /// The vault's Chinese-translation index (`.quasi/localise/cndouban.json`),
+    /// reloaded on every index load. nil when the sidecar is absent/unreadable —
+    /// the 译本 inspector row then stays dark. See [[CnDoubanIndex]].
+    private(set) var localisation: CnDoubanIndex?
+
     /// Required-field conformance for one entry, or nil when the vault has no
     /// schema opinion on it (no snapshot, or an unmodeled type). Read-only,
     /// auxiliary: callers that get nil render exactly as before.
@@ -664,6 +669,10 @@ final class AppModel {
         // feature dark. Loaded here (not watched) since `.quasi/` is a sibling of
         // the watched `vault/` dir.
         schemaSnapshot = SchemaSnapshot.load(workspaceRoot: workspaceRoot)
+        // 译本 index — same cadence/rationale as the schema snapshot above:
+        // a tiny `.quasi/` sidecar, loaded (not watched) since it's a sibling of
+        // the watched `vault/` dir and maintained by `quasi-helpers localise`.
+        localisation = CnDoubanIndex.load(workspaceRoot: workspaceRoot)
         rebuildIndexDerived()
         if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
             recomputeVisible()
