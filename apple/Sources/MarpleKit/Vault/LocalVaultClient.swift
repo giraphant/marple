@@ -3,6 +3,7 @@ import Foundation
 import AppKit
 #endif
 
+#if os(macOS)
 /// In-process `VaultClient`: reads/writes vault markdown files directly and
 /// delegates metadata/search to `IndexDatabase`. No HTTP, no sidecar on the hot
 /// path. All `path` arguments are workspace-relative (e.g. "vault/papers/x.md").
@@ -204,3 +205,4 @@ public struct LocalVaultClient: VaultClient {
         return (String(stem[..<dot]), String(stem[stem.index(after: dot)...]))
     }
 }
+#endif
