@@ -28,12 +28,32 @@ struct SidebarScreen: View {
     private var typeList: some View {
         // Count per type once (O(n)), not once-per-row.
         let counts = Dictionary(model.entries.map { ($0.type, 1) }, uniquingKeysWith: +)
-        return List(EntryType.modeled, id: \.rawValue) { type in
-            NavigationLink {
-                EntryListScreen(model: model, type: type)
-            } label: {
-                Label(type.label, systemImage: symbol(for: type))
-                    .badge(counts[type] ?? 0)
+        return List {
+            if !model.openOnMac.isEmpty {
+                Section("Mac 上打开的") {
+                    ForEach(model.openOnMac) { entry in
+                        NavigationLink {
+                            DocScreen(model: model, entry: entry)
+                        } label: {
+                            Label {
+                                Text(entry.title ?? (entry.path as NSString).lastPathComponent)
+                                    .lineLimit(1)
+                            } icon: {
+                                Image(systemName: symbol(for: entry.type))
+                            }
+                        }
+                    }
+                }
+            }
+            Section {
+                ForEach(EntryType.modeled, id: \.rawValue) { type in
+                    NavigationLink {
+                        EntryListScreen(model: model, type: type)
+                    } label: {
+                        Label(type.label, systemImage: symbol(for: type))
+                            .badge(counts[type] ?? 0)
+                    }
+                }
             }
         }
     }

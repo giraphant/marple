@@ -246,6 +246,9 @@ final class AppModel {
     private let stateStore: StateStore?
     private let semantic: (any SemanticBackend)?
     private let supersetRunner: SupersetRunner
+    /// Publishes open tabs to the synced folder for the iOS companion. nil without
+    /// a workspace root (e.g. tests).
+    private let sessionWriter: SessionWriter?
 
     /// True when a vector index exists, so 深度 (semantic) mode can run.
     var semanticAvailable: Bool { semantic != nil }
@@ -265,6 +268,7 @@ final class AppModel {
         self.stateStore = stateStore
         self.semantic = semantic
         self.supersetRunner = supersetRunner
+        self.sessionWriter = workspaceRoot.isEmpty ? nil : SessionWriter(workspaceRoot: workspaceRoot)
         self.isFirstRun = isFirstRun
         if let s = stateStore?.load() {
             // QUA-105: seed `loadedCountsSnapshot` BEFORE the property setters
@@ -336,6 +340,10 @@ final class AppModel {
                                            tree: ws?.treeSnapshot)
         }
         let activeSavedSpace = activeSpaceID.flatMap { id in savedSpaces.first { $0.id == id } } ?? savedSpaces.first
+        // Mirror the active Space's open tabs to the synced folder for the iOS
+        // companion (debounced + dedup'd inside the writer).
+        sessionWriter?.publish(tabs: activeSavedSpace?.tabs ?? [],
+                               activeIndex: activeSavedSpace?.activeIndex ?? 0)
         // Same round-trip discipline for counts — during bootstrap, write back
         // the loaded snapshot rather than the still-empty `counts` dict.
         let persistedCounts: [EntryType: Int]? =

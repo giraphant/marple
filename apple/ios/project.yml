@@ -26,13 +26,15 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.quasifish.marpleios
         GENERATE_INFOPLIST_FILE: YES
+        # Home-screen name is just "Marple" (the target/bundle id stays MarpleiOS).
+        INFOPLIST_KEY_CFBundleDisplayName: Marple
         # App icon from Assets.xcassets (required by App Store Connect / TestFlight).
         # actool emits the canonical CFBundleIcons.CFBundlePrimaryIcon block.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # iPhone only (TARGETED_DEVICE_FAMILY 1) — matches the iPhone-only scope.
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "9"
+        CURRENT_PROJECT_VERSION: "10"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         # Supported orientations (iPhone): portrait + both landscapes.
