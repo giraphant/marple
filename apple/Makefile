@@ -93,7 +93,7 @@ update-cask:
 	gh repo clone "$(TAP_REPO)" "$$tmp" -- -q || exit 1; \
 	if [ ! -f "$$tmp/$(CASK_PATH)" ]; then \
 		mkdir -p "$$tmp/Casks"; \
-		printf 'cask "marple" do\n  version "%s"\n  sha256 "%s"\n\n  url "https://github.com/giraphant/marple/releases/download/v#{version}/$(APP_NAME).dmg"\n  name "Marple"\n  desc "Native macOS reader for your knowledge vault"\n  homepage "https://github.com/giraphant/marple"\n\n  depends_on macos: ">= :sequoia"\n\n  app "Marple.app"\n  binary "#{appdir}/Marple.app/Contents/MacOS/marple-cli"\n\n  zap trash: [\n    "~/Library/Application Support/com.marple.app",\n    "~/Library/Preferences/com.marple.app.plist",\n  ]\nend\n' "$(VERSION)" "$$sha" > "$$tmp/$(CASK_PATH)"; \
+		printf 'cask "marple" do\n  version "%s"\n  sha256 "%s"\n\n  url "https://github.com/giraphant/marple/releases/download/v#{version}/$(APP_NAME).dmg"\n  name "Marple"\n  desc "Native macOS reader for your knowledge vault"\n  homepage "https://github.com/giraphant/marple"\n\n  depends_on macos: :sequoia\n\n  app "Marple.app"\n  binary "#{appdir}/Marple.app/Contents/MacOS/marple-cli"\n\n  zap trash: [\n    "~/Library/Application Support/com.marple.app",\n    "~/Library/Preferences/com.marple.app.plist",\n  ]\nend\n' "$(VERSION)" "$$sha" > "$$tmp/$(CASK_PATH)"; \
 	else \
 		sed -i '' -E "s|^  version \".*\"|  version \"$(VERSION)\"|" "$$tmp/$(CASK_PATH)"; \
 		sed -i '' -E "s|^  sha256 \".*\"|  sha256 \"$$sha\"|" "$$tmp/$(CASK_PATH)"; \
