@@ -9,6 +9,9 @@ final class ReaderModel {
 
     private(set) var phase: Phase = .needsFolder
     private(set) var entries: [Entry] = []
+    /// Field-weighted in-memory search index (same engine as the Mac's 快速 palette).
+    /// Rebuilt off-actor whenever `entries` change.
+    private var searchIndex: SearchIndex = .empty
     /// Progress during the indexing phase. nil = indeterminate (e.g. the build step).
     private(set) var progress: (done: Int, total: Int)?
     /// Human-readable status under the progress bar.
@@ -77,7 +80,7 @@ final class ReaderModel {
             let c = IOSVaultClient(workspaceRoot: root, db: IndexDatabase(indexDBPath: dbPath))
             if let warm = try? await c.index() {
                 self.client = c
-                self.entries = warm
+                await updateEntries(warm)
                 phase = .ready
                 Task { await self.backgroundSync(root: root, dbPath: dbPath) }
                 return
@@ -98,7 +101,7 @@ final class ReaderModel {
             let db = IndexDatabase(indexDBPath: dbPath)
             let c = IOSVaultClient(workspaceRoot: root, db: db)
             self.client = c
-            self.entries = try await c.index()
+            await updateEntries(try await c.index())
             phase = .ready
         } catch {
             phase = .failed("建立索引失败:\(error.localizedDescription)")
@@ -124,7 +127,7 @@ final class ReaderModel {
             try await Task.detached(priority: .utility) {
                 _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).reconcile()
             }.value
-            if let c = client { self.entries = try await c.index() }
+            if let c = client { await updateEntries(try await c.index()) }
         } catch {
             print("[marple] background sync failed (keeping last entries): \(error)")
         }
@@ -134,8 +137,26 @@ final class ReaderModel {
         (try? await client?.entryText(path: entry.path)) ?? ""
     }
 
-    func search(_ q: String) async -> [SearchHit] {
-        (try? await client?.search(SearchQuery(q: q, limit: 80))) ?? []
+    /// Cross-type ranked search — the same field-weighted fuzzy ranker the Mac's
+    /// 快速 command palette uses (`buildSearchIndex` + `searchDocuments`), run off
+    /// the main actor so typing never hitches. Results are global; callers filter
+    /// by type if they want a scoped list.
+    func search(_ q: String) async -> [Entry] {
+        let trimmed = q.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return [] }
+        let index = searchIndex
+        let ranked = await Task.detached(priority: .userInitiated) {
+            searchDocuments(index, trimmed)
+        }.value
+        return ranked.map(\.entry)
+    }
+
+    /// Set entries and rebuild the search index (off-actor — thousands of docs).
+    private func updateEntries(_ newEntries: [Entry]) async {
+        self.entries = newEntries
+        self.searchIndex = await Task.detached(priority: .utility) {
+            buildSearchIndex(newEntries)
+        }.value
     }
 
     /// Force-download the vault's `.md` files from iCloud, concurrently, in

@@ -22,11 +22,10 @@ struct EntryListScreen: View {
             }
         }
         .navigationTitle(type.label)
-        .searchable(text: $query, prompt: "全文搜索")
+        .searchable(text: $query, prompt: "在\(type.label)中搜索")
         .task(id: query) {
             guard !query.isEmpty else { hits = []; return }
-            let results = await model.search(query)
-            hits = results.map(\.entry).filter { $0.type == type }
+            hits = (await model.search(query)).filter { $0.type == type }
         }
     }
 }
