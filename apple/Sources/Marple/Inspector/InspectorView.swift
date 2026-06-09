@@ -380,7 +380,7 @@ private struct InspectorInfoRowsView: View {
     let entry: Entry
 
     var body: some View {
-        ForEach(Array(inspectorInfoRows(for: entry, in: model.entries).enumerated()), id: \.offset) { _, row in
+        ForEach(Array(inspectorInfoRows(for: entry, in: model.entries, localise: model.localisation).enumerated()), id: \.offset) { _, row in
             switch row {
             case .rating:
                 RatingRow(model: model, score: Int(entry.ratingScore))
@@ -394,12 +394,12 @@ private struct InspectorInfoRowsView: View {
                 MetadataChipsRow(
                     label: label,
                     values: [InspectorInfoChip(title: value, path: path, copyValue: copyValue)]
-                ) { path in
-                    Task { await model.open(path) }
+                ) { target in
+                    openInspectorTarget(target, model: model)
                 }
             case .chips(let label, let values):
-                MetadataChipsRow(label: label, values: values) { path in
-                    Task { await model.open(path) }
+                MetadataChipsRow(label: label, values: values) { target in
+                    openInspectorTarget(target, model: model)
                 }
             case .identifier(let label, let displayValue, let fullValue):
                 ReadOnlyScalarRow(label: label, value: displayValue, copyValue: fullValue)
@@ -617,13 +617,23 @@ private struct MetadataChip: View {
             .font(.system(size: 11.5, weight: .medium))
             .lineLimit(1)
             .truncationMode(.tail)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private func copy(_ value: String) {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(value, forType: .string)
+}
+
+/// Resolve a metadata chip tap: external http(s) URLs (e.g. a 译本 Douban link)
+/// open in the browser; everything else is an internal vault path.
+private func openInspectorTarget(_ target: String, model: AppModel) {
+    if (target.hasPrefix("http://") || target.hasPrefix("https://")),
+       let url = URL(string: target) {
+        NSWorkspace.shared.open(url)
+    } else {
+        Task { await model.open(target) }
+    }
 }
 
 private struct AuthorRow: View {

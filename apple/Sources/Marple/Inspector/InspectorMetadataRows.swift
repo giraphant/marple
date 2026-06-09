@@ -26,7 +26,8 @@ enum InspectorInfoRow: Equatable {
 }
 
 // Keep this presentation policy in sync with the Quasi plugin schemas at ~/.agents/plugins/quasi/scripts/schemas.
-func inspectorInfoRows(for entry: Entry, in entries: [Entry] = []) -> [InspectorInfoRow] {
+func inspectorInfoRows(for entry: Entry, in entries: [Entry] = [],
+                       localise: CnDoubanIndex? = nil) -> [InspectorInfoRow] {
     var rows: [InspectorInfoRow]
     switch entry.type {
     case .paper:   rows = paperRows(for: entry, in: entries)
@@ -51,7 +52,31 @@ func inspectorInfoRows(for entry: Entry, in entries: [Entry] = []) -> [Inspector
             rows.append(membership)
         }
     }
+    // "译本": Chinese translation edition, slotted directly above the rating
+    // (and below 专题, which inserted just before rating above).
+    if let translation = translationRow(for: entry, in: entries, localise: localise) {
+        if let last = rows.last, last == .rating {
+            rows.insert(translation, at: rows.count - 1)
+        } else {
+            rows.append(translation)
+        }
+    }
     return rows
+}
+
+/// Row for a book's Chinese translation, resolved from the `cndouban.json`
+/// sidecar by ISBN, linking to its Douban page when a URL is available. The
+/// translation is keyed off the book, so for a chapter we resolve it from the
+/// parent book overview (mirrors how `bookDetailRows` sources the overview).
+/// Returns nil when the book has no indexed Chinese edition.
+private func translationRow(for entry: Entry, in entries: [Entry], localise: CnDoubanIndex?) -> InspectorInfoRow? {
+    guard let localise else { return nil }
+    let source = bookContext(for: entry, in: entries)?.overview ?? entry
+    guard let translation = localise.translation(forISBN: source.isbn) else { return nil }
+    if let url = nonEmpty(translation.doubanURL) {
+        return .linkedScalar(label: "译本", value: translation.titleCn, path: url, copyValue: url)
+    }
+    return .readOnlyScalar(label: "译本", value: translation.titleCn, copyValue: nil)
 }
 
 /// Read-only row listing the topic corpora this entry declares membership in
