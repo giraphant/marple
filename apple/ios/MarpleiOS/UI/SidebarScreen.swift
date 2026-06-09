@@ -29,19 +29,10 @@ struct SidebarScreen: View {
         // Count per type once (O(n)), not once-per-row.
         let counts = Dictionary(model.entries.map { ($0.type, 1) }, uniquingKeysWith: +)
         return List {
-            if !model.openOnMac.isEmpty {
+            if !model.openOnMacRoots.isEmpty {
                 Section("Mac 上打开的") {
-                    ForEach(model.openOnMac) { entry in
-                        NavigationLink {
-                            DocScreen(model: model, entry: entry)
-                        } label: {
-                            Label {
-                                Text(entry.title ?? (entry.path as NSString).lastPathComponent)
-                                    .lineLimit(1)
-                            } icon: {
-                                Image(systemName: symbol(for: entry.type))
-                            }
-                        }
+                    ForEach(model.openOnMacRoots) { node in
+                        MacTabNodeView(node: node, model: model)
                     }
                 }
             }
@@ -71,12 +62,62 @@ struct SidebarScreen: View {
         }
     }
 
-    private func symbol(for type: EntryType) -> String {
-        switch type {
-        case .paper: "doc.text"; case .book: "book"; case .author: "person"
-        case .topic: "tag"; case .journal: "newspaper"; case .chapter: "doc.plaintext"
-        case .note: "note.text"; case .image: "photo"; case .talk: "mic"
-        default: "doc"
+}
+
+/// Sidebar SF Symbol for an entry type. File-level so both the type list and the
+/// "Mac 上打开的" forest share one mapping.
+func symbol(for type: EntryType) -> String {
+    switch type {
+    case .paper: "doc.text"; case .book: "book"; case .author: "person"
+    case .topic: "tag"; case .journal: "newspaper"; case .chapter: "doc.plaintext"
+    case .note: "note.text"; case .image: "photo"; case .talk: "mic"
+    default: "doc"
+    }
+}
+
+/// Recursively renders one node of the "Mac 上打开的" forest: a document link or a
+/// collapsible group (folder) whose initial expansion mirrors the Mac's collapsed
+/// state.
+private struct MacTabNodeView: View {
+    let node: MacTabNode
+    @Bindable var model: ReaderModel
+
+    var body: some View {
+        switch node {
+        case .doc(_, let entry, let label):
+            NavigationLink {
+                DocScreen(model: model, entry: entry)
+            } label: {
+                Label {
+                    Text(label).lineLimit(1)
+                } icon: {
+                    Image(systemName: symbol(for: entry.type))
+                }
+            }
+        case .group(_, let name, let collapsed, let children):
+            MacTabGroupView(name: name, collapsed: collapsed, children: children, model: model)
+        }
+    }
+}
+
+private struct MacTabGroupView: View {
+    let name: String
+    let children: [MacTabNode]
+    @Bindable var model: ReaderModel
+    @State private var expanded: Bool
+
+    init(name: String, collapsed: Bool, children: [MacTabNode], model: ReaderModel) {
+        self.name = name
+        self.children = children
+        self.model = model
+        _expanded = State(initialValue: !collapsed)
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            ForEach(children) { MacTabNodeView(node: $0, model: model) }
+        } label: {
+            Label(name, systemImage: "folder")
         }
     }
 }
