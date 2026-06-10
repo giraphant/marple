@@ -106,11 +106,14 @@ struct DocScreen: View {
 
     private func load() async {
         let raw = await model.text(for: entry)
-        let md = Wikilink.preprocessForRendering(raw)
+        // Strip YAML frontmatter before rendering/stats, same as the Mac reader
+        // (metadata lives in the info sheet, not the reading surface).
+        let body = Frontmatter.split(raw).body
+        let md = Wikilink.preprocessForRendering(body)
         let doc = MarkdownRenderer.render(md, style: style)
         rendered = doc.attributedString
         outline = MarpleKit.outline(from: doc.headings)
-        stats = computeDocStats(raw)
+        stats = computeDocStats(body)
         book = bookContext(for: entry, in: model.entries)
     }
 }
@@ -121,6 +124,13 @@ private struct OutlineSheet: View {
     let outline: [OutlineItem]
     let onJump: (OutlineItem) -> Void
 
+    // Ulysses geometry: hierarchy is expressed by indentation ONLY — every level
+    // gets the same primary text and the same dot. 20pt per level; the dot column
+    // is 7pt dot + 10pt gap = 17pt.
+    private func indent(_ item: OutlineItem) -> CGFloat { CGFloat(max(item.level - 1, 0)) * 20 }
+    /// x where a row's text begins — separators align to the FOLLOWING row's text.
+    private func textLeading(_ item: OutlineItem) -> CGFloat { 16 + indent(item) + 17 }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
@@ -128,23 +138,26 @@ private struct OutlineSheet: View {
                 VStack(spacing: 0) {
                     ForEach(Array(outline.enumerated()), id: \.element.id) { idx, item in
                         Button { onJump(item) } label: {
-                            HStack(spacing: 10) {
+                            // Top-aligned so the dot anchors to the FIRST line of a
+                            // wrapped heading, not the center of the whole block.
+                            HStack(alignment: .top, spacing: 10) {
                                 Circle()
-                                    .fill(item.level <= 1 ? Color.primary.opacity(0.5) : Color.secondary.opacity(0.35))
-                                    .frame(width: item.level <= 1 ? 6 : 4, height: item.level <= 1 ? 6 : 4)
+                                    .fill(Color.secondary.opacity(0.55))
+                                    .frame(width: 7, height: 7)
+                                    .padding(.top, 7)   // optical center of the first body line
                                 Text(item.text)
-                                    .font(item.level <= 1 ? .callout.weight(.medium) : .callout)
-                                    .foregroundStyle(item.level <= 1 ? .primary : .secondary)
+                                    .font(.body)
                                     .lineLimit(2).multilineTextAlignment(.leading)
                                 Spacer(minLength: 0)
                             }
-                            .padding(.leading, CGFloat((item.level - 1) * 16))
-                            .padding(.vertical, 9).padding(.horizontal, 14)
+                            .padding(.leading, 16 + indent(item))
+                            .padding(.trailing, 16)
+                            .padding(.vertical, 13)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         if idx < outline.count - 1 {
-                            Divider().padding(.leading, 14)
+                            Divider().padding(.leading, textLeading(outline[idx + 1]))
                         }
                     }
                 }
