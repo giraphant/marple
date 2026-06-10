@@ -407,12 +407,14 @@ final class AppModel {
                                            tabs: savedTabs,
                                            activeIndex: idx,
                                            iconName: space.iconName,
+                                           isArchived: space.isArchived,
                                            tree: ws?.treeSnapshot)
         }
         let activeSavedSpace = activeSpaceID.flatMap { id in savedSpaces.first { $0.id == id } } ?? savedSpaces.first
         // Mirror every Space's open tab forest (names + icons + groups + nesting) to
         // the synced folder for the iOS companion (debounced + dedup'd in the writer).
-        sessionWriter?.publish(spaces: savedSpaces)
+        // Archived Spaces stay out of the iOS "Mac 上打开的" list.
+        sessionWriter?.publish(spaces: savedSpaces.filter { !$0.isArchived })
         // Same round-trip discipline for counts — during bootstrap, write back
         // the loaded snapshot rather than the still-empty `counts` dict.
         let persistedCounts: [EntryType: Int]? =
@@ -677,6 +679,53 @@ final class AppModel {
         guard let index = spaces.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = iconName?.trimmingCharacters(in: .whitespacesAndNewlines)
         spaces[index].iconName = trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    /// Spaces shown in the bottom switcher bar — everything that isn't archived.
+    var activeSpaces: [WorkspaceSpace] { spaces.filter { !$0.isArchived } }
+
+    /// Archived Spaces, listed in Settings ▸ Spaces for restore/delete.
+    var archivedSpaces: [WorkspaceSpace] { spaces.filter { $0.isArchived } }
+
+    func renameSpace(_ id: WorkspaceSpace.ID, to name: String) {
+        guard let index = spaces.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        spaces[index].name = trimmed
+    }
+
+    /// Archive a Space: hide it from the switcher but keep its tabs. If it was the
+    /// active one, fall back to another visible Space (creating a fresh one when the
+    /// last visible Space is archived, so the window always has somewhere to be).
+    func archiveSpace(_ id: WorkspaceSpace.ID) {
+        guard let index = spaces.firstIndex(where: { $0.id == id }), !spaces[index].isArchived else { return }
+        spaces[index].isArchived = true
+        if activeSpaceID == id { fallBackToVisibleSpace() }
+    }
+
+    func unarchiveSpace(_ id: WorkspaceSpace.ID) {
+        guard let index = spaces.firstIndex(where: { $0.id == id }), spaces[index].isArchived else { return }
+        spaces[index].isArchived = false
+    }
+
+    func deleteSpace(_ id: WorkspaceSpace.ID) {
+        guard let index = spaces.firstIndex(where: { $0.id == id }) else { return }
+        let wasActive = activeSpaceID == id
+        spaces.remove(at: index)
+        if wasActive { fallBackToVisibleSpace() }
+    }
+
+    /// Point `activeSpaceID` at a visible Space, materialising one if none remain.
+    private func fallBackToVisibleSpace() {
+        if let next = spaces.first(where: { !$0.isArchived }) {
+            Task { await selectSpace(next.id) }
+        } else {
+            let fresh = WorkspaceSpace(name: "Space \(spaces.count + 1)", workspace: nil, isBrowsing: true)
+            spaces.append(fresh)
+            activeSpaceID = fresh.id
+            isBrowsing = true
+            Task { await loadDoc(nil) }
+        }
     }
 
     private func mutateSpace(_ id: WorkspaceSpace.ID, _ body: (inout WorkspaceSpace) -> Void) {
