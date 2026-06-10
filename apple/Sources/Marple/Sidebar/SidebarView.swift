@@ -35,7 +35,7 @@ private struct SpaceSwitcherView: View {
             Spacer(minLength: 4)
 
             HStack(spacing: 6) {
-                ForEach(Array(model.spaces.enumerated()), id: \.element.id) { index, space in
+                ForEach(Array(model.activeSpaces.enumerated()), id: \.element.id) { index, space in
                     SpaceControlView(index: index + 1,
                                      spaceID: space.id,
                                      iconName: space.iconName,
@@ -238,8 +238,61 @@ private struct SpaceControlView: NSViewRepresentable {
             Task { await model?.selectSpace(spaceID) }
         }
 
+        private var lastMenuPoint: NSPoint = .zero
+
         override func rightMouseDown(with event: NSEvent) {
-            showIconPalette(at: convert(event.locationInWindow, from: nil))
+            guard spaceID != nil else { return }
+            lastMenuPoint = convert(event.locationInWindow, from: nil)
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            let icon = menu.addItem(withTitle: "选择图标", action: #selector(chooseIconAction), keyEquivalent: "")
+            let rename = menu.addItem(withTitle: "设定名称…", action: #selector(renameAction), keyEquivalent: "")
+            let archive = menu.addItem(withTitle: "封存归档", action: #selector(archiveAction), keyEquivalent: "")
+            menu.addItem(.separator())
+            let remove = menu.addItem(withTitle: "删除", action: #selector(deleteAction), keyEquivalent: "")
+            for item in [icon, rename, archive, remove] { item.target = self }
+            // Anchor the menu's corner to the Space dot's center, not the cursor.
+            // Near the bottom of the window AppKit flips it up, so the center becomes
+            // the menu's bottom-left corner and it extends up-and-to-the-right.
+            menu.popUp(positioning: nil, at: NSPoint(x: bounds.midX, y: bounds.midY), in: self)
+        }
+
+        @objc private func chooseIconAction() {
+            showIconPalette(at: lastMenuPoint)
+        }
+
+        @objc private func renameAction() {
+            guard let spaceID, let current = model?.spaces.first(where: { $0.id == spaceID }) else { return }
+            let alert = NSAlert()
+            alert.messageText = "重命名 Space"
+            alert.addButton(withTitle: "确定")
+            alert.addButton(withTitle: "取消")
+            let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+            field.stringValue = current.name
+            field.placeholderString = "Space 名称"
+            alert.accessoryView = field
+            alert.window.initialFirstResponder = field
+            if alert.runModal() == .alertFirstButtonReturn {
+                model?.renameSpace(spaceID, to: field.stringValue)
+            }
+        }
+
+        @objc private func archiveAction() {
+            guard let spaceID else { return }
+            model?.archiveSpace(spaceID)
+        }
+
+        @objc private func deleteAction() {
+            guard let spaceID, let current = model?.spaces.first(where: { $0.id == spaceID }) else { return }
+            let alert = NSAlert()
+            alert.messageText = "删除“\(current.name)”？"
+            alert.informativeText = "该 Space 及其打开的标签页都会被移除，此操作无法撤销。"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "删除")
+            alert.addButton(withTitle: "取消")
+            if alert.runModal() == .alertFirstButtonReturn {
+                model?.deleteSpace(spaceID)
+            }
         }
 
         func draggingSession(_ session: NSDraggingSession,
