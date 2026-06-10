@@ -31,13 +31,29 @@ struct MarkdownTextView: UIViewRepresentable {
         // so re-rendering (e.g. a font-size change) never yanks the scroll position.
         guard scrollNonce != context.coordinator.lastNonce else { return }
         context.coordinator.lastNonce = scrollNonce
-        guard let range = scrollTarget, range.location != NSNotFound,
-              range.location <= tv.textStorage.length else { return }
+        guard let range = scrollTarget, range.location != NSNotFound else { return }
+        // TextKit 2 throughout — touching `tv.layoutManager` would fall the view back
+        // to TextKit 1 and silently disable the table attachment views.
+        guard let layoutManager = tv.textLayoutManager,
+              let contentManager = layoutManager.textContentManager else { return }
+        let documentStart = layoutManager.documentRange.location
+        guard let start = contentManager.location(documentStart, offsetBy: range.location),
+              let end = contentManager.location(start, offsetBy: range.length),
+              let target = NSTextRange(location: start, end: end) else { return }
+        // Lay out up to the target so its segment frame (and contentSize) is real.
+        if let upToTarget = NSTextRange(location: documentStart, end: end) {
+            layoutManager.ensureLayout(for: upToTarget)
+        }
+        var headingMinY: CGFloat?
+        layoutManager.enumerateTextSegments(in: target, type: .standard,
+                                            options: [.rangeNotRequired]) { _, frame, _, _ in
+            headingMinY = frame.minY
+            return false
+        }
+        guard let minY = headingMinY else { return }
         // Place the heading near the top rather than just "barely visible".
-        let glyphRange = tv.layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-        let rect = tv.layoutManager.boundingRect(forGlyphRange: glyphRange, in: tv.textContainer)
         let maxY = max(0, tv.contentSize.height - tv.bounds.height + tv.adjustedContentInset.bottom)
-        let y = min(max(0, rect.minY - tv.textContainerInset.top + 8), maxY)
+        let y = min(max(0, minY - tv.textContainerInset.top + 8), maxY)
         tv.setContentOffset(CGPoint(x: 0, y: y), animated: true)
     }
 
