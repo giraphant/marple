@@ -1,10 +1,11 @@
 import Foundation
 
 public enum FilterField: String, Sendable, CaseIterable, Hashable, Codable {
-    case rating, year, author, theme, source, haspdf, added
+    case type, rating, year, author, theme, source, haspdf, added
 
     public var label: String {
         switch self {
+        case .type:   return "类型"
         case .rating: return "评分"
         case .year:   return "年份"
         case .author: return "作者"
@@ -15,17 +16,19 @@ public enum FilterField: String, Sendable, CaseIterable, Hashable, Codable {
         }
     }
 
-    /// Value input kind: text, number, or none (haspdf is a pure predicate).
+    /// Value input kind: text, number, choice (a fixed picker — `type` holds an
+    /// `EntryType` rawValue), or none (haspdf is a pure predicate).
     public var input: FilterInput {
         switch self {
         case .rating, .year, .added: return .number
         case .author, .theme, .source: return .text
+        case .type: return .choice
         case .haspdf: return .none
         }
     }
 }
 
-public enum FilterInput: Sendable { case number, text, none }
+public enum FilterInput: Sendable { case number, text, choice, none }
 public enum FilterOp: String, Sendable, Hashable, Codable { case gte, lte, eq, contains, is_ = "is", yes, within }
 public enum FilterMatch: String, Sendable, Hashable, Codable { case all, any }
 
@@ -49,12 +52,14 @@ public func clauseReady(_ c: FilterClause) -> Bool {
     switch c.field.input {
     case .none:   return true
     case .number: return toNum(c.value.trimmingCharacters(in: .whitespaces)) != nil
-    case .text:   return !c.value.trimmingCharacters(in: .whitespaces).isEmpty
+    case .text, .choice: return !c.value.trimmingCharacters(in: .whitespaces).isEmpty
     }
 }
 
 private func test(_ e: Entry, _ c: FilterClause, now: Date) -> Bool {
     switch c.field {
+    case .type:
+        return e.type.rawValue == c.value
     case .rating:
         guard let want = toNum(c.value) else { return true }
         let got = e.ratingScore
@@ -101,6 +106,8 @@ public func applyFilters(_ list: [Entry], _ clauses: [FilterClause],
 public func clauseLabel(_ c: FilterClause) -> String {
     if c.field == .haspdf { return "有 PDF" }
     if c.field == .added { return "入库近 \(c.value) 天" }
+    // `value` is the EntryType rawValue; chip shows the human label (论文, not paper).
+    if c.field == .type { return "类型 是 \(EntryType(rawValue: c.value).label)" }
     let opLabel: String
     switch c.op {
     case .gte: opLabel = "≥"; case .lte: opLabel = "≤"; case .eq: opLabel = "="

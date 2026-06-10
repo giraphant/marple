@@ -77,6 +77,27 @@ import Testing
         #expect(applyFilters(list, [bClause], match: .all).isEmpty)
     }
 
+    /// QUA-127: type is a filter axis (value = EntryType rawValue, op = is).
+    @Test func testTypeFilter() {
+        let paper = e("p")  // factory builds .paper
+        let book = Entry(path: "b", type: .book, title: nil, author: [], year: nil,
+                         ratingScore: 0, themes: [], preview: "", hasPDF: false)
+        let list = [paper, book]
+        let cs = [FilterClause(field: .type, op: .is_, value: "paper")]
+        #expect(applyFilters(list, cs, match: .all).map(\.path) == ["p"])
+        // Composes with other clauses — the issue's headline example shape.
+        let combo = [FilterClause(field: .type, op: .is_, value: "book"),
+                     FilterClause(field: .rating, op: .gte, value: "1")]
+        #expect(applyFilters(list, combo, match: .all).isEmpty)
+        // Empty value = incomplete clause, ignored.
+        #expect(applyFilters(list, [FilterClause(field: .type, op: .is_, value: "")],
+                             match: .all).count == 2)
+    }
+
+    @Test func testTypeClauseLabelUsesHumanLabel() {
+        #expect(clauseLabel(FilterClause(field: .type, op: .is_, value: "paper")) == "类型 是 论文")
+    }
+
     @Test func testAddedWithinDays() {
         let now = Date(timeIntervalSince1970: 1_000_000) // fixed
         let recent = (now.timeIntervalSince1970 - 86400) * 1000   // 1 day ago, ms

@@ -91,6 +91,19 @@ import Foundation
         #expect(try JSONDecoder().decode(PersistedState.self, from: data) == s)
     }
 
+    @Test func savedViewsRoundTripAndOldBlobsDecodeWithoutThem() throws {
+        var s = sample()
+        s.savedViews = [SavedView(name: "好论文",
+                                  clauses: [FilterClause(field: .type, op: .is_, value: "paper")],
+                                  match: .all,
+                                  sorts: [SortClause(field: .year, dir: .desc)])]
+        let data = try JSONEncoder().encode(s)
+        #expect(try JSONDecoder().decode(PersistedState.self, from: data) == s)
+        // A blob persisted before QUA-127 has no savedViews key — must still decode.
+        let old = try JSONEncoder().encode(sample())
+        #expect(try JSONDecoder().decode(PersistedState.self, from: old).savedViews == nil)
+    }
+
     @Test func makeWorkspaceRebuildsActiveAndPinned() throws {
         let ws = try #require(sample().makeWorkspace())
         #expect(ws.tabs.count == 2)

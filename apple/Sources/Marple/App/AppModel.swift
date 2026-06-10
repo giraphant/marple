@@ -128,6 +128,37 @@ final class AppModel {
     private(set) var sortClauses: [SortClause] = [] { didSet { persist() } }
     private(set) var filterClauses: [FilterClause] = [] { didSet { persist() } }
     private(set) var filterMatch: FilterMatch = .all { didSet { persist() } }
+
+    // Saved smart-folder views (QUA-127). Each carries its own filter+sort,
+    // edited write-through while browsing it; the global clauses above belong
+    // to the type/theme buckets and are untouched by view edits (拍板: 视图自带、桶用全局).
+    private(set) var savedViews: [SavedView] = [] {
+        didSet {
+            persist()
+            recomputeSavedViewCounts()
+        }
+    }
+    /// Live row counts per saved view for the sidebar (computed like the type
+    /// bucket counts, over the browse universe).
+    private(set) var savedViewCounts: [UUID: Int] = [:]
+
+    func savedView(_ id: UUID) -> SavedView? { savedViews.first { $0.id == id } }
+
+    /// The filter/sort the CURRENT pane uses: a saved view's own definition
+    /// while browsing one, the global browse controls otherwise. All UI
+    /// (popovers, button states) and the list pipeline read these.
+    var activeFilterClauses: [FilterClause] {
+        if case .savedView(let id) = pane, let v = savedView(id) { return v.clauses }
+        return filterClauses
+    }
+    var activeFilterMatch: FilterMatch {
+        if case .savedView(let id) = pane, let v = savedView(id) { return v.match }
+        return filterMatch
+    }
+    var activeSortClauses: [SortClause] {
+        if case .savedView(let id) = pane, let v = savedView(id) { return v.sorts }
+        return sortClauses
+    }
     private(set) var searchText: String = ""
     private var searchHits: [SearchHit] = []
     private var searchTask: Task<Void, Never>?
@@ -290,7 +321,16 @@ final class AppModel {
                 counts = restored
                 loadedCountsSnapshot = restored
             }
+            // Restore views BEFORE browsePane: its didSet persists, and a
+            // .savedView pane needs the list present to resolve (same ordering
+            // discipline as the counts snapshot above).
+            savedViews = s.savedViews ?? []
             browsePane = s.browsePane
+            // A stale .savedView reference (view deleted, blob raced) degrades
+            // to the first bucket instead of an unfiltered everything-list.
+            if case .savedView(let id) = browsePane, savedView(id) == nil {
+                browsePane = .type(.paper)
+            }
             let restoredSpaces = s.makeSpaces()
             spaces = restoredSpaces.spaces
             activeSpaceID = restoredSpaces.activeID
@@ -370,7 +410,8 @@ final class AppModel {
             currentSpace: activeSavedSpace,
             spaces: savedSpaces,
             activeSpaceID: activeSavedSpace?.id,
-            counts: persistedCounts))
+            counts: persistedCounts,
+            savedViews: savedViews))
     }
 
     // MARK: type order persistence
@@ -440,9 +481,26 @@ final class AppModel {
         // count must match the folded list, not the raw page total.
         if c[.topic] != nil { c[.topic] = topicBrowseSubset(entries).count }
         counts = c
+        recomputeSavedViewCounts()
         themeIndex = themeCounts(entries)
         topicMembership = buildTopicMembership(entries)
         scheduleDeferredDerivedRebuild()
+    }
+
+    /// Sidebar counts for saved views — each view's clauses over the browse
+    /// universe, so count == list length (same contract as the topic bucket).
+    /// Cheap: clause matching over the flat array, × a handful of views.
+    private func recomputeSavedViewCounts() {
+        guard !savedViews.isEmpty else {
+            if !savedViewCounts.isEmpty { savedViewCounts = [:] }
+            return
+        }
+        let universe = browseUniverse(entries)
+        var result: [UUID: Int] = [:]
+        for view in savedViews {
+            result[view.id] = applyFilters(universe, view.clauses, match: view.match).count
+        }
+        savedViewCounts = result
     }
 
     /// Build the heavy derived caches (authors, annotations, search index) on a
@@ -521,9 +579,9 @@ final class AppModel {
         }
         let snapshot = entries
         let pane = self.pane
-        let filters = filterClauses
-        let match = filterMatch
-        let sorts = sortClauses
+        let filters = activeFilterClauses
+        let match = activeFilterMatch
+        let sorts = activeSortClauses
         recomputeTask = Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
                 sortEntries(applyFilters(entriesForPane(pane, in: snapshot), filters, match: match),
@@ -768,15 +826,71 @@ final class AppModel {
         print("[marple] browse -> \(newPane)")
     }
 
+    // Write-through routing (QUA-127 拍板: 直写视图): editing filter/sort while
+    // browsing a saved view mutates the view's definition like editing a
+    // document; in a bucket it edits the global controls as before.
     func setSort(_ clauses: [SortClause]) {
-        sortClauses = clauses
+        if case .savedView(let id) = pane,
+           let index = savedViews.firstIndex(where: { $0.id == id }) {
+            savedViews[index].sorts = clauses
+        } else {
+            sortClauses = clauses
+        }
         recomputeVisible()
     }
 
     func setFilters(_ clauses: [FilterClause], match: FilterMatch = .all) {
-        filterClauses = clauses
-        filterMatch = match
+        if case .savedView(let id) = pane,
+           let index = savedViews.firstIndex(where: { $0.id == id }) {
+            savedViews[index].clauses = clauses
+            savedViews[index].match = match
+        } else {
+            filterClauses = clauses
+            filterMatch = match
+        }
         recomputeVisible()
+    }
+
+    // MARK: saved views (QUA-127)
+
+    /// Snapshot the current pane's filtering as a named view and switch to it.
+    /// In a type/theme bucket the bucket itself becomes a leading clause —
+    /// the view's universe is ALL types, so without it「paper 桶里 rating≥4」
+    /// would silently widen to every type. Skipped under `.any` match, where
+    /// an injected clause would OR instead of constrain. Half-typed clauses
+    /// are dropped at save time.
+    @discardableResult
+    func createSavedView(named name: String) -> SavedView {
+        var clauses = activeFilterClauses.filter(clauseReady)
+        if activeFilterMatch == .all {
+            switch pane {
+            case .type(let t) where !clauses.contains(where: { $0.field == .type }):
+                clauses.insert(FilterClause(field: .type, op: .is_, value: t.rawValue), at: 0)
+            case .theme(let name) where !clauses.contains(where: { $0.field == .theme }):
+                clauses.insert(FilterClause(field: .theme, op: .is_, value: name), at: 0)
+            default:
+                break
+            }
+        }
+        let view = SavedView(name: name, clauses: clauses,
+                             match: activeFilterMatch, sorts: activeSortClauses)
+        savedViews.append(view)
+        select(pane: .savedView(view.id))
+        return view
+    }
+
+    func renameSavedView(_ id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = savedViews.firstIndex(where: { $0.id == id }) else { return }
+        savedViews[index].name = trimmed
+    }
+
+    func deleteSavedView(_ id: UUID) {
+        savedViews.removeAll { $0.id == id }
+        if case .savedView(let current) = browsePane, current == id {
+            select(pane: .type(visibleTypeOrder.first ?? .paper))
+        }
     }
 
     /// SwiftUI's TextField with a custom Binding can echo the current value
@@ -1239,6 +1353,7 @@ final class AppModel {
         case .theme(let name): return "#\(name)"
         case .themesIndex:     return "标签"
         case .trash:           return "回收站"
+        case .savedView(let id): return savedView(id)?.name ?? "视图"
         }
     }
 
@@ -1291,6 +1406,7 @@ final class AppModel {
         case .theme(let name): return "#\(name)"
         case .themesIndex:     return "标签"
         case .trash:           return "回收站"
+        case .savedView(let id): return savedView(id)?.name ?? "视图"
         }
     }
 
