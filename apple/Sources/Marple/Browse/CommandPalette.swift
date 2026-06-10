@@ -12,7 +12,7 @@ struct PaletteResult: Sendable {
 /// Arc/Xcode-style command palette (⌘T): a cross-type search hosted in a floating
 /// `NSPanel` (see `CommandPalettePanel`). Mirrors the web `CommandPalette.tsx`
 /// (mode segmented control + Tab cycle, per-type top-5 + "查看全部", ↑/↓ ⏎ ⌘⏎ Esc,
-/// relevance badges) and CodeEdit's panel patterns (hidden `.keyboardShortcut`
+/// "/" hops across type sections, relevance badges) and CodeEdit's panel patterns (hidden `.keyboardShortcut`
 /// buttons for nav so they coexist with the focused field; focus comes from the
 /// key panel, not a SwiftUI hack). 快速 = in-memory ranker, 平衡 = FTS, 深度 =
 /// semantic vectors (disabled until the vector index is built).
@@ -46,6 +46,11 @@ struct CommandPalette: View {
 
     private let perType = 5
 
+    /// Mode-segment label. Glyphs at equal point size *measure* the same as the
+    /// placeholder, but medium weight + dark color + the pill background read a
+    /// size bigger — so the segments sit one step below the placeholder's body(15).
+    private static let modeFont = Font.system(size: 13, weight: .medium)
+
     private var promoteType: EntryType? {
         if case .type(let t) = model.browsePane { return t } else { return nil }
     }
@@ -78,6 +83,15 @@ struct CommandPalette: View {
         .onKeyPress(.escape) { onClose(); return .handled }
         .onKeyPress(.upArrow) { move(-1); return .handled }
         .onKeyPress(.downArrow) { move(1); return .handled }
+        // "/" hops to the next type section, ⇧/ back (QUA-197). A switch-flavored
+        // key that never appears in a title/author query — the palette trades away
+        // typing a literal "/" so the hop needs no modifier. (Arrows were tried
+        // first and clashed with caret movement in the field.)
+        .onKeyPress(keys: ["/", "?"]) { press in
+            let back = press.key == "?" || press.modifiers.contains(.shift)
+            jumpSection(back ? -1 : 1)
+            return .handled   // never insert "/" — consistent whether or not results exist
+        }
         .onKeyPress(.tab) { cycleMode(); return .handled }
         .onAppear {
             runSearch()
@@ -103,11 +117,23 @@ struct CommandPalette: View {
 
             modeControl
 
-            TextField(mode.placeholder, text: $query)
-                .textFieldStyle(.plain)
-                .font(Typo.title3)
-                .focused($fieldFocused)
-                .onSubmit { activate(selected) }
+            // Custom placeholder overlay: the native prompt always renders at the
+            // field's own font (title3), too loud for a hint line — draw it one
+            // size down instead. (Mode names live in the segmented control, so
+            // the prompt is just scope + key hints.)
+            ZStack(alignment: .leading) {
+                if query.isEmpty {
+                    Text(mode.placeholder)
+                        .font(Typo.body)
+                        .foregroundStyle(Color(nsColor: .placeholderTextColor))
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(Typo.title3)
+                    .focused($fieldFocused)
+                    .onSubmit { activate(selected) }
+            }
 
             if loading {
                 ProgressView().controlSize(.small)
@@ -130,7 +156,7 @@ struct CommandPalette: View {
                 let disabled = (m == .deep && !model.semanticAvailable)   // 深度 needs the vector index
                 Button { if !disabled { mode = m } } label: {
                     Text(m.label)
-                        .font(Typo.caption)
+                        .font(Self.modeFont)
                         .padding(.horizontal, Space.s4)
                         .padding(.vertical, Space.s2)
                         .background(mode == m ? Color.accentColor : Color.clear)
@@ -356,6 +382,23 @@ struct CommandPalette: View {
         keyboardNavCursor = NSEvent.mouseLocation
         scrollToSelection = true
         selected = min(max(0, selected + delta), flat.count - 1)
+    }
+
+    /// Jump the selection to the first row of the next/previous section (the
+    /// open-tab group counts as one), wrapping at the ends — "/" is a cycler,
+    /// so a few presses always tour every type.
+    private func jumpSection(_ delta: Int) {
+        guard !flat.isEmpty else { return }
+        // First-row flat index of every non-empty section, in visual order.
+        var bases: [Int] = openMatches.isEmpty ? [] : [0]
+        bases.append(contentsOf: sectionBases.compactMap { $0.section.top.isEmpty ? nil : $0.base })
+        guard bases.count > 1 else { return }
+        // Section containing the current selection → step from there.
+        let current = bases.lastIndex { $0 <= selected } ?? 0
+        let target = (current + delta + bases.count) % bases.count
+        keyboardNavCursor = NSEvent.mouseLocation
+        scrollToSelection = true
+        selected = bases[target]
     }
 
     /// Activate the row at `index`: an open-tab match switches to its existing tab,
