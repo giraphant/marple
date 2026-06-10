@@ -1,6 +1,10 @@
 APP_NAME    := Marple
 BUILD_DIR   := .build
 APP_BUNDLE  := $(APP_NAME).app
+# Dev bundle lives off the iCloud-synced repo tree (QUA-199): the File Provider
+# re-stamps com.apple.FinderInfo onto an in-repo .app, which breaks codesign.
+# Must match the APP_DIR default in build-app.sh.
+DEV_APP     := $(HOME)/Library/Caches/marple-dev/$(APP_BUNDLE)
 INSTALL_DIR := /Applications
 DIST_DIR    := $(BUILD_DIR)/dist
 DIST_DMG    := $(DIST_DIR)/$(APP_NAME).dmg
@@ -27,14 +31,14 @@ all: build
 
 # Dev build: debug, unsigned, self-symlinks marple-cli onto PATH (build-app.sh).
 build:
-	./build-app.sh
+	APP_DIR="$(DEV_APP)" ./build-app.sh
 
 run: build
-	open $(APP_BUNDLE)
+	open "$(DEV_APP)"
 
 install: build
 	@rm -rf "$(INSTALL_DIR)/$(APP_BUNDLE)"
-	@cp -R $(APP_BUNDLE) "$(INSTALL_DIR)/"
+	@cp -R "$(DEV_APP)" "$(INSTALL_DIR)/"
 	@echo "Installed to $(INSTALL_DIR)/$(APP_BUNDLE)"
 
 # Release bundle (signed, hardened runtime) packaged into a signed DMG.
@@ -107,5 +111,6 @@ update-cask:
 		echo "Cask bumped to $(VERSION) ($$sha) and pushed to $(TAP_REPO)."; \
 	fi
 
+# $(APP_BUNDLE) sweeps up stale in-tree bundles from before QUA-199.
 clean:
-	rm -rf $(BUILD_DIR) $(APP_BUNDLE)
+	rm -rf $(BUILD_DIR) $(APP_BUNDLE) "$(DEV_APP)"
