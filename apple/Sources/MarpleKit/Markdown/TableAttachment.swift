@@ -168,6 +168,10 @@ public final class TableCardView: UIView {
                 tv.backgroundColor = .clear
                 tv.textContainerInset = .zero
                 tv.textContainer.lineFragmentPadding = 0
+                // Long-press must mean "select", not "drag": with text drag enabled
+                // the lift-and-drag preview wins the gesture and selection never
+                // starts. Dragging is useless in a read-only reader anyway.
+                tv.textDragInteraction?.isEnabled = false
                 tv.attributedText = cell
                 contentView.addSubview(tv)
                 rowViews.append(tv)

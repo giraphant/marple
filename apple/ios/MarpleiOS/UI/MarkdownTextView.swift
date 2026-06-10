@@ -21,6 +21,10 @@ struct MarkdownTextView: UIViewRepresentable {
         tv.backgroundColor = .clear
         tv.textContainerInset = UIEdgeInsets(top: 16, left: 16, bottom: 96, right: 16)
         tv.alwaysBounceVertical = true
+        // Read-only reader: text drag is useless here, and its long-press lift wins
+        // the gesture over selection — most visibly on table cards, where it "picks
+        // up" the whole attachment like a file instead of selecting cell text.
+        tv.textDragInteraction?.isEnabled = false
         return tv
     }
 
