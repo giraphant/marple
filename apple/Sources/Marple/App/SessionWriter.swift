@@ -7,42 +7,49 @@ import MarpleKit
 /// `.marple` index; the open-tab list just lives outside `.marple` so it still syncs
 /// even if the index directory is excluded from iCloud.
 ///
-/// Publishes the **full recursive forest** (groups + their names + nesting), not a
-/// flat tab list, so the iOS sidebar mirrors the Mac's 页面 folder structure and the
-/// per-tab custom names (别名).
+/// Publishes **every Space** (name + icon + its full recursive forest of groups and
+/// nesting), in sidebar order — not just the active one — so the iOS sidebar can
+/// group by Space and mirror the Mac's 页面 folder structure and per-tab custom
+/// names (别名).
 ///
 /// `persist()` fires on every state change, so this is debounced (~1.5s) and skips
-/// the write entirely when the forest is unchanged — keeping iCloud churn down.
+/// the write entirely when nothing material changed — keeping iCloud churn down.
 @MainActor
 final class SessionWriter {
     private let workspaceRoot: String
-    /// Last forest we committed to disk (timestamp ignored when comparing).
-    private var lastRoots: [SessionNode] = []
-    private var lastActive: String?
+    /// Last space list we committed to disk (timestamp ignored when comparing).
+    private var lastSpaces: [SessionSpaceSnapshot] = []
     private var pending: SessionSnapshot?
     private var scheduled = false
 
     init(workspaceRoot: String) { self.workspaceRoot = workspaceRoot }
 
-    /// Build a snapshot from the active Space's tab forest and queue a debounced
-    /// write. `tree` is the recursive (v2) snapshot whose tab leaves index into
-    /// `tabs`; without it we fall back to a flat list of the tabs.
-    func publish(tabs: [PersistedTab], tree: WorkspaceTreeSnapshot?, activeIndex: Int) {
+    /// Build a snapshot of all Spaces' tab forests and queue a debounced write.
+    /// Each Space's `tree` is the recursive (v2) snapshot whose tab leaves index
+    /// into its `tabs`; without it we fall back to a flat list of the tabs. Spaces
+    /// whose forest prunes to empty (e.g. browse-only) aren't published.
+    func publish(spaces: [PersistedWorkspaceSpace]) {
         guard !workspaceRoot.isEmpty else { return }
-        let roots: [SessionNode]
-        if let tree {
-            roots = tree.roots.compactMap { node(from: $0, tabs: tabs) }
-        } else {
-            roots = tabs.compactMap { leaf(from: $0).map(SessionNode.doc) }
+        let published = spaces.compactMap { space -> SessionSpaceSnapshot? in
+            let roots: [SessionNode]
+            if let tree = space.tree {
+                roots = tree.roots.compactMap { node(from: $0, tabs: space.tabs) }
+            } else {
+                roots = space.tabs.compactMap { leaf(from: $0).map(SessionNode.doc) }
+            }
+            guard !roots.isEmpty else { return nil }
+            let active = space.tabs.indices.contains(space.activeIndex)
+                ? space.tabs[space.activeIndex].location.openPath : nil
+            return SessionSpaceSnapshot(id: space.id, name: space.name,
+                                        iconName: space.iconName,
+                                        roots: roots, activePath: active)
         }
-        let active = tabs.indices.contains(activeIndex) ? tabs[activeIndex].location.openPath : nil
         // Nothing materially changed → don't rewrite the file (avoids iCloud churn
         // on every scroll/selection that also triggers persist()).
-        if roots == lastRoots && active == lastActive { return }
-        lastRoots = roots
-        lastActive = active
+        if published == lastSpaces { return }
+        lastSpaces = published
         pending = SessionSnapshot(updatedAtMs: Int64(Date().timeIntervalSince1970 * 1000),
-                                  roots: roots, activePath: active)
+                                  spaces: published)
         schedule()
     }
 
