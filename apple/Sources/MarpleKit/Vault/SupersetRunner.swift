@@ -1,5 +1,6 @@
 import Foundation
 
+#if os(macOS)
 public struct SupersetInvocation: Sendable, Equatable {
     public let executablePath: String
     public let arguments: [String]
@@ -342,3 +343,4 @@ public struct SupersetRunner: Sendable {
         }.value
     }
 }
+#endif

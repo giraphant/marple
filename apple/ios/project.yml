@@ -1,0 +1,63 @@
+name: MarpleiOS
+options:
+  bundleIdPrefix: com.quasifish
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  # Local SwiftPM package at apple/ (Package.swift name is "Marple"); we depend
+  # only on the MarpleKit product — never MarpleEmbeddings (MLX), which the
+  # read-only companion does not use.
+  Marple:
+    path: ..
+
+targets:
+  MarpleiOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - MarpleiOS
+    dependencies:
+      - package: Marple
+        product: MarpleKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.quasifish.marpleios
+        GENERATE_INFOPLIST_FILE: YES
+        # Home-screen name is just "Marple" (the target/bundle id stays MarpleiOS).
+        INFOPLIST_KEY_CFBundleDisplayName: Marple
+        # App icon from Assets.xcassets (required by App Store Connect / TestFlight).
+        # actool emits the canonical CFBundleIcons.CFBundlePrimaryIcon block.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # iPhone only (TARGETED_DEVICE_FAMILY 1) — matches the iPhone-only scope.
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "11"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        # Supported orientations (iPhone): portrait + both landscapes.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        # Export compliance: reader uses only standard HTTPS/iCloud (exempt) — skips
+        # the per-upload encryption prompt in App Store Connect.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        # Baked-in team so `xcodegen generate` doesn't wipe the signing selection.
+        DEVELOPMENT_TEAM: 2E5N3Q45BG
+        CODE_SIGN_STYLE: Automatic
+
+  MarpleiOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - MarpleiOSTests
+    dependencies:
+      # Host in the app target; MarpleKit comes transitively. Linking the package
+      # product directly here double-links Tokenizers/OrderedCollections and breaks
+      # the test bundle link.
+      - target: MarpleiOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.quasifish.marpleios.tests
+        GENERATE_INFOPLIST_FILE: YES

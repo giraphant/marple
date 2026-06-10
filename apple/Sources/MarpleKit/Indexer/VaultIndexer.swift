@@ -52,11 +52,15 @@ public final class VaultIndexer: @unchecked Sendable {
     /// `reconcile`.  Mirrors `static INDEX_WRITE_LOCK: Mutex<()>` in indexer.rs.
     private let writeLock = NSLock()
 
+    /// Directory containing the index DB — the parent of `indexDBPath`. On macOS
+    /// this is `<workspaceRoot>/.marple`; on iOS it is the app's private container.
+    private var indexDBDir: String { (indexDBPath as NSString).deletingLastPathComponent }
+
     // MARK: - init
 
-    public init(workspaceRoot: String) {
+    public init(workspaceRoot: String, indexDBPath: String? = nil) {
         self.workspaceRoot = workspaceRoot
-        self.indexDBPath  = workspaceRoot + "/.marple/index.sqlite"
+        self.indexDBPath  = indexDBPath ?? (workspaceRoot + "/.marple/index.sqlite")
         self.vaultPath    = workspaceRoot + "/vault"
         self.sourcesPath  = workspaceRoot + "/sources"
     }
@@ -111,8 +115,8 @@ public final class VaultIndexer: @unchecked Sendable {
             return at < bt
         }
 
-        // 3. Ensure .marple/ exists.
-        let marpleDir = workspaceRoot + "/.marple"
+        // 3. Ensure the index DB directory exists.
+        let marpleDir = indexDBDir
         try FileManager.default.createDirectory(
             atPath: marpleDir, withIntermediateDirectories: true, attributes: nil)
 
@@ -165,7 +169,7 @@ public final class VaultIndexer: @unchecked Sendable {
         // back to 0 after createSchema). Nuke the cache file so the next
         // loadEntries takes the SQL path once and writes a cache tied to the
         // new DB's revision.
-        let cachePath = workspaceRoot + "/.marple/entries.cache"
+        let cachePath = indexDBDir + "/entries.cache"
         try? FileManager.default.removeItem(atPath: cachePath)
 
         // 6. Flip to WAL so all subsequent readers can open concurrently.

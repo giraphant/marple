@@ -1,6 +1,7 @@
 import Foundation
-import CoreServices
 
+#if os(macOS)
+import CoreServices
 /// Collapses a burst of signals into a single trailing-edge call.
 public final class Coalescer: @unchecked Sendable {
     public actor Box {
@@ -113,3 +114,4 @@ public final class VaultWatcher: @unchecked Sendable {
 
     deinit { stop() }
 }
+#endif
