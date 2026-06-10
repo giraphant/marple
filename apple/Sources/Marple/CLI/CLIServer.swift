@@ -115,6 +115,11 @@ final class CLIServer: @unchecked Sendable {
         var tv = timeval(tv_sec: 10, tv_usec: 0)
         _ = setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         _ = setsockopt(clientFD, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        // QUA-208: a client that times out and closes before we write the
+        // response must fail that write with EPIPE, not raise SIGPIPE — the
+        // default disposition silently kills the whole app (exit 141).
+        var noSigpipe: Int32 = 1
+        _ = setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
 
         Task.detached(priority: .userInitiated) { [weak self] in
             await self?.handle(clientFD: clientFD)
