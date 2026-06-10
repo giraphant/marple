@@ -22,10 +22,16 @@ public final class IndexDatabase: @unchecked Sendable {
     private let lock = NSLock()
     private var cachedQueue: DatabaseQueue?
 
-    /// Serialises cache rewrites so two concurrent loadEntries that both saw
-    /// a miss don't race on the temp-rename target. Concurrent reads are fine —
-    /// only the write path needs single-flight.
-    private let cacheWriteLock = NSLock()
+    /// QUA-198: single-flight + drop-stale cache writes. During a vault write
+    /// storm every watcher fire takes the SQL path and used to queue its own
+    /// async write closure, each capturing a ~50–100 MB [Entry] array; when the
+    /// disk was saturated those closures backed up unboundedly (~48 GB observed).
+    /// Now there is one pending slot (latest revision wins — older arrays are
+    /// released immediately) drained by at most one writer, so no more than two
+    /// arrays are ever pinned by the cache path.
+    private let cacheWriteLock = NSLock()   // guards the two fields below
+    private var pendingCacheWrite: (entries: [Entry], revision: Int64)?
+    private var cacheWriterRunning = false
 
     public init(indexDBPath: String) { self.indexDBPath = indexDBPath }
 
@@ -122,14 +128,7 @@ public final class IndexDatabase: @unchecked Sendable {
 
         // 4. Schedule async cache write. We don't block the caller — even a
         //    slow encode (~50 ms for 15k entries) is amortized away from boot.
-        let cachePath = entriesCachePath
-        let revisionForWrite = revision
-        let entriesForWrite = entries
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            self?.writeCacheBestEffort(entries: entriesForWrite,
-                                       revision: revisionForWrite,
-                                       cachePath: cachePath)
-        }
+        scheduleCacheWrite(entries: entries, revision: revision)
         return entries
     }
 
@@ -202,12 +201,48 @@ public final class IndexDatabase: @unchecked Sendable {
         }
     }
 
+    /// Park `(entries, revision)` in the pending slot and make sure one writer
+    /// is draining it. If a newer revision is already parked, drop this one —
+    /// writing an older snapshot over a newer cache would be a regression, and
+    /// releasing the array here is the whole point of QUA-198.
+    private func scheduleCacheWrite(entries: [Entry], revision: Int64) {
+        cacheWriteLock.lock()
+        if let pending = pendingCacheWrite, pending.revision > revision {
+            cacheWriteLock.unlock()
+            return
+        }
+        pendingCacheWrite = (entries, revision)
+        if cacheWriterRunning {
+            cacheWriteLock.unlock()
+            return
+        }
+        cacheWriterRunning = true
+        cacheWriteLock.unlock()
+
+        let cachePath = entriesCachePath
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            while true {
+                self.cacheWriteLock.lock()
+                guard let job = self.pendingCacheWrite else {
+                    self.cacheWriterRunning = false
+                    self.cacheWriteLock.unlock()
+                    return
+                }
+                self.pendingCacheWrite = nil
+                self.cacheWriteLock.unlock()
+                self.writeCacheBestEffort(entries: job.entries, revision: job.revision,
+                                          cachePath: cachePath)
+            }
+        }
+    }
+
     /// Encode `[Entry]` to the on-disk format and atomically replace the cache
     /// file. Best-effort: failures are swallowed (logged) — next boot will pay
     /// the SQL cost again and retry. UUID-suffixed temp file so two concurrent
-    /// rebuilds don't clobber each other.
+    /// rebuilds don't clobber each other. Only ever called from the single
+    /// drain loop in `scheduleCacheWrite`, so writes are serialized by design.
     private func writeCacheBestEffort(entries: [Entry], revision: Int64, cachePath: String) {
-        cacheWriteLock.lock(); defer { cacheWriteLock.unlock() }
         do {
             let encoder = PropertyListEncoder()
             encoder.outputFormat = .binary
