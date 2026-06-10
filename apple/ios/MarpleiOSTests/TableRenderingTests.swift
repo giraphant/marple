@@ -130,6 +130,8 @@ final class TableRenderingTests: XCTestCase {
             XCTAssertTrue(cell.isSelectable)
             XCTAssertFalse(cell.isEditable)
             XCTAssertFalse(cell.isScrollEnabled)
+            // Text drag must stay off or its long-press lift beats selection.
+            XCTAssertFalse(cell.textDragInteraction?.isEnabled ?? false)
         }
         let texts = Set(cells.map(\.text))
         XCTAssertTrue(texts.contains("hello"))
