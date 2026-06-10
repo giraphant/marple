@@ -71,6 +71,8 @@ private final class SidebarOutlineNode: NSObject {
             return "group:\(sourceSpaceID.uuidString):\(id.uuidString)"
         case .pane(.type(let type)):
             return "type:\(type.rawValue)"
+        case .pane(.savedView(let id)):
+            return "savedview:\(id.uuidString)"
         case .section, .pane:
             return nil
         }
@@ -94,6 +96,7 @@ private enum SidebarTabPayload {
     case tab(spaceID: WorkspaceSpace.ID?, id: NavTab.ID)
     case group(spaceID: WorkspaceSpace.ID?, id: TabGroup.ID)
     case type(EntryType)
+    case savedView(UUID)
     /// A browse card dragged from the grid — "open this entry path as a tab".
     /// Lets a card drop flow through the exact same tab-drop machinery (insertion
     /// indicators, tab-on-tab grouping, Space dots) as a real tab. QUA-114.
@@ -102,7 +105,7 @@ private enum SidebarTabPayload {
     var sourceSpaceID: WorkspaceSpace.ID? {
         switch self {
         case .tab(let spaceID, _), .group(let spaceID, _): return spaceID
-        case .type, .entry: return nil
+        case .type, .savedView, .entry: return nil
         }
     }
 
@@ -110,7 +113,7 @@ private enum SidebarTabPayload {
     var coercesOntoTab: Bool {
         switch self {
         case .tab, .entry: return true
-        case .group, .type: return false
+        case .group, .type, .savedView: return false
         }
     }
 
@@ -137,6 +140,9 @@ private enum SidebarTabPayload {
             }
         case "type":
             self = .type(EntryType(rawValue: parts[1]))
+        case "savedview":
+            guard let id = UUID(uuidString: parts[1]) else { return nil }
+            self = .savedView(id)
         case "entry":
             // Path may itself contain ":" — rejoin everything after the prefix.
             self = .entry(path: parts[1...].joined(separator: ":"))
@@ -346,6 +352,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             case .tab(_, let id): return findTabNode(id, in: nodes)
             case .group(_, let id): return findGroupNode(id, in: nodes)
             case .type(let type): return findPaneNode(.type(type), in: nodes)
+            case .savedView(let id): return findPaneNode(.savedView(id), in: nodes)
             case .entry: return nil   // not an existing node
             }
         }
@@ -514,6 +521,13 @@ struct SidebarOutlineView: NSViewRepresentable {
         private var objectsSection: SidebarOutlineNode? {
             rootItems.first {
                 if case .section(.objects) = $0.kind { return true }
+                return false
+            }
+        }
+
+        private var viewsSection: SidebarOutlineNode? {
+            rootItems.first {
+                if case .section(.views) = $0.kind { return true }
                 return false
             }
         }
@@ -1028,11 +1042,13 @@ struct SidebarOutlineView: NSViewRepresentable {
         private func singleSourceSpaceID(for payloads: [SidebarTabPayload]) -> WorkspaceSpace.ID? {
             var source: WorkspaceSpace.ID?
             for payload in payloads {
-                guard case .type = payload else {
+                switch payload {
+                case .type, .savedView:
+                    continue   // pane reorders carry no Space identity
+                default:
                     let spaceID = sourceSpaceID(for: payload)
                     if source == nil { source = spaceID }
                     else if source != spaceID { return nil }
-                    continue
                 }
             }
             return source
@@ -1051,6 +1067,9 @@ struct SidebarOutlineView: NSViewRepresentable {
             logDrop("validate proposed=\(describe(item as? SidebarOutlineNode)) index=\(index) row=\(rowAtY(point.y, in: outlineView)) x=\(String(format: "%.1f", point.x)) y=\(String(format: "%.1f", point.y)) sticky=\(describe(stickyRowDropTarget)) payload=\(describe(payload))")
             if case .type = payload {
                 return validateTypeDrop(outlineView, info: info, item: item, childIndex: index)
+            }
+            if case .savedView = payload {
+                return validateSavedViewDrop(outlineView, info: info, item: item, childIndex: index)
             }
             if shouldRetargetToRow(outlineView, info: info, payload: payload) {
                 logDrop("validate retarget sticky=\(describe(stickyRowDropTarget))")
@@ -1103,6 +1122,12 @@ struct SidebarOutlineView: NSViewRepresentable {
                 if accepted { reload(outlineView) }
                 return accepted
             }
+            if case .savedView(let id) = payload {
+                let accepted = acceptSavedView(id, into: item as? SidebarOutlineNode, childIndex: index,
+                                               outlineView: outlineView, info: info)
+                if accepted { reload(outlineView) }
+                return accepted
+            }
             let point = draggingPoint(in: outlineView, info: info)
             let directTarget = rowDropTarget(outlineView, info: info, payload: payload,
                                             edgeRatio: rowDropReleaseEdgeRatio)
@@ -1142,7 +1167,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 switch p {
                 case .tab(_, let id): rawTabs.append(id)
                 case .group(_, let id): rawGroups.append(id)
-                case .type, .entry: break   // not part of batch tab/group DnD
+                case .type, .savedView, .entry: break   // not part of batch tab/group DnD
                 }
             }
             return model.payloadAncestorFilter(tabIDs: rawTabs, groupIDs: rawGroups)
@@ -1160,7 +1185,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 switch payload {
                 case .tab(_, let id): return allowedTabs.contains(id) ? .tab(id) : nil
                 case .group(_, let id): return allowedGroups.contains(id) ? .group(id) : nil
-                case .type, .entry: return nil
+                case .type, .savedView, .entry: return nil
                 }
             }
         }
@@ -1336,6 +1361,35 @@ struct SidebarOutlineView: NSViewRepresentable {
             return []
         }
 
+        /// Saved-view reorder within the 视图 section (QUA-210) — same shape as
+        /// `validateTypeDrop`, minus the hidden-bucket indirection: every saved
+        /// view is always visible, so the drop slot indexes `savedViews` directly.
+        private func validateSavedViewDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
+                                           item: Any?, childIndex index: Int) -> NSDragOperation {
+            if let node = item as? SidebarOutlineNode,
+               case .section(.views) = node.kind,
+               index >= 0 {
+                return .move
+            }
+            let point = draggingPoint(in: outlineView, info: info)
+            let row = rowAtY(point.y, in: outlineView)
+            guard row >= 0,
+                  let node = outlineView.item(atRow: row) as? SidebarOutlineNode,
+                  let views = viewsSection else { return [] }
+            if case .pane(.savedView(let targetID)) = node.kind,
+               let targetIndex = model.savedViews.firstIndex(where: { $0.id == targetID }) {
+                let rect = outlineView.rect(ofRow: row)
+                let childIndex = point.y < rect.midY ? targetIndex : targetIndex + 1
+                outlineView.setDropItem(views, dropChildIndex: childIndex)
+                return .move
+            }
+            if case .section(.views) = node.kind {
+                outlineView.setDropItem(views, dropChildIndex: 0)
+                return .move
+            }
+            return []
+        }
+
         private func shouldRetargetToRow(_ outlineView: NSOutlineView, info: NSDraggingInfo,
                                          payload: SidebarTabPayload) -> Bool {
             if let node = rowDropTarget(outlineView, info: info, payload: payload,
@@ -1420,6 +1474,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             case .tab(_, let id): return "tab(\(id.uuidString.prefix(6)))"
             case .group(_, let id): return "group(\(id.uuidString.prefix(6)))"
             case .type(let type): return "type(\(type.rawValue))"
+            case .savedView(let id): return "savedview(\(id.uuidString.prefix(6)))"
             case .entry(let path): return "entry(\((path as NSString).lastPathComponent))"
             }
         }
@@ -1443,6 +1498,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 return acceptGroup(groupID, sourceSpaceID: sourceSpaceID, into: node, childIndex: childIndex)
             case .type(let type):
                 return acceptType(type, into: node, childIndex: childIndex)
+            case .savedView(let id):
+                return acceptSavedView(id, into: node, childIndex: childIndex)
             case .entry(let path):
                 return acceptEntry(path, into: node, childIndex: childIndex)
             }
@@ -1499,6 +1556,27 @@ struct SidebarOutlineView: NSViewRepresentable {
             order.insert(type, at: fullIndex)
             model.setTypeOrder(order)
             return true
+        }
+
+        /// Resolve the drop to a slot among the saved views and let the model
+        /// reorder. Mirrors `acceptType`'s slot math, without the visible/full
+        /// split (no hidden saved views). QUA-210.
+        private func acceptSavedView(_ id: UUID, into node: SidebarOutlineNode?, childIndex: Int,
+                                     outlineView: NSOutlineView? = nil, info: NSDraggingInfo? = nil) -> Bool {
+            let targetIndex: Int? = {
+                guard let node else { return nil }
+                if case .section(.views) = node.kind, childIndex >= 0 {
+                    return childIndex
+                }
+                guard let outlineView, let info,
+                      case .pane(.savedView(let targetID)) = node.kind,
+                      let row = rowForItem(node, in: outlineView),
+                      let index = model.savedViews.firstIndex(where: { $0.id == targetID }) else { return nil }
+                let point = draggingPoint(in: outlineView, info: info)
+                return point.y < outlineView.rect(ofRow: row).midY ? index : index + 1
+            }()
+            guard let targetIndex else { return false }
+            return model.moveSavedView(id, to: targetIndex)
         }
 
         private func acceptTab(_ sourceID: NavTab.ID, sourceSpaceID: WorkspaceSpace.ID?, into node: SidebarOutlineNode?, childIndex: Int) -> Bool {

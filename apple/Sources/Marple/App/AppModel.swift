@@ -893,6 +893,20 @@ final class AppModel {
         }
     }
 
+    /// Reorder a saved view to a sidebar drop slot — `index` is the drop
+    /// indicator's position among the current rows, counted BEFORE the dragged
+    /// view is removed (same slot semantics as the type-bucket reorder). QUA-210.
+    @discardableResult
+    func moveSavedView(_ id: UUID, to index: Int) -> Bool {
+        guard let from = savedViews.firstIndex(where: { $0.id == id }) else { return false }
+        var views = savedViews
+        let view = views.remove(at: from)
+        let dropAt = min(max(from < index ? index - 1 : index, 0), views.count)
+        views.insert(view, at: dropAt)
+        savedViews = views
+        return true
+    }
+
     /// SwiftUI's TextField with a custom Binding can echo the current value
     /// back through its setter whenever the parent view re-evaluates (the
     /// `SearchField` here re-renders on any @Observable AppModel mutation
