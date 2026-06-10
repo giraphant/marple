@@ -39,6 +39,9 @@ public struct PersistedWorkspaceSpace: Codable, Sendable, Equatable {
     public var tabs: [PersistedTab]
     public var activeIndex: Int
     public var iconName: String?
+    /// Archived Spaces (QUA-216) are hidden from the switcher but kept here so they
+    /// survive relaunch and can be restored from Settings. Absent in legacy blobs.
+    public var isArchived: Bool
     /// Legacy (v1) flat groups. Still decoded from already-stored state; new saves
     /// leave this empty and use `tree`.
     public var groups: [WorkspaceGroupSnapshot]
@@ -47,7 +50,7 @@ public struct PersistedWorkspaceSpace: Codable, Sendable, Equatable {
 
     public init(id: UUID = UUID(), name: String = "默认 Space", isBrowsing: Bool = false,
                 tabs: [PersistedTab] = [], activeIndex: Int = 0,
-                iconName: String? = nil,
+                iconName: String? = nil, isArchived: Bool = false,
                 groups: [WorkspaceGroupSnapshot] = [], tree: WorkspaceTreeSnapshot? = nil) {
         self.id = id
         self.name = name
@@ -55,11 +58,12 @@ public struct PersistedWorkspaceSpace: Codable, Sendable, Equatable {
         self.tabs = tabs
         self.activeIndex = activeIndex
         self.iconName = iconName
+        self.isArchived = isArchived
         self.groups = groups
         self.tree = tree
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, isBrowsing, tabs, activeIndex, iconName, groups, tree }
+    enum CodingKeys: String, CodingKey { case id, name, isBrowsing, tabs, activeIndex, iconName, isArchived, groups, tree }
 
     // Tolerant decode: a v2 blob may omit `groups`; a v1 blob omits `tree`. Neither
     // should fail the whole persisted-state decode.
@@ -71,6 +75,7 @@ public struct PersistedWorkspaceSpace: Codable, Sendable, Equatable {
         tabs = try c.decodeIfPresent([PersistedTab].self, forKey: .tabs) ?? []
         activeIndex = try c.decodeIfPresent(Int.self, forKey: .activeIndex) ?? 0
         iconName = try c.decodeIfPresent(String.self, forKey: .iconName)
+        isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         groups = try c.decodeIfPresent([WorkspaceGroupSnapshot].self, forKey: .groups) ?? []
         tree = try c.decodeIfPresent(WorkspaceTreeSnapshot.self, forKey: .tree)
     }
@@ -136,9 +141,13 @@ public struct PersistedState: Codable, Sendable, Equatable {
                 WorkspaceSpace(id: space.id, name: space.name,
                                workspace: Self.makeWorkspace(tabs: space.tabs, activeIndex: space.activeIndex, space: space),
                                isBrowsing: space.isBrowsing,
-                               iconName: space.iconName)
+                               iconName: space.iconName,
+                               isArchived: space.isArchived)
             }
-            let active = activeSpaceID.flatMap { id in restored.contains { $0.id == id } ? id : nil } ?? restored.first?.id
+            // Never restore an archived Space as active — it isn't shown in the switcher.
+            let active = activeSpaceID.flatMap { id in
+                restored.first { $0.id == id && !$0.isArchived }?.id
+            } ?? restored.first { !$0.isArchived }?.id ?? restored.first?.id
             return (restored, active)
         }
         let id = currentSpace?.id ?? UUID()

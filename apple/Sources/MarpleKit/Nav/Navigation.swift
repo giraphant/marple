@@ -159,14 +159,18 @@ public struct WorkspaceSpace: Identifiable, Sendable {
     public var workspace: Workspace?
     public var isBrowsing: Bool
     public var iconName: String?
+    /// Archived ("封存") Spaces are hidden from the bottom switcher bar but kept in
+    /// `spaces` (and persisted). They're restored from the Settings ▸ Spaces pane.
+    public var isArchived: Bool
 
     public init(id: UUID = UUID(), name: String, workspace: Workspace?, isBrowsing: Bool = false,
-                iconName: String? = nil) {
+                iconName: String? = nil, isArchived: Bool = false) {
         self.id = id
         self.name = name
         self.workspace = workspace
         self.isBrowsing = isBrowsing
         self.iconName = iconName
+        self.isArchived = isArchived
     }
 }
 
