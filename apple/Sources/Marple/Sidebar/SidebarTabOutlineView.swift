@@ -18,6 +18,17 @@ private enum SidebarOutlineSection {
         case .tabs:    return "页面"
         }
     }
+
+    /// Stable key for persisting the section's collapsed state across
+    /// reloads/launches (node objects are minted fresh every reload, so
+    /// AppKit's own per-item expansion memory can't carry it).
+    var key: String {
+        switch self {
+        case .objects: return "objects"
+        case .views:   return "views"
+        case .tabs:    return "tabs"
+        }
+    }
 }
 
 private final class SidebarOutlineNode: NSObject {
@@ -197,6 +208,11 @@ struct SidebarOutlineView: NSViewRepresentable {
         private var isRestoringExpansion = false
         private var pendingReload = false
         private var lastReloadSignature: String?
+        /// Collapsed sidebar sections by `SidebarOutlineSection.key`, persisted
+        /// across launches. Lives here (not AppModel) — pure view chrome, the
+        /// same way NSOutlineView owns its own scroll position.
+        private var collapsedSections: Set<String> =
+            Set(UserDefaults.standard.stringArray(forKey: "marple.collapsedSidebarSections") ?? [])
         private var lastReloadSpaceID: WorkspaceSpace.ID?
         private var stickyRowDropTarget: SidebarOutlineNode?
         // Row split for tab-on-tab grouping: top/bottom edge bands reorder, the
@@ -458,9 +474,17 @@ struct SidebarOutlineView: NSViewRepresentable {
             isRestoringExpansion = true
             defer { isRestoringExpansion = false }
             for section in rootItems {
-                outline.expandItem(section)
+                if case .section(let s) = section.kind, collapsedSections.contains(s.key) {
+                    outline.collapseItem(section)
+                } else {
+                    outline.expandItem(section)
+                }
             }
-            applyExpansion(to: tabRootItems, in: outline)
+            // Group rows only exist while their section is expanded; a collapsed
+            // 页面 section re-applies this lazily in outlineViewItemDidExpand.
+            if !collapsedSections.contains(SidebarOutlineSection.tabs.key) {
+                applyExpansion(to: tabRootItems, in: outline)
+            }
         }
 
         /// Recursively restore each group's expanded/collapsed state. Children rows
@@ -591,10 +615,10 @@ struct SidebarOutlineView: NSViewRepresentable {
             return true
         }
 
+        // Sections collapse like Mail's mailbox groups (hover「隐藏」button);
+        // state persists in collapsedSections so reloads don't pop them open.
         func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool {
-            guard let node = item as? SidebarOutlineNode else { return true }
-            if case .section = node.kind { return false }
-            return true
+            true
         }
 
         func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
@@ -936,16 +960,42 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         func outlineViewItemDidExpand(_ notification: Notification) {
             guard !isRestoringExpansion,
-                  let node = notification.userInfo?["NSObject"] as? SidebarOutlineNode,
-                  case .group(let id) = node.kind else { return }
-            model.setTabGroup(id, collapsed: false)
+                  let node = notification.userInfo?["NSObject"] as? SidebarOutlineNode else { return }
+            switch node.kind {
+            case .group(let id):
+                model.setTabGroup(id, collapsed: false)
+            case .section(let s):
+                collapsedSections.remove(s.key)
+                saveCollapsedSections()
+                // Fresh-minted child rows materialize collapsed; restore the
+                // persisted group expansion the deferred restoreExpansion skipped.
+                if case .tabs = s, let outline = notification.object as? NSOutlineView {
+                    isRestoringExpansion = true
+                    applyExpansion(to: node.children, in: outline)
+                    isRestoringExpansion = false
+                }
+            case .tab, .pane:
+                break
+            }
         }
 
         func outlineViewItemDidCollapse(_ notification: Notification) {
             guard !isRestoringExpansion,
-                  let node = notification.userInfo?["NSObject"] as? SidebarOutlineNode,
-                  case .group(let id) = node.kind else { return }
-            model.setTabGroup(id, collapsed: true)
+                  let node = notification.userInfo?["NSObject"] as? SidebarOutlineNode else { return }
+            switch node.kind {
+            case .group(let id):
+                model.setTabGroup(id, collapsed: true)
+            case .section(let s):
+                collapsedSections.insert(s.key)
+                saveCollapsedSections()
+            case .tab, .pane:
+                break
+            }
+        }
+
+        private func saveCollapsedSections() {
+            UserDefaults.standard.set(Array(collapsedSections).sorted(),
+                                      forKey: "marple.collapsedSidebarSections")
         }
 
         func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
