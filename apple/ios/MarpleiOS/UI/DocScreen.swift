@@ -111,6 +111,7 @@ private struct InfoSheet: View {
                 if !bookRows.isEmpty { bookCard }
                 if !outline.isEmpty { outlineCard }
                 infoCard
+                timestamps
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
@@ -119,25 +120,24 @@ private struct InfoSheet: View {
         .background(Color(.systemGroupedBackground))
     }
 
+    /// Ulysses-style stats: left-aligned lines, number primary + unit secondary —
+    /// not a three-column dashboard.
     private func statsCard(_ s: DocStats) -> some View {
-        HStack {
-            stat("\(s.chars)", "字符")
-            Divider().frame(height: 34)
-            stat("\(s.words)", "字")
-            Divider().frame(height: 34)
-            stat("\(s.minutes)", "分钟")
+        VStack(alignment: .leading, spacing: 6) {
+            statLine("\(s.chars.formatted())", "字符")
+            statLine("\(s.words.formatted())", "字")
+            statLine("\(s.minutes)", "分钟 阅读时间")
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 14).padding(.horizontal, 14)
         .card()
     }
 
-    private func stat(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value).font(.title3.weight(.semibold)).monospacedDigit()
-            Text(label).font(.caption).foregroundStyle(.secondary)
+    private func statLine(_ value: String, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Text(value).font(.callout).monospacedDigit()
+            Text(label).font(.callout).foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity)
     }
 
     /// 本书 navigation rows (概述 + ordered chapters), mirroring the Mac
@@ -225,6 +225,26 @@ private struct InfoSheet: View {
             if !entry.themes.isEmpty { divider; infoRow("主题", entry.themes.joined(separator: " · ")) }
         }
         .card()
+    }
+
+    /// Ulysses-style trailing footnote: plain secondary text below the cards,
+    /// no card chrome. Absolute dates — this is a knowledge base, not a feed.
+    @ViewBuilder
+    private var timestamps: some View {
+        let modified = entry.mtime.map { Date(timeIntervalSince1970: $0 / 1000) }
+        if entry.created != nil || modified != nil {
+            VStack(alignment: .leading, spacing: 3) {
+                if let c = entry.created, !c.isEmpty {
+                    Text("创建于:\(c)")
+                }
+                if let m = modified {
+                    Text("修改于:\(m, format: .dateTime.year().month().day().hour().minute())")
+                }
+            }
+            .font(.footnote).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+        }
     }
 
     private var divider: some View { Divider().padding(.leading, 14) }
