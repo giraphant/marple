@@ -5,6 +5,10 @@ public enum Pane: Hashable, Sendable, Codable {
     case themesIndex
     case theme(String)
     case trash
+    /// A saved smart-folder view (QUA-127); the id resolves against
+    /// `PersistedState.savedViews`. The pane carries only the id so stale
+    /// references (view deleted) degrade gracefully at restore.
+    case savedView(UUID)
 }
 
 /// Base subset for a pane, before filter/sort. `.themesIndex` and `.trash` are
@@ -19,7 +23,16 @@ public func entriesForPane(_ pane: Pane, in entries: [Entry]) -> [Entry] {
     case .theme(let name): return entries.filter { $0.themes.contains(name) }
     case .themesIndex:     return []
     case .trash:           return []
+    case .savedView:       return browseUniverse(entries)
     }
+}
+
+/// The saved-view universe: every entry, with topic pages folded to one
+/// overview row per topic — browse semantics, so a view's rows always match
+/// what the type buckets would show (a `类型 是 专题` view lists topics, not
+/// loose resource pages).
+public func browseUniverse(_ entries: [Entry]) -> [Entry] {
+    entries.filter { $0.type != .topic } + topicBrowseSubset(entries)
 }
 
 /// One entry per topic slug — its overview page — collapsing resources/other

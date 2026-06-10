@@ -8,12 +8,25 @@ enum SidebarDragPasteboard {
 
 private enum SidebarOutlineSection {
     case objects
+    case views
     case tabs
 
     var title: String {
         switch self {
         case .objects: return "物件"
+        case .views:   return "视图"
         case .tabs:    return "页面"
+        }
+    }
+
+    /// Stable key for persisting the section's collapsed state across
+    /// reloads/launches (node objects are minted fresh every reload, so
+    /// AppKit's own per-item expansion memory can't carry it).
+    var key: String {
+        switch self {
+        case .objects: return "objects"
+        case .views:   return "views"
+        case .tabs:    return "tabs"
         }
     }
 }
@@ -195,6 +208,11 @@ struct SidebarOutlineView: NSViewRepresentable {
         private var isRestoringExpansion = false
         private var pendingReload = false
         private var lastReloadSignature: String?
+        /// Collapsed sidebar sections by `SidebarOutlineSection.key`, persisted
+        /// across launches. Lives here (not AppModel) — pure view chrome, the
+        /// same way NSOutlineView owns its own scroll position.
+        private var collapsedSections: Set<String> =
+            Set(UserDefaults.standard.stringArray(forKey: "marple.collapsedSidebarSections") ?? [])
         private var lastReloadSpaceID: WorkspaceSpace.ID?
         private var stickyRowDropTarget: SidebarOutlineNode?
         // Row split for tab-on-tab grouping: top/bottom edge bands reorder, the
@@ -232,7 +250,10 @@ struct SidebarOutlineView: NSViewRepresentable {
                 _ = model.pane
                 _ = model.activeTabID
                 _ = model.typeOrder
+                _ = model.hiddenTypes
                 _ = model.counts
+                _ = model.savedViews
+                _ = model.savedViewCounts
                 _ = model.tabs
                 _ = model.tabRootNodes
                 _ = model.spaces
@@ -342,8 +363,9 @@ struct SidebarOutlineView: NSViewRepresentable {
             // tree and clamped the scroll origin to the top — the viewport "jump".
             // An active-only change now hits the no-op-reload path (selection
             // update only), leaving the scroll position untouched.
-            parts.append("types:\(model.typeOrder.map(String.init(describing:)).joined(separator: ","))")
-            parts.append("counts:\(model.typeOrder.map { "\($0)=\(model.counts[$0] ?? 0)" }.joined(separator: ","))")
+            parts.append("types:\(model.visibleTypeOrder.map(String.init(describing:)).joined(separator: ","))")
+            parts.append("counts:\(model.visibleTypeOrder.map { "\($0)=\(model.counts[$0] ?? 0)" }.joined(separator: ","))")
+            parts.append("views:\(model.savedViews.map { "\($0.id.uuidString):\($0.name)=\(model.savedViewCounts[$0.id] ?? 0)" }.joined(separator: ","))")
             parts.append("tabs:\(model.tabs.map { "\($0.id.uuidString):\($0.location):\($0.pinned):\($0.customTitle ?? "")" }.joined(separator: ","))")
             parts.append("tree:\(Self.treeSignature(model.tabRootNodes))")
             parts.append("spaces:\(model.activeSpaceID?.uuidString ?? "nil"):\(model.spaces.map(\.id.uuidString).joined(separator: ","))")
@@ -363,15 +385,32 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         private func makeRootItems() -> [SidebarOutlineNode] {
             let entryByPath = Dictionary(model.entries.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
-            var sections = [
-                SidebarOutlineNode(kind: .section(.objects), title: SidebarOutlineSection.objects.title,
-                                   children: model.typeOrder.map { type in
-                                       SidebarOutlineNode(kind: .pane(.type(type)),
-                                                          title: type.label,
-                                                          count: model.counts[type] ?? 0,
-                                                          iconName: type.symbolName)
-                                   })
-            ]
+            var sections: [SidebarOutlineNode] = []
+            // Hidden buckets (QUA-127) just drop out of the list; all hidden ⇒
+            // the whole 物件 section disappears (re-enable via 设置 → 外观).
+            let visibleTypes = model.visibleTypeOrder
+            if !visibleTypes.isEmpty {
+                sections.append(
+                    SidebarOutlineNode(kind: .section(.objects), title: SidebarOutlineSection.objects.title,
+                                       children: visibleTypes.map { type in
+                                           SidebarOutlineNode(kind: .pane(.type(type)),
+                                                              title: type.label,
+                                                              count: model.counts[type] ?? 0,
+                                                              iconName: type.symbolName)
+                                       }))
+            }
+            // Saved smart-folder views (QUA-127). Section only exists once the
+            // user has saved one — no empty「视图」header on a fresh install.
+            if !model.savedViews.isEmpty {
+                sections.append(
+                    SidebarOutlineNode(kind: .section(.views), title: SidebarOutlineSection.views.title,
+                                       children: model.savedViews.map { view in
+                                           SidebarOutlineNode(kind: .pane(.savedView(view.id)),
+                                                              title: view.name,
+                                                              count: model.savedViewCounts[view.id] ?? 0,
+                                                              iconName: "line.3.horizontal.decrease.circle")
+                                       }))
+            }
             sections.append(SidebarOutlineNode(kind: .section(.tabs),
                                                title: SidebarOutlineSection.tabs.title,
                                                children: makeTabRootItems(entryByPath: entryByPath)))
@@ -427,6 +466,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             case .theme(let name): return "#\(name)"
             case .themesIndex: return "标签"
             case .trash: return "回收站"
+            case .savedView(let id): return model.savedView(id)?.name ?? "视图"
             }
         }
 
@@ -434,9 +474,17 @@ struct SidebarOutlineView: NSViewRepresentable {
             isRestoringExpansion = true
             defer { isRestoringExpansion = false }
             for section in rootItems {
-                outline.expandItem(section)
+                if case .section(let s) = section.kind, collapsedSections.contains(s.key) {
+                    outline.collapseItem(section)
+                } else {
+                    outline.expandItem(section)
+                }
             }
-            applyExpansion(to: tabRootItems, in: outline)
+            // Group rows only exist while their section is expanded; a collapsed
+            // 页面 section re-applies this lazily in outlineViewItemDidExpand.
+            if !collapsedSections.contains(SidebarOutlineSection.tabs.key) {
+                applyExpansion(to: tabRootItems, in: outline)
+            }
         }
 
         /// Recursively restore each group's expanded/collapsed state. Children rows
@@ -567,10 +615,10 @@ struct SidebarOutlineView: NSViewRepresentable {
             return true
         }
 
+        // Sections collapse like Mail's mailbox groups (hover「隐藏」button);
+        // state persists in collapsedSections so reloads don't pop them open.
         func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool {
-            guard let node = item as? SidebarOutlineNode else { return true }
-            if case .section = node.kind { return false }
-            return true
+            true
         }
 
         func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
@@ -609,13 +657,15 @@ struct SidebarOutlineView: NSViewRepresentable {
             switch node.kind {
             case .tab(let id): return findTabNode(id, in: rootItems)
             case .group(let id): return findGroupNode(id, in: rootItems)
-            case .section, .pane: return node
+            case .pane(let pane): return findPaneNode(pane, in: rootItems)
+            case .section: return node
             }
         }
 
         private func canRename(_ node: SidebarOutlineNode) -> Bool {
             switch node.kind {
             case .tab, .group: return true
+            case .pane(.savedView): return true   // user-named smart folder (QUA-127)
             case .section, .pane: return false
             }
         }
@@ -641,6 +691,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 model.renameTab(id, to: value)
             case .group(let id):
                 if !value.isEmpty { model.renameTabGroup(id, to: value) }
+            case .pane(.savedView(let id)):
+                model.renameSavedView(id, to: value)   // no-op on empty/whitespace
             case .section, .pane:
                 break
             }
@@ -674,6 +726,22 @@ struct SidebarOutlineView: NSViewRepresentable {
             let clicked = outline.clickedRow
             if clicked >= 0, let clickedNode = outline.item(atRow: clicked) as? SidebarOutlineNode,
                case .section = clickedNode.kind { return }
+            // Type buckets get a single display action (QUA-127); re-show lives
+            // in 设置 → 外观 → 侧栏物件.
+            if clicked >= 0, let clickedNode = outline.item(atRow: clicked) as? SidebarOutlineNode,
+               case .pane(.type) = clickedNode.kind {
+                contextMenu.addItem(menuItem("在侧栏中隐藏", action: #selector(hideTypeFromMenu(_:)), node: clickedNode))
+                return
+            }
+            // Saved views: rename in place, delete for good (QUA-127). Deleting
+            // is just dropping a stored filter — no confirmation dance.
+            if clicked >= 0, let clickedNode = outline.item(atRow: clicked) as? SidebarOutlineNode,
+               case .pane(.savedView) = clickedNode.kind {
+                contextMenu.addItem(menuItem("重命名", action: #selector(renameFromMenu(_:)), node: clickedNode))
+                contextMenu.addItem(.separator())
+                contextMenu.addItem(menuItem("删除视图", action: #selector(deleteSavedViewFromMenu(_:)), node: clickedNode))
+                return
+            }
             // AppKit auto-collapses selection to the clicked row when the clicked
             // row isn't already selected, so `selectedRowIndexes` is the truth.
             let nodes = outline.selectedRowIndexes
@@ -813,6 +881,18 @@ struct SidebarOutlineView: NSViewRepresentable {
             beginRename(node)
         }
 
+        @objc private func hideTypeFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode,
+                  case .pane(.type(let type)) = node.kind else { return }
+            model.setTypeHidden(type, hidden: true)
+        }
+
+        @objc private func deleteSavedViewFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode,
+                  case .pane(.savedView(let id)) = node.kind else { return }
+            model.deleteSavedView(id)
+        }
+
         @objc private func copyShareManifestFromMenu(_ sender: NSMenuItem) {
             guard let node = sender.representedObject as? SidebarOutlineNode else { return }
             let markdown: String?
@@ -880,16 +960,42 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         func outlineViewItemDidExpand(_ notification: Notification) {
             guard !isRestoringExpansion,
-                  let node = notification.userInfo?["NSObject"] as? SidebarOutlineNode,
-                  case .group(let id) = node.kind else { return }
-            model.setTabGroup(id, collapsed: false)
+                  let node = notification.userInfo?["NSObject"] as? SidebarOutlineNode else { return }
+            switch node.kind {
+            case .group(let id):
+                model.setTabGroup(id, collapsed: false)
+            case .section(let s):
+                collapsedSections.remove(s.key)
+                saveCollapsedSections()
+                // Fresh-minted child rows materialize collapsed; restore the
+                // persisted group expansion the deferred restoreExpansion skipped.
+                if case .tabs = s, let outline = notification.object as? NSOutlineView {
+                    isRestoringExpansion = true
+                    applyExpansion(to: node.children, in: outline)
+                    isRestoringExpansion = false
+                }
+            case .tab, .pane:
+                break
+            }
         }
 
         func outlineViewItemDidCollapse(_ notification: Notification) {
             guard !isRestoringExpansion,
-                  let node = notification.userInfo?["NSObject"] as? SidebarOutlineNode,
-                  case .group(let id) = node.kind else { return }
-            model.setTabGroup(id, collapsed: true)
+                  let node = notification.userInfo?["NSObject"] as? SidebarOutlineNode else { return }
+            switch node.kind {
+            case .group(let id):
+                model.setTabGroup(id, collapsed: true)
+            case .section(let s):
+                collapsedSections.insert(s.key)
+                saveCollapsedSections()
+            case .tab, .pane:
+                break
+            }
+        }
+
+        private func saveCollapsedSections() {
+            UserDefaults.standard.set(Array(collapsedSections).sorted(),
+                                      forKey: "marple.collapsedSidebarSections")
         }
 
         func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
@@ -1215,7 +1321,9 @@ struct SidebarOutlineView: NSViewRepresentable {
                   let node = outlineView.item(atRow: row) as? SidebarOutlineNode,
                   let objects = objectsSection else { return [] }
             if case .pane(.type(let targetType)) = node.kind,
-               let targetIndex = model.typeOrder.firstIndex(of: targetType) {
+               // Drop indicator slots are positions among the VISIBLE children,
+               // so index against visibleTypeOrder, not the full order (QUA-127).
+               let targetIndex = model.visibleTypeOrder.firstIndex(of: targetType) {
                 let rect = outlineView.rect(ofRow: row)
                 let childIndex = point.y < rect.midY ? targetIndex : targetIndex + 1
                 outlineView.setDropItem(objects, dropChildIndex: childIndex)
@@ -1362,6 +1470,11 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         private func acceptType(_ type: EntryType, into node: SidebarOutlineNode?, childIndex: Int,
                                 outlineView: NSOutlineView? = nil, info: NSDraggingInfo? = nil) -> Bool {
+            // All indices here are positions among the VISIBLE rows (that's what
+            // AppKit hands us); the reorder is applied to the full typeOrder by
+            // anchoring on the visible neighbour, so hidden buckets keep their
+            // relative place (QUA-127).
+            let visible = model.visibleTypeOrder
             let targetIndex: Int? = {
                 guard let node else { return nil }
                 if case .section(.objects) = node.kind, childIndex >= 0 {
@@ -1370,16 +1483,20 @@ struct SidebarOutlineView: NSViewRepresentable {
                 guard let outlineView, let info,
                       case .pane(.type(let targetType)) = node.kind,
                       let row = rowForItem(node, in: outlineView),
-                      let index = model.typeOrder.firstIndex(of: targetType) else { return nil }
+                      let index = visible.firstIndex(of: targetType) else { return nil }
                 let point = draggingPoint(in: outlineView, info: info)
                 return point.y < outlineView.rect(ofRow: row).midY ? index : index + 1
             }()
             guard let targetIndex,
-                  let from = model.typeOrder.firstIndex(of: type) else { return false }
+                  let from = visible.firstIndex(of: type) else { return false }
+            let remaining = visible.filter { $0 != type }
+            let dropAt = min(max(from < targetIndex ? targetIndex - 1 : targetIndex, 0), remaining.count)
             var order = model.typeOrder
-            order.remove(at: from)
-            let adjustedIndex = from < targetIndex ? targetIndex - 1 : targetIndex
-            order.insert(type, at: min(max(adjustedIndex, 0), order.count))
+            order.removeAll { $0 == type }
+            let fullIndex = dropAt < remaining.count
+                ? (order.firstIndex(of: remaining[dropAt]) ?? order.count)
+                : order.count
+            order.insert(type, at: fullIndex)
             model.setTypeOrder(order)
             return true
         }
