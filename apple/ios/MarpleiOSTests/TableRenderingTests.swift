@@ -2,8 +2,9 @@ import XCTest
 import UIKit
 import MarpleKit
 
-/// iOS v2 table rendering: markdown tables become TextKit 2 `TableAttachment`s
-/// carrying pre-rendered cells, drawn natively by `TableCardView` (QUA-201).
+/// iOS table rendering: markdown tables become TextKit 2 `TableAttachment`s carrying
+/// pre-rendered cells, hosted natively by `TableCardView` (QUA-201; live selectable
+/// cells + horizontal scroll for wide tables in QUA-206).
 @MainActor
 final class TableRenderingTests: XCTestCase {
     private let style = RenderStyle(size: 17, fontFamily: nil, bodyWeight: .regular,
@@ -102,11 +103,79 @@ final class TableRenderingTests: XCTestCase {
         XCTAssertGreaterThan(card?.bounds.height ?? 0, 0)
     }
 
-    func testCardHeightGrowsWhenNarrowWidthForcesWrapping() {
+    // MARK: v3 (QUA-206): live cell text + horizontal scroll
+
+    private func materializedCard(in md: String, width: CGFloat) -> TableCardView {
+        let attachment = firstTableAttachment(in: md)!
+        let card = TableCardView(table: attachment.table)
+        card.frame = CGRect(x: 0, y: 0, width: width,
+                            height: TableCardView.height(for: attachment.table, width: width))
+        card.layoutIfNeeded()
+        return card
+    }
+
+    private func findViews<T: UIView>(_ type: T.Type, in view: UIView) -> [T] {
+        var found: [T] = []
+        if let view = view as? T { found.append(view) }
+        for sub in view.subviews { found.append(contentsOf: findViews(type, in: sub)) }
+        return found
+    }
+
+    /// Cells are live UITextViews (selectable/copyable), not draw(_:)-painted text.
+    func testCellTextIsLiveAndSelectable() {
+        let card = materializedCard(in: "| A | B |\n|---|---|\n| hello | world |", width: 360)
+        let cells = findViews(UITextView.self, in: card)
+        XCTAssertEqual(cells.count, 4)
+        for cell in cells {
+            XCTAssertTrue(cell.isSelectable)
+            XCTAssertFalse(cell.isEditable)
+            XCTAssertFalse(cell.isScrollEnabled)
+        }
+        let texts = Set(cells.map(\.text))
+        XCTAssertTrue(texts.contains("hello"))
+        XCTAssertTrue(texts.contains("world"))
+    }
+
+    /// v3: a table too wide for a phone column lays out at the width it wants and
+    /// scrolls horizontally inside the card — so the card height no longer depends
+    /// on the column width (in v2, narrow forced aggressive wrapping).
+    func testNarrowWidthScrollsInsteadOfWrapping() {
         let md = "| 描述 |\n|---|\n| a fairly long sentence that must wrap on a narrow phone column |"
         let attachment = firstTableAttachment(in: md)!
         let wide = TableCardView.height(for: attachment.table, width: 700)
         let narrow = TableCardView.height(for: attachment.table, width: 200)
-        XCTAssertGreaterThan(narrow, wide)
+        XCTAssertEqual(narrow, wide)
+    }
+
+    func testWideTableScrollsHorizontally() {
+        let md = """
+        | first-column-header | second-column-header | third-column-header | fourth-column-header |
+        |---|---|---|---|
+        | unbreakable-identifier-one | unbreakable-identifier-two | unbreakable-identifier-three | unbreakable-identifier-four |
+        """
+        let card = materializedCard(in: md, width: 360)
+        let scroll = findViews(UIScrollView.self, in: card).first
+        XCTAssertNotNil(scroll)
+        XCTAssertGreaterThan(scroll?.contentSize.width ?? 0, 360)
+        XCTAssertTrue(scroll?.isScrollEnabled ?? false)
+    }
+
+    func testNarrowTableDoesNotScroll() {
+        let card = materializedCard(in: "| A | B |\n|---|---|\n| 1 | 2 |", width: 360)
+        let scroll = findViews(UIScrollView.self, in: card).first
+        XCTAssertNotNil(scroll)
+        XCTAssertLessThanOrEqual(scroll?.contentSize.width ?? .infinity, 360)
+        XCTAssertFalse(scroll?.isScrollEnabled ?? true)
+    }
+
+    /// Breakable prose wider than the Mac's 700pt measure wraps there, as on the Mac,
+    /// instead of producing an absurdly wide scroll.
+    func testScrollWidthCappedAtMacMeasure() {
+        let prose = "a very long breakable sentence that would naturally measure far past the mac reading measure all by itself"
+        let md = "| 一 | 二 | 三 |\n|---|---|---|\n| \(prose) | \(prose) | \(prose) |"
+        let card = materializedCard(in: md, width: 360)
+        let scroll = findViews(UIScrollView.self, in: card).first
+        XCTAssertGreaterThan(scroll?.contentSize.width ?? 0, 360)
+        XCTAssertLessThanOrEqual(scroll?.contentSize.width ?? .infinity, 700)
     }
 }

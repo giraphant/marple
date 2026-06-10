@@ -1024,6 +1024,26 @@ enum TableLayoutMath {
         return widths.map { $0 / total * budget }
     }
 
+    /// Total text width (chrome excluded) the table needs: `natural` lays every cell
+    /// on a single line; `min` is the narrowest width at which no unbreakable token
+    /// splits. Drives the iOS card's scroll-vs-wrap decision.
+    static func requiredTextWidths(headerTexts: [String], rowTexts: [[String]],
+                                   headerFont: PlatformFont, bodyFont: PlatformFont) -> (min: CGFloat, natural: CGFloat) {
+        var minTotal: CGFloat = 0
+        var naturalTotal: CGFloat = 0
+        for column in 0..<headerTexts.count {
+            var minWidth = longestUnbreakableWidth(headerTexts[column], font: headerFont)
+            var naturalWidth = singleLineWidth(headerTexts[column], font: headerFont)
+            for row in rowTexts where column < row.count {
+                minWidth = max(minWidth, longestUnbreakableWidth(row[column], font: bodyFont))
+                naturalWidth = max(naturalWidth, singleLineWidth(row[column], font: bodyFont))
+            }
+            minTotal += minWidth
+            naturalTotal += max(naturalWidth, minWidth)
+        }
+        return (minTotal, naturalTotal)
+    }
+
     /// Width of `text` laid out on a single line.
     static func singleLineWidth(_ text: String, font: PlatformFont) -> CGFloat {
         guard !text.isEmpty else { return 0 }
