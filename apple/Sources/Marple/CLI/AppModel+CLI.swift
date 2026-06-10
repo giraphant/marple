@@ -49,15 +49,17 @@ extension AppModel {
         return entries.contains(where: { $0.path == path })
     }
 
-    /// Run the same reconcile + index reload the FSEvents watcher does, on demand.
-    /// No-op when no indexer is wired (stub-backed tests).
+    /// Run the same reconcile + index reload the FSEvents watcher does, on
+    /// demand, through the shared single-flight `refreshGate` (QUA-212): a
+    /// watcher/boot chain already mid-run is joined — request a trailing rerun
+    /// and wait for that fresh pass — instead of stacking a duplicate full
+    /// vault walk behind the indexer writeLock. No-op when no indexer is wired
+    /// (stub-backed tests).
     func cliRefreshIndex() async {
-        guard let indexer = cliIndexer else { return }
-        beginRefreshing()
-        do { _ = try await Task.detached { try indexer.reconcile() }.value }
-        catch { print("[marple] cli reconcile failed: \(error)") }
-        await loadIndex()
-        endRefreshing()
+        guard cliIndexer != nil else { return }
+        if await refreshGate.beginOrJoin() {
+            repeat { await refreshChain() } while await refreshGate.finishOrRerun()
+        }
     }
 }
 

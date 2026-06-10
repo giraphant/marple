@@ -22,6 +22,12 @@ final class AppModel {
     /// handlers trigger a synchronous reconcile through this. nil in stub tests.
     var cliIndexer: VaultIndexer?
 
+    /// QUA-198/QUA-212: single-flight gate shared by every reconcile→reload
+    /// chain (FSEvents watcher, boot deferred reconcile, CLI self-heal). Owned
+    /// here so the CLI extension can join an in-flight pass instead of stacking
+    /// a duplicate full vault walk behind the indexer writeLock.
+    let refreshGate = RefreshGate()
+
     /// The vault's self-describing schema snapshot, reloaded on every index load.
     /// nil when the vault has no `.quasi/schema.json` (or it's stale/unreadable) —
     /// in which case the conformance feature stays dark. See [[SchemaSnapshot]].
@@ -60,6 +66,19 @@ final class AppModel {
     var isRefreshing: Bool { refreshingCount > 0 }
     func beginRefreshing() { refreshingCount += 1 }
     func endRefreshing() { refreshingCount = max(0, refreshingCount - 1) }
+
+    /// One reconcile→reload pass — the body every `refreshGate` runner executes
+    /// (watcher signal, trailing rerun, CLI self-heal). Callers must hold the
+    /// gate. No-op when no indexer is wired (stub-backed tests).
+    func refreshChain() async {
+        guard let indexer = cliIndexer else { return }
+        beginRefreshing()
+        do { _ = try await Task.detached { try indexer.reconcile() }.value }
+        catch { print("[marple] reconcile failed: \(error)") }
+        await loadIndex()
+        await reloadOpen()
+        endRefreshing()
+    }
 
     /// Card grid vs single-column list. Pure UI toggle; no derived cache depends on it.
     var browseMode: BrowseMode = .grid { didSet { persist() } }
