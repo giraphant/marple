@@ -8,11 +8,13 @@ cd "$(dirname "$0")"
 # codesigning (release/dist); unset keeps the old unsigned dev bundle.
 CONFIG="${CONFIG:-debug}"
 PKG_ROOT=".build/arm64-apple-macosx/$CONFIG"
-# Bundle output dir. Defaults to ./Marple.app for dev builds. `make dist`
-# overrides it to a path off the iCloud-synced tree: the File Provider keeps
-# re-stamping com.apple.FinderInfo onto a synced .app, which codesign rejects
-# ("resource fork, Finder information, or similar detritus not allowed").
-APP_DIR="${APP_DIR:-Marple.app}"
+# Bundle output dir. QUA-199: defaults to a local-volume path, NOT the repo
+# dir — the repo lives under ~/Documents (iCloud), and the File Provider keeps
+# re-stamping com.apple.FinderInfo onto a synced .app between our `xattr -cr`
+# and codesign, which codesign rejects ("resource fork, Finder information,
+# or similar detritus not allowed"). `make dist` overrides it to its own
+# off-iCloud staging dir.
+APP_DIR="${APP_DIR:-$HOME/Library/Caches/marple-dev/Marple.app}"
 APP="$APP_DIR/Contents"
 APPICONSET="Sources/Marple/Resources/Assets.xcassets/AppIcon.appiconset"
 BUNDLE_ID="com.marple.app"
@@ -200,7 +202,12 @@ fi
 # by bare name. We symlink into the bundle so every rebuild stays current.
 # Try a user-writable PATH dir first (no sudo); fall back to printing a manual
 # install command if nothing on PATH is writable.
-CLI_SRC="$(pwd)/$APP/MacOS/marple-cli"
+# QUA-199: $APP_DIR may be absolute (the default cache path) or relative —
+# only prefix $(pwd) for the relative case, or the link target doubles up.
+case "$APP_DIR" in
+    /*) CLI_SRC="$APP/MacOS/marple-cli" ;;
+    *)  CLI_SRC="$(pwd)/$APP/MacOS/marple-cli" ;;
+esac
 CLI_INSTALLED=0
 for d in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin" "$HOME/bin"; do
     if [ -d "$d" ] && [ -w "$d" ]; then

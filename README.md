@@ -33,9 +33,11 @@ Build a proper `.app` bundle (so the Dock icon shows up):
 
 ```sh
 cd apple
-./build-app.sh
-open Marple.app
+make run
 ```
+
+The bundle is assembled at `~/Library/Caches/marple-dev/Marple.app` — off the
+iCloud-synced repo tree, which codesign rejects (QUA-199).
 
 First launch asks you to pick the vault workspace (the directory that
 contains your `.md` library). The choice is persisted in
