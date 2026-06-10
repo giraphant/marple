@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import MarpleKit
 
@@ -25,6 +26,44 @@ import Testing
 
     @Test func testTrashPaneHasNoEntries() {
         #expect(entriesForPane(.trash, in: [e("a", .note)]).isEmpty)
+    }
+
+    // MARK: - Saved views (QUA-127)
+
+    /// The saved-view universe is every entry with topics folded to overview
+    /// rows — so a `类型 是 专题` view matches the 专题 bucket, never loose
+    /// resource pages.
+    @Test func savedViewPaneUsesBrowseUniverse() {
+        let list = [
+            e("vault/papers/p.md", .paper),
+            e("vault/notes/n.md", .note),
+            topic("vault/topics/repair/00-overview.md", kind: "overview"),
+            topic("vault/topics/repair/01-resources.md", kind: "resources"),
+        ]
+        let universe = entriesForPane(.savedView(UUID()), in: list)
+        #expect(Set(universe.map(\.path)) == [
+            "vault/papers/p.md", "vault/notes/n.md", "vault/topics/repair/00-overview.md",
+        ])
+        // Composed with a type clause, the fold carries through.
+        let topicsOnly = applyFilters(universe,
+                                      [FilterClause(field: .type, op: .is_, value: "topic")],
+                                      match: .all)
+        #expect(topicsOnly.map(\.path) == ["vault/topics/repair/00-overview.md"])
+    }
+
+    @Test func savedViewRoundTripsThroughCodable() throws {
+        let view = SavedView(name: "好论文",
+                             clauses: [FilterClause(field: .type, op: .is_, value: "paper"),
+                                       FilterClause(field: .rating, op: .gte, value: "4")],
+                             match: .all,
+                             sorts: [SortClause(field: .year, dir: .desc)])
+        let data = try JSONEncoder().encode(view)
+        let back = try JSONDecoder().decode(SavedView.self, from: data)
+        #expect(back == view)
+        // The pane case that references it round-trips too (it's in NavLocation).
+        let pane = Pane.savedView(view.id)
+        let paneBack = try JSONDecoder().decode(Pane.self, from: JSONEncoder().encode(pane))
+        #expect(paneBack == pane)
     }
 
     // MARK: - Topic fold (QUA-189)

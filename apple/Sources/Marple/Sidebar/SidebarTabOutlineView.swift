@@ -8,11 +8,13 @@ enum SidebarDragPasteboard {
 
 private enum SidebarOutlineSection {
     case objects
+    case views
     case tabs
 
     var title: String {
         switch self {
         case .objects: return "物件"
+        case .views:   return "视图"
         case .tabs:    return "页面"
         }
     }
@@ -234,6 +236,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 _ = model.typeOrder
                 _ = model.hiddenTypes
                 _ = model.counts
+                _ = model.savedViews
+                _ = model.savedViewCounts
                 _ = model.tabs
                 _ = model.tabRootNodes
                 _ = model.spaces
@@ -345,6 +349,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             // update only), leaving the scroll position untouched.
             parts.append("types:\(model.visibleTypeOrder.map(String.init(describing:)).joined(separator: ","))")
             parts.append("counts:\(model.visibleTypeOrder.map { "\($0)=\(model.counts[$0] ?? 0)" }.joined(separator: ","))")
+            parts.append("views:\(model.savedViews.map { "\($0.id.uuidString):\($0.name)=\(model.savedViewCounts[$0.id] ?? 0)" }.joined(separator: ","))")
             parts.append("tabs:\(model.tabs.map { "\($0.id.uuidString):\($0.location):\($0.pinned):\($0.customTitle ?? "")" }.joined(separator: ","))")
             parts.append("tree:\(Self.treeSignature(model.tabRootNodes))")
             parts.append("spaces:\(model.activeSpaceID?.uuidString ?? "nil"):\(model.spaces.map(\.id.uuidString).joined(separator: ","))")
@@ -376,6 +381,18 @@ struct SidebarOutlineView: NSViewRepresentable {
                                                               title: type.label,
                                                               count: model.counts[type] ?? 0,
                                                               iconName: type.symbolName)
+                                       }))
+            }
+            // Saved smart-folder views (QUA-127). Section only exists once the
+            // user has saved one — no empty「视图」header on a fresh install.
+            if !model.savedViews.isEmpty {
+                sections.append(
+                    SidebarOutlineNode(kind: .section(.views), title: SidebarOutlineSection.views.title,
+                                       children: model.savedViews.map { view in
+                                           SidebarOutlineNode(kind: .pane(.savedView(view.id)),
+                                                              title: view.name,
+                                                              count: model.savedViewCounts[view.id] ?? 0,
+                                                              iconName: "line.3.horizontal.decrease.circle")
                                        }))
             }
             sections.append(SidebarOutlineNode(kind: .section(.tabs),
@@ -433,6 +450,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             case .theme(let name): return "#\(name)"
             case .themesIndex: return "标签"
             case .trash: return "回收站"
+            case .savedView(let id): return model.savedView(id)?.name ?? "视图"
             }
         }
 
@@ -615,13 +633,15 @@ struct SidebarOutlineView: NSViewRepresentable {
             switch node.kind {
             case .tab(let id): return findTabNode(id, in: rootItems)
             case .group(let id): return findGroupNode(id, in: rootItems)
-            case .section, .pane: return node
+            case .pane(let pane): return findPaneNode(pane, in: rootItems)
+            case .section: return node
             }
         }
 
         private func canRename(_ node: SidebarOutlineNode) -> Bool {
             switch node.kind {
             case .tab, .group: return true
+            case .pane(.savedView): return true   // user-named smart folder (QUA-127)
             case .section, .pane: return false
             }
         }
@@ -647,6 +667,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 model.renameTab(id, to: value)
             case .group(let id):
                 if !value.isEmpty { model.renameTabGroup(id, to: value) }
+            case .pane(.savedView(let id)):
+                model.renameSavedView(id, to: value)   // no-op on empty/whitespace
             case .section, .pane:
                 break
             }
@@ -685,6 +707,15 @@ struct SidebarOutlineView: NSViewRepresentable {
             if clicked >= 0, let clickedNode = outline.item(atRow: clicked) as? SidebarOutlineNode,
                case .pane(.type) = clickedNode.kind {
                 contextMenu.addItem(menuItem("在侧栏中隐藏", action: #selector(hideTypeFromMenu(_:)), node: clickedNode))
+                return
+            }
+            // Saved views: rename in place, delete for good (QUA-127). Deleting
+            // is just dropping a stored filter — no confirmation dance.
+            if clicked >= 0, let clickedNode = outline.item(atRow: clicked) as? SidebarOutlineNode,
+               case .pane(.savedView) = clickedNode.kind {
+                contextMenu.addItem(menuItem("重命名", action: #selector(renameFromMenu(_:)), node: clickedNode))
+                contextMenu.addItem(.separator())
+                contextMenu.addItem(menuItem("删除视图", action: #selector(deleteSavedViewFromMenu(_:)), node: clickedNode))
                 return
             }
             // AppKit auto-collapses selection to the clicked row when the clicked
@@ -830,6 +861,12 @@ struct SidebarOutlineView: NSViewRepresentable {
             guard let node = sender.representedObject as? SidebarOutlineNode,
                   case .pane(.type(let type)) = node.kind else { return }
             model.setTypeHidden(type, hidden: true)
+        }
+
+        @objc private func deleteSavedViewFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode,
+                  case .pane(.savedView(let id)) = node.kind else { return }
+            model.deleteSavedView(id)
         }
 
         @objc private func copyShareManifestFromMenu(_ sender: NSMenuItem) {
