@@ -102,6 +102,7 @@ public final class VaultIndexer: @unchecked Sendable {
             )
             guard case .indexed(var entry) = outcome else { continue }
             entry.added = addedDates[rel] ?? 0
+            Self.deriveImageFields(&entry, absPath: file)
             entries.append(entry)
         }
 
@@ -393,6 +394,9 @@ public final class VaultIndexer: @unchecked Sendable {
             // QUA-185: `media` carries talk's recording filename for conformance.
             // Its absence means a pre-QUA-185 DB → force buildFull rebuild.
             "media",
+            // QUA-175: `width`/`height`/`file_size` carry image technical
+            // fields derived from original.<ext>. Absence → rebuild.
+            "width",
         ]
 
         var config = Configuration()
@@ -457,7 +461,22 @@ public final class VaultIndexer: @unchecked Sendable {
             mtimeMs: mtimeMs
         )
 
-        if case .indexed(let entry) = outcome { return entry }
+        if case .indexed(var entry) = outcome {
+            Self.deriveImageFields(&entry, absPath: absPath)
+            return entry
+        }
         return nil
+    }
+
+    // MARK: deriveImageFields
+
+    /// Fill an image entry's technical fields (width / height / file size)
+    /// from its sibling `original.<ext>` (QUA-175). No-op for other types.
+    private static func deriveImageFields(_ entry: inout IndexedEntry, absPath: String) {
+        guard entry.entryType == "image",
+              let dims = ImageProbe.probe(imageEntryAbsPath: absPath) else { return }
+        entry.width = dims.width
+        entry.height = dims.height
+        entry.fileSize = dims.fileSize
     }
 }

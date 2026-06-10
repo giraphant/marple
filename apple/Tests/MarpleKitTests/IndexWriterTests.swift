@@ -293,6 +293,39 @@ struct IndexWriterTests {
         #expect(loaded[0].author == ["Smith, John Jr.", "Jane Doe"])
     }
 
+    /// QUA-175: image technical fields (width / height / file size, derived by
+    /// ImageProbe at build time) round-trip through their SQLite columns.
+    @Test("image width/height/file_size round-trip")
+    func imageDimensionsRoundTrip() throws {
+        let path = try tempDBPath()
+        let queue = try openAndCreateSchema(at: path)
+        var entry = IndexedEntry(
+            path: "vault/images/micrometer/image.md",
+            entryType: "image", book: nil,
+            title: "Micrometer", titleEn: nil, titleCn: nil,
+            author: ["Henry Maudslay"],
+            yearJSON: nil, ratingJSON: nil, ratingScore: 0,
+            themes: nil, topics: nil, source: nil, doi: nil,
+            publisher: nil, isbn: nil,
+            translationTitleCn: nil, translationDoubanURL: nil,
+            chaptersAnalyzed: nil, annotates: nil, created: "2024-11-08",
+            pdfSlug: nil, hasPDF: false, mtime: nil,
+            preview: "", bodyLen: 0, added: 0,
+            bodyText: "", searchText: "micrometer"
+        )
+        entry.width = 3024
+        entry.height = 4032
+        entry.fileSize = 123_456
+        try queue.write { db in try IndexWriter.insert(db, entry) }
+        let db = IndexDatabase(indexDBPath: path)
+        let loaded = try db.loadEntries()
+        #expect(loaded.count == 1)
+        #expect(loaded[0].width == 3024)
+        #expect(loaded[0].height == 4032)
+        #expect(loaded[0].fileSize == 123_456)
+        #expect(loaded[0].imageAspect == 3024.0 / 4032.0)
+    }
+
     /// Legacy DBs (built before QUA-109) stored author as a joined string.
     /// The decoder must still accept that shape so reindex doesn't break on
     /// first-run upgrade.

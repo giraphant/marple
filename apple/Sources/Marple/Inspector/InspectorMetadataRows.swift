@@ -5,6 +5,9 @@ enum MetadataAction: Equatable {
     case title
     case year
     case imageAuthor
+    /// Image creation/capture date — writes the `date:` frontmatter key
+    /// (indexed into `created`, QUA-175).
+    case imageDate
     case source
     case doi
 }
@@ -197,7 +200,26 @@ private func noteRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRo
 }
 
 private func imageRows(for entry: Entry) -> [InspectorInfoRow] {
-    [.editableScalar(label: "名称", value: entry.title, action: .title)]
+    // `creator` is indexed into `author` (same parse as `authors`, QUA-175), so
+    // reuse the standard authors row — it renders 创作者 for images and writes
+    // edits back to the `creator:` key (see AppModel.setAuthor).
+    var rows: [InspectorInfoRow] = [
+        .editableScalar(label: "名称", value: entry.title, action: .title),
+        .authors,
+        // `date` is indexed into `created` (same fold as talk).
+        .editableScalar(label: "日期", value: entry.created, action: .imageDate),
+        .editableScalar(label: "来源", value: entry.source, action: .source),
+    ]
+    // Technical fields, derived from original.<ext> at index time — read-only.
+    if let w = entry.width, let h = entry.height {
+        rows.append(.readOnlyScalar(label: "尺寸", value: "\(w) × \(h)", copyValue: "\(w)×\(h)"))
+    }
+    if let bytes = entry.fileSize, bytes > 0 {
+        let display = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        rows.append(.readOnlyScalar(label: "大小", value: display, copyValue: nil))
+    }
+    rows.append(.rating)
+    return rows
 }
 
 private func talkRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRow] {

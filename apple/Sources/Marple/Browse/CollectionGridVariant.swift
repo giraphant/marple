@@ -62,7 +62,6 @@ struct CollectionGridVariant: NSViewRepresentable {
 
         coordinator.entries = model.visibleEntries
         collectionView.reloadData()
-        coordinator.trackDims()
         return scrollView
     }
 
@@ -82,7 +81,6 @@ struct CollectionGridVariant: NSViewRepresentable {
             // switching between panes reuses each entry's already-measured height
             // (the boundingRect re-measure of a whole pane was the switch hitch).
             collectionView.reloadData()
-            coordinator.trackDims()
         }
     }
 
@@ -111,7 +109,6 @@ struct CollectionGridVariant: NSViewRepresentable {
             // nibName: nil + our code-based loadView avoids it entirely.
             let item = EntryCardItem(nibName: nil, bundle: nil)
             guard let entry = entries[safe: indexPath.item] else { return item }
-            dims.probe(entry)
             let nonConforming = model.conformance(for: entry)?.isConforming == false
             item.configure(entry: entry, nonConforming: nonConforming) { [model] path in
                 try? await model.client.imageOriginalURL(forImageEntryPath: path)
@@ -139,22 +136,6 @@ struct CollectionGridVariant: NSViewRepresentable {
             spacesItem.submenu = submenu
             menu.addItem(spacesItem)
             return menu
-        }
-
-        /// Re-arm an Observation watch so finished aspect-ratio probes invalidate
-        /// the layout (cards settle to true height as bitmaps resolve).
-        func trackDims() {
-            withObservationTracking {
-                for entry in entries where entry.type == .image {
-                    _ = dims.aspect(for: entry.path)
-                }
-            } onChange: { [weak self] in
-                Task { @MainActor in
-                    guard let self else { return }
-                    self.collectionView?.collectionViewLayout?.invalidateLayout()
-                    self.trackDims()
-                }
-            }
         }
     }
 }

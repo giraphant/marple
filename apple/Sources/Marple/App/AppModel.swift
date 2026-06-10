@@ -1784,21 +1784,27 @@ final class AppModel {
     /// (legacy alias) frontmatter keys; non-empty → write canonical block
     /// list under `author:` per SPEC §5.2.
     ///
-    /// A `talk` stores its presenters under `speaker:` (not `author:`), so for
-    /// talks the same edit writes the `speaker:` key instead — the inspector
-    /// reuses the authors row for 讲者, and the indexer folds `speaker:` back
-    /// into `author` on reload.
+    /// A `talk` stores its presenters under `speaker:` and an `image` its
+    /// makers under `creator:` (not `author:`), so for those types the same
+    /// edit writes their own key instead — the inspector reuses the authors
+    /// row for 讲者/创作者, and the indexer folds the key back into `author`
+    /// on reload.
     func setAuthor(_ authors: [String]) async {
         let cleaned = authors
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        let key = openEntry?.type == .talk ? "speaker" : "author"
+        let key: String
+        switch openEntry?.type {
+        case .talk:  key = "speaker"
+        case .image: key = "creator"
+        default:     key = "author"
+        }
         await applyPatch(
             field: key,
             { raw in
                 if cleaned.isEmpty {
-                    if key == "speaker" {
-                        return FrontmatterPatch.removeKey(raw, key: "speaker")
+                    if key != "author" {
+                        return FrontmatterPatch.removeKey(raw, key: key)
                     }
                     // Double-clear: vault has both `author:` and `authors:`
                     // historic spellings; drop both to guarantee absence.
@@ -1807,8 +1813,8 @@ final class AppModel {
                         key: "authors"
                     )
                 }
-                if key == "speaker" {
-                    return FrontmatterPatch.setSequence(raw, key: "speaker", values: cleaned)
+                if key != "author" {
+                    return FrontmatterPatch.setSequence(raw, key: key, values: cleaned)
                 }
                 // Also drop the alias key so the canonical `author:` is the
                 // only one present after the write.
@@ -1817,6 +1823,15 @@ final class AppModel {
             },
             local: { $0.with(author: cleaned) }
         )
+    }
+
+    /// Set an image's creation/capture date — writes the `date:` frontmatter
+    /// key, which the indexer folds into the `created` column (QUA-175).
+    func setImageDate(_ text: String?) async {
+        let val = normalize(text)
+        await applyPatch(field: "date",
+            { FrontmatterPatch.setScalar($0, key: "date", value: val) },
+            local: { $0.with(created: .some(val)) })
     }
 
     /// Author-profile entry whose title matches `name` (case-insensitive). Used
