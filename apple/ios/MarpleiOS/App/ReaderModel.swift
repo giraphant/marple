@@ -25,6 +25,8 @@ struct MacSpaceTabs: Identifiable {
     let name: String
     let iconName: String?
     let roots: [MacTabNode]
+    /// That Space's active tab path (Mac-side), for the subtle "you are here" mark.
+    let activePath: String?
 }
 
 @MainActor
@@ -39,6 +41,9 @@ final class ReaderModel {
     /// sidebar. Published by the Mac into the synced folder; refreshed whenever
     /// entries change. Empty if the Mac never published.
     private(set) var openOnMacSpaces: [MacSpaceTabs] = []
+    /// When the Mac last published its open tabs (from the snapshot's updatedAtMs).
+    /// nil when no snapshot — drives the "同步于…" footer.
+    private(set) var openTabsUpdatedAt: Date?
     /// Field-weighted in-memory search index (same engine as the Mac's 快速 palette).
     /// Rebuilt off-actor whenever `entries` change.
     private var searchIndex: SearchIndex = .empty
@@ -202,8 +207,10 @@ final class ReaderModel {
         guard let data = try? Data(contentsOf: url),
               let snap = try? JSONDecoder().decode(SessionSnapshot.self, from: data) else {
             openOnMacSpaces = []
+            openTabsUpdatedAt = nil
             return
         }
+        openTabsUpdatedAt = Date(timeIntervalSince1970: Double(snap.updatedAtMs) / 1000)
         let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
         var counter = 0
         func resolve(_ nodes: [SessionNode]) -> [MacTabNode] {
@@ -224,7 +231,8 @@ final class ReaderModel {
             let roots = resolve(space.roots)
             guard !roots.isEmpty else { return nil }
             return MacSpaceTabs(id: space.id, name: space.name,
-                                iconName: space.iconName, roots: roots)
+                                iconName: space.iconName, roots: roots,
+                                activePath: space.activePath)
         }
     }
 

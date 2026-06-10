@@ -11,6 +11,7 @@ struct DocScreen: View {
     /// same derivation the Mac inspector uses (QUA-202).
     @State private var book: BookContext?
     @State private var showInfo = false
+    @State private var showOutline = false
     // Chapter navigation: the sheet records the tapped path, the push happens in
     // onDismiss so it doesn't race the sheet's dismissal animation.
     @State private var pendingPush: String?
@@ -31,18 +32,35 @@ struct DocScreen: View {
 
     var body: some View {
         MarkdownTextView(attributed: rendered, scrollTarget: scrollTarget, scrollNonce: scrollNonce)
-            .navigationTitle(entry.title ?? "")
+            // No bar title — the document's own H1 is the title (Ulysses/Notes
+            // style); the bar is just the system glass back circle + the ⋯ menu.
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { showFontControl = true } label: {
+                            Label("字号", systemImage: "textformat.size")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                }
+            }
             .overlay(alignment: .bottomTrailing) { floatingControls }
-            .sheet(isPresented: $showInfo, onDismiss: {
-                if let p = pendingPush { pendingPush = nil; pushedPath = p }
-            }) {
-                InfoSheet(entry: entry, stats: stats, outline: outline, book: book) { item in
+            .sheet(isPresented: $showOutline) {
+                OutlineSheet(outline: outline) { item in
                     guard let r = item.characterRange else { return }
                     scrollTarget = r
                     scrollNonce += 1
-                    showInfo = false
-                } onOpen: { target in
+                    showOutline = false
+                }
+                .presentationDetents([.fraction(0.5), .large])
+                .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showInfo, onDismiss: {
+                if let p = pendingPush { pendingPush = nil; pushedPath = p }
+            }) {
+                InfoSheet(entry: entry, stats: stats, book: book) { target in
                     if target.path != entry.path { pendingPush = target.path }
                     showInfo = false
                 }
@@ -63,15 +81,18 @@ struct DocScreen: View {
             .onChange(of: fontSize) { _, _ in Task { await load() } }
     }
 
-    /// 利器-style floating pill, split to the bottom-right corner and thumb-reachable.
+    /// Ulysses-style floating pill, bottom-right and thumb-reachable: outline +
+    /// info. Typography moved to the ⋯ menu (low-frequency, Ulysses keeps it
+    /// out of the reading surface too).
     private var floatingControls: some View {
         HStack(spacing: 2) {
-            Button { showFontControl = true } label: {
-                Image(systemName: "textformat.size").frame(width: 44, height: 44)
+            Button { showOutline = true } label: {
+                Image(systemName: "list.bullet").frame(width: 44, height: 44)
             }
+            .disabled(outline.isEmpty)
             Divider().frame(height: 22)
             Button { showInfo = true } label: {
-                Image(systemName: "list.bullet").frame(width: 44, height: 44)
+                Image(systemName: "info.circle").frame(width: 44, height: 44)
             }
         }
         .font(.system(size: 17, weight: .medium))
@@ -85,23 +106,77 @@ struct DocScreen: View {
 
     private func load() async {
         let raw = await model.text(for: entry)
-        let md = Wikilink.preprocessForRendering(raw)
+        // Strip YAML frontmatter before rendering/stats, same as the Mac reader
+        // (metadata lives in the info sheet, not the reading surface).
+        let body = Frontmatter.split(raw).body
+        let md = Wikilink.preprocessForRendering(body)
         let doc = MarkdownRenderer.render(md, style: style)
         rendered = doc.attributedString
         outline = MarpleKit.outline(from: doc.headings)
-        stats = computeDocStats(raw)
+        stats = computeDocStats(body)
         book = bookContext(for: entry, in: model.entries)
     }
 }
 
-// MARK: - Info sheet (Ulysses-style: stats + outline + metadata cards)
+// MARK: - Outline sheet (its own half-height sheet, Ulysses-style)
+
+private struct OutlineSheet: View {
+    let outline: [OutlineItem]
+    let onJump: (OutlineItem) -> Void
+
+    // Ulysses geometry: hierarchy is expressed by indentation ONLY — every level
+    // gets the same primary text and the same dot. 20pt per level; the dot column
+    // is 7pt dot + 10pt gap = 17pt.
+    private func indent(_ item: OutlineItem) -> CGFloat { CGFloat(max(item.level - 1, 0)) * 20 }
+    /// x where a row's text begins — separators align to the FOLLOWING row's text.
+    private func textLeading(_ item: OutlineItem) -> CGFloat { 16 + indent(item) + 17 }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                sheetTitle("大纲")
+                VStack(spacing: 0) {
+                    ForEach(Array(outline.enumerated()), id: \.element.id) { idx, item in
+                        Button { onJump(item) } label: {
+                            // Top-aligned so the dot anchors to the FIRST line of a
+                            // wrapped heading, not the center of the whole block.
+                            HStack(alignment: .top, spacing: 10) {
+                                Circle()
+                                    .fill(Color.secondary.opacity(0.55))
+                                    .frame(width: 7, height: 7)
+                                    .padding(.top, 7)   // optical center of the first body line
+                                Text(item.text)
+                                    .font(.body)
+                                    .lineLimit(2).multilineTextAlignment(.leading)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.leading, 16 + indent(item))
+                            .padding(.trailing, 16)
+                            .padding(.vertical, 13)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if idx < outline.count - 1 {
+                            Divider().padding(.leading, textLeading(outline[idx + 1]))
+                        }
+                    }
+                }
+                .card()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
+        }
+        .background(Color(.systemGroupedBackground))
+    }
+}
+
+// MARK: - Info sheet (Ulysses-style: stats + metadata cards + timestamp footnote)
 
 private struct InfoSheet: View {
     let entry: Entry
     let stats: DocStats?
-    let outline: [OutlineItem]
     let book: BookContext?
-    let onJump: (OutlineItem) -> Void
     let onOpen: (Entry) -> Void
 
     var body: some View {
@@ -109,8 +184,8 @@ private struct InfoSheet: View {
             VStack(spacing: 18) {
                 if let s = stats { statsCard(s) }
                 if !bookRows.isEmpty { bookCard }
-                if !outline.isEmpty { outlineCard }
                 infoCard
+                timestamps
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
@@ -119,25 +194,24 @@ private struct InfoSheet: View {
         .background(Color(.systemGroupedBackground))
     }
 
+    /// Ulysses-style stats: left-aligned lines, number primary + unit secondary —
+    /// not a three-column dashboard.
     private func statsCard(_ s: DocStats) -> some View {
-        HStack {
-            stat("\(s.chars)", "字符")
-            Divider().frame(height: 34)
-            stat("\(s.words)", "字")
-            Divider().frame(height: 34)
-            stat("\(s.minutes)", "分钟")
+        VStack(alignment: .leading, spacing: 6) {
+            statLine("\(s.chars.formatted())", "字符")
+            statLine("\(s.words.formatted())", "字")
+            statLine("\(s.minutes)", "分钟 阅读时间")
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 14).padding(.horizontal, 14)
         .card()
     }
 
-    private func stat(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value).font(.title3.weight(.semibold)).monospacedDigit()
-            Text(label).font(.caption).foregroundStyle(.secondary)
+    private func statLine(_ value: String, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Text(value).font(.callout).monospacedDigit()
+            Text(label).font(.callout).foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity)
     }
 
     /// 本书 navigation rows (概述 + ordered chapters), mirroring the Mac
@@ -188,34 +262,6 @@ private struct InfoSheet: View {
         .card()
     }
 
-    private var outlineCard: some View {
-        VStack(spacing: 0) {
-            sectionHeader("大纲")
-            ForEach(Array(outline.enumerated()), id: \.element.id) { idx, item in
-                Button { onJump(item) } label: {
-                    HStack(spacing: 10) {
-                        Circle()
-                            .fill(item.level <= 1 ? Color.primary.opacity(0.5) : Color.secondary.opacity(0.35))
-                            .frame(width: item.level <= 1 ? 6 : 4, height: item.level <= 1 ? 6 : 4)
-                        Text(item.text)
-                            .font(item.level <= 1 ? .callout.weight(.medium) : .callout)
-                            .foregroundStyle(item.level <= 1 ? .primary : .secondary)
-                            .lineLimit(2).multilineTextAlignment(.leading)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.leading, CGFloat((item.level - 1) * 16))
-                    .padding(.vertical, 9).padding(.horizontal, 14)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                if idx < outline.count - 1 {
-                    Divider().padding(.leading, 14)
-                }
-            }
-        }
-        .card()
-    }
-
     private var infoCard: some View {
         VStack(spacing: 0) {
             sectionHeader("信息")
@@ -225,6 +271,26 @@ private struct InfoSheet: View {
             if !entry.themes.isEmpty { divider; infoRow("主题", entry.themes.joined(separator: " · ")) }
         }
         .card()
+    }
+
+    /// Ulysses-style trailing footnote: plain secondary text below the cards,
+    /// no card chrome. Absolute dates — this is a knowledge base, not a feed.
+    @ViewBuilder
+    private var timestamps: some View {
+        let modified = entry.mtime.map { Date(timeIntervalSince1970: $0 / 1000) }
+        if entry.created != nil || modified != nil {
+            VStack(alignment: .leading, spacing: 3) {
+                if let c = entry.created, !c.isEmpty {
+                    Text("创建于:\(c)")
+                }
+                if let m = modified {
+                    Text("修改于:\(m, format: .dateTime.year().month().day().hour().minute())")
+                }
+            }
+            .font(.footnote).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+        }
     }
 
     private var divider: some View { Divider().padding(.leading, 14) }
@@ -271,8 +337,11 @@ private struct FontControlSheet: View {
                         Text("\(Int(opt))")
                             .font(.system(size: 17, weight: size == opt ? .semibold : .regular))
                             .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(size == opt ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground),
+                            .background(Color(.secondarySystemBackground),
                                         in: RoundedRectangle(cornerRadius: 10))
+                            // Selected = accent stroke, not a filled block — quieter.
+                            .overlay(RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(size == opt ? Color.accentColor : .clear, lineWidth: 1.5))
                             .foregroundStyle(size == opt ? Color.accentColor : .primary)
                     }
                     .buttonStyle(.plain)
@@ -282,6 +351,16 @@ private struct FontControlSheet: View {
         .padding(20)
         .frame(maxHeight: .infinity, alignment: .top)
     }
+}
+
+/// Small secondary title above a sheet's first card (the "大纲" header in
+/// Ulysses' outline sheet) — shared by both sheets.
+private func sheetTitle(_ title: String) -> some View {
+    HStack {
+        Text(title).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+        Spacer()
+    }
+    .padding(.horizontal, 14).padding(.bottom, 8)
 }
 
 // MARK: - Card styling (rounded, hairline-bordered grouped card)
