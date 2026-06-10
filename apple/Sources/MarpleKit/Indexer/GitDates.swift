@@ -22,6 +22,7 @@ private func parseRFC3339(_ s: String) -> Int64? {
     return nil
 }
 
+#if os(macOS)
 /// Run `git` via `/usr/bin/env` and capture stdout.
 /// Returns nil on launch failure, non-zero exit, or any other error.
 private func runGitCapture(_ args: [String], workspaceRoot: String) -> String? {
@@ -124,3 +125,33 @@ public func gitAddedDate(workspaceRoot: String, relPath: String) -> Int64 {
     }
     return 0
 }
+#else
+/// iOS: no git. Approximate each vault file's "added date" with its filesystem
+/// modification date (epoch-ms). Key is the workspace-relative path (e.g.
+/// "vault/foo/bar.md"), matching the macOS git map's key shape.
+public func gitAddedDates(workspaceRoot: String) -> [String: Int64] {
+    var map = [String: Int64]()
+    let vaultURL = URL(fileURLWithPath: workspaceRoot).appendingPathComponent("vault")
+    let fm = FileManager.default
+    guard let en = fm.enumerator(at: vaultURL,
+                                 includingPropertiesForKeys: [.contentModificationDateKey],
+                                 options: [.skipsHiddenFiles]) else { return map }
+    for case let url as URL in en where url.pathExtension == "md" {
+        let rel = url.path.hasPrefix(workspaceRoot + "/")
+            ? String(url.path.dropFirst(workspaceRoot.count + 1))
+            : url.lastPathComponent
+        if let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate {
+            map[rel] = Int64(date.timeIntervalSince1970 * 1000)
+        }
+    }
+    return map
+}
+
+public func gitAddedDate(workspaceRoot: String, relPath: String) -> Int64 {
+    let url = URL(fileURLWithPath: workspaceRoot).appendingPathComponent(relPath)
+    if let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate {
+        return Int64(date.timeIntervalSince1970 * 1000)
+    }
+    return 0
+}
+#endif

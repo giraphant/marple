@@ -1,5 +1,6 @@
 import Foundation
 
+#if os(macOS)
 /// Append-only persistent log for Superset CLI failures. GUI-launched apps
 /// don't inherit a console, so `print()` to stdout is invisible — yet the
 /// failure messages tell the user to "请查看日志". This writes the exit code
@@ -42,3 +43,4 @@ public struct SupersetLog: Sendable {
         "[\(ISO8601DateFormatter().string(from: timestamp))] \(message)\n"
     }
 }
+#endif
