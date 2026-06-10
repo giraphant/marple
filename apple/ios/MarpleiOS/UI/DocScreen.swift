@@ -7,7 +7,14 @@ struct DocScreen: View {
     @State private var rendered = NSAttributedString()
     @State private var stats: DocStats?
     @State private var outline: [OutlineItem] = []
+    /// 本书 context (overview + chapters) when this doc is a book or chapter —
+    /// same derivation the Mac inspector uses (QUA-202).
+    @State private var book: BookContext?
     @State private var showInfo = false
+    // Chapter navigation: the sheet records the tapped path, the push happens in
+    // onDismiss so it doesn't race the sheet's dismissal animation.
+    @State private var pendingPush: String?
+    @State private var pushedPath: String?
     @State private var showFontControl = false
     // Jump-to-section: bump the nonce on each outline tap so re-tapping the same
     // heading still scrolls (a plain NSRange wouldn't change value).
@@ -27,15 +34,25 @@ struct DocScreen: View {
             .navigationTitle(entry.title ?? "")
             .navigationBarTitleDisplayMode(.inline)
             .overlay(alignment: .bottomTrailing) { floatingControls }
-            .sheet(isPresented: $showInfo) {
-                InfoSheet(entry: entry, stats: stats, outline: outline) { item in
+            .sheet(isPresented: $showInfo, onDismiss: {
+                if let p = pendingPush { pendingPush = nil; pushedPath = p }
+            }) {
+                InfoSheet(entry: entry, stats: stats, outline: outline, book: book) { item in
                     guard let r = item.characterRange else { return }
                     scrollTarget = r
                     scrollNonce += 1
                     showInfo = false
+                } onOpen: { target in
+                    if target.path != entry.path { pendingPush = target.path }
+                    showInfo = false
                 }
                 .presentationDetents([.fraction(0.5), .large])
                 .presentationDragIndicator(.visible)
+            }
+            .navigationDestination(item: $pushedPath) { path in
+                if let target = model.entries.first(where: { $0.path == path }) {
+                    DocScreen(model: model, entry: target)
+                }
             }
             .sheet(isPresented: $showFontControl) {
                 FontControlSheet(size: $fontSize)
@@ -73,6 +90,7 @@ struct DocScreen: View {
         rendered = doc.attributedString
         outline = MarpleKit.outline(from: doc.headings)
         stats = computeDocStats(raw)
+        book = bookContext(for: entry, in: model.entries)
     }
 }
 
@@ -82,12 +100,15 @@ private struct InfoSheet: View {
     let entry: Entry
     let stats: DocStats?
     let outline: [OutlineItem]
+    let book: BookContext?
     let onJump: (OutlineItem) -> Void
+    let onOpen: (Entry) -> Void
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
                 if let s = stats { statsCard(s) }
+                if !bookRows.isEmpty { bookCard }
                 if !outline.isEmpty { outlineCard }
                 infoCard
             }
@@ -117,6 +138,54 @@ private struct InfoSheet: View {
             Text(label).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// 本书 navigation rows (概述 + ordered chapters), mirroring the Mac
+    /// inspector's BookNavGroup. Empty when there's nowhere else to go —
+    /// a card listing only the page you're on would be noise.
+    private var bookRows: [BookRow] {
+        guard let b = book else { return [] }
+        var rows: [BookRow] = []
+        if let ov = b.overview { rows.append(BookRow(entry: ov, label: "概述")) }
+        rows += b.chapters.map { BookRow(entry: $0, label: chapterLabel($0)) }
+        guard rows.contains(where: { $0.entry.path != entry.path }) else { return [] }
+        return rows
+    }
+
+    private func chapterLabel(_ e: Entry) -> String {
+        if let t = e.title, !t.isEmpty { return t }
+        return (e.path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+    }
+
+    private var bookCard: some View {
+        VStack(spacing: 0) {
+            sectionHeader("本书")
+            let rows = bookRows
+            ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
+                let active = row.entry.path == entry.path
+                Button { onOpen(row.entry) } label: {
+                    HStack(spacing: 10) {
+                        Text(row.label)
+                            .font(active ? .callout.weight(.medium) : .callout)
+                            .foregroundStyle(active ? Color.accentColor : Color.primary)
+                            .lineLimit(2).multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                        if !active {
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.vertical, 9).padding(.horizontal, 14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if idx < rows.count - 1 {
+                    Divider().padding(.leading, 14)
+                }
+            }
+        }
+        .card()
     }
 
     private var outlineCard: some View {
@@ -176,6 +245,14 @@ private struct InfoSheet: View {
         }
         .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
     }
+}
+
+/// One 本书 row resolved for display (Entry isn't Hashable, tuples aren't
+/// Identifiable — this carries both the target and its display label).
+private struct BookRow: Identifiable {
+    let entry: Entry
+    let label: String
+    var id: String { entry.path }
 }
 
 // MARK: - Font size control
