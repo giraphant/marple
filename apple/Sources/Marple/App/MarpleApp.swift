@@ -56,13 +56,23 @@ final class AppState: ObservableObject {
         // closure calls loadIndex itself, and the generation guard in
         // AppModel.loadIndex makes overlapping bootstrap + watcher-triggered
         // calls converge to the latest snapshot.
+        // QUA-198: the Coalescer debounces signals but does NOT bound concurrency
+        // — once a debounced action fires, the next signal can fire another while
+        // the first is still mid-reconcile. During a vault write storm these
+        // chains piled up unboundedly (each holding a full [Entry] SQL read).
+        // The gate admits one chain at a time; signals arriving mid-run collapse
+        // into a single trailing rerun so no change is missed.
+        let gate = RefreshGate()
         let watcher = VaultWatcher(vaultDirectory: URL(fileURLWithPath: paths.vaultDir)) { [weak m, indexer] in
-            await m?.beginRefreshing()
-            do { _ = try await Task.detached { try indexer.reconcile() }.value }
-            catch { print("[marple] watcher reconcile failed: \(error)") }
-            await m?.loadIndex()
-            await m?.reloadOpen()
-            await m?.endRefreshing()
+            guard await gate.tryBegin() else { return }
+            repeat {
+                await m?.beginRefreshing()
+                do { _ = try await Task.detached { try indexer.reconcile() }.value }
+                catch { print("[marple] watcher reconcile failed: \(error)") }
+                await m?.loadIndex()
+                await m?.reloadOpen()
+                await m?.endRefreshing()
+            } while await gate.finishOrRerun()
         }
         watcher.start()
         self.watcher = watcher
@@ -159,6 +169,27 @@ final class AppState: ObservableObject {
             cliSettingObserver = nil
         }
         cliServer?.stop()
+    }
+}
+
+/// QUA-198: single-flight gate for the watcher's reconcile→loadIndex chain.
+/// `tryBegin` admits exactly one runner; later signals set a rerun flag instead
+/// of starting a second chain. `finishOrRerun` consumes that flag — the runner
+/// loops once more if anything arrived mid-run, then releases the gate.
+private actor RefreshGate {
+    private var running = false
+    private var rerun = false
+
+    func tryBegin() -> Bool {
+        if running { rerun = true; return false }
+        running = true
+        return true
+    }
+
+    func finishOrRerun() -> Bool {
+        if rerun { rerun = false; return true }
+        running = false
+        return false
     }
 }
 
