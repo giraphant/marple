@@ -18,8 +18,45 @@ struct SettingsView: View {
                 .tabItem { Label("AI 接入", systemImage: "terminal") }
             BackupSettings()
                 .tabItem { Label("备份", systemImage: "clock.arrow.circlepath") }
+            SpacesSettings()
+                .tabItem { Label("Spaces", systemImage: "square.stack") }
         }
         .frame(width: 620, height: 560)
+    }
+}
+
+// MARK: - Spaces
+
+/// Where封存的 Spaces are managed (QUA-216). Archived Spaces are hidden from the
+/// bottom switcher; here they can be restored or permanently deleted. Reaches the
+/// live model via `ActiveModel.current`, same as the other model-backed panes.
+private struct SpacesSettings: View {
+    var body: some View {
+        Form {
+            Section("已封存的 Spaces") {
+                if let model = ActiveModel.current {
+                    let archived = model.archivedSpaces
+                    if archived.isEmpty {
+                        Text("暂无已封存的 Space。右键底部切换栏的 Space 可选择「封存归档」。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(archived) { space in
+                            HStack {
+                                Label(space.name, systemImage: space.iconName ?? "square.dashed")
+                                Spacer()
+                                Button("恢复") { model.unarchiveSpace(space.id) }
+                                Button(role: .destructive) {
+                                    model.deleteSpace(space.id)
+                                } label: { Text("删除") }
+                            }
+                        }
+                    }
+                } else {
+                    Text("主窗口尚未就绪。").foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 
