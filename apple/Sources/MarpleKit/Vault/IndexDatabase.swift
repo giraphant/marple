@@ -46,7 +46,12 @@ public final class IndexDatabase: @unchecked Sendable {
     /// Optional Entry fields added with safe `decodeIfPresent` do NOT require a
     /// bump — old caches still decode, missing fields default to nil/empty.
     /// Required new fields, encoder swaps, or header rearrangement DO require a bump.
-    private static let cacheFormatVersion: UInt32 = 1
+    ///
+    /// 2: QUA-175 image width/height/file_size. Optional fields, but the
+    ///    schema-forced index rebuild resets `entries_revision`, which can
+    ///    collide with an old cache's revision — bump so a pre-QUA-175 cache
+    ///    (nil dimensions) can never be revived against the rebuilt DB.
+    private static let cacheFormatVersion: UInt32 = 2
 
     /// 8-byte ASCII magic "MARPLE\0C" — guards against decoding a foreign file
     /// that happened to land at this path.
@@ -113,7 +118,8 @@ public final class IndexDatabase: @unchecked Sendable {
             let cursor = try Row.fetchCursor(db, sql: """
                 SELECT path, type, book, title, author, year_json, rating_score,
                        themes_json, topics_json, kind, journal, source, doi, publisher, isbn, category,
-                       annotates, created, media, has_pdf, pdf_slug, mtime, preview, added
+                       annotates, created, media, width, height, file_size,
+                       has_pdf, pdf_slug, mtime, preview, added
                 FROM entries
                 ORDER BY path
                 """)
@@ -308,6 +314,7 @@ public final class IndexDatabase: @unchecked Sendable {
                    e.publisher AS publisher, e.isbn AS isbn,
                    e.category AS category, e.annotates AS annotates, e.created AS created,
                    e.media AS media,
+                   e.width AS width, e.height AS height, e.file_size AS file_size,
                    e.has_pdf AS has_pdf,
                    e.pdf_slug AS pdf_slug,
                    e.mtime AS mtime, e.preview AS preview, e.added AS added,
@@ -356,6 +363,7 @@ public final class IndexDatabase: @unchecked Sendable {
                    e.publisher AS publisher, e.isbn AS isbn,
                    e.category AS category, e.annotates AS annotates, e.created AS created,
                    e.media AS media,
+                   e.width AS width, e.height AS height, e.file_size AS file_size,
                    e.has_pdf AS has_pdf,
                    e.pdf_slug AS pdf_slug,
                    e.mtime AS mtime, e.preview AS preview, e.added AS added,
@@ -436,6 +444,9 @@ public final class IndexDatabase: @unchecked Sendable {
         let annotates: String? = row["annotates"]
         let created: String? = row["created"]
         let media: String? = row["media"]
+        let width: Int? = row["width"]
+        let height: Int? = row["height"]
+        let fileSize: Int? = row["file_size"]
         return Entry(
             path: path,
             type: EntryType(rawValue: typeRaw),
@@ -460,7 +471,10 @@ public final class IndexDatabase: @unchecked Sendable {
             category: category,
             annotates: annotates,
             created: created,
-            media: media
+            media: media,
+            width: width,
+            height: height,
+            fileSize: fileSize
         )
     }
 

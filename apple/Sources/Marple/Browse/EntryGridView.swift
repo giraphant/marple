@@ -5,12 +5,12 @@ import MarpleKit
 /// `NSCollectionView` + custom waterfall layout + pure-AppKit cells
 /// (`CollectionGridVariant`). Native scrolling, single-click select, ⌘/⇧
 /// multi-select, rubber-band marquee, item drag, double-click to open. Image card
-/// heights come from real pixel aspect ratios (`GridDimensions`). A density slider
-/// sets the target column width.
+/// heights come from indexed pixel dimensions (`Entry.width`/`height`, QUA-175).
+/// A density slider sets the target column width.
 struct EntryGridView: View {
     let model: AppModel
     @State private var columnWidth: CGFloat = 260
-    @State private var dims: GridDimensions?
+    @State private var dims = GridDimensions()
     @State private var isDropTargeted = false
 
     var body: some View {
@@ -18,9 +18,7 @@ struct EntryGridView: View {
             header
             Divider()
             ZStack {
-                if let dims {
-                    CollectionGridVariant(model: model, dims: dims, columnWidth: columnWidth)
-                }
+                CollectionGridVariant(model: model, dims: dims, columnWidth: columnWidth)
 
                 if acceptsImageDrops && model.visibleEntries.isEmpty {
                     ContentUnavailableView(
@@ -41,13 +39,6 @@ struct EntryGridView: View {
             }
             .dropDestination(for: URL.self, action: handleImageDrop) { targeted in
                 isDropTargeted = acceptsImageDrops && targeted
-            }
-        }
-        .task {
-            if dims == nil {
-                dims = GridDimensions { [model] path in
-                    try? await model.client.imageOriginalURL(forImageEntryPath: path)
-                }
             }
         }
     }
