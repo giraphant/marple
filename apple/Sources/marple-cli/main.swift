@@ -107,9 +107,15 @@ func emitError(code: String, message: String) -> Int32 {
     emit(CLIResponse.failure(code: code, message: message))
 }
 
-func runRequest(_ request: CLIRequest) -> Int32 {
+// QUA-208: methods that self-heal the index (search/open) run a synchronous
+// reconcile in the app, and right after a cold launch that also queues behind
+// the boot reconcile — well over the default 5s on a large vault. Give them
+// a generous read timeout instead of giving up mid-request.
+let reconcilingTimeout = 30.0
+
+func runRequest(_ request: CLIRequest, timeoutSeconds: Double = 5.0) -> Int32 {
     do {
-        let response = try CLITransport.roundTrip(request)
+        let response = try CLITransport.roundTrip(request, timeoutSeconds: timeoutSeconds)
         return emit(response)
     } catch let e as CLIClientError {
         return emitError(code: e.errorCode, message: e.description)
@@ -120,7 +126,8 @@ func runRequest(_ request: CLIRequest) -> Int32 {
 
 func runOpenWithFallback(_ path: String) -> Int32 {
     do {
-        let response = try CLITransport.roundTrip(CLIRequest(method: CLIMethod.open, path: path))
+        let response = try CLITransport.roundTrip(CLIRequest(method: CLIMethod.open, path: path),
+                                                  timeoutSeconds: reconcilingTimeout)
         return emit(response)
     } catch CLIClientError.notRunning {
         let task = Process()
@@ -166,7 +173,8 @@ struct Search: ParsableCommand {
     var limit: Int = 20
 
     func run() throws {
-        let code = runRequest(CLIRequest(method: CLIMethod.search, query: query, limit: limit))
+        let code = runRequest(CLIRequest(method: CLIMethod.search, query: query, limit: limit),
+                              timeoutSeconds: reconcilingTimeout)
         if code != 0 { throw ExitCode(code) }
     }
 }

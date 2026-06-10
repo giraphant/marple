@@ -26,6 +26,38 @@ import Darwin
         #expect(response.data?.pong == "marple")
     }
 
+    /// QUA-208: a client that times out and closes its socket before the
+    /// response lands must not kill the app. Without SO_NOSIGPIPE on the
+    /// accepted fd, the server's write raises SIGPIPE and the whole process
+    /// dies (exit 141) — this test then kills the test runner itself.
+    @MainActor
+    @Test func clientClosingBeforeResponseDoesNotKillTheProcess() async throws {
+        let dir = URL(fileURLWithPath: "/tmp/cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let socketPath = dir.appendingPathComponent("s.sock").path
+        let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
+        let indexer = VaultIndexer(workspaceRoot: dir.path)
+        let server = CLIServer(socketPath: socketPath)
+        try server.start(model: model, indexer: indexer)
+        defer { server.stop() }
+
+        // Send a request and slam the socket shut without reading the response,
+        // like a marple-cli whose SO_RCVTIMEO expired.
+        try await Task.detached {
+            try Self.sendAndClose(CLIRequest(method: CLIMethod.ping), socketPath: socketPath)
+        }.value
+        // Give the server time to handle the request and write into the dead fd.
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        // Still alive? A fresh round-trip must succeed.
+        let response = try await Task.detached {
+            try Self.roundTrip(CLIRequest(method: CLIMethod.ping), socketPath: socketPath)
+        }.value
+        #expect(response.ok)
+    }
+
     @MainActor
     @Test func openCreatesDocumentPageEvenWhenReaderIsActive() async throws {
         let first = Self.entry("vault/notes/first.md")
@@ -201,10 +233,10 @@ import Darwin
               ratingScore: 0, themes: [], preview: "", hasPDF: false)
     }
 
-    private static func roundTrip(_ request: CLIRequest, socketPath: String) throws -> CLIResponse {
+    /// Connect to `socketPath` and send one request line. Caller owns the fd.
+    private static func connectAndSend(_ request: CLIRequest, socketPath: String) throws -> Int32 {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        defer { close(fd) }
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
@@ -223,7 +255,10 @@ import Darwin
                 connect(fd, sa, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard connected == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        guard connected == 0 else {
+            close(fd)
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
 
         var line = try JSONEncoder().encode(request)
         line.append(0x0A)
@@ -231,10 +266,26 @@ import Darwin
             var sent = 0
             while sent < buf.count {
                 let n = write(fd, buf.baseAddress!.advanced(by: sent), buf.count - sent)
-                guard n > 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+                guard n > 0 else {
+                    close(fd)
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
                 sent += n
             }
         }
+        return fd
+    }
+
+    /// Send a request, then close immediately without reading the response —
+    /// the behavior of a marple-cli whose read timeout expired (QUA-208).
+    private static func sendAndClose(_ request: CLIRequest, socketPath: String) throws {
+        let fd = try connectAndSend(request, socketPath: socketPath)
+        close(fd)
+    }
+
+    private static func roundTrip(_ request: CLIRequest, socketPath: String) throws -> CLIResponse {
+        let fd = try connectAndSend(request, socketPath: socketPath)
+        defer { close(fd) }
 
         var response = Data()
         var chunk = [UInt8](repeating: 0, count: 4096)
