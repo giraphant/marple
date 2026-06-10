@@ -340,11 +340,9 @@ final class AppModel {
                                            tree: ws?.treeSnapshot)
         }
         let activeSavedSpace = activeSpaceID.flatMap { id in savedSpaces.first { $0.id == id } } ?? savedSpaces.first
-        // Mirror the active Space's open tab forest (groups + names + nesting) to
+        // Mirror every Space's open tab forest (names + icons + groups + nesting) to
         // the synced folder for the iOS companion (debounced + dedup'd in the writer).
-        sessionWriter?.publish(tabs: activeSavedSpace?.tabs ?? [],
-                               tree: activeSavedSpace?.tree,
-                               activeIndex: activeSavedSpace?.activeIndex ?? 0)
+        sessionWriter?.publish(spaces: savedSpaces)
         // Same round-trip discipline for counts — during bootstrap, write back
         // the loaded snapshot rather than the still-empty `counts` dict.
         let persistedCounts: [EntryType: Int]? =

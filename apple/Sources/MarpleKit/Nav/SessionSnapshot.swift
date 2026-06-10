@@ -28,22 +28,41 @@ public indirect enum SessionNode: Codable, Sendable, Equatable {
     case group(name: String, isCollapsed: Bool, children: [SessionNode])
 }
 
+/// One Mac Space as published: its display name + icon (an SF Symbol name, as set
+/// in the Mac's Space switcher) and its tab forest. `activePath` is that Space's
+/// active tab, not the globally focused document.
+public struct SessionSpaceSnapshot: Codable, Sendable, Equatable, Identifiable {
+    public let id: UUID
+    public let name: String
+    public let iconName: String?
+    public let roots: [SessionNode]
+    public let activePath: String?
+
+    public init(id: UUID, name: String, iconName: String?,
+                roots: [SessionNode], activePath: String?) {
+        self.id = id
+        self.name = name
+        self.iconName = iconName
+        self.roots = roots
+        self.activePath = activePath
+    }
+}
+
 /// What the Mac publishes about its open tabs — read-only, for the iOS companion's
-/// "Mac 上打开的" list. Carries the full recursive forest (`roots`). Versioned and
-/// decoded leniently (the whole file read is best-effort) so neither side chokes on
+/// "Mac 上打开的" list. v3 carries every Space (name + icon + recursive forest), in
+/// the Mac's sidebar order, so iOS can group by Space — not just the active one.
+/// Decoded leniently (the whole file read is best-effort) so neither side chokes on
 /// the other's format drift.
 public struct SessionSnapshot: Codable, Sendable, Equatable {
     public var version: Int
     public var updatedAtMs: Int64
-    public var roots: [SessionNode]
-    public var activePath: String?
+    public var spaces: [SessionSpaceSnapshot]
 
-    public init(version: Int = 2, updatedAtMs: Int64,
-                roots: [SessionNode], activePath: String?) {
+    public init(version: Int = 3, updatedAtMs: Int64,
+                spaces: [SessionSpaceSnapshot]) {
         self.version = version
         self.updatedAtMs = updatedAtMs
-        self.roots = roots
-        self.activePath = activePath
+        self.spaces = spaces
     }
 }
 
