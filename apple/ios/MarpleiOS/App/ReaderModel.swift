@@ -17,6 +17,16 @@ enum MacTabNode: Identifiable {
     }
 }
 
+/// One Mac Space resolved for display: its name + icon (SF Symbol, as set on the
+/// Mac) and its resolved tab forest. Spaces whose forest resolves to empty are
+/// pruned before this is built.
+struct MacSpaceTabs: Identifiable {
+    let id: UUID
+    let name: String
+    let iconName: String?
+    let roots: [MacTabNode]
+}
+
 @MainActor
 @Observable
 final class ReaderModel {
@@ -24,11 +34,11 @@ final class ReaderModel {
 
     private(set) var phase: Phase = .needsFolder
     private(set) var entries: [Entry] = []
-    /// The Mac's open-tab forest (groups + names + nesting), resolved to local
-    /// entries — the read-only "Mac 上打开的" sidebar. Published by the Mac into the
-    /// synced folder; refreshed whenever entries change. Empty if the Mac never
-    /// published.
-    private(set) var openOnMacRoots: [MacTabNode] = []
+    /// The Mac's open tabs grouped by Space (each with its name/icon + forest of
+    /// groups + nesting), resolved to local entries — the read-only "Mac 上打开的"
+    /// sidebar. Published by the Mac into the synced folder; refreshed whenever
+    /// entries change. Empty if the Mac never published.
+    private(set) var openOnMacSpaces: [MacSpaceTabs] = []
     /// Field-weighted in-memory search index (same engine as the Mac's 快速 palette).
     /// Rebuilt off-actor whenever `entries` change.
     private var searchIndex: SearchIndex = .empty
@@ -181,16 +191,17 @@ final class ReaderModel {
     }
 
     /// Read the Mac-published open-tabs file from the synced folder and resolve its
-    /// forest into `MacTabNode`s, keeping group names + nesting + the Mac's display
-    /// label (custom name). Best-effort: a missing/未同步/legacy file yields an empty
-    /// forest (the sidebar group then hides). Unresolved docs and groups that end up
-    /// empty are pruned.
+    /// per-Space forests into `MacSpaceTabs`, keeping Space names/icons + group
+    /// names + nesting + the Mac's display label (custom name). Best-effort: a
+    /// missing/未同步/legacy file yields an empty list (the sidebar group then
+    /// hides). Unresolved docs, groups that end up empty, and Spaces whose forest
+    /// resolves to empty are pruned.
     private func loadSession(root: String) async {
         let url = SessionFile.url(workspaceRoot: root)
         try? await ICloudMaterializer.ensureDownloaded(url)
         guard let data = try? Data(contentsOf: url),
               let snap = try? JSONDecoder().decode(SessionSnapshot.self, from: data) else {
-            openOnMacRoots = []
+            openOnMacSpaces = []
             return
         }
         let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
@@ -209,7 +220,12 @@ final class ReaderModel {
                 }
             }
         }
-        openOnMacRoots = resolve(snap.roots)
+        openOnMacSpaces = snap.spaces.compactMap { space in
+            let roots = resolve(space.roots)
+            guard !roots.isEmpty else { return nil }
+            return MacSpaceTabs(id: space.id, name: space.name,
+                                iconName: space.iconName, roots: roots)
+        }
     }
 
     /// Force-download the vault's `.md` files from iCloud, concurrently, in

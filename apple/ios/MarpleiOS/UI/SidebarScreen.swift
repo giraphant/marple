@@ -29,10 +29,10 @@ struct SidebarScreen: View {
         // Count per type once (O(n)), not once-per-row.
         let counts = Dictionary(model.entries.map { ($0.type, 1) }, uniquingKeysWith: +)
         return List {
-            if !model.openOnMacRoots.isEmpty {
+            if !model.openOnMacSpaces.isEmpty {
                 Section("Mac 上打开的") {
-                    ForEach(model.openOnMacRoots) { node in
-                        MacTabNodeView(node: node, model: model)
+                    ForEach(model.openOnMacSpaces) { space in
+                        MacSpaceView(space: space, model: model)
                     }
                 }
             }
@@ -72,6 +72,22 @@ func symbol(for type: EntryType) -> String {
     case .topic: "tag"; case .journal: "newspaper"; case .chapter: "doc.plaintext"
     case .note: "note.text"; case .image: "photo"; case .talk: "mic"
     default: "doc"
+    }
+}
+
+/// One Mac Space in the "Mac 上打开的" section: a collapsible row carrying the
+/// Space's own icon + name, expanded by default, containing its tab forest.
+private struct MacSpaceView: View {
+    let space: MacSpaceTabs
+    @Bindable var model: ReaderModel
+    @State private var expanded = true
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            ForEach(space.roots) { MacTabNodeView(node: $0, model: model) }
+        } label: {
+            Label(space.name, systemImage: space.iconName ?? "square.grid.2x2")
+        }
     }
 }
 
