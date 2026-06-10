@@ -19,9 +19,9 @@ public enum SearchMode: String, CaseIterable, Sendable {
     /// Search-field placeholder.
     public var placeholder: String {
         switch self {
-        case .fast: return "快速检索 标题/作者/标签…  Tab 切换 · ⏎ 打开 · Esc 关闭"
-        case .balanced: return "平衡检索 标题/作者/标签/正文…  Tab 切换 · ⏎ 打开 · Esc 关闭"
-        case .deep: return "深度检索 跨语言 / 概念 / 自然语言…  Tab 切换 · ⏎ 打开 · Esc 关闭"
+        case .fast: return "标题/作者/标签…  Tab 切换模式 · / 跳转类型 · ⏎ 打开"
+        case .balanced: return "标题/作者/标签/正文…  Tab 切换模式 · / 跳转类型 · ⏎ 打开"
+        case .deep: return "跨语言 / 概念 / 自然语言…  Tab 切换模式 · / 跳转类型 · ⏎ 打开"
         }
     }
 
