@@ -30,12 +30,40 @@ private struct AppearanceSettings: View {
 
     var body: some View {
         Form {
-            Picker("主题", selection: $theme) {
-                ForEach(ThemePreference.allCases, id: \.self) { Text($0.label).tag($0) }
+            Section("主题") {
+                Picker("主题", selection: $theme) {
+                    ForEach(ThemePreference.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
-            .pickerStyle(.segmented)
+            Section("侧栏物件") {
+                SidebarTypeToggles()
+                Text("关掉的类型只从侧栏隐藏；⌘K 搜索、已打开的页面和保存的视图不受影响。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
-        .padding(20)
+        .formStyle(.grouped)
+    }
+}
+
+/// Which type buckets the sidebar shows (QUA-127). The Settings scene has no
+/// environment injection, so reach the live model the same way the menu-bar
+/// commands do — via `ActiveModel.current`.
+private struct SidebarTypeToggles: View {
+    var body: some View {
+        if let model = ActiveModel.current {
+            ForEach(model.typeOrder, id: \.self) { type in
+                Toggle(isOn: Binding(
+                    get: { !model.hiddenTypes.contains(type) },
+                    set: { model.setTypeHidden(type, hidden: !$0) }
+                )) {
+                    Label(type.label, systemImage: type.symbolName)
+                }
+            }
+        } else {
+            Text("主窗口尚未就绪。").foregroundStyle(.secondary)
+        }
     }
 }
 

@@ -232,6 +232,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 _ = model.pane
                 _ = model.activeTabID
                 _ = model.typeOrder
+                _ = model.hiddenTypes
                 _ = model.counts
                 _ = model.tabs
                 _ = model.tabRootNodes
@@ -342,8 +343,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             // tree and clamped the scroll origin to the top — the viewport "jump".
             // An active-only change now hits the no-op-reload path (selection
             // update only), leaving the scroll position untouched.
-            parts.append("types:\(model.typeOrder.map(String.init(describing:)).joined(separator: ","))")
-            parts.append("counts:\(model.typeOrder.map { "\($0)=\(model.counts[$0] ?? 0)" }.joined(separator: ","))")
+            parts.append("types:\(model.visibleTypeOrder.map(String.init(describing:)).joined(separator: ","))")
+            parts.append("counts:\(model.visibleTypeOrder.map { "\($0)=\(model.counts[$0] ?? 0)" }.joined(separator: ","))")
             parts.append("tabs:\(model.tabs.map { "\($0.id.uuidString):\($0.location):\($0.pinned):\($0.customTitle ?? "")" }.joined(separator: ","))")
             parts.append("tree:\(Self.treeSignature(model.tabRootNodes))")
             parts.append("spaces:\(model.activeSpaceID?.uuidString ?? "nil"):\(model.spaces.map(\.id.uuidString).joined(separator: ","))")
@@ -363,15 +364,20 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         private func makeRootItems() -> [SidebarOutlineNode] {
             let entryByPath = Dictionary(model.entries.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
-            var sections = [
-                SidebarOutlineNode(kind: .section(.objects), title: SidebarOutlineSection.objects.title,
-                                   children: model.typeOrder.map { type in
-                                       SidebarOutlineNode(kind: .pane(.type(type)),
-                                                          title: type.label,
-                                                          count: model.counts[type] ?? 0,
-                                                          iconName: type.symbolName)
-                                   })
-            ]
+            var sections: [SidebarOutlineNode] = []
+            // Hidden buckets (QUA-127) just drop out of the list; all hidden ⇒
+            // the whole 物件 section disappears (re-enable via 设置 → 外观).
+            let visibleTypes = model.visibleTypeOrder
+            if !visibleTypes.isEmpty {
+                sections.append(
+                    SidebarOutlineNode(kind: .section(.objects), title: SidebarOutlineSection.objects.title,
+                                       children: visibleTypes.map { type in
+                                           SidebarOutlineNode(kind: .pane(.type(type)),
+                                                              title: type.label,
+                                                              count: model.counts[type] ?? 0,
+                                                              iconName: type.symbolName)
+                                       }))
+            }
             sections.append(SidebarOutlineNode(kind: .section(.tabs),
                                                title: SidebarOutlineSection.tabs.title,
                                                children: makeTabRootItems(entryByPath: entryByPath)))
@@ -674,6 +680,13 @@ struct SidebarOutlineView: NSViewRepresentable {
             let clicked = outline.clickedRow
             if clicked >= 0, let clickedNode = outline.item(atRow: clicked) as? SidebarOutlineNode,
                case .section = clickedNode.kind { return }
+            // Type buckets get a single display action (QUA-127); re-show lives
+            // in 设置 → 外观 → 侧栏物件.
+            if clicked >= 0, let clickedNode = outline.item(atRow: clicked) as? SidebarOutlineNode,
+               case .pane(.type) = clickedNode.kind {
+                contextMenu.addItem(menuItem("在侧栏中隐藏", action: #selector(hideTypeFromMenu(_:)), node: clickedNode))
+                return
+            }
             // AppKit auto-collapses selection to the clicked row when the clicked
             // row isn't already selected, so `selectedRowIndexes` is the truth.
             let nodes = outline.selectedRowIndexes
@@ -811,6 +824,12 @@ struct SidebarOutlineView: NSViewRepresentable {
         @objc private func renameFromMenu(_ sender: NSMenuItem) {
             guard let node = sender.representedObject as? SidebarOutlineNode else { return }
             beginRename(node)
+        }
+
+        @objc private func hideTypeFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode,
+                  case .pane(.type(let type)) = node.kind else { return }
+            model.setTypeHidden(type, hidden: true)
         }
 
         @objc private func copyShareManifestFromMenu(_ sender: NSMenuItem) {
@@ -1215,7 +1234,9 @@ struct SidebarOutlineView: NSViewRepresentable {
                   let node = outlineView.item(atRow: row) as? SidebarOutlineNode,
                   let objects = objectsSection else { return [] }
             if case .pane(.type(let targetType)) = node.kind,
-               let targetIndex = model.typeOrder.firstIndex(of: targetType) {
+               // Drop indicator slots are positions among the VISIBLE children,
+               // so index against visibleTypeOrder, not the full order (QUA-127).
+               let targetIndex = model.visibleTypeOrder.firstIndex(of: targetType) {
                 let rect = outlineView.rect(ofRow: row)
                 let childIndex = point.y < rect.midY ? targetIndex : targetIndex + 1
                 outlineView.setDropItem(objects, dropChildIndex: childIndex)
@@ -1362,6 +1383,11 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         private func acceptType(_ type: EntryType, into node: SidebarOutlineNode?, childIndex: Int,
                                 outlineView: NSOutlineView? = nil, info: NSDraggingInfo? = nil) -> Bool {
+            // All indices here are positions among the VISIBLE rows (that's what
+            // AppKit hands us); the reorder is applied to the full typeOrder by
+            // anchoring on the visible neighbour, so hidden buckets keep their
+            // relative place (QUA-127).
+            let visible = model.visibleTypeOrder
             let targetIndex: Int? = {
                 guard let node else { return nil }
                 if case .section(.objects) = node.kind, childIndex >= 0 {
@@ -1370,16 +1396,20 @@ struct SidebarOutlineView: NSViewRepresentable {
                 guard let outlineView, let info,
                       case .pane(.type(let targetType)) = node.kind,
                       let row = rowForItem(node, in: outlineView),
-                      let index = model.typeOrder.firstIndex(of: targetType) else { return nil }
+                      let index = visible.firstIndex(of: targetType) else { return nil }
                 let point = draggingPoint(in: outlineView, info: info)
                 return point.y < outlineView.rect(ofRow: row).midY ? index : index + 1
             }()
             guard let targetIndex,
-                  let from = model.typeOrder.firstIndex(of: type) else { return false }
+                  let from = visible.firstIndex(of: type) else { return false }
+            let remaining = visible.filter { $0 != type }
+            let dropAt = min(max(from < targetIndex ? targetIndex - 1 : targetIndex, 0), remaining.count)
             var order = model.typeOrder
-            order.remove(at: from)
-            let adjustedIndex = from < targetIndex ? targetIndex - 1 : targetIndex
-            order.insert(type, at: min(max(adjustedIndex, 0), order.count))
+            order.removeAll { $0 == type }
+            let fullIndex = dropAt < remaining.count
+                ? (order.firstIndex(of: remaining[dropAt]) ?? order.count)
+                : order.count
+            order.insert(type, at: fullIndex)
             model.setTypeOrder(order)
             return true
         }
