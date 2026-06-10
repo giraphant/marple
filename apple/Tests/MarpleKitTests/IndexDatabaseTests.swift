@@ -383,6 +383,43 @@ import GRDB
         ])
     }
 
+    /// QUA-198: cache writes are single-flight + drop-stale. A burst of misses
+    /// across bumping revisions must converge on a cache for the LATEST
+    /// revision — older snapshots are dropped, never written over newer ones.
+    @Test func cacheWriteConvergesOnLatestRevisionAfterBurst() throws {
+        let path = try makeFixtureDB([
+            (path: "vault/papers/a.md", type: "paper", title: "Alpha",
+             themesJSON: nil, yearJSON: nil, hasPDF: 0, rating: 0, text: "alpha"),
+        ])
+        let cachePath = Self.entriesCachePath(forDB: path)
+        let db = IndexDatabase(indexDBPath: path)
+
+        // Burst: every loadEntries takes the SQL path (revision keeps moving)
+        // and schedules a cache write; the slot should coalesce them.
+        var latest: Int64 = 0
+        for _ in 0..<5 {
+            _ = try db.loadEntries()
+            try bumpRevision(path)
+            latest += 1
+        }
+        _ = try db.loadEntries()   // final read at the latest revision
+
+        // The cache must settle at the latest revision: a fresh IndexDatabase
+        // (cold queue, same files) gets a HIT with the real row.
+        let deadline = Date().addingTimeInterval(2.0)
+        var decoded: [Entry]?
+        while Date() < deadline {
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: cachePath)),
+               let entries = try? IndexDatabase.decodeCachePayload(data, expectedRevision: latest) {
+                decoded = entries
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        let entries = try #require(decoded, "cache should converge on revision \(latest) within 2s")
+        #expect(entries.map(\.path) == ["vault/papers/a.md"])
+    }
+
     /// Build a valid cache blob matching IndexDatabase.decodeCachePayload.
     /// Mirrors the encoder in writeCacheBestEffort.
     private func buildCacheBlob(entries: [Entry], revision: Int64) throws -> Data {
