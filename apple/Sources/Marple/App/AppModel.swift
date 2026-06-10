@@ -259,6 +259,16 @@ final class AppModel {
         didSet { persistTypeOrder() }
     }
 
+    /// Sidebar-hidden type buckets (QUA-127). Display-only: ⌘K, search, open tabs
+    /// and saved views still reach a hidden type's entries — only the 物件 row
+    /// disappears. Persisted like `typeOrder`, separate from workspace state.
+    private(set) var hiddenTypes: Set<EntryType> = [] {
+        didSet { persistHiddenTypes() }
+    }
+
+    /// The type buckets the sidebar actually shows, in user order.
+    var visibleTypeOrder: [EntryType] { typeOrder.filter { !hiddenTypes.contains($0) } }
+
     init(client: VaultClient, stateStore: StateStore? = nil,
          semantic: (any SemanticBackend)? = nil, isFirstRun: Bool = false,
          workspaceRoot: String = "",
@@ -296,6 +306,7 @@ final class AppModel {
             activeSpaceID = initial.id
         }
         loadTypeOrder()
+        loadHiddenTypes()
     }
 
     /// Last-session sidebar counts, restored from PersistedState in init. Kept
@@ -383,6 +394,35 @@ final class AppModel {
 
     func setTypeOrder(_ order: [EntryType]) {
         typeOrder = order
+    }
+
+    // MARK: hidden types persistence (QUA-127)
+
+    private static let hiddenTypesKey = "marple.hiddenTypes"
+
+    private func loadHiddenTypes() {
+        guard let data = UserDefaults.standard.data(forKey: Self.hiddenTypesKey),
+              let decoded = try? JSONDecoder().decode(Set<EntryType>.self, from: data) else { return }
+        hiddenTypes = decoded.intersection(EntryType.modeled)
+    }
+
+    private func persistHiddenTypes() {
+        guard let data = try? JSONEncoder().encode(hiddenTypes) else { return }
+        UserDefaults.standard.set(data, forKey: Self.hiddenTypesKey)
+    }
+
+    func setTypeHidden(_ type: EntryType, hidden: Bool) {
+        if hidden {
+            hiddenTypes.insert(type)
+            // Hiding the bucket being browsed: jump to the first visible bucket
+            // so the list doesn't show a category the sidebar no longer offers.
+            if case .type(let current) = browsePane, current == type,
+               let first = visibleTypeOrder.first {
+                select(pane: .type(first))
+            }
+        } else {
+            hiddenTypes.remove(type)
+        }
     }
 
     // MARK: derived recompute
