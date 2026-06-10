@@ -32,9 +32,9 @@ struct MacSpaceTabs: Identifiable {
 @MainActor
 @Observable
 final class ReaderModel {
-    enum Phase { case needsFolder, indexing, ready, failed(String) }
+    enum Phase { case booting, needsFolder, indexing, ready, failed(String) }
 
-    private(set) var phase: Phase = .needsFolder
+    private(set) var phase: Phase = .booting
     private(set) var entries: [Entry] = []
     /// The Mac's open tabs grouped by Space (each with its name/icon + forest of
     /// groups + nesting), resolved to local entries — the read-only "Mac 上打开的"
@@ -70,18 +70,20 @@ final class ReaderModel {
     }()
 
     /// Resolve a saved folder bookmark and boot; otherwise wait for a pick.
+    /// A stale bookmark is re-saved inside `start` — creating bookmark data on
+    /// iOS requires the security scope to be active, so doing it here would
+    /// silently throw and the bookmark would never freshen (then eventually die).
     func boot() async {
         guard let (url, isStale) = VaultBookmark.resolve() else { phase = .needsFolder; return }
-        if isStale { try? VaultBookmark.save(url) }   // freshen the moved-file bookmark
-        await start(folder: url)
+        await start(folder: url, resaveBookmark: isStale)
     }
 
     /// Called by the picker with a freshly chosen folder.
     func didPickFolder(_ url: URL) async {
-        await start(folder: url, freshPick: true)
+        await start(folder: url, resaveBookmark: true)
     }
 
-    private func start(folder url: URL, freshPick: Bool = false) async {
+    private func start(folder url: URL, resaveBookmark: Bool = false) async {
         // Release any previously held scope before acquiring a new one (re-pick
         // or a second boot) — security-scoped handles are a limited per-process pool.
         scopedURL?.stopAccessingSecurityScopedResource()
@@ -102,22 +104,29 @@ final class ReaderModel {
         }
         // Persist the bookmark only after access succeeds and the folder validates,
         // so we never save an unusable or wrong folder (and the bookmark is created
-        // while the security scope is active, as iOS requires).
-        if freshPick { try? VaultBookmark.save(url) }
+        // while the security scope is active, as iOS requires). Covers both a
+        // fresh pick and freshening a stale bookmark from `boot`.
+        if resaveBookmark { try? VaultBookmark.save(url) }
         workspaceRoot = root
         let dbPath = containerDBPath
 
         // Warm launch: an index already exists → show the library immediately from
         // it, then sync (download new + reconcile) in the background. This is what
         // makes a re-open instant instead of re-running the whole download/index
-        // flow with the progress screen every time.
+        // flow with the progress screen every time. `.ready` is set straight after
+        // the SQLite read — the search-index rebuild and the session-file load
+        // (which can block on an iCloud download for seconds) must NOT gate the
+        // first paint (QUA-214).
         if FileManager.default.fileExists(atPath: dbPath) {
             let c = IOSVaultClient(workspaceRoot: root, db: IndexDatabase(indexDBPath: dbPath))
             if let warm = try? await c.index() {
                 self.client = c
-                await updateEntries(warm)
+                self.entries = warm
                 phase = .ready
-                Task { await self.backgroundSync(root: root, dbPath: dbPath) }
+                Task {
+                    await self.finishEntriesUpdate(warm)
+                    await self.backgroundSync(root: root, dbPath: dbPath)
+                }
                 return
             }
         }
@@ -189,6 +198,13 @@ final class ReaderModel {
     /// Set entries and rebuild the search index (off-actor — thousands of docs).
     private func updateEntries(_ newEntries: [Entry]) async {
         self.entries = newEntries
+        await finishEntriesUpdate(newEntries)
+    }
+
+    /// The non-urgent tail of an entries update: search-index rebuild + Mac
+    /// session load. Split out so the warm-launch path can flip `.ready` first
+    /// and run this in the background.
+    private func finishEntriesUpdate(_ newEntries: [Entry]) async {
         self.searchIndex = await Task.detached(priority: .utility) {
             buildSearchIndex(newEntries)
         }.value
