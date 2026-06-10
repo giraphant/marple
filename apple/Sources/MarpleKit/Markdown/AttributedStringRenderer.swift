@@ -384,7 +384,8 @@ private final class RenderContext {
         case heading, content
     }
 
-    let attributed = NSMutableAttributedString()
+    // `var` so table-cell rendering can temporarily swap in a scratch buffer (iOS).
+    var attributed = NSMutableAttributedString()
     let style: RenderStyle
     var headings: [HeadingAnchor] = []
 
@@ -635,149 +636,129 @@ private final class RenderContext {
         newlines(1)
         ps = style.bodyParagraphStyle
         #else
-        // iOS: NSTextTable doesn't exist in UIKit. Render rows as plain stacked text —
-        // header cells in the table-header font, body cells in the table-body font,
-        // cells separated by a tab, one line per row.
-        ps = style.bodyParagraphStyle
+        // iOS: NSTextTable doesn't exist in UIKit. Embed the table as a native card
+        // view via a TextKit 2 attachment — same path-D chrome as the Mac blocks.
         let headerCells = Array(table.head.cells)
-        func emitRow(_ cells: [Markup], header: Bool) {
-            for (i, cell) in cells.enumerated() {
-                if i > 0 { append("\t", color: style.separatorTextColor) }
-                let prevFont = baseFont, prevWeight = baseWeight, prevColor = activeTextColor
-                baseFont = header ? style.tableHeaderFont : style.tableBodyFont
-                baseWeight = header ? .semibold : style.bodyWeight
-                activeTextColor = header ? style.tableHeaderTextColor : prevColor
-                let start = attributed.length
-                walkInlines(cell.children)
-                if attributed.length == start { append("—", color: .tertiaryLabelColor) }
-                baseFont = prevFont; baseWeight = prevWeight; activeTextColor = prevColor
+        let bodyRows = Array(table.body.rows.map { Array($0.cells) })
+        let bodyColumnCount = bodyRows.reduce(0) { max($0, $1.count) }
+        let columnCount = max(headerCells.count, bodyColumnCount)
+        guard columnCount > 0 else { return }
+
+        let texts = tableCellTexts(headerCells: headerCells, bodyRows: bodyRows, columnCount: columnCount)
+        let columnAlignments = table.columnAlignments
+        let alignments = (0..<columnCount).map { column -> NSTextAlignment in
+            if column < columnAlignments.count, let explicit = columnAlignments[column] {
+                return textAlignment(for: explicit)
             }
-            newlines(1)
+            return TableLayoutMath.isNumericColumn(column, rowTexts: texts.rows) ? .right : .natural
         }
-        if !headerCells.isEmpty { emitRow(headerCells, header: true) }
-        for row in table.body.rows { emitRow(Array(row.cells), header: false) }
-        newlines(1)
+
+        let header = (0..<columnCount).map { column in
+            renderedTableCell(column < headerCells.count ? headerCells[column] : nil,
+                              isHeader: true, alignment: alignments[column])
+        }
+        let rows = bodyRows.map { rowCells in
+            (0..<columnCount).map { column in
+                renderedTableCell(column < rowCells.count ? rowCells[column] : nil,
+                                  isHeader: false, alignment: alignments[column])
+            }
+        }
+        let rendered = RenderedTable(headerCells: header, rows: rows,
+                                     headerTexts: texts.header, rowTexts: texts.rows,
+                                     headerFont: style.tableHeaderFont, bodyFont: style.tableBodyFont,
+                                     cardFillColor: style.tableCardFillColor,
+                                     cardBorderColor: style.tableCardBorderColor,
+                                     headerFillColor: style.tableHeaderFillColor,
+                                     rowSeparatorColor: style.tableRowSeparatorColor,
+                                     cornerRadius: style.tableCornerRadius)
+
         ps = style.bodyParagraphStyle
+        let attachmentString = NSMutableAttributedString(attachment: TableAttachment(table: rendered))
+        attachmentString.addAttribute(.paragraphStyle, value: ps,
+                                      range: NSRange(location: 0, length: attachmentString.length))
+        attributed.append(attachmentString)
+        newlines(1)
         #endif
+    }
+
+    #if canImport(UIKit)
+    /// Render one cell's inlines into a standalone attributed string for the native
+    /// table card — same font/color/kern state as the Mac's visitTableCell, captured
+    /// by swapping in a scratch buffer so inline styling (bold, links, code) survives.
+    private func renderedTableCell(_ cell: Markup?, isHeader: Bool, alignment: NSTextAlignment) -> NSAttributedString {
+        let previousBuffer = attributed
+        let previousBaseFont = baseFont
+        let previousBaseWeight = baseWeight
+        let previousTraits = traits
+        let previousParagraphStyle = ps
+        let previousTextColor = activeTextColor
+        let previousKern = activeKern
+        let previousLinkURL = linkURL
+
+        attributed = NSMutableAttributedString()
+        baseFont = isHeader ? style.tableHeaderFont : style.tableBodyFont
+        baseWeight = isHeader ? .semibold : style.bodyWeight
+        traits = []
+        activeTextColor = isHeader ? style.tableHeaderTextColor : previousTextColor
+        activeKern = isHeader ? style.tableHeaderKern : nil
+        linkURL = nil
+        let cellStyle = NSMutableParagraphStyle()
+        cellStyle.alignment = alignment
+        cellStyle.lineSpacing = style.tableLineSpacing
+        cellStyle.lineBreakMode = .byWordWrapping
+        ps = cellStyle
+
+        if let cell {
+            walkInlines(cell.children)
+        }
+        if attributed.length == 0 {
+            append("—", color: .tertiaryLabelColor)
+        }
+        let result = attributed
+
+        attributed = previousBuffer
+        baseFont = previousBaseFont
+        baseWeight = previousBaseWeight
+        traits = previousTraits
+        ps = previousParagraphStyle
+        activeTextColor = previousTextColor
+        activeKern = previousKern
+        linkURL = previousLinkURL
+        return result
+    }
+    #endif
+
+    /// Per-cell plain texts (header row + body rows), padded to `columnCount` — the
+    /// measurement input for `TableLayoutMath` on both platforms.
+    private func tableCellTexts(headerCells: [Markup], bodyRows: [[Markup]], columnCount: Int) -> (header: [String], rows: [[String]]) {
+        let header = (0..<columnCount).map { $0 < headerCells.count ? plainText(of: headerCells[$0]) : "" }
+        let rows = bodyRows.map { rowCells in
+            (0..<columnCount).map { $0 < rowCells.count ? plainText(of: rowCells[$0]) : "" }
+        }
+        return (header, rows)
     }
 
     #if canImport(AppKit)
     /// Column widths driven by real text measurement (mirrors Reading.measure = 700).
-    /// Each column is given at least the width of its widest unbreakable token (so Latin
-    /// words and short CJK headers never break mid-word), then the remaining budget is
-    /// shared in proportion to each column's natural single-line width.
     private func tableColumnWidthPercentages(headerCells: [Markup], bodyRows: [[Markup]], columnCount: Int) -> [CGFloat] {
         let referenceContentWidth: CGFloat = 700
         let cellHorizontalPadding: CGFloat = 24
         let budget = max(referenceContentWidth - CGFloat(columnCount) * cellHorizontalPadding, 1)
-        let naturalCap = budget * 0.45
-
-        let headerFont = style.tableHeaderFont
-        let bodyFont = style.tableBodyFont
-        var minWidths = [CGFloat](repeating: 0, count: columnCount)
-        var naturalWidths = [CGFloat](repeating: 0, count: columnCount)
-
-        for column in 0..<columnCount {
-            if column < headerCells.count {
-                let text = plainText(of: headerCells[column])
-                minWidths[column] = max(minWidths[column], longestUnbreakableWidth(text, font: headerFont))
-                naturalWidths[column] = max(naturalWidths[column], singleLineWidth(text, font: headerFont))
-            }
-            for rowCells in bodyRows where column < rowCells.count {
-                let text = plainText(of: rowCells[column])
-                minWidths[column] = max(minWidths[column], longestUnbreakableWidth(text, font: bodyFont))
-                naturalWidths[column] = max(naturalWidths[column], singleLineWidth(text, font: bodyFont))
-            }
-            naturalWidths[column] = min(naturalWidths[column], naturalCap)
-            minWidths[column] = min(minWidths[column], naturalWidths[column])
-        }
-
-        let sumMin = minWidths.reduce(0, +)
-        let flex = zip(minWidths, naturalWidths).map { max($0.1 - $0.0, 0) }
-        let sumFlex = flex.reduce(0, +)
-
-        let widths: [CGFloat]
-        if sumMin >= budget || sumFlex <= 0 {
-            widths = minWidths
-        } else {
-            let extra = budget - sumMin
-            widths = (0..<columnCount).map { minWidths[$0] + extra * flex[$0] / sumFlex }
-        }
-
-        let total = widths.reduce(0, +)
-        guard total > 0 else { return Array(repeating: 100 / CGFloat(columnCount), count: columnCount) }
-        return widths.map { $0 / total * 100 }
-    }
-
-    /// Width of `text` laid out on a single line.
-    private func singleLineWidth(_ text: String, font: PlatformFont) -> CGFloat {
-        guard !text.isEmpty else { return 0 }
-        return (text as NSString).size(withAttributes: [.font: font]).width
-    }
-
-    /// Width of the widest run the line-breaker won't split: whitespace and CJK
-    /// boundaries allow breaks, so Latin words stay whole while CJK measures per char.
-    private func longestUnbreakableWidth(_ text: String, font: PlatformFont) -> CGFloat {
-        guard !text.isEmpty else { return 0 }
-        var maxWidth: CGFloat = 0
-        var token = ""
-        func flush() {
-            guard !token.isEmpty else { return }
-            maxWidth = max(maxWidth, singleLineWidth(token, font: font))
-            token = ""
-        }
-        for ch in text {
-            if ch == " " || ch == "\t" || ch == "\n" {
-                flush()
-            } else if let scalar = ch.unicodeScalars.first, isCJKBreakable(scalar) {
-                flush()
-                maxWidth = max(maxWidth, singleLineWidth(String(ch), font: font))
-            } else {
-                token.append(ch)
-            }
-        }
-        flush()
-        return maxWidth
-    }
-
-    private func isCJKBreakable(_ scalar: Unicode.Scalar) -> Bool {
-        switch scalar.value {
-        case 0x3000...0x303F,   // CJK symbols & punctuation
-             0x3040...0x30FF,   // Hiragana & Katakana
-             0x3400...0x4DBF,   // CJK extension A
-             0x4E00...0x9FFF,   // CJK unified ideographs
-             0xF900...0xFAFF,   // CJK compatibility ideographs
-             0xFF00...0xFFEF:   // halfwidth & fullwidth forms
-            return true
-        default:
-            return false
-        }
+        let texts = tableCellTexts(headerCells: headerCells, bodyRows: bodyRows, columnCount: columnCount)
+        let widths = TableLayoutMath.columnWidths(headerTexts: texts.header, rowTexts: texts.rows,
+                                                  headerFont: style.tableHeaderFont,
+                                                  bodyFont: style.tableBodyFont,
+                                                  budget: budget)
+        return widths.map { $0 / budget * 100 }
     }
 
     /// A column reads as numeric when every non-empty body cell parses as a number,
     /// so it can be right-aligned even when the Markdown gave no alignment marker.
     private func isNumericColumn(_ column: Int, bodyRows: [[Markup]]) -> Bool {
-        var sawNumber = false
-        for rowCells in bodyRows where column < rowCells.count {
-            let text = plainText(of: rowCells[column]).trimmingCharacters(in: .whitespaces)
-            guard !text.isEmpty else { continue }
-            guard Self.isNumericToken(text) else { return false }
-            sawNumber = true
+        let rowTexts = bodyRows.map { rowCells in
+            (0...column).map { $0 < rowCells.count ? plainText(of: rowCells[$0]) : "" }
         }
-        return sawNumber
-    }
-
-    /// Lenient numeric test: tolerates currency, percent, thousands separators and
-    /// accounting-style parentheses before checking the remainder parses as a Double.
-    private static func isNumericToken(_ raw: String) -> Bool {
-        var token = raw
-        if token.hasPrefix("(") && token.hasSuffix(")") {
-            token = String(token.dropFirst().dropLast())
-        }
-        let decorations = Set("$€£¥%, ")
-        token = String(token.filter { !decorations.contains($0) })
-        guard !token.isEmpty else { return false }
-        return Double(token) != nil
+        return TableLayoutMath.isNumericColumn(column, rowTexts: rowTexts)
     }
 
     private func visitTableCell(_ cell: Markup?, card: RoundedCardBlock, table: NSTextTable, row: Int, column: Int, columnCount: Int, isHeader: Bool, isLastRow: Bool, columnWidthPercent: CGFloat, columnAlignment: Table.ColumnAlignment?) {
@@ -861,6 +842,8 @@ private final class RenderContext {
         return paragraphStyle
     }
 
+    #endif
+
     private func textAlignment(for columnAlignment: Table.ColumnAlignment?) -> NSTextAlignment {
         switch columnAlignment {
         case .left: return .left
@@ -869,7 +852,6 @@ private final class RenderContext {
         case nil: return .natural
         }
     }
-    #endif
 
     // MARK: Inline visitors
 
@@ -988,6 +970,129 @@ private final class RenderContext {
         if let c = markup as? InlineCode { s += c.code; return }
         if markup is SoftBreak || markup is LineBreak { s += " "; return }
         for child in markup.children { collectText(child, into: &s) }
+    }
+}
+
+// MARK: - Table column measurement
+
+/// Column-width solver shared by the macOS NSTextTable path (700pt reference budget,
+/// converted to percentages) and the iOS table card view (solved at the live view
+/// width). Pure text measurement — no AppKit/UIKit layout types.
+enum TableLayoutMath {
+    /// Absolute column widths summing exactly to `budget`. Each column is given at
+    /// least the width of its widest unbreakable token (so Latin words and short CJK
+    /// headers never break mid-word), then the remaining budget is shared in
+    /// proportion to each column's natural single-line width (capped at 45%); the
+    /// result is normalized to fill `budget`.
+    static func columnWidths(headerTexts: [String], rowTexts: [[String]],
+                             headerFont: PlatformFont, bodyFont: PlatformFont,
+                             budget: CGFloat) -> [CGFloat] {
+        let columnCount = headerTexts.count
+        guard columnCount > 0, budget > 0 else { return [] }
+        let naturalCap = budget * 0.45
+
+        var minWidths = [CGFloat](repeating: 0, count: columnCount)
+        var naturalWidths = [CGFloat](repeating: 0, count: columnCount)
+
+        for column in 0..<columnCount {
+            let header = headerTexts[column]
+            minWidths[column] = max(minWidths[column], longestUnbreakableWidth(header, font: headerFont))
+            naturalWidths[column] = max(naturalWidths[column], singleLineWidth(header, font: headerFont))
+            for row in rowTexts where column < row.count {
+                let text = row[column]
+                minWidths[column] = max(minWidths[column], longestUnbreakableWidth(text, font: bodyFont))
+                naturalWidths[column] = max(naturalWidths[column], singleLineWidth(text, font: bodyFont))
+            }
+            naturalWidths[column] = min(naturalWidths[column], naturalCap)
+            minWidths[column] = min(minWidths[column], naturalWidths[column])
+        }
+
+        let sumMin = minWidths.reduce(0, +)
+        let flex = zip(minWidths, naturalWidths).map { max($0.1 - $0.0, 0) }
+        let sumFlex = flex.reduce(0, +)
+
+        let widths: [CGFloat]
+        if sumMin >= budget || sumFlex <= 0 {
+            widths = minWidths
+        } else {
+            let extra = budget - sumMin
+            widths = (0..<columnCount).map { minWidths[$0] + extra * flex[$0] / sumFlex }
+        }
+
+        let total = widths.reduce(0, +)
+        guard total > 0 else { return Array(repeating: budget / CGFloat(columnCount), count: columnCount) }
+        return widths.map { $0 / total * budget }
+    }
+
+    /// Width of `text` laid out on a single line.
+    static func singleLineWidth(_ text: String, font: PlatformFont) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        return (text as NSString).size(withAttributes: [.font: font]).width
+    }
+
+    /// Width of the widest run the line-breaker won't split: whitespace and CJK
+    /// boundaries allow breaks, so Latin words stay whole while CJK measures per char.
+    static func longestUnbreakableWidth(_ text: String, font: PlatformFont) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        var maxWidth: CGFloat = 0
+        var token = ""
+        func flush() {
+            guard !token.isEmpty else { return }
+            maxWidth = max(maxWidth, singleLineWidth(token, font: font))
+            token = ""
+        }
+        for ch in text {
+            if ch == " " || ch == "\t" || ch == "\n" {
+                flush()
+            } else if let scalar = ch.unicodeScalars.first, isCJKBreakable(scalar) {
+                flush()
+                maxWidth = max(maxWidth, singleLineWidth(String(ch), font: font))
+            } else {
+                token.append(ch)
+            }
+        }
+        flush()
+        return maxWidth
+    }
+
+    private static func isCJKBreakable(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x3000...0x303F,   // CJK symbols & punctuation
+             0x3040...0x30FF,   // Hiragana & Katakana
+             0x3400...0x4DBF,   // CJK extension A
+             0x4E00...0x9FFF,   // CJK unified ideographs
+             0xF900...0xFAFF,   // CJK compatibility ideographs
+             0xFF00...0xFFEF:   // halfwidth & fullwidth forms
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// A column reads as numeric when every non-empty body cell parses as a number,
+    /// so it can be right-aligned even when the Markdown gave no alignment marker.
+    static func isNumericColumn(_ column: Int, rowTexts: [[String]]) -> Bool {
+        var sawNumber = false
+        for row in rowTexts where column < row.count {
+            let text = row[column].trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else { continue }
+            guard isNumericToken(text) else { return false }
+            sawNumber = true
+        }
+        return sawNumber
+    }
+
+    /// Lenient numeric test: tolerates currency, percent, thousands separators and
+    /// accounting-style parentheses before checking the remainder parses as a Double.
+    static func isNumericToken(_ raw: String) -> Bool {
+        var token = raw
+        if token.hasPrefix("(") && token.hasSuffix(")") {
+            token = String(token.dropFirst().dropLast())
+        }
+        let decorations = Set("$€£¥%, ")
+        token = String(token.filter { !decorations.contains($0) })
+        guard !token.isEmpty else { return false }
+        return Double(token) != nil
     }
 }
 
