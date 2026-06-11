@@ -185,6 +185,10 @@ final class ReaderModel {
     /// session load. Split out so the warm-launch path can flip `.ready` first
     /// and run this in the background.
     private func finishEntriesUpdate(_ newEntries: [Entry]) async {
+        // searchIndex is filled asynchronously by Catalog (scheduleDeferredDerivedRebuild,
+        // fire-and-forget); search(_:) may return stale/empty for ~100–300ms after this
+        // returns — matches the warm-launch behaviour (QUA-218 PR4 decision 2).
+        // savedViews: [] — iOS has no saved views (recomputeSavedViewCounts early-returns).
         catalog.rebuildIndexDerived(entries: newEntries, savedViews: [])
         if let root = workspaceRoot { await loadSession(root: root) }
     }
