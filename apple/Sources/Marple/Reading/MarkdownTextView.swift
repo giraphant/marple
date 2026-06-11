@@ -130,7 +130,11 @@ struct MarkdownTextView: NSViewRepresentable {
             return items.indices.contains(ord) ? items[ord].characterRange : nil
         }
         if let target, target != co.lastScrollTarget {
-            textView.scrollRangeToVisible(target)
+            // Not scrollRangeToVisible: that only does the *minimum* scroll, so the
+            // heading lands pinned to whichever viewport edge it entered from rather
+            // than near the top. Lift it to the document's natural top margin instead.
+            scrollRangeNearTop(target, in: scrollView, textView: textView,
+                               topPadding: textView.textContainerInset.height)
             co.lastScrollTarget = target
         } else if Self.shouldRepositionOnDocSwitch(docSwitched: docSwitched,
                                                    hasScrollTarget: target != nil,
@@ -179,7 +183,7 @@ struct MarkdownTextView: NSViewRepresentable {
     /// scroll it to a comfortable position near the top, and mark it as current.
     private func scrollToMatch(_ jump: AppModel.MatchJump, in scrollView: NSScrollView,
                                textView: NSTextView, co: Coordinator) {
-        guard let lm = textView.layoutManager, let tc = textView.textContainer,
+        guard let lm = textView.layoutManager,
               let storage = textView.textStorage else { return }
         guard let target = BodyMatching.resolveJumpTarget(
             in: storage.string, matchRanges: co.matchRanges,
@@ -192,17 +196,30 @@ struct MarkdownTextView: NSViewRepresentable {
         lm.addTemporaryAttribute(.backgroundColor, value: Self.currentMatchColor, forCharacterRange: target)
         co.currentMatch = target
 
+        scrollRangeNearTop(target, in: scrollView, textView: textView, topPadding: 96)
+        co.lastScrollTarget = target   // keep the outline channel from re-scrolling
+    }
+
+    /// Scroll so `range`'s layout rect lands near the top of the viewport — a
+    /// `topPadding` gap below the top edge — clamped to the scrollable range.
+    /// Computing the rect via `layoutManager.boundingRect` and scrolling to it
+    /// (rather than `scrollRangeToVisible`, which only does the minimum scroll)
+    /// is what actively lifts the target up. The view forces contiguous layout, so
+    /// `ensureLayout` here guarantees the target paragraph is laid out before we
+    /// measure it. Targets near the document end are clamped by `maxY` (the bottom
+    /// of the content can hold them short of the top — expected).
+    private func scrollRangeNearTop(_ range: NSRange, in scrollView: NSScrollView,
+                                    textView: NSTextView, topPadding: CGFloat) {
+        guard let lm = textView.layoutManager, let tc = textView.textContainer else { return }
         lm.ensureLayout(for: tc)
-        let glyphRange = lm.glyphRange(forCharacterRange: target, actualCharacterRange: nil)
+        let glyphRange = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
         let rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
         let clip = scrollView.contentView
-        let topPadding: CGFloat = 96
         let docY = rect.minY + textView.textContainerOrigin.y
         let maxY = max(0, textView.frame.height - clip.bounds.height)
         let y = min(max(0, docY - topPadding), maxY)
         clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
         scrollView.reflectScrolledClipView(clip)
-        co.lastScrollTarget = target   // keep the outline channel from re-scrolling
     }
 
     /// Whether a render pass owns repositioning the reader for a document switch
