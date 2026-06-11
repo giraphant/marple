@@ -46,13 +46,18 @@ public func outline(from blocks: [RenderBlock]) -> [OutlineItem] {
     return out
 }
 
-/// Build outline from heading anchors produced by MarkdownRenderer.
-/// The first H1 is dropped (same as the block-based variant).
+/// Build outline from heading anchors produced by MarkdownRenderer. Filters
+/// identically to the block-based variant (drop empty-text headings, then drop
+/// the first H1 title) so the two produce the same heading ordinal sequence —
+/// the Mac reader bridges the font-free outline (no ranges) to this one (with
+/// ranges, from the live text view) by that ordinal.
 public func outline(from headings: [HeadingAnchor]) -> [OutlineItem] {
     var out: [OutlineItem] = []
     var firstH1Skipped = false
     var idx = 0
     for heading in headings {
+        let text = heading.text.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { continue }
         if !firstH1Skipped && heading.level == 1 {
             firstH1Skipped = true
             continue
@@ -60,7 +65,7 @@ public func outline(from headings: [HeadingAnchor]) -> [OutlineItem] {
         out.append(OutlineItem(
             blockIndex: idx,
             level: heading.level,
-            text: heading.text,
+            text: text,
             characterRange: heading.range
         ))
         idx += 1

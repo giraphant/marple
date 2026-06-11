@@ -369,8 +369,8 @@ final class AppModel {
         loadHiddenTypes()
         // deferred 派生发布后,若有开档则重算开档派生（旧 scheduleDeferredDerivedRebuild
         // 的 `if openEntry != nil { recomputeOpenDerived() }`）。openEntry 现读 catalog 的
-        // （同值）；recomputeOpenDerived 也已迁入 Catalog，经壳传入 openPath/openBody 与
-        // ReadingDefaults 渲染常量。
+        // （同值）；recomputeOpenDerived 也已迁入 Catalog，经壳传入 openPath/openBody/
+        // openBlocks。
         catalog.onDerivedReady = { [weak self] in
             guard let self, self.catalog.openEntry != nil else { return }
             self.recomputeOpenDerived()
@@ -509,12 +509,11 @@ final class AppModel {
     }
 
     /// Recompute the open document's open-doc derived caches. Routes to Catalog;
-    /// `openPath`/`openBody` are shell inputs, render-style constants come from
-    /// ReadingDefaults (Marple-module only, hence passed in).
+    /// `openPath`/`openBody`/`openBlocks` are shell inputs (the outline is built
+    /// from the font-free `openBlocks`, so no render-style constants cross over).
     private func recomputeOpenDerived() {
-        catalog.recomputeOpenDerived(openPath: openPath, openBody: openBody, entries: entries,
-                                     renderSize: ReadingDefaults.fontSize,
-                                     renderLineHeight: ReadingDefaults.lineHeight)
+        catalog.recomputeOpenDerived(openPath: openPath, openBody: openBody,
+                                     openBlocks: openBlocks, entries: entries)
     }
 
     /// Rebuild the middle-column list. Search hits are a cheap direct swap; the pane
