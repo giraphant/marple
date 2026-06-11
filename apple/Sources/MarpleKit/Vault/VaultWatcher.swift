@@ -33,7 +33,12 @@ public final class Coalescer: @unchecked Sendable {
 /// Recursive FSEvents-backed watcher for the vault directory.
 /// Coarse by design: it only hints "something changed"; the handler decides what
 /// to refresh (the VaultIndexer reconciles by mtime diff on each signal).
-public final class VaultWatcher: @unchecked Sendable {
+///
+/// QUA-218: conforms to `VaultChangeSource`. The 0.4s Coalescer + FSEvents logic
+/// is byte-identical to before; the only change is that `onChange` is injected at
+/// `start(onChange:)` (the protocol contract) instead of `init`, and the
+/// coalesced callback now invokes the injected closure on the main actor.
+public final class VaultWatcher: VaultChangeSource, @unchecked Sendable {
     private final class CallbackContext: @unchecked Sendable {
         let coalescer: Coalescer
         init(coalescer: Coalescer) { self.coalescer = coalescer }
@@ -56,21 +61,26 @@ public final class VaultWatcher: @unchecked Sendable {
     }
 
     private let url: URL
-    private let coalescer: Coalescer
+    private let debounce: TimeInterval
+    private var coalescer: Coalescer?
     private let queue = DispatchQueue(label: "marple.vault-watcher")
     private let lock = NSLock()
     private var stream: FSEventStreamRef?
 
-    public init(vaultDirectory: URL, debounce: TimeInterval = 0.4,
-                onChange: @escaping @Sendable () async -> Void) {
+    public init(vaultDirectory: URL, debounce: TimeInterval = 0.4) {
         self.url = vaultDirectory
-        self.coalescer = Coalescer(interval: debounce, action: onChange)
+        self.debounce = debounce
     }
 
-    public func start() {
+    /// VaultChangeSource: inject the refresh trigger and start watching. The
+    /// 0.4s Coalescer collapses a burst of FSEvents into one trailing-edge call
+    /// of `onChange` (hopped onto the main actor).
+    public func start(onChange: @escaping @MainActor () -> Void) {
         lock.lock()
         defer { lock.unlock() }
         guard stream == nil else { return }
+        let coalescer = Coalescer(interval: debounce) { await MainActor.run { onChange() } }
+        self.coalescer = coalescer
         let callbackContext = CallbackContext(coalescer: coalescer)
         var context = FSEventStreamContext(
             version: 0,

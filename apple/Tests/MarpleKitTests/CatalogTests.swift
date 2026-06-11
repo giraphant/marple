@@ -170,4 +170,102 @@ import Testing
         #expect(c.openStats == nil)        // empty body
         #expect(c.openOutline.isEmpty)
     }
+
+    // MARK: - 统一刷新权威 (QUA-218 PR3a Task 7) — 2→1 单飞 + per-pass generation
+
+    /// pass bumps exactly once per body run; an old captured pass goes stale once
+    /// a newer pass begins (旧 loadIndexGeneration staleness, now unified).
+    @Test func refreshBumpsPassOncePerBodyAndStales() async {
+        let c = Catalog()
+        #expect(c.pass == 0)
+        var seen: [Int] = []
+        await c.refresh { myPass in seen.append(myPass) }
+        #expect(c.pass == 1)
+        #expect(seen == [1])             // one body run, one bump
+        #expect(c.isStale(1) == false)   // current pass not stale
+
+        await c.refresh { myPass in seen.append(myPass) }
+        #expect(c.pass == 2)
+        #expect(c.isStale(1) == true)    // an older pass is now stale
+        #expect(c.isStale(2) == false)
+    }
+
+    /// A body that captures its pass, then a newer refresh bumps pass mid-body —
+    /// the captured pass is stale, so the old body would drop its publish.
+    @Test func capturedPassGoesStaleWhenNewerRefreshOvertakes() async {
+        let c = Catalog()
+        await c.refresh { _ in }          // pass = 1
+        let captured = c.pass             // 1
+        await c.refresh { _ in }          // pass = 2
+        #expect(c.isStale(captured) == true)
+    }
+
+    /// OOM-safety proxy: M concurrent `catalog.refresh` calls collapse to ≤2 body
+    /// runs (1 main + at most 1 trailing rerun), never M stacked chains. This is
+    /// the unified-authority restatement of RefreshAuthority's coalescing bound.
+    @Test func concurrentRefreshRunsBodyAtMostTwice() async {
+        let c = Catalog()
+        let counter = CatalogRefreshCounter()
+        let release = CatalogRefreshGate()
+        let M = 25
+
+        // First refresh: admitted runner that parks inside its body, holding the
+        // single flight open so the remaining M-1 calls arrive WHILE it's held.
+        let first = Task { @MainActor in
+            await c.refresh { _ in
+                await counter.bump()
+                await release.wait()
+            }
+        }
+        // Let the first runner acquire + enter its body before the rest fire.
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        var rest: [Task<Void, Never>] = []
+        for _ in 0..<(M - 1) {
+            rest.append(Task { @MainActor in
+                await c.refresh { _ in await counter.bump() }
+            })
+        }
+        // Give them a beat to coalesce into the single rerun flag, then release.
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        await release.open()
+
+        await first.value
+        for t in rest { await t.value }
+
+        let n = await counter.value
+        #expect(n >= 1 && n <= 2)         // does NOT grow with M
+    }
+
+    /// CLI join path (refreshJoining): on an idle authority it acquires and runs a
+    /// fresh pass — matching the old cliRefreshIndex `if beginOrJoin() { ... }`.
+    @Test func refreshJoiningRunsFreshPassWhenIdle() async {
+        let c = Catalog()
+        var ran = 0
+        await c.refreshJoining { _ in ran += 1 }
+        #expect(ran == 1)
+        #expect(c.pass == 1)
+    }
+}
+
+/// Counts body executions across concurrent refresh calls (OOM proxy).
+actor CatalogRefreshCounter {
+    private(set) var value = 0
+    func bump() { value += 1 }
+}
+
+/// One-shot gate: the first admitted refresh body parks on `wait()` until the
+/// test `open()`s it, holding the single flight so concurrent calls coalesce.
+actor CatalogRefreshGate {
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func open() {
+        opened = true
+        for w in waiters { w.resume() }
+        waiters = []
+    }
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
 }

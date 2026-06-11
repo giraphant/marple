@@ -22,13 +22,9 @@ final class AppModel {
     /// handlers trigger a synchronous reconcile through this. nil in stub tests.
     var cliIndexer: VaultIndexer?
 
-    /// QUA-198/QUA-212: single-flight gate shared by every reconcile→reload
-    /// chain (FSEvents watcher, boot deferred reconcile, CLI self-heal). Owned
-    /// here so the CLI extension can join an in-flight pass instead of stacking
-    /// a duplicate full vault walk behind the indexer writeLock.
-    let refreshGate = RefreshAuthority()
-
-    /// L2 编目层派生状态 owner (QUA-218 PR3a). 派生缓存逐步迁入；本期仅持 themeIndex。
+    /// L2 编目层派生状态 owner (QUA-218 PR3a). 持全部派生缓存 + vault-变更管线的
+    /// 统一 generation/单飞权威 (QUA-198/QUA-212 的 RefreshAuthority 合流单飞 +
+    /// loadIndex staleness 2→1)，经 catalog.refresh/refreshJoining 暴露唯一入口。
     let catalog = Catalog()
 
     /// The vault's self-describing schema snapshot, reloaded on every index load.
@@ -70,15 +66,16 @@ final class AppModel {
     func beginRefreshing() { refreshingCount += 1 }
     func endRefreshing() { refreshingCount = max(0, refreshingCount - 1) }
 
-    /// One reconcile→reload pass — the body every `refreshGate` runner executes
-    /// (watcher signal, trailing rerun, CLI self-heal). Callers must hold the
-    /// gate. No-op when no indexer is wired (stub-backed tests).
-    func refreshChain() async {
+    /// One reconcile→reload pass — the body every `catalog.refresh` runner executes
+    /// (watcher signal, trailing rerun, CLI self-heal). `myPass` is the current
+    /// refresh generation, threaded into loadIndex for stale-publish dropping.
+    /// No-op when no indexer is wired (stub-backed tests).
+    func refreshBody(_ myPass: Int) async {
         guard let indexer = cliIndexer else { return }
         beginRefreshing()
         do { _ = try await Task.detached { try indexer.reconcile() }.value }
         catch { print("[marple] reconcile failed: \(error)") }
-        await loadIndex()
+        await loadIndex(pass: myPass)
         await reloadOpen()
         endRefreshing()
     }
@@ -725,31 +722,34 @@ final class AppModel {
     /// `loadIndex()` runs concurrently with itself in practice: the fast-path boot
     /// kicks a deferred reconcile that calls loadIndex on completion, the FSEvents
     /// watcher calls loadIndex on every debounced vault change, and the in-progress
-    /// QUA-105 startup flow adds a background "full hydration" path. Each call
-    /// captures a `loadIndexGeneration` at entry; after every suspension point we
-    /// recheck — if a newer call has already started, the older one drops its
-    /// result instead of overwriting freshly-published `entries`/`trashItems`.
-    /// Same shape as `derivedGeneration` in `scheduleDeferredDerivedRebuild`.
-    private var loadIndexGeneration: Int = 0
-
+    /// QUA-105 startup flow adds a background "full hydration" path. Staleness is
+    /// now the Catalog's unified per-pass generation (QUA-218 2→1): a refresh pass
+    /// passes its `myPass` in; standalone callers (restoreTrash, boot first load,
+    /// tests) take a fresh pass via `catalog.beginStandalonePass()`. After every
+    /// suspension point we recheck `catalog.isStale(myPass)` — if a newer pass has
+    /// begun, the older one drops its result instead of overwriting freshly-
+    /// published `entries`/`trashItems`. Same shape as `derivedGeneration` in
+    /// `scheduleDeferredDerivedRebuild` (which stays its own independent counter).
     func loadIndex() async {
-        loadIndexGeneration &+= 1
-        let generation = loadIndexGeneration
+        await loadIndex(pass: catalog.beginStandalonePass())
+    }
+
+    func loadIndex(pass myPass: Int) async {
         let fetched: [Entry]
         do {
             fetched = try await client.index()
         } catch {
             // Only the latest call publishes failure state — an older stale
             // failure shouldn't clobber a newer call's "n entries" status.
-            if loadIndexGeneration == generation {
+            if !catalog.isStale(myPass) {
                 status = "index failed: \(error)"
                 isBootstrapping = false
                 print("[marple] index FAILED: \(error)")
             }
             return
         }
-        guard loadIndexGeneration == generation else {
-            print("[marple] loadIndex gen \(generation) stale after index() (latest \(loadIndexGeneration)), dropping")
+        guard !catalog.isStale(myPass) else {
+            print("[marple] loadIndex pass \(myPass) stale after index() (latest \(catalog.pass)), dropping")
             return
         }
         entries = fetched
@@ -780,8 +780,8 @@ final class AppModel {
         persist()
         if openPath != loadedDocPath {
             await loadDoc(openPath)
-            guard loadIndexGeneration == generation else {
-                print("[marple] loadIndex gen \(generation) stale after loadDoc, dropping trash refresh")
+            guard !catalog.isStale(myPass) else {
+                print("[marple] loadIndex pass \(myPass) stale after loadDoc, dropping trash refresh")
                 return
             }
         }
@@ -790,15 +790,15 @@ final class AppModel {
         // is also called from user actions where this guard would be wrong).
         do {
             let trash = try await client.listTrash()
-            guard loadIndexGeneration == generation else {
-                print("[marple] loadIndex gen \(generation) stale after listTrash, dropping trash result")
+            guard !catalog.isStale(myPass) else {
+                print("[marple] loadIndex pass \(myPass) stale after listTrash, dropping trash result")
                 return
             }
             trashItems = trash
         } catch {
             print("[marple] listTrash FAILED: \(error)")
         }
-        print("[marple] index loaded: \(entries.count) entries (gen \(generation))")
+        print("[marple] index loaded: \(entries.count) entries (pass \(myPass))")
     }
 
     func select(pane newPane: Pane) {
