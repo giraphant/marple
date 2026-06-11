@@ -52,24 +52,25 @@ final class AppState: ObservableObject {
         self.booting = false
 
         // Wire the FSEvents watcher and CLI server up front — they're safe to
-        // exist before the first loadIndex completes. The watcher's reconcile
-        // closure calls loadIndex itself, and the generation guard in
+        // exist before the first loadIndex completes. The watcher's onChange
+        // routes through `catalog.refresh`, and the per-pass generation guard in
         // AppModel.loadIndex makes overlapping bootstrap + watcher-triggered
         // calls converge to the latest snapshot.
         // QUA-198: the Coalescer debounces signals but does NOT bound concurrency
         // — once a debounced action fires, the next signal can fire another while
         // the first is still mid-reconcile. During a vault write storm these
         // chains piled up unboundedly (each holding a full [Entry] SQL read).
-        // The gate admits one chain at a time; signals arriving mid-run collapse
-        // into a single trailing rerun so no change is missed.
-        // QUA-212: the gate lives on AppModel so the CLI surface joins the same
-        // single flight instead of running an ungated duplicate reconcile.
-        let gate = m.refreshGate
-        let watcher = VaultWatcher(vaultDirectory: URL(fileURLWithPath: paths.vaultDir)) { [weak m] in
-            guard await gate.tryBegin() else { return }
-            repeat { await m?.refreshChain() } while await gate.finishOrRerun()
+        // `catalog.refresh` admits one chain at a time (RefreshAuthority single-
+        // flight); signals arriving mid-run collapse into a single trailing rerun
+        // so no change is missed.
+        // QUA-212/QUA-218: the single-flight authority lives on Catalog so the CLI
+        // surface joins the same flight (via refreshJoining) instead of running an
+        // ungated duplicate reconcile.
+        let watcher = VaultWatcher(vaultDirectory: URL(fileURLWithPath: paths.vaultDir))
+        watcher.start { [weak m] in
+            guard let m else { return }
+            Task { await m.catalog.refresh(m.refreshBody) }
         }
-        watcher.start()
         self.watcher = watcher
 
         // QUA-106: backup engine. The store walks the whole workspaceRoot for
@@ -118,24 +119,30 @@ final class AppState: ObservableObject {
             }
             if canSkip {
                 Task { @MainActor [weak m, indexer] in
-                    // QUA-212: take the shared gate so a CLI search arriving
-                    // mid-boot joins this pass instead of stacking a duplicate
-                    // walk. Gate already busy → the active runner's trailing
-                    // rerun covers this reconcile's purpose.
-                    guard await gate.tryBegin() else { return }
-                    m?.beginRefreshing()
-                    let stats: ReconcileStats?
-                    do { stats = try await Task.detached { try indexer.reconcile() }.value }
-                    catch {
-                        print("[marple] deferred reconcile failed: \(error)")
-                        stats = nil
+                    guard let m else { return }
+                    // QUA-212/QUA-218: go through `catalog.refresh` so a CLI search
+                    // arriving mid-boot joins this single flight instead of stacking
+                    // a duplicate walk. refresh internally does tryBegin (busy →
+                    // the active runner's trailing rerun covers this) + the
+                    // finishOrRerun loop. The body keeps the stats-conditional
+                    // reload: only re-load the index when the deferred reconcile
+                    // actually found stale rows (the boot loadIndex above already
+                    // published the cached snapshot).
+                    await m.catalog.refresh { [weak m, indexer] myPass in
+                        guard let m else { return }
+                        m.beginRefreshing()
+                        let stats: ReconcileStats?
+                        do { stats = try await Task.detached { try indexer.reconcile() }.value }
+                        catch {
+                            print("[marple] deferred reconcile failed: \(error)")
+                            stats = nil
+                        }
+                        if let s = stats, s.upserted + s.removed > 0 {
+                            await m.loadIndex(pass: myPass)
+                            await m.reloadOpen()
+                        }
+                        m.endRefreshing()
                     }
-                    if let s = stats, s.upserted + s.removed > 0 {
-                        await m?.loadIndex()
-                        await m?.reloadOpen()
-                    }
-                    m?.endRefreshing()
-                    while await gate.finishOrRerun() { await m?.refreshChain() }
                 }
             }
         }

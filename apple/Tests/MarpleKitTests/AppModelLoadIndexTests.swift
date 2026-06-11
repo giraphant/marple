@@ -26,7 +26,7 @@ import Testing
         async let first: Void = model.loadIndex()
         // Yield to give the first call a chance to enter loadIndex and bump
         // generation before the second call captures its own snapshot. Without
-        // this nudge, both calls would race for `loadIndexGeneration` and the
+        // this nudge, both calls would race for `catalog.pass` and the
         // outcome would be schedule-dependent rather than the deterministic
         // "older suspends, newer overtakes" we want to exercise.
         try await Task.sleep(nanoseconds: 5_000_000)
