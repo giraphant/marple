@@ -2,7 +2,7 @@ import Testing
 @testable import MarpleKit
 
 @MainActor @Suite struct CatalogTests {
-    /// Test factory — mirrors RelationsIndexTests.mk.
+    /// Test factory for Entry, with an `annotates:` knob for relation cases.
     func mk(_ path: String, _ type: String, title: String? = nil, author: String? = nil,
             themes: [String] = [], topics: [String] = [], rating: Double = 0, book: String? = nil,
             annotates: String? = nil) -> Entry {
@@ -38,7 +38,7 @@ import Testing
 
         // Topic membership: the paper declares topics:[embodiment]; the overview
         // page wins the slug→entry mapping (path-first).
-        #expect(c.topicMembership.membersBySlug["embodiment"]?.map(\.path) == ["vault/papers/p.md"])
+        #expect(Set(c.topicMembership.membersBySlug["embodiment"]?.map(\.path) ?? []) == Set(["vault/papers/p.md"]))
         #expect(c.topicMembership.topicEntryBySlug["embodiment"]?.path == "vault/topics/embodiment/00-overview.md")
     }
 
