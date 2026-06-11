@@ -14,9 +14,9 @@ public final class Catalog {
 
     public init() {}
 
-    /// Seed the restored last-session counts before the first `loadIndex` publishes
-    /// live ones, so the sidebar shows cached badges during the bootstrap window
-    /// (QUA-105). Once `rebuildIndexDerived` runs, `counts` is authoritative.
+    /// Bootstrap-only: seed counts from persisted state in AppModel.init BEFORE
+    /// the first rebuildIndexDerived. Calling it afterwards overwrites live counts
+    /// with stale restored data. Not a general setter.
     public func seedCounts(_ restored: [EntryType: Int]) { counts = restored }
 
     /// entries 变更后的立即派生（counts/themeIndex/topicMembership/savedViewCounts）。
