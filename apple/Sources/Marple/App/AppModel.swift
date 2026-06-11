@@ -28,6 +28,9 @@ final class AppModel {
     /// a duplicate full vault walk behind the indexer writeLock.
     let refreshGate = RefreshGate()
 
+    /// L2 编目层派生状态 owner (QUA-218 PR3a). 派生缓存逐步迁入；本期仅持 themeIndex。
+    let catalog = Catalog()
+
     /// The vault's self-describing schema snapshot, reloaded on every index load.
     /// nil when the vault has no `.quasi/schema.json` (or it's stale/unreadable) —
     /// in which case the conformance feature stays dark. See [[SchemaSnapshot]].
@@ -196,7 +199,7 @@ final class AppModel {
 
     // Derived caches — recomputed only when their inputs change, never in a view body.
     private(set) var counts: [EntryType: Int] = [:]
-    private(set) var themeIndex: [ThemeCount] = []
+    var themeIndex: [ThemeCount] { catalog.themeIndex }
     private(set) var topicMembership: TopicMembership = TopicMembership()
     private(set) var visibleEntries: [Entry] = []
     private(set) var relationGraph: RelationGraph = .empty
@@ -502,7 +505,7 @@ final class AppModel {
         if c[.topic] != nil { c[.topic] = topicBrowseSubset(entries).count }
         counts = c
         recomputeSavedViewCounts()
-        themeIndex = themeCounts(entries)
+        catalog.themeIndex = themeCounts(entries)
         topicMembership = buildTopicMembership(entries)
         scheduleDeferredDerivedRebuild()
     }
