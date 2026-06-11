@@ -2,32 +2,11 @@ import Foundation
 import SwiftUI
 import MarpleKit
 
-/// The Mac's open-tab forest resolved for display: a document leaf (carrying the
-/// resolved entry for navigation + the Mac's display label) or a named group with
-/// children. `id` is a stable per-node tag assigned during resolution.
-enum MacTabNode: Identifiable {
-    case doc(id: String, entry: Entry, label: String)
-    case group(id: String, name: String, isCollapsed: Bool, children: [MacTabNode])
-
-    var id: String {
-        switch self {
-        case .doc(let id, _, _): return id
-        case .group(let id, _, _, _): return id
-        }
-    }
-}
-
-/// One Mac Space resolved for display: its name + icon (SF Symbol, as set on the
-/// Mac) and its resolved tab forest. Spaces whose forest resolves to empty are
-/// pruned before this is built.
-struct MacSpaceTabs: Identifiable {
-    let id: UUID
-    let name: String
-    let iconName: String?
-    let roots: [MacTabNode]
-    /// That Space's active tab path (Mac-side), for the subtle "you are here" mark.
-    let activePath: String?
-}
+/// The Mac open-tab display types + resolution now live in MarpleKit
+/// (`SessionResolver`), shared with the Mac app (QUA-218 PR4). These aliases keep
+/// the iOS sidebar's call sites unchanged.
+typealias MacTabNode = ResolvedSessionNode
+typealias MacSpaceTabs = ResolvedSessionSpace
 
 @MainActor
 @Observable
@@ -227,29 +206,7 @@ final class ReaderModel {
             return
         }
         openTabsUpdatedAt = Date(timeIntervalSince1970: Double(snap.updatedAtMs) / 1000)
-        let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
-        var counter = 0
-        func resolve(_ nodes: [SessionNode]) -> [MacTabNode] {
-            nodes.compactMap { node -> MacTabNode? in
-                counter += 1
-                switch node {
-                case .doc(let d):
-                    guard let entry = byPath[d.path] else { return nil }
-                    return .doc(id: "n\(counter)", entry: entry, label: d.title)
-                case .group(let name, let collapsed, let children):
-                    let kids = resolve(children)
-                    guard !kids.isEmpty else { return nil }
-                    return .group(id: "n\(counter)", name: name, isCollapsed: collapsed, children: kids)
-                }
-            }
-        }
-        openOnMacSpaces = snap.spaces.compactMap { space in
-            let roots = resolve(space.roots)
-            guard !roots.isEmpty else { return nil }
-            return MacSpaceTabs(id: space.id, name: space.name,
-                                iconName: space.iconName, roots: roots,
-                                activePath: space.activePath)
-        }
+        openOnMacSpaces = SessionResolver.resolve(snap, entries: entries)
     }
 
     /// Force-download the vault's `.md` files from iCloud, concurrently, in
