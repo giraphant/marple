@@ -232,7 +232,7 @@ private func talkRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRo
     if let date = nonEmpty(entry.created) {
         rows.append(.readOnlyScalar(label: "日期", value: date, copyValue: nil))
     }
-    if let transcript = siblingEntry(of: entry, named: "transcript.md", in: entries) {
+    if let transcript = containerContext(for: entry, in: entries)?.children.first {
         rows.append(.linkedScalar(label: "转写", value: displayTitle(for: transcript) ?? "转写",
                                   path: transcript.path, copyValue: nil))
     }
@@ -241,9 +241,9 @@ private func talkRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRo
 }
 
 private func transcriptRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRow] {
-    // A transcript's only structured link is back to its talk (the sibling
-    // `talk.md` in the same folder-per-object directory).
-    guard let talk = siblingEntry(of: entry, named: "talk.md", in: entries) else { return [] }
+    // A transcript's only structured link is back to its talk — the容器②
+    // overview of its `talks/<slug>/` folder.
+    guard let talk = containerContext(for: entry, in: entries)?.overview else { return [] }
     return [.linkedScalar(label: "讲座", value: displayTitle(for: talk) ?? "讲座",
                           path: talk.path, copyValue: nil)]
 }

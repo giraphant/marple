@@ -9,16 +9,25 @@ import Testing
               kind: kind)
     }
 
-    @Test func siblingEntryResolvesWithinDirectory() {
+    // talk/transcript 并入规则②容器：talk=overview，transcript=成员，双向可达。
+    @Test func containerContextTalkPairsTalkAndTranscript() {
         let talk = mk(path: "vault/talks/t/talk.md", type: .talk)
         let transcript = mk(path: "vault/talks/t/transcript.md", type: .transcript)
-        #expect(siblingEntry(of: talk, named: "transcript.md", in: [talk, transcript])?.path == transcript.path)
-        #expect(siblingEntry(of: transcript, named: "talk.md", in: [talk, transcript])?.path == talk.path)
+        let entries = [transcript, talk]
+        let fromTalk = containerContext(for: talk, in: entries)
+        #expect(fromTalk?.overview?.path == talk.path)
+        #expect(fromTalk?.children.map(\.path) == [transcript.path])
+        let fromTranscript = containerContext(for: transcript, in: entries)
+        #expect(fromTranscript?.overview?.path == talk.path)
+        #expect(fromTranscript?.children.map(\.path) == [transcript.path])
     }
 
-    @Test func siblingEntryNilWhenMissing() {
+    // 无 transcript 的 talk：仍是有效容器（overview 在、成员空），同空书可见。
+    @Test func containerContextTalkWithoutTranscript() {
         let talk = mk(path: "vault/talks/t/talk.md", type: .talk)
-        #expect(siblingEntry(of: talk, named: "transcript.md", in: [talk]) == nil)
+        let c = containerContext(for: talk, in: [talk])
+        #expect(c?.overview?.path == talk.path)
+        #expect(c?.children.isEmpty == true)
     }
 
     @Test func containerContextBookMatchesBookContext() {
