@@ -20,6 +20,8 @@ struct SettingsView: View {
                 .tabItem { Label("备份", systemImage: "clock.arrow.circlepath") }
             SpacesSettings()
                 .tabItem { Label("Spaces", systemImage: "square.stack") }
+            SchemaSettings()
+                .tabItem { Label("声明表", systemImage: "tablecells") }
         }
         .frame(width: 620, height: 560)
     }
