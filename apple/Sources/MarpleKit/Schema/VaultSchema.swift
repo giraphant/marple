@@ -75,3 +75,73 @@ public struct VaultSchema: Sendable, Equatable {
         fallbackDisplay: TypeDisplay(symbol: "questionmark.square.dashed", tint: "gray")
     )
 }
+
+public extension VaultSchema {
+
+    /// Schema override location relative to the workspace root. Lives inside
+    /// `vault/schema/` (the user's synced data, shared territory with quasi;
+    /// the vault root keeps no loose files) — NOT `.marple/`, which is a
+    /// disposable cache rebuilt via `rm -rf`.
+    static let relativePath = "vault/schema/schema.yaml"
+
+    /// Built-in defaults overlaid by `vault/schema/schema.yaml` when present.
+    ///
+    /// Override granularity is per top-level entity / display key: declaring
+    /// `entities.author` replaces the author alias list wholesale; keys not
+    /// mentioned keep their builtin value. Malformed YAML or unreadable file
+    /// → builtin (graceful degradation, same philosophy as SchemaSnapshot).
+    static func load(workspaceRoot: String) -> VaultSchema {
+        guard !workspaceRoot.isEmpty else { return .builtin }
+        let url = URL(fileURLWithPath: workspaceRoot).appendingPathComponent(relativePath)
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return .builtin }
+        return builtin.applying(overrides: YamlFrontmatter.parseMapping(text))
+    }
+
+    /// Apply a parsed YAML mapping onto self. Unrecognized or ill-typed keys
+    /// are ignored (keep builtin) rather than failing the whole file.
+    func applying(overrides: [(String, YamlValue)]) -> VaultSchema {
+        var result = self
+        for (key, value) in overrides {
+            switch key {
+            case "entities":
+                guard case .mapping(let entities) = value else { continue }
+                for (entity, spec) in entities {
+                    guard case .mapping(let fields) = spec,
+                          let fieldsValue = fields.first(where: { $0.0 == "fields" })?.1,
+                          case .sequence(let items) = fieldsValue else { continue }
+                    let aliases = items.compactMap { Self.alias(from: $0) }
+                    if !aliases.isEmpty { result.entityAliases[entity] = aliases }
+                }
+            case "display":
+                guard case .mapping(let types) = value else { continue }
+                for (type, spec) in types {
+                    guard case .mapping(let pairs) = spec,
+                          case .string(let symbol)? = pairs.first(where: { $0.0 == "symbol" })?.1,
+                          case .string(let tint)? = pairs.first(where: { $0.0 == "tint" })?.1
+                    else { continue }
+                    result.displayByType[type] = TypeDisplay(symbol: symbol, tint: tint)
+                }
+            default:
+                continue
+            }
+        }
+        return result
+    }
+
+    /// A fields item is either a plain string (`- author`) or a mapping
+    /// (`- {field: speaker, type: talk}`).
+    private static func alias(from value: YamlValue) -> FieldAlias? {
+        switch value {
+        case .string(let s):
+            return FieldAlias(s)
+        case .mapping(let pairs):
+            guard case .string(let f)? = pairs.first(where: { $0.0 == "field" })?.1 else { return nil }
+            if case .string(let t)? = pairs.first(where: { $0.0 == "type" })?.1 {
+                return FieldAlias(f, onlyForType: t)
+            }
+            return FieldAlias(f)
+        default:
+            return nil
+        }
+    }
+}

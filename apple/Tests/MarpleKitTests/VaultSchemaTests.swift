@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import MarpleKit
 
@@ -41,5 +42,55 @@ import Testing
             #expect(d.symbol == symbol, "\(type)")
             #expect(d.tint == tint, "\(type)")
         }
+    }
+
+    private func makeWorkspace() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vs-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("vault/schema"),
+            withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test func loadWithoutFileReturnsBuiltin() throws {
+        let root = try makeWorkspace()
+        #expect(VaultSchema.load(workspaceRoot: root.path) == .builtin)
+    }
+
+    @Test func loadAppliesPerKeyOverrides() throws {
+        let root = try makeWorkspace()
+        let yaml = """
+        entities:
+          author:
+            fields:
+              - author
+              - field: translator
+                type: book
+        display:
+          paper:
+            symbol: doc.richtext
+            tint: mint
+        """
+        try yaml.write(to: root.appendingPathComponent("vault/schema/schema.yaml"),
+                       atomically: true, encoding: .utf8)
+        let schema = VaultSchema.load(workspaceRoot: root.path)
+        // author 整 key 替换
+        #expect(schema.entityAliases["author"] == [
+            VaultSchema.FieldAlias("author"),
+            VaultSchema.FieldAlias("translator", onlyForType: "book"),
+        ])
+        // 未提及的 key 保持内置
+        #expect(schema.entityAliases["journal"] == VaultSchema.builtin.entityAliases["journal"])
+        #expect(schema.display(for: .paper) ==
+                VaultSchema.TypeDisplay(symbol: "doc.richtext", tint: "mint"))
+        #expect(schema.display(for: .book) == VaultSchema.builtin.display(for: .book))
+    }
+
+    @Test func loadMalformedFileReturnsBuiltin() throws {
+        let root = try makeWorkspace()
+        try "][ not yaml ][".write(to: root.appendingPathComponent("vault/schema/schema.yaml"),
+                                   atomically: true, encoding: .utf8)
+        #expect(VaultSchema.load(workspaceRoot: root.path) == .builtin)
     }
 }
