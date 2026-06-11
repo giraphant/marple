@@ -54,7 +54,7 @@ struct SidebarScreen: View {
                     NavigationLink {
                         EntryListScreen(model: model, type: type)
                     } label: {
-                        Label(type.label, systemImage: symbol(for: type))
+                        Label(type.label, systemImage: type.symbolName)
                             .badge(counts[type] ?? 0)
                     }
                 }
@@ -75,17 +75,6 @@ struct SidebarScreen: View {
         }
     }
 
-}
-
-/// Sidebar SF Symbol for an entry type. File-level so both the type list and the
-/// "Mac 上打开的" forest share one mapping.
-func symbol(for type: EntryType) -> String {
-    switch type {
-    case .paper: "doc.text"; case .book: "book"; case .author: "person"
-    case .topic: "tag"; case .journal: "newspaper"; case .chapter: "doc.plaintext"
-    case .note: "note.text"; case .image: "photo"; case .talk: "mic"
-    default: "doc"
-    }
 }
 
 /// One Mac Space's tab list, pushed from the sidebar (Ulysses-项目 navigation, not
@@ -125,7 +114,7 @@ private struct MacTabNodeView: View {
                         Text(label).lineLimit(1)
                             .fontWeight(active ? .medium : .regular)
                     } icon: {
-                        Image(systemName: symbol(for: entry.type))
+                        Image(systemName: entry.type.symbolName)
                     }
                     if active {
                         Spacer(minLength: 6)
