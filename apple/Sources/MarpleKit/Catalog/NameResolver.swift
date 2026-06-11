@@ -72,7 +72,9 @@ public enum NameResolver {
     // MARK: - wikilink
 
     /// [[target]] → 条目。第一级逐字 = 旧 WikiResolver.resolve（小写 title
-    /// 全等 → 小写文件名 stem 全等，均不 trim）；第二级同链 folded。
+    /// 全等 → 小写文件名 stem 全等，均不 trim）；中间补"按 vault 相对路径"层，
+    /// 让 `[[papers/x|label]]` 这类带目录前缀的路径形命中（QUA-225）——只有当
+    /// needle 带 `/` 时才触发，纯 stem/title 形不受影响；第二级同链 folded。
     public static func resolveWikilink(_ target: String, in entries: [Entry]) -> Entry? {
         let needle = target.lowercased()
         if let byTitle = entries.first(where: { ($0.title ?? "").lowercased() == needle }) {
@@ -80,6 +82,12 @@ public enum NameResolver {
         }
         if let byStem = entries.first(where: { fileStem($0.path).lowercased() == needle }) {
             return byStem
+        }
+        if needle.contains("/") {
+            let pathNeedle = needle.hasSuffix(".md") ? String(needle.dropLast(3)) : needle
+            if let byPath = entries.first(where: { vaultRelPath($0.path).lowercased() == pathNeedle }) {
+                return byPath
+            }
         }
         let folded = foldedKey(target)
         guard !folded.isEmpty else { return nil }
@@ -146,6 +154,16 @@ public enum NameResolver {
 
     private static func fileStem(_ rel: String) -> String {
         (rel as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+    }
+
+    /// Vault-relative directory path minus the `vault/` prefix and `.md` suffix,
+    /// e.g. `vault/papers/foo.md` → `papers/foo`. The match target for path-form
+    /// wikilinks (QUA-225).
+    private static func vaultRelPath(_ rel: String) -> String {
+        var p = rel
+        if p.hasPrefix("vault/") { p.removeFirst("vault/".count) }
+        if p.hasSuffix(".md") { p.removeLast(3) }
+        return p
     }
 
     private static func journalKeys(_ value: String?) -> Set<String> {
