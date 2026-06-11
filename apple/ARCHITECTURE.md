@@ -40,7 +40,7 @@ Sources/MarpleKit/
                    + quasi 合规快照消费者(SchemaSnapshot · VaultConformance)
 ```
 
-依赖方向:`Model/` 在最底;`Vault/`·`Indexer/`·`Derivation/`·`Markdown/`·`Nav/`·`Schema/` 只往下依赖 `Model/`,横向之间基本不互引。
+依赖方向:`Model/` 在最底;`Vault/`·`Indexer/`·`Derivation/`·`Markdown/`·`Nav/`·`Schema/` 只往下依赖 `Model/`,横向之间基本不互引(例外:`Schema/` 横向依赖 `Indexer/` 的 YAML 解析工具)。
 
 ## Marple/ —— 按功能竖切(feature folders)
 
