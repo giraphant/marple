@@ -271,7 +271,8 @@ public func buildIndexedEntry(
     fileStem: String,
     sourceSlugs: Set<String>,
     mtimeMs: Int64?,
-    sourceIndex: SourceSlugIndex? = nil
+    sourceIndex: SourceSlugIndex? = nil,
+    schema: VaultSchema = .builtin
 ) -> BuildOutcome {
 
     // 1. Fence detection — mirrors `parse_file` / Rust's fence check.
@@ -336,15 +337,10 @@ public func buildIndexedEntry(
     // 8. Themes, topics, author.
     let themesValue: [String]? = themeArray(field(frontmatter, "themes"))
     let topicsValue: [String]? = themeArray(field(frontmatter, "topics"))
-    // `talk` carries its presenters under `speaker` and `image` its makers
-    // under `creator` (both lists, → vault/authors), not `author`/`authors`.
-    // Fall back to them so 讲者/创作者 populate the same author surfaces (list
-    // attribution, inspector, author links) as every other type.
+    // Entity-reference aliases come from the schema table (builtin mirrors the
+    // old hard-coded chain: author → authors → speaker(talk) → creator(image)).
     let authorValue: [String] = parseAuthors(
-        field(frontmatter, "author")
-            ?? field(frontmatter, "authors")
-            ?? (entryType == "talk" ? field(frontmatter, "speaker") : nil)
-            ?? (entryType == "image" ? field(frontmatter, "creator") : nil)
+        entityFieldValue(frontmatter, entity: "author", entryType: entryType, schema: schema)
     )
 
     // 9. Titles (en, cn), publisher, isbn, translation fields.
@@ -435,4 +431,19 @@ public func buildIndexedEntry(
     )
 
     return .indexed(entry)
+}
+
+/// First present frontmatter value among the schema's alias fields for the
+/// given entity type, honoring per-type restrictions. Order = declaration order.
+private func entityFieldValue(
+    _ frontmatter: [(String, YamlValue)],
+    entity: String,
+    entryType: String,
+    schema: VaultSchema
+) -> YamlValue? {
+    for alias in schema.entityAliases[entity] ?? [] {
+        guard alias.onlyForType == nil || alias.onlyForType == entryType else { continue }
+        if let v = field(frontmatter, alias.field) { return v }
+    }
+    return nil
 }
