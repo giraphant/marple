@@ -93,4 +93,68 @@ import Testing
                                    atomically: true, encoding: .utf8)
         #expect(VaultSchema.load(workspaceRoot: root.path) == .builtin)
     }
+
+    @Test func indexerUsesSchemaAuthorAliases() {
+        let text = """
+        ---
+        type: book
+        title: T
+        translator: 张三
+        ---
+        body
+        """
+        var schema = VaultSchema.builtin
+        schema.entityAliases["author"] = [
+            VaultSchema.FieldAlias("author"),
+            VaultSchema.FieldAlias("translator", onlyForType: "book"),
+        ]
+        let outcome = buildIndexedEntry(
+            text: text, rel: "vault/books/t/book.md", fileStem: "book",
+            sourceSlugs: [], mtimeMs: nil, schema: schema)
+        guard case .indexed(let entry) = outcome else {
+            Issue.record("expected .indexed, got \(outcome)")
+            return
+        }
+        #expect(entry.author == ["张三"])
+    }
+
+    // 默认 schema 下既有行为不变：talk 的 speaker 落 author 列
+    @Test func indexerDefaultSchemaKeepsTalkSpeakerFold() {
+        let text = """
+        ---
+        type: talk
+        title: T
+        speaker: 李四
+        ---
+        body
+        """
+        let outcome = buildIndexedEntry(
+            text: text, rel: "vault/talks/t/talk.md", fileStem: "talk",
+            sourceSlugs: [], mtimeMs: nil)
+        guard case .indexed(let entry) = outcome else {
+            Issue.record("expected .indexed, got \(outcome)")
+            return
+        }
+        #expect(entry.author == ["李四"])
+    }
+
+    // 类型限定生效：speaker 在非 talk 类型上不折入 author
+    @Test func indexerAliasTypeRestriction() {
+        let text = """
+        ---
+        type: note
+        title: T
+        speaker: 王五
+        ---
+        body
+        """
+        let outcome = buildIndexedEntry(
+            text: text, rel: "vault/notes/n.md", fileStem: "n",
+            sourceSlugs: [], mtimeMs: nil)
+        guard case .indexed(let entry) = outcome else {
+            Issue.record("expected .indexed, got \(outcome)")
+            return
+        }
+        #expect(entry.author == [])
+    }
 }
