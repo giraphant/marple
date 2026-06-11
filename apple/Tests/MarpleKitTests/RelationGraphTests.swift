@@ -30,6 +30,35 @@ import Testing
         #expect(g.sources(of: a.path, kind: .authoredBy).map(\.path) == [paper.path])
         #expect(g.sources(of: b.path, kind: .authoredBy).map(\.path) == [paper.path])
         #expect(g.targets(of: paper.path, kind: .authoredBy).first?.path == a.path) // entries.first semantics
+        #expect(g.worksByAuthorKey["smith"]?.map(\.path) == [paper.path])
+    }
+
+    @Test func multiAuthorEdgeOrderFollowsAuthorArray() {
+        // Edge.position is not consumable from outside yet (the edges list is
+        // private until PR3); its observable consequence is that targets()
+        // order follows the author-array order, not document order.
+        let pageA = mk("vault/authors/a.md", "author", title: "Alice A")
+        let pageB = mk("vault/authors/b.md", "author", title: "Bob B")
+        let paper = mk("vault/papers/p.md", "paper", author: "Alice A, Bob B")
+        let g = RelationGraph.build([pageB, pageA, paper]) // doc order reversed vs author order
+        #expect(g.targets(of: paper.path, kind: .authoredBy).map(\.path) == [pageA.path, pageB.path])
+    }
+
+    @Test func foldedPageSuppressedWhenExactPageExists() {
+        let exact = mk("vault/authors/exact.md", "author", title: "Pierre Bourdieu")
+        let folded = mk("vault/authors/folded.md", "author", title: "Pierré Bourdieu")
+        let paper = mk("vault/papers/p.md", "paper", author: "Pierre Bourdieu")
+        let g = RelationGraph.build([exact, folded, paper])
+        #expect(g.targets(of: paper.path, kind: .authoredBy).map(\.path) == [exact.path])
+        #expect(g.sources(of: folded.path, kind: .authoredBy).isEmpty)
+    }
+
+    @Test func multipleNotesOnSameTargetKeepDocumentOrder() {
+        let p = mk("vault/papers/p.md", "paper")
+        let n1 = mk("vault/notes/n1.md", "note", annotates: p.path)
+        let n2 = mk("vault/notes/n2.md", "note", annotates: p.path)
+        let g = RelationGraph.build([p, n1, n2])
+        #expect(g.sources(of: p.path, kind: .annotates).map(\.path) == [n1.path, n2.path])
     }
 
     @Test func foldedTierOnlyWhenNoExactPage() {
