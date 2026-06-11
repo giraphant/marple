@@ -2,32 +2,11 @@ import Foundation
 import SwiftUI
 import MarpleKit
 
-/// The Mac's open-tab forest resolved for display: a document leaf (carrying the
-/// resolved entry for navigation + the Mac's display label) or a named group with
-/// children. `id` is a stable per-node tag assigned during resolution.
-enum MacTabNode: Identifiable {
-    case doc(id: String, entry: Entry, label: String)
-    case group(id: String, name: String, isCollapsed: Bool, children: [MacTabNode])
-
-    var id: String {
-        switch self {
-        case .doc(let id, _, _): return id
-        case .group(let id, _, _, _): return id
-        }
-    }
-}
-
-/// One Mac Space resolved for display: its name + icon (SF Symbol, as set on the
-/// Mac) and its resolved tab forest. Spaces whose forest resolves to empty are
-/// pruned before this is built.
-struct MacSpaceTabs: Identifiable {
-    let id: UUID
-    let name: String
-    let iconName: String?
-    let roots: [MacTabNode]
-    /// That Space's active tab path (Mac-side), for the subtle "you are here" mark.
-    let activePath: String?
-}
+/// The Mac open-tab display types + resolution now live in MarpleKit
+/// (`SessionResolver`), shared with the Mac app (QUA-218 PR4). These aliases keep
+/// the iOS sidebar's call sites unchanged.
+typealias MacTabNode = ResolvedSessionNode
+typealias MacSpaceTabs = ResolvedSessionSpace
 
 @MainActor
 @Observable
@@ -44,9 +23,10 @@ final class ReaderModel {
     /// When the Mac last published its open tabs (from the snapshot's updatedAtMs).
     /// nil when no snapshot — drives the "同步于…" footer.
     private(set) var openTabsUpdatedAt: Date?
-    /// Field-weighted in-memory search index (same engine as the Mac's 快速 palette).
-    /// Rebuilt off-actor whenever `entries` change.
-    private var searchIndex: SearchIndex = .empty
+    /// Shared derived-state owner: holds the field-weighted searchIndex (rebuilt
+    /// via scheduleDeferredDerivedRebuild after each entries update) plus counts,
+    /// topicMembership, themeIndex, and relationGraph — same engine as the Mac.
+    let catalog = Catalog()
     /// Progress during the indexing phase. nil = indeterminate (e.g. the build step).
     private(set) var progress: (done: Int, total: Int)?
     /// Human-readable status under the progress bar.
@@ -56,9 +36,6 @@ final class ReaderModel {
     /// The security-scoped URL we currently hold access to. Released before we
     /// acquire a new one so repeated picks/launches don't leak kernel handles.
     private var scopedURL: URL?
-    /// Guards against overlapping foreground refreshes (scene can flip
-    /// .inactive→.active more than once in quick succession).
-    private var refreshing = false
 
     /// App container path for the private index DB (never the synced vault).
     /// Computed once: the directory is created here at init.
@@ -145,6 +122,7 @@ final class ReaderModel {
             let db = IndexDatabase(indexDBPath: dbPath)
             let c = IOSVaultClient(workspaceRoot: root, db: db)
             self.client = c
+            // Cold start is sequential under phase==.indexing — no concurrent refresh can race here, so catalog.refresh (single-flight) isn't needed; the first index publishes directly.
             await updateEntries(try await c.index())
             phase = .ready
         } catch {
@@ -160,20 +138,22 @@ final class ReaderModel {
     }
 
     /// Download newly-synced `.md`, reconcile, and refresh entries — all in the
-    /// background. Coalesced via `refreshing` so overlapping launches/foregrounds
-    /// don't double-run. Keeps `phase == .ready`, so reading is never interrupted.
+    /// background. Coalesced via Catalog's shared single-flight (RefreshAuthority):
+    /// an overlapping launch/foreground sets a trailing rerun instead of being
+    /// dropped, so the last signal always gets a fresh pass. Keeps `phase == .ready`.
     private func backgroundSync(root: String, dbPath: String) async {
-        guard !refreshing else { return }
-        refreshing = true
-        defer { refreshing = false }
-        await materializeMarkdown(under: root, report: false)
-        do {
-            try await Task.detached(priority: .utility) {
-                _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).reconcile()
-            }.value
-            if let c = client { await updateEntries(try await c.index()) }
-        } catch {
-            print("[marple] background sync failed (keeping last entries): \(error)")
+        await catalog.refresh { [weak self] myPass in
+            guard let self else { return }
+            await self.materializeMarkdown(under: root, report: false)   // iOS-only iCloud download
+            do {
+                try await Task.detached(priority: .utility) {
+                    _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).reconcile()
+                }.value
+                if self.catalog.isStale(myPass) { return }               // newer pass started → drop this publish
+                if let c = self.client { await self.updateEntries(try await c.index()) }
+            } catch {
+                print("[marple] background sync failed (keeping last entries): \(error)")
+            }
         }
     }
 
@@ -188,7 +168,7 @@ final class ReaderModel {
     func search(_ q: String) async -> [Entry] {
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return [] }
-        let index = searchIndex
+        let index = catalog.searchIndex
         let ranked = await Task.detached(priority: .userInitiated) {
             searchDocuments(index, trimmed)
         }.value
@@ -205,9 +185,11 @@ final class ReaderModel {
     /// session load. Split out so the warm-launch path can flip `.ready` first
     /// and run this in the background.
     private func finishEntriesUpdate(_ newEntries: [Entry]) async {
-        self.searchIndex = await Task.detached(priority: .utility) {
-            buildSearchIndex(newEntries)
-        }.value
+        // searchIndex is filled asynchronously by Catalog (scheduleDeferredDerivedRebuild,
+        // fire-and-forget); search(_:) may return stale/empty for ~100–300ms after this
+        // returns — matches the warm-launch behaviour (QUA-218 PR4 decision 2).
+        // savedViews: [] — iOS has no saved views (recomputeSavedViewCounts early-returns).
+        catalog.rebuildIndexDerived(entries: newEntries, savedViews: [])
         if let root = workspaceRoot { await loadSession(root: root) }
     }
 
@@ -227,29 +209,7 @@ final class ReaderModel {
             return
         }
         openTabsUpdatedAt = Date(timeIntervalSince1970: Double(snap.updatedAtMs) / 1000)
-        let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
-        var counter = 0
-        func resolve(_ nodes: [SessionNode]) -> [MacTabNode] {
-            nodes.compactMap { node -> MacTabNode? in
-                counter += 1
-                switch node {
-                case .doc(let d):
-                    guard let entry = byPath[d.path] else { return nil }
-                    return .doc(id: "n\(counter)", entry: entry, label: d.title)
-                case .group(let name, let collapsed, let children):
-                    let kids = resolve(children)
-                    guard !kids.isEmpty else { return nil }
-                    return .group(id: "n\(counter)", name: name, isCollapsed: collapsed, children: kids)
-                }
-            }
-        }
-        openOnMacSpaces = snap.spaces.compactMap { space in
-            let roots = resolve(space.roots)
-            guard !roots.isEmpty else { return nil }
-            return MacSpaceTabs(id: space.id, name: space.name,
-                                iconName: space.iconName, roots: roots,
-                                activePath: space.activePath)
-        }
+        openOnMacSpaces = SessionResolver.resolve(snap, entries: entries)
     }
 
     /// Force-download the vault's `.md` files from iCloud, concurrently, in
