@@ -32,6 +32,7 @@ Sources/MarpleKit/
 ├── Catalog/       编目层（L2）：全部"由馆藏派生"的索引与关联（搜索、关系图、容器上下文、theme counts）。QUA-218 中由 `Derivation/` 改名；Catalog 类型本体在 PR3 立起。
 │                  ThemeIndex · ListSort · ListFilter · Browse · CardMetrics
 │                  RelationsIndex · DocStats · DocOutline
+│                  NameResolver · RelationGraph · Containers(规则①②,QUA-218 PR2)
 ├── Markdown/      渲染模型
 │                  MarkdownModel · Wikilink
 ├── Nav/           导航 + 状态持久化
