@@ -193,10 +193,7 @@ final class AppModel {
     /// self-consistent — anchor/ordinal/query always describe the same search.
     var searchMatchQuery: String { catalog.searchMatchQuery }
     /// Result rows whose "再显示 N 个匹配项" expander has been opened.
-    var matchExpanded: Set<String> {
-        get { catalog.matchExpanded }
-        set { catalog.matchExpanded = newValue }
-    }
+    var matchExpanded: Set<String> { catalog.matchExpanded }
 
     // Derived caches — recomputed only when their inputs change, never in a view body.
     var counts: [EntryType: Int] { catalog.counts }
