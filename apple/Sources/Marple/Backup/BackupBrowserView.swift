@@ -129,9 +129,6 @@ struct BackupBrowserView: View {
     }
 
     private static func friendly(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = "yyyy-MM-dd HH:mm"
-        return f.string(from: date)
+        AppDateFormatters.friendlyMinute.string(from: date)
     }
 }
