@@ -12,7 +12,13 @@ import Foundation
 /// pass that STARTS after it joined: the in-flight walk may already have
 /// passed the directory of a just-written file, so waiting for the current
 /// pass wouldn't reliably self-heal the FSEvents race.
-actor RefreshGate {
+///
+/// QUA-218: relocated verbatim from the Marple shell's `RefreshGate` into
+/// MarpleKit so Catalog owns the vault-change anti-race machinery. Task 7 folds
+/// the per-pass generation counters into Catalog around this gate — the
+/// coalescing logic here stays byte-identical (it's concurrency-critical, the
+/// OOM fix).
+public actor RefreshAuthority {
     private var running = false
     private var rerun = false
     /// Joiners waiting on the pass currently running.
@@ -20,13 +26,15 @@ actor RefreshGate {
     /// Joiners that arrived mid-pass, waiting on the trailing rerun.
     private var nextWaiters: [CheckedContinuation<Void, Never>] = []
 
-    func tryBegin() -> Bool {
+    public init() {}
+
+    public func tryBegin() -> Bool {
         if running { rerun = true; return false }
         running = true
         return true
     }
 
-    func finishOrRerun() -> Bool {
+    public func finishOrRerun() -> Bool {
         let finished = currentWaiters
         currentWaiters = []
         let again: Bool
@@ -47,7 +55,7 @@ actor RefreshGate {
     /// `finishOrRerun` loop) or join the in-flight runner: request a trailing
     /// rerun and suspend until that fresh pass completes (returns false —
     /// nothing left to do, the index is at least as new as the join).
-    func beginOrJoin() async -> Bool {
+    public func beginOrJoin() async -> Bool {
         if !running { running = true; return true }
         rerun = true
         await withCheckedContinuation { nextWaiters.append($0) }
@@ -55,5 +63,5 @@ actor RefreshGate {
     }
 
     /// Test hook: a trailing rerun has been requested on the active runner.
-    var rerunRequested: Bool { rerun }
+    public var rerunRequested: Bool { rerun }
 }
