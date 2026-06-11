@@ -99,4 +99,75 @@ import Testing
         #expect(c.searchMatchQuery.isEmpty)
         #expect(c.matchExpanded.isEmpty)
     }
+
+    // MARK: - open-doc derive (QUA-218 PR3a Task 5)
+
+    /// Opening a chapter surfaces its book context (overview + ordered chapters).
+    @Test func openDerivedChapterBuildsBookContext() {
+        let c = Catalog()
+        let overview = mk("vault/books/being-time/00-overview.md", "book")
+        let ch1 = mk("vault/books/being-time/01-intro.md", "chapter", book: "being-time")
+        let ch2 = mk("vault/books/being-time/02-care.md", "chapter", book: "being-time")
+        let entries = [overview, ch1, ch2]
+
+        c.recomputeOpenDerived(openPath: ch1.path, openBody: "# Intro\n\nbody",
+                               entries: entries, renderSize: 15, renderLineHeight: 1.62)
+
+        #expect(c.openEntry?.path == ch1.path)
+        #expect(c.openBook?.slug == "being-time")
+        #expect(c.openBook?.overview?.path == overview.path)
+        #expect(c.openBook?.chapters.map(\.path) == [ch1.path, ch2.path])
+        #expect(c.openStats != nil)                    // non-empty body → stats
+        #expect(c.openTopic == nil)                    // not a topic page
+    }
+
+    /// Opening a topic overview surfaces its topic context (sibling pages).
+    @Test func openDerivedTopicBuildsTopicContext() {
+        let c = Catalog()
+        let overview = mk("vault/topics/embodiment/00-overview.md", "topic")
+        let resources = mk("vault/topics/embodiment/01-resources.md", "topic")
+        let entries = [overview, resources]
+
+        c.recomputeOpenDerived(openPath: overview.path, openBody: "# 本专题",
+                               entries: entries, renderSize: 15, renderLineHeight: 1.62)
+
+        #expect(c.openEntry?.path == overview.path)
+        #expect(c.openTopic?.slug == "embodiment")
+        #expect(c.openTopic?.overview?.path == overview.path)
+        #expect(c.openTopic?.pages.map(\.path) == [resources.path])
+        #expect(c.openBook == nil)                     // not a book/chapter
+    }
+
+    /// Opening an author page surfaces their works via catalog.relationGraph.
+    @Test func openDerivedAuthorWorksViaRelationGraph() {
+        let c = Catalog()
+        let author = mk("vault/authors/pb.md", "author", title: "Pierre Bourdieu")
+        let p1 = mk("vault/papers/distinction.md", "paper", author: "Pierre Bourdieu", rating: 5)
+        let p2 = mk("vault/papers/habitus.md", "paper", author: "Pierre Bourdieu", rating: 3)
+        let entries = [author, p1, p2]
+        // Seed the catalog's relation graph (works→author edges) so relations()
+        // reads it rather than the empty-graph fallback.
+        c.relationGraph = RelationGraph.build(entries)
+
+        c.recomputeOpenDerived(openPath: author.path, openBody: "# Pierre Bourdieu",
+                               entries: entries, renderSize: 15, renderLineHeight: 1.62)
+
+        #expect(c.openEntry?.path == author.path)
+        // works ordered by rating desc.
+        #expect(c.openRelations?.works.map(\.path) == [p1.path, p2.path])
+    }
+
+    /// No open path → entry/relations/book/topic clear; outline/stats reflect body.
+    @Test func openDerivedNoOpenClears() {
+        let c = Catalog()
+        let entries = [mk("vault/papers/a.md", "paper")]
+        c.recomputeOpenDerived(openPath: nil, openBody: "",
+                               entries: entries, renderSize: 15, renderLineHeight: 1.62)
+        #expect(c.openEntry == nil)
+        #expect(c.openRelations == nil)
+        #expect(c.openBook == nil)
+        #expect(c.openTopic == nil)
+        #expect(c.openStats == nil)        // empty body
+        #expect(c.openOutline.isEmpty)
+    }
 }
