@@ -18,6 +18,88 @@ public func loadSourceSlugs(sourcesDir: String) -> Set<String> {
     return slugs
 }
 
+private struct SourceSlugCandidate: Sendable {
+    let slug: String
+    let titleTokens: Set<String>
+    let year: Int?
+}
+
+/// Precomputed lookup for `hasPDF`.
+///
+/// Full index rebuilds call the resolver once per paper/book/chapter. Building
+/// candidate title tokens once keeps fuzzy matching proportional to same-surname
+/// candidates instead of `entries × all PDFs`.
+public struct SourceSlugIndex: Sendable {
+    private let slugs: Set<String>
+    private let byFirstToken: [String: [SourceSlugCandidate]]
+
+    public init(_ slugs: Set<String>) {
+        self.slugs = slugs
+        var buckets: [String: [SourceSlugCandidate]] = [:]
+        for slug in slugs {
+            guard let first = slugFirstTokenLower(slug) else { continue }
+            buckets[first, default: []].append(SourceSlugCandidate(
+                slug: slug,
+                titleTokens: slugTitleTokens(slug),
+                year: slugYear(slug)
+            ))
+        }
+        self.byFirstToken = buckets
+    }
+
+    public func hasPDF(slug: String) -> Bool {
+        guard !slug.isEmpty else { return false }
+        if slugs.contains(slug) { return true }
+        return fuzzyPickSource(slug) != nil
+    }
+
+    public func fuzzyPickSource(_ expected: String) -> String? {
+        let expTokens = expected.split(separator: "-").filter { !$0.isEmpty }.map(String.init)
+        if expTokens.isEmpty { return nil }
+        let expLast = expTokens[0].lowercased()
+        let expTitle = slugTitleTokens(expected)
+        if expTitle.count < 2 { return nil }
+        let expYear = slugYear(expected)
+
+        var best: (score: Double, cand: String)?
+        var runnerUp: (score: Double, cand: String)?
+        var matched = 0
+        for cand in byFirstToken[expLast] ?? [] {
+            let inter = expTitle.intersection(cand.titleTokens).count
+            if inter < 2 { continue }
+            let union = expTitle.union(cand.titleTokens).count
+            if union == 0 { continue }
+            let jac = Double(inter) / Double(union)
+            if jac < 0.6 { continue }
+
+            let identical = expTitle == cand.titleTokens
+            let yearClose: Bool
+            if let a = expYear, let b = cand.year {
+                yearClose = abs(a - b) <= 5
+            } else {
+                yearClose = false
+            }
+            guard identical || yearClose else { continue }
+
+            matched += 1
+            let candidate = (score: jac, cand: cand.slug)
+            if best == nil || candidate.score > best!.score {
+                runnerUp = best
+                best = candidate
+            } else if runnerUp == nil || candidate.score > runnerUp!.score {
+                runnerUp = candidate
+            }
+        }
+
+        guard let best else { return nil }
+        if matched == 1 { return best.cand }
+        if let runnerUp, best.score - runnerUp.score > 0.15 {
+            return best.cand
+        }
+        return nil
+    }
+}
+
 // MARK: - bookSlug
 // Mirrors indexer.rs `book_slug` (:1138-1143):
 // first path component after "vault/books/", or nil.
@@ -54,9 +136,7 @@ public func pdfSlug(type: String, rel: String, fileStem: String) -> String? {
 // exact slug in sourceSlugs OR fuzzyPickSource returns a hit.
 
 public func hasPDF(slug: String, sourceSlugs: Set<String>) -> Bool {
-    guard !slug.isEmpty else { return false }
-    if sourceSlugs.contains(slug) { return true }
-    return fuzzyPickSource(slug, sourceSlugs) != nil
+    SourceSlugIndex(sourceSlugs).hasPDF(slug: slug)
 }
 
 // MARK: - fuzzy_pick_source helpers
@@ -97,6 +177,15 @@ private func slugTitleTokens(_ slug: String) -> Set<String> {
     return result
 }
 
+/// Lowercased first slug token without allocating the full `slug.split("-")`
+/// array. The fuzzy matcher calls this for every candidate, so keeping the
+/// surname prefilter cheap matters on large source directories.
+private func slugFirstTokenLower(_ slug: String) -> String? {
+    guard !slug.isEmpty else { return nil }
+    let end = slug.firstIndex(of: "-") ?? slug.endIndex
+    return String(slug[..<end]).lowercased()
+}
+
 // MARK: - fuzzyPickSource
 // Mirrors lib.rs `fuzzy_pick_source` (:1121-1172) verbatim.
 
@@ -108,49 +197,5 @@ private func slugTitleTokens(_ slug: String) -> Set<String> {
 ///   - identical title token sets OR year within ±5
 ///   - single clear winner: only one candidate, OR top beats runner-up by > 0.15
 public func fuzzyPickSource(_ expected: String, _ candidates: Set<String>) -> String? {
-    let expTokens = expected.split(separator: "-").filter { !$0.isEmpty }.map(String.init)
-    if expTokens.isEmpty { return nil }
-    let expLast = expTokens[0].lowercased()
-    let expTitle = slugTitleTokens(expected)
-    if expTitle.count < 2 { return nil }  // too little signal to match safely
-    let expYear = slugYear(expected)
-
-    var scored: [(score: Double, cand: String)] = []
-    for cand in candidates {
-        let candTokens = cand.split(separator: "-").filter { !$0.isEmpty }.map(String.init)
-        if candTokens.isEmpty { continue }
-        if candTokens[0].lowercased() != expLast { continue }
-        let candTitle = slugTitleTokens(cand)
-        let inter = expTitle.intersection(candTitle).count
-        if inter < 2 { continue }
-        let union = expTitle.union(candTitle).count
-        if union == 0 { continue }
-        let jac = Double(inter) / Double(union)
-        if jac < 0.6 { continue }
-        // Identical titles are high-confidence; partial overlap must also have close years.
-        let identical = expTitle == candTitle
-        let yearClose: Bool
-        if let a = expYear, let b = slugYear(cand) {
-            yearClose = abs(a - b) <= 5
-        } else {
-            yearClose = false
-        }
-        if identical || yearClose {
-            scored.append((score: jac, cand: cand))
-        }
-    }
-    // Sort descending by score
-    scored.sort { $0.score > $1.score }
-    switch scored.count {
-    case 0:
-        return nil
-    case 1:
-        return scored[0].cand
-    default:
-        // Only accept if top beats runner-up by > 0.15
-        if scored[0].score - scored[1].score > 0.15 {
-            return scored[0].cand
-        }
-        return nil
-    }
+    SourceSlugIndex(candidates).fuzzyPickSource(expected)
 }

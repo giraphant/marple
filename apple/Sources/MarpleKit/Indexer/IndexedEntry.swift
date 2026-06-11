@@ -126,6 +126,20 @@ public struct IndexedEntry: Sendable, Equatable {
     /// resolves the real file on disk via `TalkMedia`.  Column: `media`.
     public var media: String? = nil
 
+    // MARK: Image technical fields (QUA-175)
+
+    /// Display-oriented pixel width of an image entry's `original.<ext>`,
+    /// derived at index time by `ImageProbe` (never from frontmatter).
+    /// nil for non-image entries or when the original is missing/unreadable.
+    /// Column: `width`.
+    public var width: Int64? = nil
+
+    /// Display-oriented pixel height (see `width`).  Column: `height`.
+    public var height: Int64? = nil
+
+    /// Byte size of the image entry's `original.<ext>`.  Column: `file_size`.
+    public var fileSize: Int64? = nil
+
     // MARK: Source PDF
 
     /// Slug used to locate the source PDF.  Column: `pdf_slug`.
@@ -256,7 +270,8 @@ public func buildIndexedEntry(
     rel: String,
     fileStem: String,
     sourceSlugs: Set<String>,
-    mtimeMs: Int64?
+    mtimeMs: Int64?,
+    sourceIndex: SourceSlugIndex? = nil
 ) -> BuildOutcome {
 
     // 1. Fence detection — mirrors `parse_file` / Rust's fence check.
@@ -302,7 +317,10 @@ public func buildIndexedEntry(
 
     // has_pdf
     let hasPDFValue: Bool = pdfSlugValue.map { slug in
-        hasPDF(slug: slug, sourceSlugs: sourceSlugs)
+        if let sourceIndex {
+            return sourceIndex.hasPDF(slug: slug)
+        }
+        return hasPDF(slug: slug, sourceSlugs: sourceSlugs)
     } ?? false
 
     // 6. Title.
@@ -318,13 +336,15 @@ public func buildIndexedEntry(
     // 8. Themes, topics, author.
     let themesValue: [String]? = themeArray(field(frontmatter, "themes"))
     let topicsValue: [String]? = themeArray(field(frontmatter, "topics"))
-    // `talk` carries its presenters under `speaker` (a list, → vault/authors),
-    // not `author`/`authors`. Fall back to it so 讲者 populate the same author
-    // surfaces (list attribution, inspector, author links) as every other type.
+    // `talk` carries its presenters under `speaker` and `image` its makers
+    // under `creator` (both lists, → vault/authors), not `author`/`authors`.
+    // Fall back to them so 讲者/创作者 populate the same author surfaces (list
+    // attribution, inspector, author links) as every other type.
     let authorValue: [String] = parseAuthors(
         field(frontmatter, "author")
             ?? field(frontmatter, "authors")
             ?? (entryType == "talk" ? field(frontmatter, "speaker") : nil)
+            ?? (entryType == "image" ? field(frontmatter, "creator") : nil)
     )
 
     // 9. Titles (en, cn), publisher, isbn, translation fields.
@@ -371,10 +391,12 @@ public func buildIndexedEntry(
     // `talk`'s required `media` key (recording filename, e.g. `recording.mov`),
     // carried for conformance only (QUA-185); playback uses TalkMedia on disk.
     let mediaValue: String? = entryType == "talk" ? truthyText(frontmatter, "media") : nil
-    // `talk` dates its event under `date` (full ISO day), reusing the `created`
-    // column so the inspector / sort surfaces treat it like any other date.
+    // `talk` dates its event and `image` its creation under `date` (full ISO
+    // day), reusing the `created` column so the inspector / sort surfaces
+    // treat it like any other date.
     let createdValue: String? = textValue(field(frontmatter, "created"))
-        ?? (entryType == "talk" ? textValue(field(frontmatter, "date")) : nil)
+        ?? (entryType == "talk" || entryType == "image"
+            ? textValue(field(frontmatter, "date")) : nil)
 
     let entry = IndexedEntry(
         path: rel,

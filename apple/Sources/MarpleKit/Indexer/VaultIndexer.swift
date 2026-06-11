@@ -76,6 +76,7 @@ public final class VaultIndexer: @unchecked Sendable {
         // 1. Walk + parse (outside the lock — slow phase).
         let files = try walkMarkdown(vaultPath)
         let sourceSlugs = loadSourceSlugs(sourcesDir: sourcesPath)
+        let sourceIndex = SourceSlugIndex(sourceSlugs)
         let addedDates  = gitAddedDates(workspaceRoot: workspaceRoot)
 
         var entries: [IndexedEntry] = []
@@ -98,10 +99,12 @@ public final class VaultIndexer: @unchecked Sendable {
                 rel: rel,
                 fileStem: fileStem,
                 sourceSlugs: sourceSlugs,
-                mtimeMs: mtimeMs
+                mtimeMs: mtimeMs,
+                sourceIndex: sourceIndex
             )
             guard case .indexed(var entry) = outcome else { continue }
             entry.added = addedDates[rel] ?? 0
+            Self.deriveImageFields(&entry, absPath: file)
             entries.append(entry)
         }
 
@@ -214,6 +217,7 @@ public final class VaultIndexer: @unchecked Sendable {
 
         // Current vault fingerprints: rel → mtime ms (mirrors :372-380).
         let sourceSlugs = loadSourceSlugs(sourcesDir: sourcesPath)
+        let sourceIndex = SourceSlugIndex(sourceSlugs)
         let files = try walkMarkdown(vaultPath)
         var fsMap = [String: Int64](minimumCapacity: files.count)
         for file in files {
@@ -257,7 +261,12 @@ public final class VaultIndexer: @unchecked Sendable {
 
             let existing = indexed.keys.contains(rel)
             let absPath = workspaceRoot + "/" + rel
-            if let entry = indexedEntryForPath(sourceSlugs: sourceSlugs, absPath: absPath, rel: rel) {
+            if let entry = indexedEntryForPath(
+                sourceSlugs: sourceSlugs,
+                sourceIndex: sourceIndex,
+                absPath: absPath,
+                rel: rel
+            ) {
                 writes.append((rel: rel, entry: entry))
                 stats.upserted += 1
             } else if existing {
@@ -393,6 +402,9 @@ public final class VaultIndexer: @unchecked Sendable {
             // QUA-185: `media` carries talk's recording filename for conformance.
             // Its absence means a pre-QUA-185 DB → force buildFull rebuild.
             "media",
+            // QUA-175: `width`/`height`/`file_size` carry image technical
+            // fields derived from original.<ext>. Absence → rebuild.
+            "width",
         ]
 
         var config = Configuration()
@@ -440,6 +452,7 @@ public final class VaultIndexer: @unchecked Sendable {
     /// behaviour (only `buildFull` sets it from git dates).
     private func indexedEntryForPath(
         sourceSlugs: Set<String>,
+        sourceIndex: SourceSlugIndex,
         absPath: String,
         rel: String
     ) -> IndexedEntry? {
@@ -454,10 +467,26 @@ public final class VaultIndexer: @unchecked Sendable {
             rel: rel,
             fileStem: fileStem,
             sourceSlugs: sourceSlugs,
-            mtimeMs: mtimeMs
+            mtimeMs: mtimeMs,
+            sourceIndex: sourceIndex
         )
 
-        if case .indexed(let entry) = outcome { return entry }
+        if case .indexed(var entry) = outcome {
+            Self.deriveImageFields(&entry, absPath: absPath)
+            return entry
+        }
         return nil
+    }
+
+    // MARK: deriveImageFields
+
+    /// Fill an image entry's technical fields (width / height / file size)
+    /// from its sibling `original.<ext>` (QUA-175). No-op for other types.
+    private static func deriveImageFields(_ entry: inout IndexedEntry, absPath: String) {
+        guard entry.entryType == "image",
+              let dims = ImageProbe.probe(imageEntryAbsPath: absPath) else { return }
+        entry.width = dims.width
+        entry.height = dims.height
+        entry.fileSize = dims.fileSize
     }
 }
