@@ -105,7 +105,7 @@ private func paperRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoR
         rows.append(.readOnlyScalar(label: "年份", value: year, copyValue: nil))
     }
     if let journal = nonEmpty(entry.journal) ?? nonEmpty(entry.source) {
-        if let target = journalEntry(for: journal, in: entries) {
+        if let target = NameResolver.journalEntry(matching: journal, in: entries) {
             rows.append(.linkedScalar(
                 label: "期刊",
                 value: journalDisplayTitle(for: target) ?? journal,
@@ -248,14 +248,6 @@ private func transcriptRows(for entry: Entry, in entries: [Entry]) -> [Inspector
                           path: talk.path, copyValue: nil)]
 }
 
-/// Resolve a sibling object (e.g. `transcript.md` ↔ `talk.md`) within the same
-/// folder-per-object directory.
-private func siblingEntry(of entry: Entry, named filename: String, in entries: [Entry]) -> Entry? {
-    let dir = (entry.path as NSString).deletingLastPathComponent
-    let target = dir.isEmpty ? filename : dir + "/" + filename
-    return entries.first { $0.path == target }
-}
-
 private func displayTitle(for entry: Entry?) -> String? {
     if let title = nonEmpty(entry?.title) {
         return title
@@ -266,53 +258,6 @@ private func displayTitle(for entry: Entry?) -> String? {
 
 private func journalDisplayTitle(for entry: Entry?) -> String? {
     nonEmpty(entry?.journal) ?? displayTitle(for: entry)
-}
-
-private func journalEntry(for value: String, in entries: [Entry]) -> Entry? {
-    let needle = journalKeys(value)
-    guard !needle.isEmpty else { return nil }
-    return entries.first { entry in
-        guard entry.type == .journal else { return false }
-        let keys = journalKeys(entry.journal)
-            .union(journalKeys(entry.title))
-            .union(journalKeys(journalSlug(entry.path)))
-            .union(journalKeys(fileStem(entry.path)))
-        return !needle.isDisjoint(with: keys)
-    }
-}
-
-private func journalSlug(_ rel: String) -> String? {
-    guard rel.hasPrefix("vault/journals/") else { return nil }
-    let rest = String(rel.dropFirst("vault/journals/".count))
-    guard let first = rest.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first else {
-        return nil
-    }
-    return String(first).replacingOccurrences(of: ".md", with: "")
-}
-
-private func fileStem(_ rel: String) -> String {
-    (rel as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
-}
-
-private func journalKeys(_ value: String?) -> Set<String> {
-    guard let key = normalizedJournalKey(value) else { return [] }
-    var keys: Set<String> = [key]
-    let slug = slugKey(key)
-    if !slug.isEmpty { keys.insert(slug) }
-    return keys
-}
-
-private func normalizedJournalKey(_ value: String?) -> String? {
-    guard let trimmed = nonEmpty(value) else { return nil }
-    let folded = trimmed.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-    let collapsed = folded.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-    return collapsed.lowercased()
-}
-
-private func slugKey(_ value: String) -> String {
-    value
-        .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "-", options: .regularExpression)
-        .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
 }
 
 private func nonEmpty(_ value: String?) -> String? {
