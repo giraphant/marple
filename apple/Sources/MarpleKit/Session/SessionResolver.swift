@@ -2,7 +2,9 @@ import Foundation
 
 /// The Mac's open-tab forest resolved for display: a document leaf (carrying the
 /// resolved entry for navigation + the Mac's display label) or a named group with
-/// children. `id` is a stable per-node tag assigned during resolution.
+/// children. `id` is a content-derived tag (ancestry path + the node's own path /
+/// group name) that stays put across re-resolves, so SwiftUI animates rather than
+/// resets when the Mac's unresolved set shifts (QUA-228).
 ///
 /// `Identifiable` is a Swift standard-library protocol (not SwiftUI), so this type
 /// lives in MarpleKit and the iOS SwiftUI sidebar consumes it directly.
@@ -44,27 +46,37 @@ public struct ResolvedSessionSpace: Identifiable {
 /// pure path→entry resolution + pruning of unresolved docs, empty groups, and empty
 /// Spaces. File load / iCloud download stay iOS-side (platform IO).
 public enum SessionResolver {
-    /// Verbatim port of `ReaderModel.loadSession`'s resolution segment (byPath
-    /// lookup + recursive prune + counter IDs).
+    /// byPath lookup + recursive prune, assigning each surviving node an ID built
+    /// from its ancestry: `<parent>/<key>#<occurrence>`, where `key` is the doc's
+    /// path or `g:<group name>`. The occurrence index counts only *surviving*
+    /// same-key siblings, so an unresolved (pruned) node never consumes a slot —
+    /// adding/removing one leaves every survivor's ID untouched (QUA-228). The
+    /// occurrence suffix only ever moves when a genuine duplicate (same path or
+    /// group name in one parent) appears or disappears.
     public static func resolve(_ snapshot: SessionSnapshot, entries: [Entry]) -> [ResolvedSessionSpace] {
         let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
-        var counter = 0
-        func resolveNodes(_ nodes: [SessionNode]) -> [ResolvedSessionNode] {
-            nodes.compactMap { node -> ResolvedSessionNode? in
-                counter += 1
+        func resolveNodes(_ nodes: [SessionNode], prefix: String) -> [ResolvedSessionNode] {
+            var used: [String: Int] = [:]
+            return nodes.compactMap { node -> ResolvedSessionNode? in
                 switch node {
                 case .doc(let d):
                     guard let entry = byPath[d.path] else { return nil }
-                    return .doc(id: "n\(counter)", entry: entry, label: d.title)
+                    let key = d.path
+                    let id = "\(prefix)/\(key)#\(used[key, default: 0])"
+                    used[key, default: 0] += 1
+                    return .doc(id: id, entry: entry, label: d.title)
                 case .group(let name, let collapsed, let children):
-                    let kids = resolveNodes(children)
+                    let key = "g:\(name)"
+                    let id = "\(prefix)/\(key)#\(used[key, default: 0])"
+                    let kids = resolveNodes(children, prefix: id)
                     guard !kids.isEmpty else { return nil }
-                    return .group(id: "n\(counter)", name: name, isCollapsed: collapsed, children: kids)
+                    used[key, default: 0] += 1
+                    return .group(id: id, name: name, isCollapsed: collapsed, children: kids)
                 }
             }
         }
         return snapshot.spaces.compactMap { space in
-            let roots = resolveNodes(space.roots)
+            let roots = resolveNodes(space.roots, prefix: space.id.uuidString)
             guard !roots.isEmpty else { return nil }
             return ResolvedSessionSpace(id: space.id, name: space.name,
                                         iconName: space.iconName, roots: roots,
