@@ -47,7 +47,7 @@ public func buildAnnotationIndex(_ entries: [Entry]) -> [String: [Entry]] {
     return idx
 }
 
-private func bookOverviewBySlug(_ entries: [Entry]) -> [String: Entry] {
+func bookOverviewBySlug(_ entries: [Entry]) -> [String: Entry] {
     var out: [String: Entry] = [:]
     for e in entries where e.type == .book {
         if let slug = bookSlug(e.path), out[slug] == nil { out[slug] = e }
@@ -55,7 +55,7 @@ private func bookOverviewBySlug(_ entries: [Entry]) -> [String: Entry] {
     return out
 }
 
-private func annotationAnchor(for entry: Entry, overviewBySlug: [String: Entry]) -> Entry {
+func annotationAnchor(for entry: Entry, overviewBySlug: [String: Entry]) -> Entry {
     if entry.type == .chapter {
         let slug = entry.book ?? bookSlug(entry.path)
         if let slug, let overview = overviewBySlug[slug] { return overview }
