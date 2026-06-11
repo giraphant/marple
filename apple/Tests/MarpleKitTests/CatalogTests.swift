@@ -59,4 +59,44 @@ import Testing
         c.recomputeSavedViewCounts(entries: entries, savedViews: [])
         #expect(c.savedViewCounts.isEmpty)
     }
+
+    @Test func recomputeVisibleSearchActiveUsesHits() {
+        let c = Catalog()
+        let hit = SearchHit(entry: mk("vault/papers/a.md", "paper"), score: 1,
+                            snippet: nil, source: "test")
+        // Non-empty searchText → search-active branch: visibleEntries = the hits,
+        // synchronously (no off-main task).
+        c.recomputeVisible(searchText: "embodiment", searchHits: [hit], pane: .type(.paper),
+                           entries: [], filters: [], match: .all, sorts: [])
+        #expect(c.visibleEntries.map(\.path) == ["vault/papers/a.md"])
+    }
+
+    @Test func recomputeVisibleBrowseFiltersAndSorts() async {
+        let c = Catalog()
+        let p1 = mk("vault/papers/a.md", "paper")
+        let p2 = mk("vault/papers/b.md", "paper")
+        let note = mk("vault/notes/n.md", "note")
+        // Empty searchText → browse branch: pane .type(.paper) keeps only papers,
+        // off-main, applied on main.
+        c.recomputeVisible(searchText: "", searchHits: [], pane: .type(.paper),
+                           entries: [p1, p2, note],
+                           filters: [], match: .all, sorts: [])
+        // Let the off-main task settle.
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        #expect(Set(c.visibleEntries.map(\.path)) == Set(["vault/papers/a.md", "vault/papers/b.md"]))
+    }
+
+    @Test func toggleAndClearSearchMatches() {
+        let c = Catalog()
+        c.toggleMatchExpanded("vault/papers/a.md")
+        #expect(c.matchExpanded.contains("vault/papers/a.md"))
+        c.toggleMatchExpanded("vault/papers/a.md")
+        #expect(!c.matchExpanded.contains("vault/papers/a.md"))
+
+        c.matchExpanded = ["x"]
+        c.clearSearchMatches()
+        #expect(c.searchMatches.isEmpty)
+        #expect(c.searchMatchQuery.isEmpty)
+        #expect(c.matchExpanded.isEmpty)
+    }
 }

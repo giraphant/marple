@@ -184,24 +184,25 @@ final class AppModel {
     private(set) var searchText: String = ""
     private var searchHits: [SearchHit] = []
     private var searchTask: Task<Void, Never>?
-    private var matchTask: Task<Void, Never>?
-    private var recomputeTask: Task<Void, Never>?
 
     /// Per-result matched body lines for the current list search (keyed by path).
     /// Populated off-main after the search settles; rows read from it.
-    private(set) var searchMatches: [String: BodyMatches] = [:]
+    var searchMatches: [String: BodyMatches] { catalog.searchMatches }
     /// The query `searchMatches` was computed for. A matched-line tap uses THIS
     /// (not the live `searchText`) so a tap during the debounce window stays
     /// self-consistent — anchor/ordinal/query always describe the same search.
-    private(set) var searchMatchQuery: String = ""
+    var searchMatchQuery: String { catalog.searchMatchQuery }
     /// Result rows whose "再显示 N 个匹配项" expander has been opened.
-    var matchExpanded: Set<String> = []
+    var matchExpanded: Set<String> {
+        get { catalog.matchExpanded }
+        set { catalog.matchExpanded = newValue }
+    }
 
     // Derived caches — recomputed only when their inputs change, never in a view body.
     var counts: [EntryType: Int] { catalog.counts }
     var themeIndex: [ThemeCount] { catalog.themeIndex }
     var topicMembership: TopicMembership { catalog.topicMembership }
-    private(set) var visibleEntries: [Entry] = []
+    var visibleEntries: [Entry] { catalog.visibleEntries }
     var relationGraph: RelationGraph { catalog.relationGraph }
     /// Prebuilt field-weighted index for the command palette's 快速 mode (rebuilt
     /// whenever `entries` changes, like the other derived caches). Carries a
@@ -538,24 +539,10 @@ final class AppModel {
     /// blocks — mirrors NetNewsWire/FSNotes/CodeEdit list-search discipline (don't
     /// re-filter synchronously in the input handler).
     private func recomputeVisible() {
-        recomputeTask?.cancel()
-        if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-            visibleEntries = searchHits.map(\.entry)
-            return
-        }
-        let snapshot = entries
-        let pane = self.pane
-        let filters = activeFilterClauses
-        let match = activeFilterMatch
-        let sorts = activeSortClauses
-        recomputeTask = Task { [weak self] in
-            let result = await Task.detached(priority: .userInitiated) {
-                sortEntries(applyFilters(entriesForPane(pane, in: snapshot), filters, match: match),
-                            by: sorts)
-            }.value
-            guard !Task.isCancelled else { return }
-            self?.visibleEntries = result
-        }
+        catalog.recomputeVisible(searchText: searchText, searchHits: searchHits,
+                                 pane: pane, entries: entries,
+                                 filters: activeFilterClauses, match: activeFilterMatch,
+                                 sorts: activeSortClauses)
     }
 
     // MARK: actions
@@ -949,7 +936,10 @@ final class AppModel {
                 if Task.isCancelled { return }
                 self?.searchHits = hits
                 self?.recomputeVisible()
-                self?.computeSearchMatches(query: q, paths: hits.map(\.entry.path))
+                guard let self else { return }
+                self.catalog.computeSearchMatches(
+                    query: q, paths: hits.map(\.entry.path), client: self.client,
+                    currentSearchText: { [weak self] in self?.searchText ?? "" })
                 print("[marple] search '\(q)' -> \(hits.count) hits")
             } catch {
                 self?.status = "search failed: \(error)"
@@ -959,42 +949,12 @@ final class AppModel {
     }
 
     private func clearSearchMatches() {
-        matchTask?.cancel()
-        searchMatches = [:]
-        searchMatchQuery = ""
-        matchExpanded = []
-    }
-
-    /// Load each result's stripped body off-main and compute its matched lines.
-    /// Bounded to the hit set (≤ search limit); cancellable and query-versioned so a
-    /// stale load can never attach excerpts to a newer query's rows. Matches the
-    /// stripped body (not the raw file) so frontmatter can't create phantom matches.
-    private func computeSearchMatches(query: String, paths: [String]) {
-        matchTask?.cancel()
-        matchExpanded = []
-        searchMatches = [:]
-        let client = self.client
-        matchTask = Task { [weak self] in
-            var result: [String: BodyMatches] = [:]
-            for path in paths {
-                if Task.isCancelled { return }
-                guard let raw = try? await client.entryText(path: path) else { continue }
-                let body = Frontmatter.split(raw).body
-                let m = bodyLineMatches(body: body, query: query)
-                if !m.lines.isEmpty { result[path] = m }
-            }
-            if Task.isCancelled { return }
-            guard let self,
-                  self.searchText.trimmingCharacters(in: .whitespaces) == query else { return }
-            self.searchMatches = result
-            self.searchMatchQuery = query
-        }
+        catalog.clearSearchMatches()
     }
 
     /// Toggle a result row's "再显示 N 个匹配项" expander.
     func toggleMatchExpanded(_ path: String) {
-        if matchExpanded.contains(path) { matchExpanded.remove(path) }
-        else { matchExpanded.insert(path) }
+        catalog.toggleMatchExpanded(path)
     }
 
     /// Open `path` from a clicked search matched-line: opens browser-style (in-place

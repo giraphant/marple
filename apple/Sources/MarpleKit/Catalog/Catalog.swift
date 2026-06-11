@@ -21,6 +21,22 @@ public final class Catalog {
     private var deferredDerivedTask: Task<Void, Never>?
     private var derivedGeneration: Int = 0
 
+    // 可见列表 + 列表搜索匹配缓存（QUA-218 PR3a Task 4）
+    public internal(set) var visibleEntries: [Entry] = []
+    /// Per-result matched body lines for the current list search (keyed by path).
+    /// Populated off-main after the search settles; rows read from it.
+    public internal(set) var searchMatches: [String: BodyMatches] = [:]
+    /// The query `searchMatches` was computed for. A matched-line tap uses THIS
+    /// (not the live `searchText`) so a tap during the debounce window stays
+    /// self-consistent — anchor/ordinal/query always describe the same search.
+    public internal(set) var searchMatchQuery: String = ""
+    /// Result rows whose "再显示 N 个匹配项" expander has been opened.
+    public var matchExpanded: Set<String> = []
+    /// filter/sort 防抖轴（独立，不并入统一 generation）
+    private var recomputeTask: Task<Void, Never>?
+    /// 搜索匹配加载防抖轴（独立，不并入统一 generation）
+    private var matchTask: Task<Void, Never>?
+
     public init() {}
 
     /// Bootstrap-only: seed counts from persisted state in AppModel.init BEFORE
@@ -93,5 +109,79 @@ public final class Catalog {
             result[view.id] = applyFilters(universe, view.clauses, match: view.match).count
         }
         savedViewCounts = result
+    }
+
+    /// The visible browse subset (filter→sort over ~15k entries) is computed OFF the
+    /// main thread and applied back on main, with stale rebuilds dropped via task
+    /// cancellation. This keeps clearing search / switching panes off the keystroke so
+    /// text input never blocks — mirrors NetNewsWire/FSNotes/CodeEdit list-search
+    /// discipline (don't re-filter synchronously in the input handler).
+    ///
+    /// Inputs are snapshotted at entry by the shell (searchText/searchHits/pane/
+    /// filters/match/sorts/entries): the search-active branch and the off-main
+    /// filter/sort both read state captured when `recomputeVisible` was called.
+    public func recomputeVisible(searchText: String, searchHits: [SearchHit],
+                                 pane: Pane, entries: [Entry],
+                                 filters: [FilterClause], match: FilterMatch,
+                                 sorts: [SortClause]) {
+        recomputeTask?.cancel()
+        if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+            visibleEntries = searchHits.map(\.entry)
+            return
+        }
+        let snapshot = entries
+        recomputeTask = Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                sortEntries(applyFilters(entriesForPane(pane, in: snapshot), filters, match: match),
+                            by: sorts)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.visibleEntries = result
+        }
+    }
+
+    public func clearSearchMatches() {
+        matchTask?.cancel()
+        searchMatches = [:]
+        searchMatchQuery = ""
+        matchExpanded = []
+    }
+
+    /// Load each result's stripped body off-main and compute its matched lines.
+    /// Bounded to the hit set (≤ search limit); cancellable and query-versioned so a
+    /// stale load can never attach excerpts to a newer query's rows. Matches the
+    /// stripped body (not the raw file) so frontmatter can't create phantom matches.
+    ///
+    /// `query`/`paths`/`client` are snapshots taken at call entry. `currentSearchText`
+    /// is a LIVE closure: the publish guard re-reads the shell's CURRENT searchText at
+    /// the async publish point (post-await), so a tap during the debounce window stays
+    /// self-consistent — a snapshot here would let a stale query attach to newer rows.
+    public func computeSearchMatches(query: String, paths: [String],
+                                     client: VaultClient,
+                                     currentSearchText: @escaping () -> String) {
+        matchTask?.cancel()
+        matchExpanded = []
+        searchMatches = [:]
+        matchTask = Task { [weak self] in
+            var result: [String: BodyMatches] = [:]
+            for path in paths {
+                if Task.isCancelled { return }
+                guard let raw = try? await client.entryText(path: path) else { continue }
+                let body = Frontmatter.split(raw).body
+                let m = bodyLineMatches(body: body, query: query)
+                if !m.lines.isEmpty { result[path] = m }
+            }
+            if Task.isCancelled { return }
+            guard let self,
+                  currentSearchText().trimmingCharacters(in: .whitespaces) == query else { return }
+            self.searchMatches = result
+            self.searchMatchQuery = query
+        }
+    }
+
+    /// Toggle a result row's "再显示 N 个匹配项" expander.
+    public func toggleMatchExpanded(_ path: String) {
+        if matchExpanded.contains(path) { matchExpanded.remove(path) }
+        else { matchExpanded.insert(path) }
     }
 }
