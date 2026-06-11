@@ -298,6 +298,7 @@ final class AppModel {
     /// Publishes open tabs to the synced folder for the iOS companion. nil without
     /// a workspace root (e.g. tests).
     private let sessionWriter: SessionWriter?
+    private let metadataWriter: MetadataWriter
 
     /// True when a vector index exists, so 深度 (semantic) mode can run.
     var semanticAvailable: Bool { semantic != nil }
@@ -323,6 +324,7 @@ final class AppModel {
          workspaceRoot: String = "",
          supersetRunner: SupersetRunner = SupersetRunner()) {
         self.client = client
+        self.metadataWriter = MetadataWriter(client: client)
         self.workspaceRoot = workspaceRoot
         self.stateStore = stateStore
         self.semantic = semantic
@@ -1683,9 +1685,7 @@ final class AppModel {
         savingField = field; writeError = nil
         defer { savingField = nil }
         do {
-            let fresh = try await client.entryText(path: path)
-            let next = patch(fresh)
-            try await client.writeFile(path: path, text: next)
+            try await metadataWriter.write(path: path, applying: patch)
             if let i = entries.firstIndex(where: { $0.path == path }) {
                 entries[i] = local(entries[i])
             }
