@@ -1134,7 +1134,7 @@ final class AppModel {
     }
 
     func follow(_ target: String) async {
-        guard let hit = WikiResolver.resolve(target, in: entries) else {
+        guard let hit = NameResolver.resolveWikilink(target, in: entries) else {
             status = "unresolved [[\(target)]]"
             print("[marple] follow [[\(target)]] -> UNRESOLVED")
             return
@@ -1637,7 +1637,7 @@ final class AppModel {
         var targets: [SupersetWikiTarget] = []
         for ref in refs where !seen.contains(ref.target) {
             seen.insert(ref.target)
-            guard let resolved = WikiResolver.resolve(ref.target, in: entries) else { continue }
+            guard let resolved = NameResolver.resolveWikilink(ref.target, in: entries) else { continue }
             targets.append(SupersetWikiTarget(
                 target: ref.target,
                 label: ref.label,
@@ -1884,15 +1884,11 @@ final class AppModel {
             local: { $0.with(created: .some(val)) })
     }
 
-    /// Author-profile entry whose title matches `name` (case-insensitive). Used
-    /// by the Inspector so each chip in a multi-author row can navigate to its
-    /// own profile. Linear scan — call frequency is bounded by inspector renders.
+    /// Author-profile entry whose title matches `name`. Forwards to
+    /// NameResolver (exact tier = the old scan; folded tier per QUA-218 PR2
+    /// approved diffs ①②). Used by the Inspector author chips.
     func authorProfile(for name: String) -> Entry? {
-        let key = name.lowercased().trimmingCharacters(in: .whitespaces)
-        guard !key.isEmpty else { return nil }
-        return entries.first {
-            $0.type == .author && ($0.title ?? "").lowercased() == key
-        }
+        NameResolver.authorProfile(named: name, in: entries)
     }
 
     func setSource(_ text: String?) async {
