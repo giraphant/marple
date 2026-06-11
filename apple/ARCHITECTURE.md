@@ -109,14 +109,33 @@ ios/MarpleiOS/
 
 ## QUA-218 终态关键事实
 
-- **Catalog 是唯一 L2 派生 owner**:counts/themeIndex/visibleEntries/relationGraph/searchIndex 都算在它身上,壳只读。
+- **Catalog 是唯一 L2 状态 owner**:`entries` 源快照(QUA-229)+ counts/themeIndex/visibleEntries/relationGraph/searchIndex 派生都算在它身上,壳只读(以 `var entries { catalog.entries }` facade 转发)。`entries` 只能经 `catalog.publish`(陈旧守卫,refresh 路径)/ `catalog.mutateEntries`(乐观编辑)改。
 - **统一 generation / 单飞**:`RefreshAuthority`(actor)给每趟 reconcile→reload 发 `pass`,陈旧 pass 发布即丢弃;`derivedGeneration` 是独立轴(乐观单条编辑等 refresh 之外的触发也能让后台派生重算)。
 - **NameResolver = 全库唯一两级名字匹配**:wikilink 解析与实体引用共用它(第一级逐字保旧命中,第二级共用 foldedKey 兜底)。
 - **规则① 实体引用 / 规则② 容器** 两套引擎 + 具名例外:`RelationsIndex.annotationAnchor`(annotation 章→书 remap)、`SourceResolver` PDF 源的 Jaccard 模糊匹配。
 - **VaultChangeSource 契约**:Mac 用 `VaultWatcher`(FSEvents),iOS 用 `ICloudMaterializer`(iCloud 下载);两边都路由到 `catalog.refresh`。
 - **写回 primitive(`SessionWriter`/`MetadataWriter`/`FrontmatterPatch`)已沉入 MarpleKit**;iOS 只读是**产品选择**,不是平台限制——`IOSVaultClient` 的写方法存在但一律抛 read-only。
 
-## 过渡期留壳(诚实标注,尚未完全下沉)
+## 下沉边界(平台分叉决定的终态,非过渡欠债)
 
-- `entries` 数组 + `loadIndex`/`reconcile` 编排的**主体**仍在各壳的中枢 view-model 里(macOS `AppModel.refreshBody`/`loadIndex`、iOS `ReaderModel`)。Catalog 持有派生状态与 refresh 权威,但**那个 reconcile→reload 闭包是壳喂进来的**(`catalog.refresh(model.refreshBody)`)——过渡态,未彻底沉入核。
-- **字段编辑语义**(`FrontmatterPatch` 组合 + 乐观更新单条 `Entry`)与 `persist()` 编排同样留在壳侧(`AppModel`)。这些都还**没做完**,是迁移过渡留壳,别当成终态。
+QUA-229 把最后一块真共享的状态——`entries` 源快照 + 陈旧守卫的发布——沉进了 Catalog
+(`catalog.publish(_:pass:)` / `mutateEntries`)。**剩下还在壳侧的,是平台真分叉的部分,
+不是欠债**:把它们硬塞进核只会反向优化(把壳的 UI 状态倒灌进 MarpleKit)。逐条说明边界:
+
+- **reconcile 编排**仍由各壳供给(`catalog.refresh(body)` 仍收一个 body 闭包)。因为两端
+  的 reconcile 真不一样:macOS 用长期存活的注入式 `cliIndexer`(还被 `CLIServer`/boot 直接
+  用);iOS 每次新建 `VaultIndexer`,且 reconcile 前要先 `materializeMarkdown`(iCloud 下载,
+  Mac 没有)。统一它要么把 client/indexer 连带 CLIServer/boot 接线搬进核,要么散成几个 hook
+  闭包——耦合量不降反升。
+- **post-publish 反应**两端共享零行,因为是「两种交互形状各自的反应」,不是同一逻辑写两遍:
+  macOS 发布后刷新它的物化列表(`recomputeVisible`,NSCollectionView data source 的硬需求)、
+  读 schema/译本、`persist()`、重载开档、刷回收站;iOS 只 `loadSession`(解析 **Mac 的**标签页
+  来只读显示)。iOS 结构上不产生这些反应所消费的活输入(无当前 pane / 无自己的 Spaces /
+  无回收站),强行让它跑 = 编造无意义输入 + 背死状态。
+- **`persist()`** 写 Workspace/Spaces/UserDefaults,纯壳状态,Catalog(MarpleKit)不该认识这些
+  类型——留壳是对的。**`FrontmatterPatch` 组合**(哪个字段写哪个 key)是 UI 语义,同理留壳;
+  其**乐观更新单条 `Entry`** 的那一步现经 `catalog.mutateEntries` 改(`entries` 已下沉)。
+
+> 历史:PR3a 决策 3 曾把 `entries` 也留在壳里以控 blast radius,并标注「尚未下沉」。QUA-229
+> 核实后:`entries` 该沉、也沉了;reconcile/post-publish/persist 留壳是**平台分叉的正确终态**,
+> 不是没做完。所谓「catalog.refresh 完全自洽闭包-free」是当初没看清平台分叉的理想化措辞。
