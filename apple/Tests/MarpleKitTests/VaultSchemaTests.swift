@@ -116,6 +116,25 @@ import Testing
             return
         }
         #expect(entry.author == ["张三"])
+
+        // 声明顺序生效：两个别名字段同时存在时，先声明的 author 赢
+        let both = """
+        ---
+        type: book
+        title: T
+        author: 李四
+        translator: 张三
+        ---
+        body
+        """
+        let bothOutcome = buildIndexedEntry(
+            text: both, rel: "vault/books/t2/book.md", fileStem: "book",
+            sourceSlugs: [], mtimeMs: nil, schema: schema)
+        guard case .indexed(let bothEntry) = bothOutcome else {
+            Issue.record("expected .indexed, got \(bothOutcome)")
+            return
+        }
+        #expect(bothEntry.author == ["李四"])
     }
 
     // 默认 schema 下既有行为不变：talk 的 speaker 落 author 列
