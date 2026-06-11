@@ -1,12 +1,12 @@
-import XCTest
+import Testing
 @testable import MarpleKit
 
-final class VaultSchemaTests: XCTestCase {
+@Suite struct VaultSchemaTests {
 
     // 内置别名表必须逐字复刻 IndexedEntry.swift 的现状回退链
-    func testBuiltinAuthorAliases() {
+    @Test func builtinAuthorAliases() {
         let aliases = VaultSchema.builtin.entityAliases["author"]
-        XCTAssertEqual(aliases, [
+        #expect(aliases == [
             VaultSchema.FieldAlias("author"),
             VaultSchema.FieldAlias("authors"),
             VaultSchema.FieldAlias("speaker", onlyForType: "talk"),
@@ -14,15 +14,15 @@ final class VaultSchemaTests: XCTestCase {
         ])
     }
 
-    func testBuiltinJournalAndTopicAliases() {
-        XCTAssertEqual(VaultSchema.builtin.entityAliases["journal"],
-                       [VaultSchema.FieldAlias("journal")])
-        XCTAssertEqual(VaultSchema.builtin.entityAliases["topic"],
-                       [VaultSchema.FieldAlias("topics")])
+    @Test func builtinJournalAndTopicAliases() {
+        #expect(VaultSchema.builtin.entityAliases["journal"] ==
+                [VaultSchema.FieldAlias("journal")])
+        #expect(VaultSchema.builtin.entityAliases["topic"] ==
+                [VaultSchema.FieldAlias("topics")])
     }
 
     // 内置显示表必须逐字复刻 Marple/Shared/TypeIcon.swift 的现状 switch
-    func testBuiltinDisplayMatchesLegacyTypeIcon() {
+    @Test func builtinDisplayMatchesLegacyTypeIcon() {
         let expected: [(EntryType, String, String)] = [
             (.paper,      "doc.text",                 "blue"),
             (.book,       "book",                     "orange"),
@@ -38,8 +38,8 @@ final class VaultSchemaTests: XCTestCase {
         ]
         for (type, symbol, tint) in expected {
             let d = VaultSchema.builtin.display(for: type)
-            XCTAssertEqual(d.symbol, symbol, "\(type)")
-            XCTAssertEqual(d.tint, tint, "\(type)")
+            #expect(d.symbol == symbol, "\(type)")
+            #expect(d.tint == tint, "\(type)")
         }
     }
 }
