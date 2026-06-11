@@ -63,5 +63,5 @@ public actor RefreshAuthority {
     }
 
     /// Test hook: a trailing rerun has been requested on the active runner.
-    public var rerunRequested: Bool { rerun }
+    var rerunRequested: Bool { rerun }
 }
