@@ -40,6 +40,18 @@ import Testing
         let b = mk(path: "vault/authors/b.md", type: .author, title: "john smith")
         #expect(NameResolver.authorPages(named: "John Smith", in: [a, b]).map(\.path) == [a.path, b.path])
     }
+    // — batch form pins per-call semantics (exact hit / folded fallback / miss / blank / collapse) —
+    @Test func authorPageIndexMatchesAuthorPages() {
+        let exact = mk(path: "vault/authors/a.md", type: .author, title: "Pierre Bourdieu")
+        let folded = mk(path: "vault/authors/b.md", type: .author, title: "Pierré Bourdieu")
+        let entries = [exact, folded]
+        let idx = NameResolver.AuthorPageIndex(entries)
+        for name in ["Pierre Bourdieu", "pierré bourdieu", "Nobody", "  ", "Pierre  Bourdieu"] {
+            #expect(idx.pages(named: name).map(\.path)
+                 == NameResolver.authorPages(named: name, in: entries).map(\.path),
+                 "mismatch for \(name)")
+        }
+    }
     // — wikilink tier 1 verbatim (title beats stem, no trim) —
     @Test func wikilinkTitleBeatsStem() {
         let byTitle = mk(path: "vault/notes/x.md",      type: .note, title: "Target")
