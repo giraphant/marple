@@ -157,12 +157,12 @@ final class AppModel {
     private(set) var savedViews: [SavedView] = [] {
         didSet {
             persist()
-            recomputeSavedViewCounts()
+            catalog.recomputeSavedViewCounts(entries: entries, savedViews: savedViews)
         }
     }
     /// Live row counts per saved view for the sidebar (computed like the type
     /// bucket counts, over the browse universe).
-    private(set) var savedViewCounts: [UUID: Int] = [:]
+    var savedViewCounts: [UUID: Int] { catalog.savedViewCounts }
 
     func savedView(_ id: UUID) -> SavedView? { savedViews.first { $0.id == id } }
 
@@ -198,9 +198,9 @@ final class AppModel {
     var matchExpanded: Set<String> = []
 
     // Derived caches — recomputed only when their inputs change, never in a view body.
-    private(set) var counts: [EntryType: Int] = [:]
+    var counts: [EntryType: Int] { catalog.counts }
     var themeIndex: [ThemeCount] { catalog.themeIndex }
-    private(set) var topicMembership: TopicMembership = TopicMembership()
+    var topicMembership: TopicMembership { catalog.topicMembership }
     private(set) var visibleEntries: [Entry] = []
     private(set) var relationGraph: RelationGraph = .empty
     /// Prebuilt field-weighted index for the command palette's 快速 mode (rebuilt
@@ -339,7 +339,7 @@ final class AppModel {
             // wiping the user's restored type counts before we'd had a chance
             // to round-trip them.
             if let restored = s.counts {
-                counts = restored
+                catalog.seedCounts(restored)
                 loadedCountsSnapshot = restored
             }
             // Restore views BEFORE browsePane: its didSet persists, and a
@@ -498,32 +498,8 @@ final class AppModel {
     ///   the reading view's relations panel and the Cmd-K palette, neither of
     ///   which is exercised in the first few hundred ms after launch)
     private func rebuildIndexDerived() {
-        var c: [EntryType: Int] = [:]
-        for e in entries { c[e.type, default: 0] += 1 }
-        // QUA-189: the 专题 bucket folds to one row per topic (overview), so its
-        // count must match the folded list, not the raw page total.
-        if c[.topic] != nil { c[.topic] = topicBrowseSubset(entries).count }
-        counts = c
-        recomputeSavedViewCounts()
-        catalog.themeIndex = themeCounts(entries)
-        topicMembership = buildTopicMembership(entries)
-        scheduleDeferredDerivedRebuild()
-    }
-
-    /// Sidebar counts for saved views — each view's clauses over the browse
-    /// universe, so count == list length (same contract as the topic bucket).
-    /// Cheap: clause matching over the flat array, × a handful of views.
-    private func recomputeSavedViewCounts() {
-        guard !savedViews.isEmpty else {
-            if !savedViewCounts.isEmpty { savedViewCounts = [:] }
-            return
-        }
-        let universe = browseUniverse(entries)
-        var result: [UUID: Int] = [:]
-        for view in savedViews {
-            result[view.id] = applyFilters(universe, view.clauses, match: view.match).count
-        }
-        savedViewCounts = result
+        catalog.rebuildIndexDerived(entries: entries, savedViews: savedViews)
+        scheduleDeferredDerivedRebuild()   // Task 3 前暂留壳
     }
 
     /// Build the heavy derived caches (relation graph, search index) on a
