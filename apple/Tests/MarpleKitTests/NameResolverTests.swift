@@ -77,4 +77,27 @@ import Testing
         let p = mk(path: "vault/papers/x.md", type: .paper, title: "Mind")
         #expect(NameResolver.journalEntry(matching: "Mind", in: [p]) == nil)
     }
+    // — blank-input pins —
+    @Test func authorPagesBlankNameReturnsEmpty() {
+        let page = mk(path: "vault/authors/pb.md", type: .author, title: "Pierre Bourdieu")
+        #expect(NameResolver.authorPages(named: "  ", in: [page]).isEmpty)
+    }
+    @Test func journalEntryBlankValueReturnsNil() {
+        let j = mk(path: "vault/journals/jop.md", type: .journal, journal: "Journal of Philosophy")
+        #expect(NameResolver.journalEntry(matching: "", in: [j]) == nil)
+    }
+    // Pins a legacy WikiResolver quirk carried verbatim into tier 1: an empty
+    // target matches any nil-title entry because ($0.title ?? "") == "".
+    // The folded tier guards against empty needles, but tier 1 deliberately
+    // doesn't — "fixing" this asymmetry would be an unapproved behavior change.
+    @Test func wikilinkEmptyTargetMatchesNilTitleEntry() {
+        let nilTitle = mk(path: "vault/notes/x.md", type: .note)
+        #expect(NameResolver.resolveWikilink("", in: [nilTitle])?.path == nilTitle.path)
+    }
+    // — folded tier returns ALL folded-equal pages, document order —
+    @Test func authorPagesAllMatchesAtFoldedTier() {
+        let a = mk(path: "vault/authors/a.md", type: .author, title: "Pierré Bourdieu")
+        let b = mk(path: "vault/authors/b.md", type: .author, title: "PIERRÉ  Bourdieu")
+        #expect(NameResolver.authorPages(named: "Pierre Bourdieu", in: [a, b]).map(\.path) == [a.path, b.path])
+    }
 }
