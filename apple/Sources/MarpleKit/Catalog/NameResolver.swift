@@ -41,6 +41,34 @@ public enum NameResolver {
         authorPages(named: name, in: entries).first
     }
 
+    /// authorPages 的批量形式：建一次两级字典，逐名查询 O(1)。
+    /// 语义与 authorPages(named:in:) 逐字相同（exact 层未命中才看 folded 层；
+    /// 文档序保留）。RelationGraph.build 用它避免 O(作品×作者名×全库) 扫描。
+    struct AuthorPageIndex {
+        private let exact: [String: [Entry]]    // key = title.lowercased()
+        private let folded: [String: [Entry]]   // key = foldedKey(title)
+
+        init(_ entries: [Entry]) {
+            var e: [String: [Entry]] = [:], f: [String: [Entry]] = [:]
+            for entry in entries where entry.type == .author {
+                let title = entry.title ?? ""
+                e[title.lowercased(), default: []].append(entry)
+                let fk = NameResolver.foldedKey(title)
+                if !fk.isEmpty { f[fk, default: []].append(entry) }
+            }
+            exact = e; folded = f
+        }
+
+        func pages(named name: String) -> [Entry] {
+            let key = name.lowercased().trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty else { return [] }
+            if let hit = exact[key], !hit.isEmpty { return hit }
+            let fk = NameResolver.foldedKey(name)
+            guard !fk.isEmpty else { return [] }
+            return folded[fk] ?? []
+        }
+    }
+
     // MARK: - wikilink
 
     /// [[target]] → 条目。第一级逐字 = 旧 WikiResolver.resolve（小写 title

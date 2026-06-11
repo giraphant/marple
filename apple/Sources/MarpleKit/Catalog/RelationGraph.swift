@@ -68,6 +68,7 @@ public struct RelationGraph: Sendable, Equatable {
         var byPath: [String: Entry] = [:]
         for e in entries where byPath[e.path] == nil { byPath[e.path] = e }
         let overviewBySlug = bookOverviewBySlug(entries)
+        let authorPageIndex = NameResolver.AuthorPageIndex(entries)
 
         for e in entries {
             if e.type == .paper || e.type == .book {
@@ -75,7 +76,7 @@ public struct RelationGraph: Sendable, Equatable {
                     works[name.lowercased(), default: []].append(e)
                 }
                 for (i, name) in e.author.enumerated() {
-                    for page in NameResolver.authorPages(named: name, in: entries) {
+                    for page in authorPageIndex.pages(named: name) {
                         edges.append(Edge(from: e.path, kind: .authoredBy, to: page.path, position: i))
                     }
                 }

@@ -63,7 +63,8 @@ public func relations(for entry: Entry, in entries: [Entry],
                       topicMembership: TopicMembership = TopicMembership()) -> Relations {
     var out = Relations()
     // 旧 isEmpty 回退：deferred 图未就绪时同步重建（author 部分用）。
-    // annotations 沿用旧时序：只读传入的图，未就绪即空（旧 annotationIndex 无回退）。
+    // annotations 沿用旧时序：只读传入的图，未就绪即空（旧 annotationIndex 无回退，
+    // 故意用 graph 非 liveGraph）。
     let liveGraph = graph.isEmpty ? RelationGraph.build(entries) : graph
     let anchor = annotationAnchor(for: entry, in: entries)
     out.annotations = graph.sources(of: anchor.path, kind: .annotates).sorted(by: byRatingDesc)
