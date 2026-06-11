@@ -3,11 +3,15 @@ import Foundation
 /// L2 编目层的派生状态 owner（QUA-218 PR3a）。图书馆目录隐喻：从馆藏（vault）
 /// 派生、可随时重编、多路检索、带交叉引用。本期持有派生缓存 + vault-变更管线
 /// 的统一 generation/单飞权威；entries 与 index 管线过渡期仍在 AppModel。
+///
+/// Stored properties live here in the primary declaration (the `@Observable`
+/// macro only sees properties declared in the class body, not extensions). The
+/// recompute / refresh methods are split into `Catalog+*` extension files by
+/// concern (index-derived / deferred-derived / visible+search / open-doc /
+/// refresh authority); this file holds ONLY state + init + bootstrap seeding.
 @MainActor
 @Observable
 public final class Catalog {
-    // TODO(QUA-218 PR3a Task 5): when open-doc derived lands, consider splitting
-    // Catalog into extension files by concern (index-derived / visible+search / open-doc).
     // 索引派生（entries 变即重算）
     public internal(set) var counts: [EntryType: Int] = [:]
     public internal(set) var savedViewCounts: [UUID: Int] = [:]
@@ -20,10 +24,10 @@ public final class Catalog {
     /// 派生就绪回调（过渡期）：deferred 派生发布后,若有开档则重算开档派生。
     /// Task 5 把 recomputeOpenDerived 迁入后改为内部直调。
     public var onDerivedReady: (() -> Void)?
-    private var deferredDerivedTask: Task<Void, Never>?
+    var deferredDerivedTask: Task<Void, Never>?
     // Independent of `pass` (Decision 1): bumped by every scheduleDeferredDerivedRebuild
     // incl. optimistic edits; do NOT fold into pass.
-    private var derivedGeneration: Int = 0
+    var derivedGeneration: Int = 0
 
     // 可见列表 + 列表搜索匹配缓存（QUA-218 PR3a Task 4）
     public internal(set) var visibleEntries: [Entry] = []
@@ -37,208 +41,9 @@ public final class Catalog {
     /// Result rows whose "再显示 N 个匹配项" expander has been opened.
     public var matchExpanded: Set<String> = []
     /// filter/sort 防抖轴（独立，不并入统一 generation）
-    private var recomputeTask: Task<Void, Never>?
+    var recomputeTask: Task<Void, Never>?
     /// 搜索匹配加载防抖轴（独立，不并入统一 generation）
-    private var matchTask: Task<Void, Never>?
-
-    // MARK: - 统一刷新权威 (QUA-218 PR3a Task 7)
-    // vault-变更管线的唯一 generation/单飞：RefreshAuthority（合流单飞，QUA-198 OOM
-    // 承重墙）+ per-pass `pass`（旧 loadIndexGeneration 的 staleness）2→1 统一。
-    // derivedGeneration 保持独立（决策 1：它有乐观单条编辑这条 refresh 之外的触发
-    // 轴，折叠会引入派生覆盖竞态）。
-    private let authority = RefreshAuthority()
-    /// 唯一 per-pass generation：服务 loadIndex 管线陈旧丢弃。每个 refresh body 跑一次
-    /// bump 一次。NOT for derive (决策 1)。
-    public private(set) var pass: Int = 0
-
-    /// 唯一刷新入口（watcher/boot）。合流单飞（保留 OOM bound）+ 每 pass bump 一次。
-    /// body = 壳的 reconcile→loadIndex 闭包；body 内用 `isStale(myPass)` 在每个挂起点
-    /// 后自检，陈旧即丢弃发布。
-    public func refresh(_ body: (_ myPass: Int) async -> Void) async {
-        guard await authority.tryBegin() else { return }
-        repeat {
-            pass &+= 1
-            let myPass = pass
-            await body(myPass)
-        } while await authority.finishOrRerun()
-    }
-
-    /// CLI join 路径（refreshJoining）：busy 时 beginOrJoin 挂起等一次新 trailing pass
-    /// 完成（返回 false，无事可做）；idle 时获取门并自跑（返回 true）。复刻旧
-    /// cliRefreshIndex 的 `if beginOrJoin() { repeat refreshChain() while finishOrRerun() }`。
-    public func refreshJoining(_ body: (_ myPass: Int) async -> Void) async {
-        if await authority.beginOrJoin() {
-            repeat {
-                pass &+= 1
-                let myPass = pass
-                await body(myPass)
-            } while await authority.finishOrRerun()
-        }
-    }
-
-    /// True when a newer pass has begun since `myPass` was captured — a loadIndex
-    /// running under `myPass` should then drop its publish (旧 loadIndexGeneration
-    /// 守卫语义)。
-    public func isStale(_ myPass: Int) -> Bool { pass != myPass }
-
-    /// 独立刷新入口（restoreTrash、boot 首次 loadIndex、测试）直接调 loadIndex 而不
-    /// 经 refresh 单飞时，仍需一个有效 pass：bump 并返回。等价于旧 loadIndexGeneration
-    /// 在 loadIndex 入口的 `&+= 1`，让两个并发裸 loadIndex 各持不同 pass、旧者自检陈旧。
-    ///
-    /// Does NOT touch the single-flight authority — it ONLY advances the staleness
-    /// generation; never call it to trigger a refresh (use refresh/refreshJoining).
-    public func beginStandalonePass() -> Int {
-        pass &+= 1
-        return pass
-    }
-
-    public init() {}
-
-    /// Bootstrap-only: seed counts from persisted state in AppModel.init BEFORE
-    /// the first rebuildIndexDerived. Calling it afterwards overwrites live counts
-    /// with stale restored data. Not a general setter.
-    public func seedCounts(_ restored: [EntryType: Int]) { counts = restored }
-
-    /// entries 变更后的立即派生（counts/themeIndex/topicMembership/savedViewCounts），
-    /// 末尾接上 deferred 派生（relationGraph/searchIndex）。
-    /// 逐字 = 旧 AppModel.rebuildIndexDerived 立即段 + recomputeSavedViewCounts
-    /// + scheduleDeferredDerivedRebuild。
-    public func rebuildIndexDerived(entries: [Entry], savedViews: [SavedView]) {
-        var c: [EntryType: Int] = [:]
-        for e in entries { c[e.type, default: 0] += 1 }
-        // QUA-189: the 专题 bucket folds to one row per topic (overview), so its
-        // count must match the folded list, not the raw page total.
-        if c[.topic] != nil { c[.topic] = topicBrowseSubset(entries).count }
-        counts = c
-        recomputeSavedViewCounts(entries: entries, savedViews: savedViews)
-        themeIndex = themeCounts(entries)
-        topicMembership = buildTopicMembership(entries)
-        scheduleDeferredDerivedRebuild(entries: entries)
-    }
-
-    /// Build the heavy derived caches (relation graph, search index) on a
-    /// background task and publish them on the main actor when done. If
-    /// `entries` changes again before this task completes, the in-flight task
-    /// is cancelled and stale dispatch blocks are vetoed by generation counter
-    /// — only the latest snapshot wins.
-    private func scheduleDeferredDerivedRebuild(entries: [Entry]) {
-        deferredDerivedTask?.cancel()
-        derivedGeneration &+= 1
-        let generation = derivedGeneration
-        let snapshot = entries
-        deferredDerivedTask = Task { [weak self] in
-            let result = await Task.detached(priority: .utility) {
-                let graph = RelationGraph.build(snapshot)
-                let search = buildSearchIndex(snapshot)
-                return (graph, search)
-            }.value
-            if Task.isCancelled { return }
-            // Hop to the next main-runloop tick (not MainActor.run, which can
-            // run synchronously inside the current render pass and triggered an
-            // NSTableView reentrant-delegate warning when @Observable
-            // invalidation cascaded back into the table mid-render).
-            //
-            // DispatchQueue.main.async can't be cancelled, so guard the
-            // assignment with the generation counter: any newer rebuild bumps
-            // `derivedGeneration` and this stale block becomes a no-op.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.derivedGeneration == generation else { return }
-                self.relationGraph = result.0
-                self.searchIndex = result.1
-                self.onDerivedReady?()
-            }
-        }
-    }
-
-    /// Sidebar counts for saved views — each view's clauses over the browse
-    /// universe, so count == list length (same contract as the topic bucket).
-    /// Cheap: clause matching over the flat array, × a handful of views.
-    public func recomputeSavedViewCounts(entries: [Entry], savedViews: [SavedView]) {
-        guard !savedViews.isEmpty else {
-            if !savedViewCounts.isEmpty { savedViewCounts = [:] }
-            return
-        }
-        let universe = browseUniverse(entries)
-        var result: [UUID: Int] = [:]
-        for view in savedViews {
-            result[view.id] = applyFilters(universe, view.clauses, match: view.match).count
-        }
-        savedViewCounts = result
-    }
-
-    /// The visible browse subset (filter→sort over ~15k entries) is computed OFF the
-    /// main thread and applied back on main, with stale rebuilds dropped via task
-    /// cancellation. This keeps clearing search / switching panes off the keystroke so
-    /// text input never blocks — mirrors NetNewsWire/FSNotes/CodeEdit list-search
-    /// discipline (don't re-filter synchronously in the input handler).
-    ///
-    /// Inputs are snapshotted at entry by the shell (searchText/searchHits/pane/
-    /// filters/match/sorts/entries): the search-active branch and the off-main
-    /// filter/sort both read state captured when `recomputeVisible` was called.
-    public func recomputeVisible(searchText: String, searchHits: [SearchHit],
-                                 pane: Pane, entries: [Entry],
-                                 filters: [FilterClause], match: FilterMatch,
-                                 sorts: [SortClause]) {
-        recomputeTask?.cancel()
-        if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-            visibleEntries = searchHits.map(\.entry)
-            return
-        }
-        let snapshot = entries
-        recomputeTask = Task { [weak self] in
-            let result = await Task.detached(priority: .userInitiated) {
-                sortEntries(applyFilters(entriesForPane(pane, in: snapshot), filters, match: match),
-                            by: sorts)
-            }.value
-            guard !Task.isCancelled else { return }
-            self?.visibleEntries = result
-        }
-    }
-
-    public func clearSearchMatches() {
-        matchTask?.cancel()
-        searchMatches = [:]
-        searchMatchQuery = ""
-        matchExpanded = []
-    }
-
-    /// Load each result's stripped body off-main and compute its matched lines.
-    /// Bounded to the hit set (≤ search limit); cancellable and query-versioned so a
-    /// stale load can never attach excerpts to a newer query's rows. Matches the
-    /// stripped body (not the raw file) so frontmatter can't create phantom matches.
-    ///
-    /// `query`/`paths`/`client` are snapshots taken at call entry. `currentSearchText`
-    /// is a LIVE closure: the publish guard re-reads the shell's CURRENT searchText at
-    /// the async publish point (post-await), so a tap during the debounce window stays
-    /// self-consistent — a snapshot here would let a stale query attach to newer rows.
-    public func computeSearchMatches(query: String, paths: [String],
-                                     client: VaultClient,
-                                     currentSearchText: @escaping () -> String) {
-        matchTask?.cancel()
-        matchExpanded = []
-        searchMatches = [:]
-        matchTask = Task { [weak self] in
-            var result: [String: BodyMatches] = [:]
-            for path in paths {
-                if Task.isCancelled { return }
-                guard let raw = try? await client.entryText(path: path) else { continue }
-                let body = Frontmatter.split(raw).body
-                let m = bodyLineMatches(body: body, query: query)
-                if !m.lines.isEmpty { result[path] = m }
-            }
-            if Task.isCancelled { return }
-            guard let self,
-                  currentSearchText().trimmingCharacters(in: .whitespaces) == query else { return }
-            self.searchMatches = result
-            self.searchMatchQuery = query
-        }
-    }
-
-    /// Toggle a result row's "再显示 N 个匹配项" expander.
-    public func toggleMatchExpanded(_ path: String) {
-        if matchExpanded.contains(path) { matchExpanded.remove(path) }
-        else { matchExpanded.insert(path) }
-    }
+    var matchTask: Task<Void, Never>?
 
     // 开档派生缓存（open / reload / metadata 写时重算，非每帧）（QUA-218 PR3a Task 5）
     public internal(set) var openEntry: Entry?
@@ -248,32 +53,21 @@ public final class Catalog {
     public internal(set) var openBook: BookContext?
     public internal(set) var openTopic: TopicContext?
 
-    /// Recompute the open document's outline / stats / entry / relations. O(n) over
-    /// the index for relations; runs on open / reload / metadata write, not per render.
-    ///
-    /// 逐字 = 旧 AppModel.recomputeOpenDerived。openPath/openBody 由壳传入（loadDoc
-    /// 设的文本/导航态）；relationGraph/topicMembership 用 self 的（已在 Catalog）。
-    /// renderSize/renderLineHeight 是壳的 ReadingDefaults 常量（Marple 模块不可见于
-    /// MarpleKit），由壳传入以保持渲染调用逐字不变。
-    public func recomputeOpenDerived(openPath: String?, openBody: String, entries: [Entry],
-                                     renderSize: Double, renderLineHeight: Double) {
-        openEntry = entries.first { $0.path == openPath }
-        let preprocessed = Wikilink.preprocessForRendering(openBody)
-        let rendered = MarkdownRenderer.render(preprocessed, style: RenderStyle(
-            size: renderSize, fontFamily: nil, lineHeight: renderLineHeight
-        ))
-        openOutline = outline(from: rendered.headings)
-        openStats = openBody.isEmpty ? nil : computeDocStats(openBody)
-        if let e = openEntry {
-            openRelations = relations(for: e, in: entries,
-                                      graph: relationGraph,
-                                      topicMembership: topicMembership)
-            openBook = bookContext(for: e, in: entries)
-            openTopic = topicContext(for: e, in: entries)
-        } else {
-            openRelations = nil
-            openBook = nil
-            openTopic = nil
-        }
-    }
+    // MARK: - 统一刷新权威 (QUA-218 PR3a Task 7)
+    // vault-变更管线的唯一 generation/单飞：RefreshAuthority（合流单飞，QUA-198 OOM
+    // 承重墙）+ per-pass `pass`（旧 loadIndexGeneration 的 staleness）2→1 统一。
+    // derivedGeneration 保持独立（决策 1：它有乐观单条编辑这条 refresh 之外的触发
+    // 轴，折叠会引入派生覆盖竞态）。方法体见 Catalog+Refresh.swift。
+    let authority = RefreshAuthority()
+    /// 唯一 per-pass generation：服务 loadIndex 管线陈旧丢弃。每个 refresh body 跑一次
+    /// bump 一次。NOT for derive (决策 1)。`internal(set)` so the refresh methods in
+    /// `Catalog+Refresh.swift` (a separate file) can bump it; public read unchanged.
+    public internal(set) var pass: Int = 0
+
+    public init() {}
+
+    /// Bootstrap-only: seed counts from persisted state in AppModel.init BEFORE
+    /// the first rebuildIndexDerived. Calling it afterwards overwrites live counts
+    /// with stale restored data. Not a general setter.
+    public func seedCounts(_ restored: [EntryType: Int]) { counts = restored }
 }
