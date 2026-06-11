@@ -36,9 +36,6 @@ final class ReaderModel {
     /// The security-scoped URL we currently hold access to. Released before we
     /// acquire a new one so repeated picks/launches don't leak kernel handles.
     private var scopedURL: URL?
-    /// Guards against overlapping foreground refreshes (scene can flip
-    /// .inactive→.active more than once in quick succession).
-    private var refreshing = false
 
     /// App container path for the private index DB (never the synced vault).
     /// Computed once: the directory is created here at init.
@@ -140,20 +137,22 @@ final class ReaderModel {
     }
 
     /// Download newly-synced `.md`, reconcile, and refresh entries — all in the
-    /// background. Coalesced via `refreshing` so overlapping launches/foregrounds
-    /// don't double-run. Keeps `phase == .ready`, so reading is never interrupted.
+    /// background. Coalesced via Catalog's shared single-flight (RefreshAuthority):
+    /// an overlapping launch/foreground sets a trailing rerun instead of being
+    /// dropped, so the last signal always gets a fresh pass. Keeps `phase == .ready`.
     private func backgroundSync(root: String, dbPath: String) async {
-        guard !refreshing else { return }
-        refreshing = true
-        defer { refreshing = false }
-        await materializeMarkdown(under: root, report: false)
-        do {
-            try await Task.detached(priority: .utility) {
-                _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).reconcile()
-            }.value
-            if let c = client { await updateEntries(try await c.index()) }
-        } catch {
-            print("[marple] background sync failed (keeping last entries): \(error)")
+        await catalog.refresh { [weak self] myPass in
+            guard let self else { return }
+            await self.materializeMarkdown(under: root, report: false)   // iOS-only iCloud download
+            do {
+                try await Task.detached(priority: .utility) {
+                    _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).reconcile()
+                }.value
+                if self.catalog.isStale(myPass) { return }               // newer pass started → drop this publish
+                if let c = self.client { await self.updateEntries(try await c.index()) }
+            } catch {
+                print("[marple] background sync failed (keeping last entries): \(error)")
+            }
         }
     }
 
