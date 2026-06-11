@@ -27,9 +27,7 @@ import Testing
         let p = mk("vault/papers/p.md", "paper")
         let n = mk("vault/notes/n.md", "note", annotates: "vault/papers/p.md")
         let entries = [p, n]
-        let rel = relations(for: p, in: entries,
-                            authorIndex: buildAuthorIndex(entries),
-                            annotationIndex: buildAnnotationIndex(entries))
+        let rel = relations(for: p, in: entries, graph: RelationGraph.build(entries))
         #expect(rel.annotations.map(\.path) == ["vault/notes/n.md"])
     }
 
@@ -38,18 +36,14 @@ import Testing
         let chapter = mk("vault/books/smith-2020/ch01.md", "chapter", book: "smith-2020")
         let note = mk("vault/notes/chapter-note.md", "note", annotates: "vault/books/smith-2020/ch01.md")
         let entries = [overview, chapter, note]
-        let annotationIndex = buildAnnotationIndex(entries)
+        let graph = RelationGraph.build(entries)
 
         #expect(annotationAnchor(for: chapter, in: entries).path == overview.path)
-        #expect(annotationIndex[overview.path]?.map(\.path) == [note.path])
-        #expect(annotationIndex[chapter.path] == nil)
+        #expect(graph.sources(of: overview.path, kind: .annotates).map(\.path) == [note.path])
+        #expect(graph.sources(of: chapter.path, kind: .annotates).isEmpty)
 
-        let overviewRel = relations(for: overview, in: entries,
-                                    authorIndex: buildAuthorIndex(entries),
-                                    annotationIndex: annotationIndex)
-        let chapterRel = relations(for: chapter, in: entries,
-                                   authorIndex: buildAuthorIndex(entries),
-                                   annotationIndex: annotationIndex)
+        let overviewRel = relations(for: overview, in: entries, graph: graph)
+        let chapterRel = relations(for: chapter, in: entries, graph: graph)
         #expect(overviewRel.annotations.map(\.path) == [note.path])
         #expect(chapterRel.annotations.map(\.path) == [note.path])
     }
@@ -59,20 +53,20 @@ import Testing
         let chapter = mk("vault/books/smith-2020/ch01.md", "chapter")
         let note = mk("vault/notes/chapter-note.md", "note", annotates: chapter.path)
         let entries = [overview, chapter, note]
-        let annotationIndex = buildAnnotationIndex(entries)
+        let graph = RelationGraph.build(entries)
 
         #expect(annotationAnchor(for: chapter, in: entries).path == overview.path)
-        #expect(annotationIndex[overview.path]?.map(\.path) == [note.path])
+        #expect(graph.sources(of: overview.path, kind: .annotates).map(\.path) == [note.path])
     }
 
     @Test func chapterWithoutOverviewKeepsItsOwnAnnotationAnchor() {
         let chapter = mk("vault/books/missing/ch01.md", "chapter", book: "missing")
         let note = mk("vault/notes/chapter-note.md", "note", annotates: chapter.path)
         let entries = [chapter, note]
-        let annotationIndex = buildAnnotationIndex(entries)
+        let graph = RelationGraph.build(entries)
 
         #expect(annotationAnchor(for: chapter, in: entries).path == chapter.path)
-        #expect(annotationIndex[chapter.path]?.map(\.path) == [note.path])
+        #expect(graph.sources(of: chapter.path, kind: .annotates).map(\.path) == [note.path])
     }
 
     @Test func siblingsAndAuthorProfile() {
@@ -80,9 +74,7 @@ import Testing
         let p1 = mk("vault/papers/a.md", "paper", author: "Jane Doe", rating: 1)
         let p2 = mk("vault/papers/b.md", "paper", author: "Jane Doe", rating: 3)
         let entries = [prof, p1, p2]
-        let rel = relations(for: p1, in: entries,
-                            authorIndex: buildAuthorIndex(entries),
-                            annotationIndex: buildAnnotationIndex(entries))
+        let rel = relations(for: p1, in: entries, graph: RelationGraph.build(entries))
         #expect(rel.authorProfile?.path == "vault/authors/x.md")
         #expect(rel.siblings.map(\.path) == ["vault/papers/b.md"])  // not self, rating desc
     }
@@ -92,9 +84,7 @@ import Testing
         let sim  = mk("vault/papers/b.md", "paper", themes: ["t1", "t2"], rating: 2)
         let no   = mk("vault/papers/c.md", "paper", themes: ["t1"])
         let entries = [base, sim, no]
-        let rel = relations(for: base, in: entries,
-                            authorIndex: buildAuthorIndex(entries),
-                            annotationIndex: buildAnnotationIndex(entries))
+        let rel = relations(for: base, in: entries, graph: RelationGraph.build(entries))
         #expect(rel.similar.map(\.path) == ["vault/papers/b.md"])
     }
 
@@ -106,9 +96,7 @@ import Testing
         let sameAuthorChapter = mk("vault/books/other/ch01.md", "chapter", author: "Jane Doe", rating: 4, book: "other")
         let entries = [overview, chapter, sameAuthorPaper, sameAuthorBook, sameAuthorChapter]
 
-        let rel = relations(for: chapter, in: entries,
-                            authorIndex: buildAuthorIndex(entries),
-                            annotationIndex: buildAnnotationIndex(entries))
+        let rel = relations(for: chapter, in: entries, graph: RelationGraph.build(entries))
 
         #expect(rel.siblings.map(\.path) == ["vault/papers/p.md", "vault/books/other/00-overview.md"])
     }
@@ -123,8 +111,7 @@ import Testing
         let topicMembership = buildTopicMembership(entries)
 
         let rel = relations(for: topic, in: entries,
-                            authorIndex: buildAuthorIndex(entries),
-                            annotationIndex: buildAnnotationIndex(entries),
+                            graph: RelationGraph.build(entries),
                             topicMembership: topicMembership)
 
         #expect(rel.topicMembers.map(\.path) == ["vault/books/b/00-overview.md", "vault/papers/p.md"])
@@ -134,9 +121,7 @@ import Testing
         let prof = mk("vault/authors/x.md", "author", title: "Jane Doe")
         let p1 = mk("vault/papers/a.md", "paper", author: "Jane Doe", rating: 5)
         let entries = [prof, p1]
-        let rel = relations(for: prof, in: entries,
-                            authorIndex: buildAuthorIndex(entries),
-                            annotationIndex: buildAnnotationIndex(entries))
+        let rel = relations(for: prof, in: entries, graph: RelationGraph.build(entries))
         #expect(rel.works.map(\.path) == ["vault/papers/a.md"])
     }
 }
