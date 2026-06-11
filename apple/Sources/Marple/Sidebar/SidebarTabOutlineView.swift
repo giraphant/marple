@@ -2,9 +2,13 @@ import AppKit
 import SwiftUI
 import MarpleKit
 
+// MARK: - Drag pasteboard
+
 enum SidebarDragPasteboard {
     static let tabItem = NSPasteboard.PasteboardType("com.marple.sidebar-tab-item")
 }
+
+// MARK: - Outline model types
 
 private enum SidebarOutlineSection {
     case objects
@@ -152,6 +156,8 @@ private enum SidebarTabPayload {
     }
 }
 
+// MARK: - SidebarOutlineView (NSViewRepresentable)
+
 struct SidebarOutlineView: NSViewRepresentable {
     var model: AppModel
 
@@ -233,6 +239,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             self.model = model
         }
 
+        // MARK: - Reload & model observation
+
         func scheduleReload(_ outline: NSOutlineView) {
             guard !pendingReload else { return }
             pendingReload = true
@@ -304,6 +312,8 @@ struct SidebarOutlineView: NSViewRepresentable {
         /// Payload set of a multi-row selection (>=2 rows). Returns empty for a
         /// single-row selection — `selectCurrentItem` will re-pick that case
         /// from the active tab/pane on its own.
+        // MARK: - Selection preservation across reloads
+
         private func sidebarSpaceTransition(in outline: NSOutlineView) -> CATransition? {
             guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
                   let oldID = lastReloadSpaceID,
@@ -357,6 +367,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             }
         }
 
+        // MARK: - Reload signature
+
         private func reloadSignature() -> String {
             var parts: [String] = []
             parts.append("entries:\(model.entries.count)")
@@ -389,6 +401,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 }
             }.joined(separator: ",")
         }
+
+        // MARK: - Node tree construction
 
         private func makeRootItems() -> [SidebarOutlineNode] {
             let entryByPath = Dictionary(model.entries.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
@@ -477,6 +491,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             }
         }
 
+        // MARK: - Expansion state
+
         private func restoreExpansion(in outline: NSOutlineView) {
             isRestoringExpansion = true
             defer { isRestoringExpansion = false }
@@ -531,6 +547,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 return false
             }
         }
+
+        // MARK: - Current-item selection & node lookup
 
         private func selectCurrentItem(in outline: NSOutlineView) {
             let target: SidebarOutlineNode? = {
@@ -604,6 +622,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             return nil
         }
 
+        // MARK: - NSOutlineView data source & delegate
+
         func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
             (item as? SidebarOutlineNode)?.children.count ?? rootItems.count
         }
@@ -654,6 +674,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             view.configure(node: node, coordinator: self)
             return view
         }
+
+        // MARK: - Rename
 
         fileprivate func beginRename(_ node: SidebarOutlineNode, in outlineView: NSOutlineView? = nil) {
             guard canRename(node) else { return }
@@ -731,6 +753,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             guard row >= 0, let node = sender.item(atRow: row) as? SidebarOutlineNode else { return }
             beginRename(node, in: sender)
         }
+
+        // MARK: - Context menu
 
         func menuNeedsUpdate(_ contextMenu: NSMenu) {
             contextMenu.removeAllItems()
@@ -945,6 +969,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             Task { await model.closeOtherTabs(id) }
         }
 
+        // MARK: - Selection & expansion notifications
+
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !isUpdatingSelection,
                   let outline = notification.object as? NSOutlineView else { return }
@@ -1011,6 +1037,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             UserDefaults.standard.set(Array(collapsedSections).sorted(),
                                       forKey: "marple.collapsedSidebarSections")
         }
+
+        // MARK: - Drag & drop
 
         func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
             guard let node = item as? SidebarOutlineNode, let payload = node.payload else { return nil }
@@ -1160,6 +1188,8 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         /// Split payloads into tab/group ids, drop type payloads, apply
         /// "上级胜出". Used by the multi-payload DnD path.
+        // MARK: Drag & drop — multi-selection drops
+
         private func classifyAndFilter(_ payloads: [SidebarTabPayload]) -> (tabs: [NavTab.ID], groups: [TabGroup.ID]) {
             var rawTabs: [NavTab.ID] = []
             var rawGroups: [TabGroup.ID] = []
@@ -1333,6 +1363,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             }
         }
 
+        // MARK: Drag & drop — type & saved-view reorder
+
         private func validateTypeDrop(_ outlineView: NSOutlineView, info: NSDraggingInfo,
                                       item: Any?, childIndex index: Int) -> NSDragOperation {
             if let node = item as? SidebarOutlineNode,
@@ -1389,6 +1421,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             }
             return []
         }
+
+        // MARK: Drag & drop — row targeting & hit-testing
 
         private func shouldRetargetToRow(_ outlineView: NSOutlineView, info: NSDraggingInfo,
                                          payload: SidebarTabPayload) -> Bool {
@@ -1488,6 +1522,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             case .group(let id): return "group(\(id.uuidString.prefix(6)), \(node.title))"
             }
         }
+
+        // MARK: Drag & drop — accept handlers
 
         private func accept(_ payload: SidebarTabPayload, into node: SidebarOutlineNode?, childIndex: Int) -> Bool {
             let sourceSpaceID = sourceSpaceID(for: payload)
@@ -1647,6 +1683,8 @@ struct SidebarOutlineView: NSViewRepresentable {
         }
     }
 }
+
+// MARK: - Cell view
 
 @MainActor
 private final class SidebarOutlineCellView: NSTableCellView {
