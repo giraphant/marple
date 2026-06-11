@@ -111,7 +111,8 @@ import Testing
         let entries = [overview, ch1, ch2]
 
         c.recomputeOpenDerived(openPath: ch1.path, openBody: "# Intro\n\nbody",
-                               entries: entries, renderSize: 15, renderLineHeight: 1.62)
+                               openBlocks: MarkdownModel.blocks(from: "# Intro\n\nbody"),
+                               entries: entries)
 
         #expect(c.openEntry?.path == ch1.path)
         #expect(c.openBook?.slug == "being-time")
@@ -129,7 +130,8 @@ import Testing
         let entries = [overview, resources]
 
         c.recomputeOpenDerived(openPath: overview.path, openBody: "# 本专题",
-                               entries: entries, renderSize: 15, renderLineHeight: 1.62)
+                               openBlocks: MarkdownModel.blocks(from: "# 本专题"),
+                               entries: entries)
 
         #expect(c.openEntry?.path == overview.path)
         #expect(c.openTopic?.slug == "embodiment")
@@ -150,7 +152,8 @@ import Testing
         c.relationGraph = RelationGraph.build(entries)
 
         c.recomputeOpenDerived(openPath: author.path, openBody: "# Pierre Bourdieu",
-                               entries: entries, renderSize: 15, renderLineHeight: 1.62)
+                               openBlocks: MarkdownModel.blocks(from: "# Pierre Bourdieu"),
+                               entries: entries)
 
         #expect(c.openEntry?.path == author.path)
         // works ordered by rating desc.
@@ -162,7 +165,8 @@ import Testing
         let c = Catalog()
         let entries = [mk("vault/papers/a.md", "paper")]
         c.recomputeOpenDerived(openPath: nil, openBody: "",
-                               entries: entries, renderSize: 15, renderLineHeight: 1.62)
+                               openBlocks: MarkdownModel.blocks(from: ""),
+                               entries: entries)
         #expect(c.openEntry == nil)
         #expect(c.openRelations == nil)
         #expect(c.openBook == nil)

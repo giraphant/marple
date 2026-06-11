@@ -8,7 +8,10 @@ struct MarkdownTextView: NSViewRepresentable {
     /// Identity of the open document (its path). Drives per-doc scroll memory:
     /// switching to a different id restores that doc's remembered offset.
     let documentID: String
-    let scrollTarget: NSRange?
+    /// Heading ordinal to scroll to (index into the open doc's outline), or nil.
+    /// The outline is built font-free in Catalog, so the actual character range is
+    /// resolved here from the live render's heading anchors (QUA-227).
+    let scrollTargetOrdinal: Int?
     /// Query whose matches are highlighted in the body (nil = none).
     var highlightQuery: String?
     /// One-shot scroll-to-match request (a clicked search line); nil = none.
@@ -119,11 +122,18 @@ struct MarkdownTextView: NSViewRepresentable {
         Self.sizeDocumentView(in: scrollView)
 
         let hasPendingJump = jump != nil && jump?.id != co.lastJumpID
-        if let target = scrollTarget, target != co.lastScrollTarget {
+        // Map the heading ordinal to a character range via the live render's anchors
+        // (outline(from:) filters identically to the font-free outline in Catalog,
+        // so ordinals line up). co.headings was refreshed above on any content change.
+        let target: NSRange? = scrollTargetOrdinal.flatMap { ord in
+            let items = outline(from: co.headings)
+            return items.indices.contains(ord) ? items[ord].characterRange : nil
+        }
+        if let target, target != co.lastScrollTarget {
             textView.scrollRangeToVisible(target)
             co.lastScrollTarget = target
         } else if Self.shouldRepositionOnDocSwitch(docSwitched: docSwitched,
-                                                   hasScrollTarget: scrollTarget != nil,
+                                                   hasScrollTarget: target != nil,
                                                    hasPendingJump: hasPendingJump) {
             // No explicit target/jump: restore this doc's remembered offset, else
             // open at the top. (NSScrollView keeps the previous doc's clip offset
