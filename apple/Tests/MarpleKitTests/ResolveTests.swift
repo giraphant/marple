@@ -10,14 +10,14 @@ import Testing
     ]
 
     @Test func testResolveByTitle() {
-        #expect(WikiResolver.resolve("Foo Paper", in: entries)?.path == "vault/papers/foo.md")
+        #expect(NameResolver.resolveWikilink("Foo Paper", in: entries)?.path == "vault/papers/foo.md")
     }
 
     @Test func testResolveByPathStem() {
-        #expect(WikiResolver.resolve("bar", in: entries)?.path == "vault/notes/bar.md")
+        #expect(NameResolver.resolveWikilink("bar", in: entries)?.path == "vault/notes/bar.md")
     }
 
     @Test func testUnresolvedIsNil() {
-        #expect(WikiResolver.resolve("nothing", in: entries) == nil)
+        #expect(NameResolver.resolveWikilink("nothing", in: entries) == nil)
     }
 }

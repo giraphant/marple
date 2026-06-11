@@ -29,9 +29,10 @@ Sources/MarpleKit/
 ├── Indexer/       写侧:扫库 → 建 SQLite 索引(从 rust/reader-core/indexer.rs 移植)
 │                  VaultIndexer · IndexWriter · IndexedEntry · IndexFields
 │                  IndexTitles · IndexBody · YamlFrontmatter · SourceResolver · GitDates
-├── Derivation/    纯函数:entries → 视图要的派生数据
+├── Catalog/       编目层（L2）：全部"由馆藏派生"的索引与关联（搜索、关系图、容器上下文、theme counts）。QUA-218 中由 `Derivation/` 改名；Catalog 类型本体在 PR3 立起。
 │                  ThemeIndex · ListSort · ListFilter · Browse · CardMetrics
 │                  RelationsIndex · DocStats · DocOutline
+│                  NameResolver · RelationGraph · Containers(规则①②,QUA-218 PR2)
 ├── Markdown/      渲染模型
 │                  MarkdownModel · Wikilink
 ├── Nav/           导航 + 状态持久化
@@ -40,7 +41,7 @@ Sources/MarpleKit/
                    + quasi 合规快照消费者(SchemaSnapshot · VaultConformance)
 ```
 
-依赖方向:`Model/` 在最底;`Vault/`·`Indexer/`·`Derivation/`·`Markdown/`·`Nav/`·`Schema/` 只往下依赖 `Model/`,横向之间基本不互引(例外:`Schema/` 横向依赖 `Indexer/` 的 YAML 解析工具)。
+依赖方向:`Model/` 在最底;`Vault/`·`Indexer/`·`Catalog/`·`Markdown/`·`Nav/`·`Schema/` 只往下依赖 `Model/`,横向之间基本不互引(例外:`Schema/` 横向依赖 `Indexer/` 的 YAML 解析工具)。
 
 ## Marple/ —— 按功能竖切(feature folders)
 

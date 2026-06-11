@@ -199,8 +199,7 @@ final class AppModel {
     private(set) var themeIndex: [ThemeCount] = []
     private(set) var topicMembership: TopicMembership = TopicMembership()
     private(set) var visibleEntries: [Entry] = []
-    private(set) var authorIndex: [String: [Entry]] = [:]
-    private(set) var annotationIndex: [String: [Entry]] = [:]
+    private(set) var relationGraph: RelationGraph = .empty
     /// Prebuilt field-weighted index for the command palette's 快速 mode (rebuilt
     /// whenever `entries` changes, like the other derived caches). Carries a
     /// trigram inverted index so per-keystroke ranking only scores hundreds of
@@ -492,7 +491,7 @@ final class AppModel {
     /// Rebuild the index-wide caches. Split into two phases:
     /// - immediate: counts + themeIndex + topicMembership (cheap; the sidebar and
     ///   open topic pages need them right away)
-    /// - deferred: authorIndex/annotationIndex/searchIndex (heavy; only needed by
+    /// - deferred: relationGraph/searchIndex (heavy; only needed by
     ///   the reading view's relations panel and the Cmd-K palette, neither of
     ///   which is exercised in the first few hundred ms after launch)
     private func rebuildIndexDerived() {
@@ -524,7 +523,7 @@ final class AppModel {
         savedViewCounts = result
     }
 
-    /// Build the heavy derived caches (authors, annotations, search index) on a
+    /// Build the heavy derived caches (relation graph, search index) on a
     /// background task and publish them on the main actor when done. If
     /// `entries` changes again before this task completes, the in-flight task
     /// is cancelled and stale dispatch blocks are vetoed by generation counter
@@ -538,10 +537,9 @@ final class AppModel {
         let snapshot = entries
         deferredDerivedTask = Task { [weak self] in
             let result = await Task.detached(priority: .utility) {
-                let authors = buildAuthorIndex(snapshot)
-                let annot = buildAnnotationIndex(snapshot)
+                let graph = RelationGraph.build(snapshot)
                 let search = buildSearchIndex(snapshot)
-                return (authors, annot, search)
+                return (graph, search)
             }.value
             if Task.isCancelled { return }
             // Hop to the next main-runloop tick (not MainActor.run, which can
@@ -554,9 +552,8 @@ final class AppModel {
             // `derivedGeneration` and this stale block becomes a no-op.
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.derivedGeneration == generation else { return }
-                self.authorIndex = result.0
-                self.annotationIndex = result.1
-                self.searchIndex = result.2
+                self.relationGraph = result.0
+                self.searchIndex = result.1
                 if self.openEntry != nil { self.recomputeOpenDerived() }
             }
         }
@@ -574,8 +571,7 @@ final class AppModel {
         openStats = openBody.isEmpty ? nil : computeDocStats(openBody)
         if let e = openEntry {
             openRelations = relations(for: e, in: entries,
-                                      authorIndex: authorIndex,
-                                      annotationIndex: annotationIndex,
+                                      graph: relationGraph,
                                       topicMembership: topicMembership)
             openBook = bookContext(for: e, in: entries)
             openTopic = topicContext(for: e, in: entries)
@@ -1134,7 +1130,7 @@ final class AppModel {
     }
 
     func follow(_ target: String) async {
-        guard let hit = WikiResolver.resolve(target, in: entries) else {
+        guard let hit = NameResolver.resolveWikilink(target, in: entries) else {
             status = "unresolved [[\(target)]]"
             print("[marple] follow [[\(target)]] -> UNRESOLVED")
             return
@@ -1637,7 +1633,7 @@ final class AppModel {
         var targets: [SupersetWikiTarget] = []
         for ref in refs where !seen.contains(ref.target) {
             seen.insert(ref.target)
-            guard let resolved = WikiResolver.resolve(ref.target, in: entries) else { continue }
+            guard let resolved = NameResolver.resolveWikilink(ref.target, in: entries) else { continue }
             targets.append(SupersetWikiTarget(
                 target: ref.target,
                 label: ref.label,
@@ -1884,15 +1880,11 @@ final class AppModel {
             local: { $0.with(created: .some(val)) })
     }
 
-    /// Author-profile entry whose title matches `name` (case-insensitive). Used
-    /// by the Inspector so each chip in a multi-author row can navigate to its
-    /// own profile. Linear scan — call frequency is bounded by inspector renders.
+    /// Author-profile entry whose title matches `name`. Forwards to
+    /// NameResolver (exact tier = the old scan; folded tier per QUA-218 PR2
+    /// approved diffs ①②). Used by the Inspector author chips.
     func authorProfile(for name: String) -> Entry? {
-        let key = name.lowercased().trimmingCharacters(in: .whitespaces)
-        guard !key.isEmpty else { return nil }
-        return entries.first {
-            $0.type == .author && ($0.title ?? "").lowercased() == key
-        }
+        NameResolver.authorProfile(named: name, in: entries)
     }
 
     func setSource(_ text: String?) async {
