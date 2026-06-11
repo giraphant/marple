@@ -46,8 +46,9 @@ public final class VaultIndexer: @unchecked Sendable {
     private let sourcesPath: String
 
     /// Vocabulary table loaded once per indexer instance (builtin + optional
-    /// vault/schema/schema.yaml override). Immutable thereafter — a schema edit needs
-    /// an app relaunch, same as today's rebuild semantics.
+    /// vault/schema/schema.yaml override). Immutable thereafter — a schema edit
+    /// takes effect on the next VaultIndexer construction (macOS: once per
+    /// launch; iOS ReaderModel constructs one per refresh).
     private let schema: VaultSchema
 
     // MARK: - Write lock (mirrors INDEX_WRITE_LOCK in Rust)
