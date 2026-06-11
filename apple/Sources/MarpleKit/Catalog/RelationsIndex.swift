@@ -16,35 +16,9 @@ public func splitAuthors(_ s: String?) -> [String] {
     return parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
 }
 
-/// authorName(lowercased) → entries authored by that name.
-public func buildAuthorIndex(_ entries: [Entry]) -> [String: [Entry]] {
-    var idx: [String: [Entry]] = [:]
-    for e in entries {
-        guard e.type == .paper || e.type == .book else { continue }
-        for name in e.author {
-            idx[name.lowercased(), default: []].append(e)
-        }
-    }
-    return idx
-}
-
 public func annotationAnchor(for entry: Entry, in entries: [Entry]) -> Entry {
     let overviewBySlug = bookOverviewBySlug(entries)
     return annotationAnchor(for: entry, overviewBySlug: overviewBySlug)
-}
-
-/// target path → note entries annotating it.
-public func buildAnnotationIndex(_ entries: [Entry]) -> [String: [Entry]] {
-    var idx: [String: [Entry]] = [:]
-    let byPath = Dictionary(uniqueKeysWithValues: entries.map { ($0.path, $0) })
-    let overviewBySlug = bookOverviewBySlug(entries)
-    for e in entries where e.type == .note {
-        if let target = e.annotates, !target.isEmpty {
-            let anchor = byPath[target].map { annotationAnchor(for: $0, overviewBySlug: overviewBySlug).path } ?? target
-            idx[anchor, default: []].append(e)
-        }
-    }
-    return idx
 }
 
 func bookOverviewBySlug(_ entries: [Entry]) -> [String: Entry] {
@@ -85,13 +59,14 @@ private func relationPanelType(_ entry: Entry) -> EntryType? {
 
 /// Compute knowledge relations for `entry`. Ports the PropertyPanel backlinks memo.
 public func relations(for entry: Entry, in entries: [Entry],
-                      authorIndex: [String: [Entry]],
-                      annotationIndex: [String: [Entry]],
+                      graph: RelationGraph,
                       topicMembership: TopicMembership = TopicMembership()) -> Relations {
     var out = Relations()
-    let liveAuthorIndex = authorIndex.isEmpty ? buildAuthorIndex(entries) : authorIndex
+    // 旧 isEmpty 回退：deferred 图未就绪时同步重建（author 部分用）。
+    // annotations 沿用旧时序：只读传入的图，未就绪即空（旧 annotationIndex 无回退）。
+    let liveGraph = graph.isEmpty ? RelationGraph.build(entries) : graph
     let anchor = annotationAnchor(for: entry, in: entries)
-    out.annotations = (annotationIndex[anchor.path] ?? []).sorted(by: byRatingDesc)
+    out.annotations = graph.sources(of: anchor.path, kind: .annotates).sorted(by: byRatingDesc)
 
     if entry.type == .topic, let slug = topicSlug(entry.path) {
         out.topicMembers = (topicMembership.membersBySlug[slug] ?? [])
@@ -100,24 +75,21 @@ public func relations(for entry: Entry, in entries: [Entry],
     }
 
     if entry.type == .author {
-        let key = (entry.title ?? "").lowercased().trimmingCharacters(in: .whitespaces)
-        out.works = key.isEmpty ? [] : (liveAuthorIndex[key] ?? [])
+        out.works = liveGraph.sources(of: entry.path, kind: .authoredBy)
             .filter { $0.path != entry.path }
             .sorted(by: byRatingDesc)
     }
 
     let relationEntry = entry.type == .chapter ? bookContext(for: entry, in: entries)?.overview : entry
     if let relationEntry, relationEntry.type == .paper || relationEntry.type == .book {
+        // 旧语义：按 author 名字序扫描，首个有作者页的名字胜出 —— 建边即按
+        // 名字序，且只为可解析的名字建边，所以 targets().first 等价。
+        out.authorProfile = liveGraph.targets(of: relationEntry.path, kind: .authoredBy).first
         var siblings: [Entry] = []
         var seen = Set<String>()
         for name in relationEntry.author {
             let key = name.lowercased()
-            if out.authorProfile == nil {
-                out.authorProfile = entries.first {
-                    $0.type == .author && ($0.title ?? "").lowercased() == key
-                }
-            }
-            for w in liveAuthorIndex[key] ?? []
+            for w in liveGraph.worksByAuthorKey[key] ?? []
                 where w.path != relationEntry.path
                     && w.path != entry.path
                     && relationPanelType(w) != nil

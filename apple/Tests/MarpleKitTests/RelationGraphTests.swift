@@ -80,7 +80,9 @@ import Testing
         let p2 = mk("vault/papers/b.md", "paper", author: "jane doe")
         let g = RelationGraph.build([p1, p2])
         #expect(g.worksByAuthorKey["jane doe"]?.map(\.path) == [p1.path, p2.path])
-        #expect(g.worksByAuthorKey == buildAuthorIndex([p1, p2]))
+        // Legacy buildAuthorIndex pin, inlined after the dict was deleted:
+        // key = name.lowercased() (no trim), insertion in document order.
+        #expect(g.worksByAuthorKey == ["jane doe": [p1, p2]])
     }
 
     @Test func annotatesEdgeWithChapterAnchorRemap() {
