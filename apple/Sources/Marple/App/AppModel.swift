@@ -213,14 +213,16 @@ final class AppModel {
     // Reading state
     var openBlocks: [RenderBlock] = []
 
-    // Open-doc derived caches (recomputed on open / reload, not per render).
-    private(set) var openEntry: Entry?
+    // Open-doc derived caches now live in Catalog (QUA-218 PR3a Task 5); facade
+    // forwarders so views keep reading `model.X`. `openBody` stays here — it's the
+    // loaded text set by loadDoc and an INPUT to recomputeOpenDerived.
     private(set) var openBody: String = ""
-    private(set) var openOutline: [OutlineItem] = []
-    private(set) var openStats: DocStats?
-    private(set) var openRelations: Relations?
-    private(set) var openBook: BookContext?
-    private(set) var openTopic: TopicContext?
+    var openEntry: Entry? { catalog.openEntry }
+    var openOutline: [OutlineItem] { catalog.openOutline }
+    var openStats: DocStats? { catalog.openStats }
+    var openRelations: Relations? { catalog.openRelations }
+    var openBook: BookContext? { catalog.openBook }
+    var openTopic: TopicContext? { catalog.openTopic }
 
     // Inspector → reader scroll channel; an outline tap sets this, DocView observes.
     var scrollTarget: Int?
@@ -367,10 +369,11 @@ final class AppModel {
         loadTypeOrder()
         loadHiddenTypes()
         // deferred 派生发布后,若有开档则重算开档派生（旧 scheduleDeferredDerivedRebuild
-        // 的 `if openEntry != nil { recomputeOpenDerived() }`）。Task 5 把
-        // recomputeOpenDerived 迁入 Catalog 后改为内部直调。
+        // 的 `if openEntry != nil { recomputeOpenDerived() }`）。openEntry 现读 catalog 的
+        // （同值）；recomputeOpenDerived 也已迁入 Catalog，经壳传入 openPath/openBody 与
+        // ReadingDefaults 渲染常量。
         catalog.onDerivedReady = { [weak self] in
-            guard let self, self.openEntry != nil else { return }
+            guard let self, self.catalog.openEntry != nil else { return }
             self.recomputeOpenDerived()
         }
     }
@@ -506,27 +509,13 @@ final class AppModel {
         catalog.rebuildIndexDerived(entries: entries, savedViews: savedViews)
     }
 
-    /// Recompute the open document's outline / stats / entry / relations. O(n) over
-    /// the index for relations; runs on open / reload / metadata write, not per render.
+    /// Recompute the open document's open-doc derived caches. Routes to Catalog;
+    /// `openPath`/`openBody` are shell inputs, render-style constants come from
+    /// ReadingDefaults (Marple-module only, hence passed in).
     private func recomputeOpenDerived() {
-        openEntry = entries.first { $0.path == openPath }
-        let preprocessed = Wikilink.preprocessForRendering(openBody)
-        let rendered = MarkdownRenderer.render(preprocessed, style: RenderStyle(
-            size: ReadingDefaults.fontSize, fontFamily: nil, lineHeight: ReadingDefaults.lineHeight
-        ))
-        openOutline = outline(from: rendered.headings)
-        openStats = openBody.isEmpty ? nil : computeDocStats(openBody)
-        if let e = openEntry {
-            openRelations = relations(for: e, in: entries,
-                                      graph: relationGraph,
-                                      topicMembership: topicMembership)
-            openBook = bookContext(for: e, in: entries)
-            openTopic = topicContext(for: e, in: entries)
-        } else {
-            openRelations = nil
-            openBook = nil
-            openTopic = nil
-        }
+        catalog.recomputeOpenDerived(openPath: openPath, openBody: openBody, entries: entries,
+                                     renderSize: ReadingDefaults.fontSize,
+                                     renderLineHeight: ReadingDefaults.lineHeight)
     }
 
     /// Rebuild the middle-column list. Search hits are a cheap direct swap; the pane
