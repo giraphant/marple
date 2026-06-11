@@ -206,6 +206,50 @@ import Testing
         #expect(entry.author == [])
     }
 
+    // MARK: - QUA-222 写回（覆盖最小化 + 往返）
+
+    // 未改动 → 覆盖体只有注释头，落盘表现为「删除文件」，load 退回内置
+    @Test func saveBuiltinRemovesFile() throws {
+        let root = try makeWorkspace()
+        let url = root.appendingPathComponent("vault/schema/schema.yaml")
+        try "stale".write(to: url, atomically: true, encoding: .utf8)
+        try VaultSchema.builtin.save(workspaceRoot: root.path)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+        #expect(VaultSchema.load(workspaceRoot: root.path) == .builtin)
+    }
+
+    // 只写与内置不同的 key；其余 key 不出现在覆盖体里
+    @Test func overrideYAMLEmitsOnlyDiffs() {
+        var schema = VaultSchema.builtin
+        schema.displayByType["paper"] = .init(symbol: "doc.richtext", tint: "mint")
+        let yaml = schema.overrideYAML()
+        #expect(yaml.contains("paper:"))
+        #expect(yaml.contains("doc.richtext"))
+        #expect(yaml.contains("mint"))
+        // 未改动的 book / 别名 / 路径引用不写出
+        #expect(!yaml.contains("book:"))
+        #expect(!yaml.contains("entities:"))
+        #expect(!yaml.contains("pathReferences:"))
+    }
+
+    // 编辑过的 schema 经 save → load 必须逐字往返
+    @Test func saveLoadRoundTrips() throws {
+        let root = try makeWorkspace()
+        var schema = VaultSchema.builtin
+        schema.entityAliases["author"] = [
+            .init("author"),
+            .init("translator", onlyForType: "book"),
+        ]
+        schema.entityAliases["editor"] = [.init("editor")]   // 新增实体
+        schema.displayByType["paper"] = .init(symbol: "doc.richtext", tint: "mint")
+        schema.pathReferences = [
+            .init(onType: "note", field: "annotates", kind: "annotates"),
+            .init(onType: "transcript", field: "talk", kind: "transcript-of"),
+        ]
+        try schema.save(workspaceRoot: root.path)
+        #expect(VaultSchema.load(workspaceRoot: root.path) == schema)
+    }
+
     @MainActor
     @Test func entryTypeDisplayReadsActiveSchema() {
         defer { VaultSchema.active = .builtin }   // 不污染其它测试
