@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 MarpleKit 立起 `Schema/` 声明表（实体字段别名、类型→图标/色），收拢 speaker/creator 列复用 hack 与 TypeIcon 硬编码，归并 Conformance 目录；内置默认 + `<workspaceRoot>/vault/schema.yaml` 覆盖。**行为零变化**。
+**Goal:** 在 MarpleKit 立起 `Schema/` 声明表（实体字段别名、类型→图标/色），收拢 speaker/creator 列复用 hack 与 TypeIcon 硬编码，归并 Conformance 目录；内置默认 + `<workspaceRoot>/vault/schema/schema.yaml` 覆盖。**行为零变化**。
 
 **Architecture:** 新增 `VaultSchema` 值类型（内置默认 `.builtin`，YAML 文件逐 key 覆盖）。索引器经 `buildIndexedEntry(schema:)` 参数消费别名表（`VaultIndexer` 在 init 自行加载，三个构造点零改动）；显示映射经 `@MainActor` 的 `VaultSchema.active` 供 SwiftUI 扩展读取。Conformance 两文件物理移入 `Schema/`，逻辑不动。容器约定**不在本 PR**（PR2 规则引擎落地时一并定形状，YAML 增量加 key 无破坏）。
 
@@ -95,8 +95,8 @@ import Foundation
 /// The vault's vocabulary as data — which frontmatter fields reference which
 /// entity type, and how each entry type is displayed. Built-in defaults mirror
 /// what used to be hard-coded across the indexer (speaker/creator column
-/// reuse) and the macOS app (TypeIcon). A `vault/schema.yaml` next to the
-/// indexed content can override individual keys; see `load(workspaceRoot:)`.
+/// reuse) and the macOS app (TypeIcon). A `vault/schema/schema.yaml` next to
+/// the indexed content can override individual keys; see `load(workspaceRoot:)`.
 ///
 /// This is deliberately a *table*, not an engine: semantics live in named
 /// Swift code (rules, resolvers); this type only declares the vocabulary.
@@ -202,7 +202,7 @@ git commit -m "feat(schema): VaultSchema declaration table with builtin vocabula
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("vs-\(UUID().uuidString)")
         try FileManager.default.createDirectory(
-            at: root.appendingPathComponent("vault"),
+            at: root.appendingPathComponent("vault/schema"),
             withIntermediateDirectories: true)
         return root
     }
@@ -226,7 +226,7 @@ git commit -m "feat(schema): VaultSchema declaration table with builtin vocabula
             symbol: doc.richtext
             tint: mint
         """
-        try yaml.write(to: root.appendingPathComponent("vault/schema.yaml"),
+        try yaml.write(to: root.appendingPathComponent("vault/schema/schema.yaml"),
                        atomically: true, encoding: .utf8)
         let schema = VaultSchema.load(workspaceRoot: root.path)
         // author 整 key 替换
@@ -243,7 +243,7 @@ git commit -m "feat(schema): VaultSchema declaration table with builtin vocabula
 
     func testLoadMalformedFileReturnsBuiltin() throws {
         let root = try makeWorkspace()
-        try "][ not yaml ][".write(to: root.appendingPathComponent("vault/schema.yaml"),
+        try "][ not yaml ][".write(to: root.appendingPathComponent("vault/schema/schema.yaml"),
                                    atomically: true, encoding: .utf8)
         XCTAssertEqual(VaultSchema.load(workspaceRoot: root.path), .builtin)
     }
@@ -264,11 +264,12 @@ Expected: 编译失败 `type 'VaultSchema' has no member 'load'`。
 public extension VaultSchema {
 
     /// Schema override location relative to the workspace root. Lives inside
-    /// `vault/` (the user's synced data, shared territory with quasi) — NOT
-    /// `.marple/`, which is a disposable cache rebuilt via `rm -rf`.
-    static let relativePath = "vault/schema.yaml"
+    /// `vault/schema/` (the user's synced data, shared territory with quasi;
+    /// the vault root keeps no loose files) — NOT `.marple/`, which is a
+    /// disposable cache rebuilt via `rm -rf`.
+    static let relativePath = "vault/schema/schema.yaml"
 
-    /// Built-in defaults overlaid by `vault/schema.yaml` when present.
+    /// Built-in defaults overlaid by `vault/schema/schema.yaml` when present.
     ///
     /// Override granularity is per top-level entity / display key: declaring
     /// `entities.author` replaces the author alias list wholesale; keys not
@@ -342,7 +343,7 @@ Expected: 6 tests PASS。
 
 ```bash
 git add apple/Sources/MarpleKit/Schema/VaultSchema.swift apple/Tests/MarpleKitTests/VaultSchemaTests.swift
-git commit -m "feat(schema): vault/schema.yaml per-key overrides with graceful degradation (QUA-218)"
+git commit -m "feat(schema): vault/schema/schema.yaml per-key overrides with graceful degradation (QUA-218)"
 ```
 
 ---
@@ -484,7 +485,7 @@ private func entityFieldValue(
 
 ```swift
     /// Vocabulary table loaded once per indexer instance (builtin + optional
-    /// vault/schema.yaml override). Immutable thereafter — a schema edit needs
+    /// vault/schema/schema.yaml override). Immutable thereafter — a schema edit needs
     /// an app relaunch, same as today's rebuild semantics.
     private let schema: VaultSchema
 ```
@@ -666,7 +667,7 @@ rmdir apple/Sources/MarpleKit/Conformance 2>/dev/null || true
 grep -n "Conformance" apple/ARCHITECTURE.md
 ```
 把提及 `Conformance/` 的条目改为 `Schema/`，并在该节补一句目录说明（措辞示例）：
-> `Schema/` — the vault's vocabulary as data: `VaultSchema` declaration table (entity field aliases, type display; overridable via `vault/schema.yaml`) plus the quasi conformance snapshot consumers (`SchemaSnapshot`, `VaultConformance`).
+> `Schema/` — the vault's vocabulary as data: `VaultSchema` declaration table (entity field aliases, type display; overridable via `vault/schema/schema.yaml`) plus the quasi conformance snapshot consumers (`SchemaSnapshot`, `VaultConformance`).
 
 - [ ] **Step 3: 全量测试**
 
@@ -720,7 +721,7 @@ gh pr create --title "refactor(schema): L0 declaration table — vocabulary as d
 QUA-218 绞杀式迁移第 1 期（spec: docs/superpowers/specs/2026-06-11-qua-218-catalog-architecture-design.md）。
 
 - 新增 MarpleKit/Schema/VaultSchema：实体字段别名 + 类型→图标/色 的声明表；
-  内置默认逐字复刻旧硬编码，vault/schema.yaml 可逐 key 覆盖（缺失/损坏时优雅回退）
+  内置默认逐字复刻旧硬编码，vault/schema/schema.yaml 可逐 key 覆盖（缺失/损坏时优雅回退）
 - 索引器 author 折叠改读别名表（speaker→talk、creator→image 的硬编码删除）
 - TypeIcon 的 symbol/tint 硬编码下沉声明表，macOS 壳只剩 tint 名→Color 映射
 - Conformance/ 物理归并入 Schema/（quasi 快照消费逻辑零改动）
@@ -736,6 +737,6 @@ EOF
 
 ## Self-Review 记录
 
-- **Spec coverage**：spec §3.3 的"实体别名/显示/校验"三项均有任务（T1-T5）；"容器约定"显式延至 PR2（计划头已记录理由，与 spec §6 PR1 句一致）。schema.yaml 位置与 spec 一致（vault 根、避开 .marple/）。
+- **Spec coverage**：spec §3.3 的"实体别名/显示/校验"三项均有任务（T1-T5）；"容器约定"显式延至 PR2（计划头已记录理由，与 spec §6 PR1 句一致）。schema.yaml 位置与 spec 一致（vault/schema/ 目录、vault 根不放散文件、避开 .marple/）。
 - **Placeholder scan**：无 TBD；Task 3 Step 1 对 `BuildOutcome` case 名留了执行时核对指引（grep 后按实际调整），属事实核对而非占位。
 - **Type consistency**：`FieldAlias(_:onlyForType:)`、`TypeDisplay(symbol:tint:)`、`display(for:)`、`VaultSchema.active`、`entityFieldValue(_:entity:entryType:schema:)` 各任务间签名一致；`buildIndexedEntry` 新尾参 `schema: VaultSchema = .builtin` 与 Task 3 测试调用一致。

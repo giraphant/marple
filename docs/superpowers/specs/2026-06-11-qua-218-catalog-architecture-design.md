@@ -104,7 +104,7 @@ App 功能已成熟，但维护时"加新东西"成本偏高。审计结论：�
 `IndexFields` 的列映射、indexer 里 speaker→author 的硬编码列复用。
 
 收拢为 `MarpleKit/Schema/` 的一张声明表：Swift 结构化数据作内置默认值，
-`<vaultRoot>/schema.yaml` 存在时逐项覆盖（YAML，与 vault frontmatter 同生态，
+`<vaultRoot>/schema/schema.yaml` 存在时逐项覆盖（vault 根不放散文件；YAML，与 vault frontmatter 同生态，
 quasi 可共读；**不放 `.marple/`**——那是可 `rm -rf` 重建的缓存区）。
 本期只实现"读取覆盖"，不做编辑器：
 
