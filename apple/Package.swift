@@ -33,6 +33,13 @@ let package = Package(
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Yams", package: "Yams"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
+            ],
+            swiftSettings: [
+                // Opt into the non-deprecated Accelerate CBLAS headers (cblas_sgemv
+                // in VectorStore). The macro gates the C headers, so it must reach
+                // the Clang importer via -Xcc. We keep the same Int32 args, so no
+                // ILP64 (which would expect Int and break the call).
+                .unsafeFlags(["-Xcc", "-DACCELERATE_NEW_LAPACK"]),
             ]
         ),
         // Concrete embedding runtime (MLX). Kept in its own target so the heavy
@@ -80,6 +87,10 @@ let package = Package(
                 "MarpleEmbeddings",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
+            // The oracle fixture is read by its source-tree path (#filePath-relative
+            // in MLXTextEmbedderTests), not via Bundle.module — so exclude it from
+            // the target instead of processing it into the test bundle.
+            exclude: ["Fixtures/qwen3-embedding-0.6B-oracle.json"],
             // CLT-only workaround: Testing.framework lives outside the default
             // SDK search paths; these flags point the linker at it so the
             // test bundle can load at runtime.

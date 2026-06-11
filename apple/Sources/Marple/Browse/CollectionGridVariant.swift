@@ -349,8 +349,13 @@ private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDat
 
     override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { true }
     override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
-        panel.dataSource = self
-        panel.delegate = self
+        // Quick Look panel control callbacks always arrive on the main thread, but
+        // the override is declared nonisolated; assert isolation to set the
+        // @MainActor dataSource/delegate without changing runtime behavior.
+        MainActor.assumeIsolated {
+            panel.dataSource = self
+            panel.delegate = self
+        }
     }
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {}
 
