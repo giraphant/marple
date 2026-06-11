@@ -8,7 +8,11 @@ enum BrowseMode: String, CaseIterable, Sendable { case list, grid }
 @Observable @MainActor
 final class AppModel {
     let client: VaultClient
-    private(set) var entries: [Entry] = []
+    /// Facade onto the Catalog-owned snapshot (QUA-229: `entries` now lives in the
+    /// L2 派生 owner). Read-only here — writes go through `catalog.publish` (refresh
+    /// path) / `catalog.mutateEntries` (optimistic edits). All `model.entries` call
+    /// sites stay unchanged, like the `counts`/`visibleEntries` facades below.
+    var entries: [Entry] { catalog.entries }
     var status: String = ""
 
     /// Workspace root (parent of `vault/`). Used only to locate the optional
@@ -749,11 +753,10 @@ final class AppModel {
             }
             return
         }
-        guard !catalog.isStale(myPass) else {
+        guard catalog.publish(fetched, pass: myPass) else {
             print("[marple] loadIndex pass \(myPass) stale after index() (latest \(catalog.pass)), dropping")
             return
         }
-        entries = fetched
         isBootstrapping = false
         status = "\(entries.count) entries"
         // Refresh the conformance snapshot on the same cadence as the index. The
@@ -1562,7 +1565,7 @@ final class AppModel {
         writeError = nil
         do {
             let entry = try await client.createImageObject(from: url, title: nil)
-            entries.append(entry)
+            catalog.mutateEntries { $0.append(entry) }
             rebuildIndexDerived()
             select(pane: .type(.image))
             await open(entry.path)
@@ -1598,7 +1601,7 @@ final class AppModel {
         writeError = nil
         do {
             try await client.createNote(path: draft.path, text: draft.text)
-            entries.append(entry)
+            catalog.mutateEntries { $0.append(entry) }
             rebuildIndexDerived(); recomputeVisible()
             await open(draft.path)
             await openExternally()
@@ -1633,7 +1636,7 @@ final class AppModel {
         do {
             _ = try await client.moveToTrash(path: path)
             let wasOpen = (openPath == path)
-            entries.removeAll { $0.path == path }
+            catalog.mutateEntries { $0.removeAll { $0.path == path } }
             rebuildIndexDerived()
             if wasOpen, let id = activeTabID {
                 await closeTab(id)   // closeTab re-syncs the list + reader
@@ -1686,8 +1689,10 @@ final class AppModel {
         defer { savingField = nil }
         do {
             try await metadataWriter.write(path: path, applying: patch)
-            if let i = entries.firstIndex(where: { $0.path == path }) {
-                entries[i] = local(entries[i])
+            catalog.mutateEntries { es in
+                if let i = es.firstIndex(where: { $0.path == path }) {
+                    es[i] = local(es[i])
+                }
             }
             rebuildIndexDerived()   // themes/rating affect themeIndex/filters/counts
             recomputeVisible()

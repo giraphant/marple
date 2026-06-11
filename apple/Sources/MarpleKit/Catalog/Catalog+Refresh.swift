@@ -45,4 +45,22 @@ extension Catalog {
         pass &+= 1
         return pass
     }
+
+    /// 陈旧守卫的发布（QUA-229）：refresh pass 取到新快照后调它。若 `myPass` 已被更新
+    /// 的 pass 取代,丢弃发布并返回 false,让壳跳过自己的 post-publish 反应。把原先两壳
+    /// 各手写的 `guard !isStale(pass); entries = fetched` 收成核内唯一权威——`entries`
+    /// 是 `internal(set)`,壳只能经此发布。reconcile 与 post-publish 反应仍由各壳供给
+    /// (平台分叉,见 ARCHITECTURE.md「下沉边界」)。
+    @discardableResult
+    public func publish(_ fetched: [Entry], pass myPass: Int) -> Bool {
+        guard !isStale(myPass) else { return false }
+        entries = fetched
+        return true
+    }
+
+    /// 乐观单条编辑 / 建删条目(QUA-229)：壳侧**同步**用户动作直接改 entries(无 staleness
+    /// ——这些不经 refresh pass)。`entries` 是 `internal(set)`,故壳必须经此入口改。
+    public func mutateEntries(_ body: (inout [Entry]) -> Void) {
+        body(&entries)
+    }
 }
