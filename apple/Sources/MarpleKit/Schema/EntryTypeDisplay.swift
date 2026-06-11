@@ -1,7 +1,9 @@
 public extension VaultSchema {
-    /// The schema in effect for display lookups. Set once by the app shell
-    /// when a vault opens (AppModel.loadIndex); defaults to builtin so views
-    /// render sensibly before any vault is open. Main-actor because every
+    /// The schema in effect for display lookups. Updated by the app shell on
+    /// each `loadIndex()` call (vault open and file-watcher reloads); defaults
+    /// to builtin so views render sensibly before any vault is open. The app
+    /// is single-vault — `workspaceRoot` is fixed for the process lifetime, so
+    /// there is no vault-switch path to handle. Main-actor because every
     /// consumer is a view; the indexer carries its own copy instead.
     @MainActor static var active: VaultSchema = .builtin
 }
