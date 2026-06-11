@@ -248,14 +248,6 @@ private func transcriptRows(for entry: Entry, in entries: [Entry]) -> [Inspector
                           path: talk.path, copyValue: nil)]
 }
 
-/// Resolve a sibling object (e.g. `transcript.md` ↔ `talk.md`) within the same
-/// folder-per-object directory.
-private func siblingEntry(of entry: Entry, named filename: String, in entries: [Entry]) -> Entry? {
-    let dir = (entry.path as NSString).deletingLastPathComponent
-    let target = dir.isEmpty ? filename : dir + "/" + filename
-    return entries.first { $0.path == target }
-}
-
 private func displayTitle(for entry: Entry?) -> String? {
     if let title = nonEmpty(entry?.title) {
         return title
