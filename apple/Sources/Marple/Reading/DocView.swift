@@ -47,7 +47,7 @@ struct DocView: View {
                     markdown: renderedMarkdown,
                     style: renderStyle,
                     documentID: model.openPath ?? "",
-                    scrollTarget: resolvedScrollTarget,
+                    scrollTargetOrdinal: resolvedScrollOrdinal,
                     highlightQuery: model.openSearchQuery,
                     jump: model.matchJump,
                     onLinkClick: { url in
@@ -120,13 +120,12 @@ struct DocView: View {
                     lineHeight: readingFont.lineHeight)
     }
 
-    private var resolvedScrollTarget: NSRange? {
-        guard let t = model.scrollTarget,
-              let item = model.openOutline.first(where: { $0.blockIndex == t }),
-              let range = item.characterRange else {
-            return nil
-        }
-        return range
+    /// The clicked outline item's position in the outline. The Inspector stores its
+    /// `blockIndex` (a font-free RenderBlock index) in `scrollTarget`; the live text
+    /// view turns this ordinal back into a character range (QUA-227).
+    private var resolvedScrollOrdinal: Int? {
+        guard let t = model.scrollTarget else { return nil }
+        return model.openOutline.firstIndex(where: { $0.blockIndex == t })
     }
 }
 

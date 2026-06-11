@@ -7,18 +7,16 @@ extension Catalog {
     /// Recompute the open document's outline / stats / entry / relations. O(n) over
     /// the index for relations; runs on open / reload / metadata write, not per render.
     ///
-    /// 逐字 = 旧 AppModel.recomputeOpenDerived。openPath/openBody 由壳传入（loadDoc
-    /// 设的文本/导航态）；relationGraph/topicMembership 用 self 的（已在 Catalog）。
-    /// renderSize/renderLineHeight 是壳的 ReadingDefaults 常量（Marple 模块不可见于
-    /// MarpleKit），由壳传入以保持渲染调用逐字不变。
-    public func recomputeOpenDerived(openPath: String?, openBody: String, entries: [Entry],
-                                     renderSize: Double, renderLineHeight: Double) {
+    /// openPath/openBody/openBlocks 由壳传入（loadDoc 设的文本/导航态/解析块）；
+    /// relationGraph/topicMembership 用 self 的（已在 Catalog）。
+    ///
+    /// 大纲走无字体路径：openBlocks 是 MarkdownModel.blocks 的纯解析结果，标题的
+    /// level/text 与字体无关，故编目层不再关心渲染样式（QUA-227）。代价：OutlineItem
+    /// 无 characterRange，Inspector 点击滚动的偏移改由 live MarkdownTextView 按序号提供。
+    public func recomputeOpenDerived(openPath: String?, openBody: String,
+                                     openBlocks: [RenderBlock], entries: [Entry]) {
         openEntry = entries.first { $0.path == openPath }
-        let preprocessed = Wikilink.preprocessForRendering(openBody)
-        let rendered = MarkdownRenderer.render(preprocessed, style: RenderStyle(
-            size: renderSize, fontFamily: nil, lineHeight: renderLineHeight
-        ))
-        openOutline = outline(from: rendered.headings)
+        openOutline = outline(from: openBlocks)
         openStats = openBody.isEmpty ? nil : computeDocStats(openBody)
         if let e = openEntry {
             openRelations = relations(for: e, in: entries,
