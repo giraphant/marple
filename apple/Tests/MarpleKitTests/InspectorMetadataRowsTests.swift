@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import Marple
 @testable import MarpleKit
 
@@ -406,22 +407,56 @@ import Testing
         ])
     }
 
-    @Test func imageRowsOnlyShowCanonicalTitle() {
+    /// QUA-175: images expose the editable descriptive fields (creator folds
+    /// into `author`, date into `created`) plus index-derived read-only
+    /// dimensions / file size when present.
+    @Test func imageRowsShowDescriptiveAndDerivedFields() {
         let entry = Entry(
             path: "vault/images/image.md",
             type: .image,
             title: "Diagram",
-            author: ["legacy author"],
+            author: ["Henry Maudslay"],
             year: nil,
             ratingScore: 0,
             themes: [],
             preview: "",
             hasPDF: false,
-            source: "legacy source"
+            source: "https://example.org/diagram",
+            created: "2024-11-08",
+            width: 3024, height: 4032, fileSize: 123_456
         )
 
         #expect(inspectorInfoRows(for: entry) == [
             .editableScalar(label: "名称", value: "Diagram", action: .title),
+            .authors,
+            .editableScalar(label: "日期", value: "2024-11-08", action: .imageDate),
+            .editableScalar(label: "来源", value: "https://example.org/diagram", action: .source),
+            .readOnlyScalar(label: "尺寸", value: "3024 × 4032", copyValue: "3024×4032"),
+            .readOnlyScalar(label: "大小", value: ByteCountFormatter.string(fromByteCount: 123_456, countStyle: .file), copyValue: nil),
+            .rating,
+        ])
+    }
+
+    /// Without index-derived dims the read-only rows are omitted entirely.
+    @Test func imageRowsOmitDerivedFieldsWhenAbsent() {
+        let entry = Entry(
+            path: "vault/images/image.md",
+            type: .image,
+            title: "Diagram",
+            author: [],
+            year: nil,
+            ratingScore: 0,
+            themes: [],
+            preview: "",
+            hasPDF: false
+        )
+
+        #expect(inspectorInfoRows(for: entry) == [
+            .editableScalar(label: "名称", value: "Diagram", action: .title),
+            .authors,
+            .editableScalar(label: "日期", value: nil, action: .imageDate),
+            .editableScalar(label: "来源", value: nil, action: .source),
+            .rating,
         ])
     }
 }
