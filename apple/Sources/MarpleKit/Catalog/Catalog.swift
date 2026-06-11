@@ -6,6 +6,8 @@ import Foundation
 @MainActor
 @Observable
 public final class Catalog {
+    // TODO(QUA-218 PR3a Task 5): when open-doc derived lands, consider splitting
+    // Catalog into extension files by concern (index-derived / visible+search / open-doc).
     // 索引派生（entries 变即重算）
     public internal(set) var counts: [EntryType: Int] = [:]
     public internal(set) var savedViewCounts: [UUID: Int] = [:]
