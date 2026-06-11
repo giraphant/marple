@@ -26,7 +26,7 @@ final class AppModel {
     /// chain (FSEvents watcher, boot deferred reconcile, CLI self-heal). Owned
     /// here so the CLI extension can join an in-flight pass instead of stacking
     /// a duplicate full vault walk behind the indexer writeLock.
-    let refreshGate = RefreshGate()
+    let refreshGate = RefreshAuthority()
 
     /// L2 编目层派生状态 owner (QUA-218 PR3a). 派生缓存逐步迁入；本期仅持 themeIndex。
     let catalog = Catalog()
