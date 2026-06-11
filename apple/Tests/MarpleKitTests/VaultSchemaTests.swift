@@ -176,4 +176,16 @@ import Testing
         }
         #expect(entry.author == [])
     }
+
+    @MainActor
+    @Test func entryTypeDisplayReadsActiveSchema() {
+        defer { VaultSchema.active = .builtin }   // 不污染其它测试
+        #expect(EntryType.paper.symbolName == "doc.text")
+        #expect(EntryType.paper.tintName == "blue")
+        var custom = VaultSchema.builtin
+        custom.displayByType["paper"] = .init(symbol: "doc.richtext", tint: "mint")
+        VaultSchema.active = custom
+        #expect(EntryType.paper.symbolName == "doc.richtext")
+        #expect(EntryType.paper.tintName == "mint")
+    }
 }
