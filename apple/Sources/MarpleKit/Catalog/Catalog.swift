@@ -50,7 +50,7 @@ public final class Catalog {
     /// `entries` changes again before this task completes, the in-flight task
     /// is cancelled and stale dispatch blocks are vetoed by generation counter
     /// — only the latest snapshot wins.
-    public func scheduleDeferredDerivedRebuild(entries: [Entry]) {
+    private func scheduleDeferredDerivedRebuild(entries: [Entry]) {
         deferredDerivedTask?.cancel()
         derivedGeneration &+= 1
         let generation = derivedGeneration
