@@ -21,6 +21,8 @@ public final class Catalog {
     /// Task 5 把 recomputeOpenDerived 迁入后改为内部直调。
     public var onDerivedReady: (() -> Void)?
     private var deferredDerivedTask: Task<Void, Never>?
+    // Independent of `pass` (Decision 1): bumped by every scheduleDeferredDerivedRebuild
+    // incl. optimistic edits; do NOT fold into pass.
     private var derivedGeneration: Int = 0
 
     // 可见列表 + 列表搜索匹配缓存（QUA-218 PR3a Task 4）
@@ -82,6 +84,9 @@ public final class Catalog {
     /// 独立刷新入口（restoreTrash、boot 首次 loadIndex、测试）直接调 loadIndex 而不
     /// 经 refresh 单飞时，仍需一个有效 pass：bump 并返回。等价于旧 loadIndexGeneration
     /// 在 loadIndex 入口的 `&+= 1`，让两个并发裸 loadIndex 各持不同 pass、旧者自检陈旧。
+    ///
+    /// Does NOT touch the single-flight authority — it ONLY advances the staleness
+    /// generation; never call it to trigger a refresh (use refresh/refreshJoining).
     public func beginStandalonePass() -> Int {
         pass &+= 1
         return pass
