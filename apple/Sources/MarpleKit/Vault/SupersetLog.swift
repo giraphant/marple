@@ -39,8 +39,13 @@ public struct SupersetLog: Sendable {
         }
     }
 
+    // Cached once: ISO8601DateFormatter is costly to allocate and was created per
+    // log line. Default config → byte-identical output. nonisolated(unsafe): we
+    // only ever read it (string(from:)), which is thread-safe.
+    private nonisolated(unsafe) static let timestampFormatter = ISO8601DateFormatter()
+
     static func line(_ message: String, timestamp: Date) -> String {
-        "[\(ISO8601DateFormatter().string(from: timestamp))] \(message)\n"
+        "[\(timestampFormatter.string(from: timestamp))] \(message)\n"
     }
 }
 #endif
