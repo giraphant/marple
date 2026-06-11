@@ -22,38 +22,33 @@ public func topicSlug(_ rel: String) -> String? {
     return slug
 }
 
-/// Bidirectional topic-membership index.
+/// Forward topic resolver: slug → its topic page. The *reverse* direction
+/// (a topic page ← its members) now lives in `RelationGraph` as `inTopic`
+/// edges (QUA-218 规则①收口); this index only keeps the forward slug→page
+/// lookup, used by the inspector's topic chips and by `relations()` to
+/// normalise any topic sub-page to its slug's anchor page.
 public struct TopicMembership: Sendable, Equatable {
-    /// topic slug → entities that declare membership via `topics: [slug]`.
-    public var membersBySlug: [String: [Entry]]
     /// topic slug → the topic page entry for that slug (first by path wins, so a
     /// `00-overview.md` is preferred over a sibling `01-resources.md`).
     public var topicEntryBySlug: [String: Entry]
 
-    public init(membersBySlug: [String: [Entry]] = [:],
-                topicEntryBySlug: [String: Entry] = [:]) {
-        self.membersBySlug = membersBySlug
+    public init(topicEntryBySlug: [String: Entry] = [:]) {
         self.topicEntryBySlug = topicEntryBySlug
     }
 }
 
-/// Build the bidirectional topic-membership index over all entries.
+/// Build the forward topic-slug→page index over all entries.
 public func buildTopicMembership(_ entries: [Entry]) -> TopicMembership {
-    var membersBySlug: [String: [Entry]] = [:]
     var topicEntryBySlug: [String: Entry] = [:]
-    for e in entries {
-        if e.type == .topic, let slug = topicSlug(e.path) {
-            if let current = topicEntryBySlug[slug] {
-                if e.path < current.path { topicEntryBySlug[slug] = e }
-            } else {
-                topicEntryBySlug[slug] = e
-            }
-        }
-        for slug in e.topics where !slug.isEmpty {
-            membersBySlug[slug, default: []].append(e)
+    for e in entries where e.type == .topic {
+        guard let slug = topicSlug(e.path) else { continue }
+        if let current = topicEntryBySlug[slug] {
+            if e.path < current.path { topicEntryBySlug[slug] = e }
+        } else {
+            topicEntryBySlug[slug] = e
         }
     }
-    return TopicMembership(membersBySlug: membersBySlug, topicEntryBySlug: topicEntryBySlug)
+    return TopicMembership(topicEntryBySlug: topicEntryBySlug)
 }
 
 /// Display title for a topic slug: the topic page's resolved title (H1 /

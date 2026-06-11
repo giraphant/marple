@@ -68,11 +68,15 @@ import Testing
         #expect(g.sources(of: folded.path, kind: .authoredBy).map(\.path) == [paper.path])
     }
 
-    @Test func authoredByOnlyFromPapersAndBooks() {
-        let page = mk("vault/authors/smith.md", "author", title: "Smith")
-        let note = mk("vault/notes/n.md", "note", author: "Smith")
-        let g = RelationGraph.build([page, note])
-        #expect(g.sources(of: page.path, kind: .authoredBy).isEmpty)
+    // QUA-218 规则①收口：authoredBy 不再限 paper/book —— talk 讲者（speaker 经
+    // 别名折进 author）也连到作者页。worksByAuthorKey（siblings 池）仍只 paper/book。
+    @Test func authoredByFromTalkSpeaker() {
+        let page = mk("vault/authors/wang.md", "author", title: "Wang")
+        let talk = mk("vault/talks/t/talk.md", "talk", author: "Wang")
+        let g = RelationGraph.build([page, talk])
+        #expect(g.sources(of: page.path, kind: .authoredBy).map(\.path) == [talk.path])
+        #expect(g.targets(of: talk.path, kind: .authoredBy).map(\.path) == [page.path])
+        #expect(g.worksByAuthorKey["wang"] == nil) // talk 不入 siblings 池
     }
 
     @Test func worksByAuthorKeyMatchesLegacyAuthorIndex() {
@@ -85,19 +89,44 @@ import Testing
         #expect(g.worksByAuthorKey == ["jane doe": [p1, p2]])
     }
 
-    @Test func annotatesEdgeWithChapterAnchorRemap() {
+    // QUA-221：边忠实指向章节，不再重映射到书 overview。上卷改由 relations()
+    // 的容器附属聚合在查询期完成（见 RelationsIndexTests）。
+    @Test func annotatesEdgeIsFaithfulToChapterTarget() {
         let overview = mk("vault/books/b/00-overview.md", "book")
         let chapter = mk("vault/books/b/01-c.md", "chapter", book: "b")
         let note = mk("vault/notes/n.md", "note", annotates: chapter.path)
         let g = RelationGraph.build([overview, chapter, note])
-        #expect(g.sources(of: overview.path, kind: .annotates).map(\.path) == [note.path])
-        #expect(g.targets(of: note.path, kind: .annotates).map(\.path) == [overview.path])
+        #expect(g.sources(of: chapter.path, kind: .annotates).map(\.path) == [note.path])
+        #expect(g.targets(of: note.path, kind: .annotates).map(\.path) == [chapter.path])
+        #expect(g.sources(of: overview.path, kind: .annotates).isEmpty)
     }
 
     @Test func annotatesDanglingTargetKeepsRawPath() {
         let note = mk("vault/notes/n.md", "note", annotates: "vault/papers/gone.md")
         let g = RelationGraph.build([note])
         #expect(g.sources(of: "vault/papers/gone.md", kind: .annotates).map(\.path) == [note.path])
+    }
+
+    // 规则③现由声明表驱动，不再硬编码：抽掉 note→annotates 行后该边消失。
+    @Test func annotatesEdgeGatedBySchemaTable() {
+        let p = mk("vault/papers/p.md", "paper")
+        let note = mk("vault/notes/n.md", "note", annotates: p.path)
+        var schema = VaultSchema.builtin
+        schema.pathReferences = []
+        let g = RelationGraph.build([p, note], schema: schema)
+        #expect(g.sources(of: p.path, kind: .annotates).isEmpty)
+    }
+
+    // 新增一行声明即给新类型建路径引用边（“新引用字段 = 声明表一行”）。
+    @Test func pathReferenceRuleAppliesToDeclaredType() {
+        let talk = mk("vault/talks/t/talk.md", "talk")
+        let transcript = mk("vault/talks/t/transcript.md", "transcript", annotates: talk.path)
+        var schema = VaultSchema.builtin
+        schema.pathReferences = [
+            .init(onType: "transcript", field: "annotates", kind: "annotates"),
+        ]
+        let g = RelationGraph.build([talk, transcript], schema: schema)
+        #expect(g.sources(of: talk.path, kind: .annotates).map(\.path) == [transcript.path])
     }
 
     @Test func emptyAndIsEmpty() {
