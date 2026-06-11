@@ -41,21 +41,21 @@ private final class MemoryVaultClient: VaultClient, @unchecked Sendable {
     }
     func writeFile(path: String, text: String) async throws { texts[path] = text }
 
-    func index() async throws -> [Entry] { [] }
-    func search(_ query: SearchQuery) async throws -> [SearchHit] { [] }
-    func openInEditor(path: String, app: String) async throws {}
-    func openPDF(slug: String) async throws {}
-    func openTranslation(slug: String) async throws {}
-    func hasTranslation(slug: String) -> Bool { false }
-    func imageOriginalURL(forImageEntryPath path: String) async throws -> URL? { nil }
-    func fileURL(for path: String) -> URL? { nil }
-    func createImageObject(from sourceURL: URL, title: String?) async throws -> Entry {
-        Entry(path: "", type: .image, title: "", author: [], year: nil,
-              ratingScore: 0, themes: [], preview: "", hasPDF: false)
-    }
-    func createNote(path: String, text: String) async throws {}
-    func moveToTrash(path: String) async throws -> String { "" }
-    func listTrash() async throws -> [TrashItem] { [] }
-    func restoreTrash(name: String) async throws -> String { "" }
-    func purgeTrash(name: String) async throws {}
+    // Unreachable by MetadataWriter.write (entryText/writeFile only). Trap loudly so
+    // a future test that accidentally routes through one fails instead of getting a
+    // garbage sentinel.
+    func index() async throws -> [Entry] { fatalError("unused in MetadataWriterTests") }
+    func search(_ query: SearchQuery) async throws -> [SearchHit] { fatalError("unused in MetadataWriterTests") }
+    func openInEditor(path: String, app: String) async throws { fatalError("unused in MetadataWriterTests") }
+    func openPDF(slug: String) async throws { fatalError("unused in MetadataWriterTests") }
+    func openTranslation(slug: String) async throws { fatalError("unused in MetadataWriterTests") }
+    func hasTranslation(slug: String) -> Bool { fatalError("unused in MetadataWriterTests") }
+    func imageOriginalURL(forImageEntryPath path: String) async throws -> URL? { fatalError("unused in MetadataWriterTests") }
+    func fileURL(for path: String) -> URL? { fatalError("unused in MetadataWriterTests") }
+    func createImageObject(from sourceURL: URL, title: String?) async throws -> Entry { fatalError("unused in MetadataWriterTests") }
+    func createNote(path: String, text: String) async throws { fatalError("unused in MetadataWriterTests") }
+    func moveToTrash(path: String) async throws -> String { fatalError("unused in MetadataWriterTests") }
+    func listTrash() async throws -> [TrashItem] { fatalError("unused in MetadataWriterTests") }
+    func restoreTrash(name: String) async throws -> String { fatalError("unused in MetadataWriterTests") }
+    func purgeTrash(name: String) async throws { fatalError("unused in MetadataWriterTests") }
 }
