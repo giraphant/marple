@@ -34,11 +34,13 @@ Sources/MarpleKit/
 │                  RelationsIndex · DocStats · DocOutline
 ├── Markdown/      渲染模型
 │                  MarkdownModel · Wikilink
-└── Nav/           导航 + 状态持久化
-                   Navigation(Workspace/NavTab/NavHistory)· PersistedState
+├── Nav/           导航 + 状态持久化
+│                  Navigation(Workspace/NavTab/NavHistory)· PersistedState
+└── Schema/        Vault 词汇表:VaultSchema 声明表(实体字段别名、类型显示;可由 vault/schema/schema.yaml 覆盖)
+                   + quasi 合规快照消费者(SchemaSnapshot · VaultConformance)
 ```
 
-依赖方向:`Model/` 在最底;`Vault/`·`Indexer/`·`Derivation/`·`Markdown/`·`Nav/` 只往下依赖 `Model/`,横向之间基本不互引。
+依赖方向:`Model/` 在最底;`Vault/`·`Indexer/`·`Derivation/`·`Markdown/`·`Nav/`·`Schema/` 只往下依赖 `Model/`,横向之间基本不互引(例外:`Schema/` 横向依赖 `Indexer/` 的 YAML 解析工具)。
 
 ## Marple/ —— 按功能竖切(feature folders)
 

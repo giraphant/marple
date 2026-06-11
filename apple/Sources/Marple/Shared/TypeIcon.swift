@@ -2,38 +2,25 @@ import SwiftUI
 import MarpleKit
 
 /// Capacities-style typed icon (mirrors the web `TypeIcon`): a small rounded
-/// tinted square holding the type's SF Symbol. Shared by the sidebar and the
-/// command palette so the symbol/color mapping lives in one place.
+/// tinted square holding the type's SF Symbol. Symbol + tint names come from
+/// the schema declaration table (VaultSchema.active); this file only maps the
+/// platform-agnostic tint name onto a SwiftUI Color.
 extension EntryType {
-    var symbolName: String {
-        switch self {
-        case .paper:   return "doc.text"
-        case .book:    return "book"
-        case .author:  return "person"
-        case .topic:   return "square.stack.3d.up"
-        case .journal: return "newspaper"
-        case .chapter: return "list.bullet.rectangle"
-        case .note:    return "note.text"
-        case .image:   return "photo"
-        case .talk:    return "waveform"
-        case .transcript: return "text.quote"
-        case .other:   return "questionmark.square.dashed"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .paper:   return .blue
-        case .book:    return .orange
-        case .author:  return .purple
-        case .topic:   return .teal
-        case .journal: return .green
-        case .chapter: return .indigo
-        case .note:    return .yellow
-        case .image:   return .pink
-        case .talk:    return .red
-        case .transcript: return .brown
-        case .other:   return .gray
+    @MainActor var tint: Color {
+        switch tintName {
+        case "blue":   return .blue
+        case "orange": return .orange
+        case "purple": return .purple
+        case "teal":   return .teal
+        case "green":  return .green
+        case "indigo": return .indigo
+        case "yellow": return .yellow
+        case "pink":   return .pink
+        case "red":    return .red
+        case "brown":  return .brown
+        case "mint":   return .mint
+        case "cyan":   return .cyan
+        default:       return .gray
         }
     }
 }
