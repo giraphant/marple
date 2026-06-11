@@ -72,6 +72,24 @@ import Testing
         let exactStem   = mk(path: "vault/notes/cafe.md", type: .note, title: "Other")
         #expect(NameResolver.resolveWikilink("cafe", in: [foldedTitle, exactStem])?.path == exactStem.path)
     }
+    // — QUA-225 path-form target [[papers/x|label]] resolves by vault-relative path —
+    @Test func wikilinkResolvesPathForm() {
+        let paper = mk(path: "vault/papers/foo.md", type: .paper, title: "Foo Paper")
+        #expect(NameResolver.resolveWikilink("papers/foo", in: [paper])?.path == paper.path)
+    }
+    @Test func wikilinkPathFormToleratesMdSuffix() {
+        let paper = mk(path: "vault/papers/foo.md", type: .paper, title: "Foo Paper")
+        #expect(NameResolver.resolveWikilink("papers/foo.md", in: [paper])?.path == paper.path)
+    }
+    @Test func wikilinkPathFormIsCaseInsensitive() {
+        let paper = mk(path: "vault/papers/Foo.md", type: .paper, title: "Foo Paper")
+        #expect(NameResolver.resolveWikilink("Papers/foo", in: [paper])?.path == paper.path)
+    }
+    // Path tier only fires on a `/`-bearing needle; bare stems keep matching by stem.
+    @Test func wikilinkBareStemUnaffectedByPathTier() {
+        let note = mk(path: "vault/notes/donna-haraway.md", type: .author, title: "Donna Haraway")
+        #expect(NameResolver.resolveWikilink("donna-haraway", in: [note])?.path == note.path)
+    }
     // — journal verbatim port (new coverage; behavior = old Inspector impl) —
     @Test func journalMatchesByJournalField() {
         let j = mk(path: "vault/journals/jop.md", type: .journal, journal: "Journal of Philosophy")
