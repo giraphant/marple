@@ -76,6 +76,7 @@ public final class VaultIndexer: @unchecked Sendable {
         // 1. Walk + parse (outside the lock — slow phase).
         let files = try walkMarkdown(vaultPath)
         let sourceSlugs = loadSourceSlugs(sourcesDir: sourcesPath)
+        let sourceIndex = SourceSlugIndex(sourceSlugs)
         let addedDates  = gitAddedDates(workspaceRoot: workspaceRoot)
 
         var entries: [IndexedEntry] = []
@@ -98,7 +99,8 @@ public final class VaultIndexer: @unchecked Sendable {
                 rel: rel,
                 fileStem: fileStem,
                 sourceSlugs: sourceSlugs,
-                mtimeMs: mtimeMs
+                mtimeMs: mtimeMs,
+                sourceIndex: sourceIndex
             )
             guard case .indexed(var entry) = outcome else { continue }
             entry.added = addedDates[rel] ?? 0
@@ -215,6 +217,7 @@ public final class VaultIndexer: @unchecked Sendable {
 
         // Current vault fingerprints: rel → mtime ms (mirrors :372-380).
         let sourceSlugs = loadSourceSlugs(sourcesDir: sourcesPath)
+        let sourceIndex = SourceSlugIndex(sourceSlugs)
         let files = try walkMarkdown(vaultPath)
         var fsMap = [String: Int64](minimumCapacity: files.count)
         for file in files {
@@ -258,7 +261,12 @@ public final class VaultIndexer: @unchecked Sendable {
 
             let existing = indexed.keys.contains(rel)
             let absPath = workspaceRoot + "/" + rel
-            if let entry = indexedEntryForPath(sourceSlugs: sourceSlugs, absPath: absPath, rel: rel) {
+            if let entry = indexedEntryForPath(
+                sourceSlugs: sourceSlugs,
+                sourceIndex: sourceIndex,
+                absPath: absPath,
+                rel: rel
+            ) {
                 writes.append((rel: rel, entry: entry))
                 stats.upserted += 1
             } else if existing {
@@ -444,6 +452,7 @@ public final class VaultIndexer: @unchecked Sendable {
     /// behaviour (only `buildFull` sets it from git dates).
     private func indexedEntryForPath(
         sourceSlugs: Set<String>,
+        sourceIndex: SourceSlugIndex,
         absPath: String,
         rel: String
     ) -> IndexedEntry? {
@@ -458,7 +467,8 @@ public final class VaultIndexer: @unchecked Sendable {
             rel: rel,
             fileStem: fileStem,
             sourceSlugs: sourceSlugs,
-            mtimeMs: mtimeMs
+            mtimeMs: mtimeMs,
+            sourceIndex: sourceIndex
         )
 
         if case .indexed(var entry) = outcome {

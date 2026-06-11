@@ -270,7 +270,8 @@ public func buildIndexedEntry(
     rel: String,
     fileStem: String,
     sourceSlugs: Set<String>,
-    mtimeMs: Int64?
+    mtimeMs: Int64?,
+    sourceIndex: SourceSlugIndex? = nil
 ) -> BuildOutcome {
 
     // 1. Fence detection — mirrors `parse_file` / Rust's fence check.
@@ -316,7 +317,10 @@ public func buildIndexedEntry(
 
     // has_pdf
     let hasPDFValue: Bool = pdfSlugValue.map { slug in
-        hasPDF(slug: slug, sourceSlugs: sourceSlugs)
+        if let sourceIndex {
+            return sourceIndex.hasPDF(slug: slug)
+        }
+        return hasPDF(slug: slug, sourceSlugs: sourceSlugs)
     } ?? false
 
     // 6. Title.
