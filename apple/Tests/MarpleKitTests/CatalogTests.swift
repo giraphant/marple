@@ -36,9 +36,8 @@ import Testing
         #expect(c.counts[.note] == 1)
         #expect(c.counts[.topic] == 1)   // two topic pages, one slug
 
-        // Topic membership: the paper declares topics:[embodiment]; the overview
-        // page wins the slug→entry mapping (path-first).
-        #expect(Set(c.topicMembership.membersBySlug["embodiment"]?.map(\.path) ?? []) == Set(["vault/papers/p.md"]))
+        // Topic forward index: the overview page wins the slug→entry mapping
+        // (path-first). Reverse membership now lives in the relation graph (inTopic).
         #expect(c.topicMembership.topicEntryBySlug["embodiment"]?.path == "vault/topics/embodiment/00-overview.md")
     }
 

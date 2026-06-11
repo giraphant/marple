@@ -22,6 +22,12 @@ import Testing
                 [VaultSchema.FieldAlias("topics")])
     }
 
+    // 规则③路径引用：内置表必须复刻旧 RelationGraph.build 的硬编码 note→annotates
+    @Test func builtinPathReferences() {
+        #expect(VaultSchema.builtin.pathReferences ==
+                [VaultSchema.PathReference(onType: "note", field: "annotates", kind: "annotates")])
+    }
+
     // 内置显示表必须逐字复刻 Marple/Shared/TypeIcon.swift 的现状 switch
     @Test func builtinDisplayMatchesLegacyTypeIcon() {
         let expected: [(EntryType, String, String)] = [
@@ -85,6 +91,29 @@ import Testing
         #expect(schema.display(for: .paper) ==
                 VaultSchema.TypeDisplay(symbol: "doc.richtext", tint: "mint"))
         #expect(schema.display(for: .book) == VaultSchema.builtin.display(for: .book))
+    }
+
+    @Test func loadOverridesPathReferences() throws {
+        let root = try makeWorkspace()
+        let yaml = """
+        pathReferences:
+          - onType: note
+            field: annotates
+            kind: annotates
+          - onType: transcript
+            field: annotates
+            kind: annotates
+        """
+        try yaml.write(to: root.appendingPathComponent("vault/schema/schema.yaml"),
+                       atomically: true, encoding: .utf8)
+        let schema = VaultSchema.load(workspaceRoot: root.path)
+        // 整列表替换
+        #expect(schema.pathReferences == [
+            VaultSchema.PathReference(onType: "note", field: "annotates", kind: "annotates"),
+            VaultSchema.PathReference(onType: "transcript", field: "annotates", kind: "annotates"),
+        ])
+        // 未提及的 key 保持内置
+        #expect(schema.entityAliases["author"] == VaultSchema.builtin.entityAliases["author"])
     }
 
     @Test func loadMalformedFileReturnsBuiltin() throws {

@@ -1581,9 +1581,10 @@ final class AppModel {
     }
 
     func newAnnotation(for entry: Entry) async {
-        let target = annotationAnchor(for: entry, in: entries)
-        let draft = NoteBuilder.annotation(target: target)
-        await createAndReveal(draft, entry: annotationEntry(from: draft, target: target))
+        // 忠实标注当前打开的文档（章节就写章节）。书 overview 的关联面板靠
+        // relations() 的容器附属聚合把章节笔记上卷过来（QUA-221）。
+        let draft = NoteBuilder.annotation(target: entry)
+        await createAndReveal(draft, entry: annotationEntry(from: draft, target: entry))
     }
 
     func newAnnotationForOpenDoc() async {
