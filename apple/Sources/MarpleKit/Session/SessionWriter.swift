@@ -1,11 +1,11 @@
 import Foundation
-import MarpleKit
 
 /// Publishes the Mac's open document tabs to `<workspaceRoot>/session/open-tabs.json`
 /// for the iOS companion to read. Mac-only — the iOS app never writes. This is the
 /// same "Mac writes derived state into the synced folder" arrangement as the
 /// `.marple` index; the open-tab list just lives outside `.marple` so it still syncs
-/// even if the index directory is excluded from iCloud.
+/// even if the index directory is excluded from iCloud. Lives in MarpleKit for
+/// code-sharing, but only instantiated by the macOS app (iOS is read-only).
 ///
 /// Publishes **every Space** (name + icon + its full recursive forest of groups and
 /// nesting), in sidebar order — not just the active one — so the iOS sidebar can
@@ -15,20 +15,20 @@ import MarpleKit
 /// `persist()` fires on every state change, so this is debounced (~1.5s) and skips
 /// the write entirely when nothing material changed — keeping iCloud churn down.
 @MainActor
-final class SessionWriter {
+public final class SessionWriter {
     private let workspaceRoot: String
     /// Last space list we committed to disk (timestamp ignored when comparing).
     private var lastSpaces: [SessionSpaceSnapshot] = []
     private var pending: SessionSnapshot?
     private var scheduled = false
 
-    init(workspaceRoot: String) { self.workspaceRoot = workspaceRoot }
+    public init(workspaceRoot: String) { self.workspaceRoot = workspaceRoot }
 
     /// Build a snapshot of all Spaces' tab forests and queue a debounced write.
     /// Each Space's `tree` is the recursive (v2) snapshot whose tab leaves index
     /// into its `tabs`; without it we fall back to a flat list of the tabs. Spaces
     /// whose forest prunes to empty (e.g. browse-only) aren't published.
-    func publish(spaces: [PersistedWorkspaceSpace]) {
+    public func publish(spaces: [PersistedWorkspaceSpace]) {
         guard !workspaceRoot.isEmpty else { return }
         let published = spaces.compactMap { space -> SessionSpaceSnapshot? in
             let roots: [SessionNode]
