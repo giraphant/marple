@@ -1,92 +1,122 @@
 # marple-native 架构地图
 
-macOS 原生阅读器(纯 Swift)。数据层已完全脱离 Rust sidecar——索引在进程内用 Swift 构建、用 SQLite(GRDB)读写。本文件是目录结构的"地图",改动布局后请同步更新。
+一颗 **MarpleKit** 核 + 两层薄壳,覆盖一座 markdown 学术文库(vault)。核里是领域模型 + 数据进出 + 索引 + 派生编目 + markdown 渲染 + 会话/导航,全程纯 Swift、无 SwiftUI;两层壳只放各自平台的 UI 与边界胶水:**Marple**(macOS,可读写)与 **MarpleiOS**(iPhone,只读 reader)。两壳消费同一颗核。本文件是目录结构的"地图",改动布局后请同步更新。
 
-## 两个 target,单向依赖
+## 分层模型(L0→L4)
 
-SPM 包定义在 `Package.swift`,两个 target:
+数据在核里自下而上流过五层,每层只往下依赖:
 
-```
-Marple (可执行, SwiftUI 外壳)  ──import──▶  MarpleKit (逻辑库, 无 UI)
-```
+- **L0 Schema** —— 文库词汇表声明:实体字段别名、type→图标/配色、容器语义。一切派生的语义起点。
+- **L1 Vault** —— 数据进出 + 关键协议缝:`VaultClient`(数据从哪来)、`IndexDatabase`(读 SQLite)、`VaultChangeSource`(变更通知契约)、写侧 primitive、Superset 自动化、语义检索后端。
+- **L2 Catalog** —— 编目层:全部"由馆藏派生"的状态(counts/themeIndex/搜索/关系图/容器上下文),统一 generation/单飞权威。唯一派生 owner。
+- **L3 Markdown** —— 文档渲染模型:markdown→行模型→`AttributedString`、wikilink、表格附件、talk 时间线。
+- **L4 Session/Nav** —— 会话/导航:工作区/标签/历史/持久化状态(Nav)、会话快照落盘 + 元数据写回(Session)。
 
-- **MarpleKit**:领域模型 + 数据进出 + 索引器 + 派生计算 + markdown 渲染模型。不含任何 SwiftUI。
-- **Marple**:只放 SwiftUI 视图 + `AppModel`(中枢 view-model)。所有逻辑都来自 MarpleKit。
-- 依赖**严格单向**:UI 依赖逻辑,逻辑绝不反过来依赖 UI。
+## 三棵树
 
-> Swift 机制提醒:同一个 target(module)内所有文件互相自动可见、无需 import;只有跨 target 才写 `import MarpleKit`。所以**子文件夹纯粹是给人看的组织,编译器不认**——SwiftPM 递归编译 `Sources/<target>/` 下所有 `.swift`。挪文件不会改任何 import,但也意味着"层级单向"是**君子协定,编译器不强制**。等哪天某条边界真需要强制(违规即编译报错),再把那块拆成独立 target。
-
-## MarpleKit/ —— 按关注点分层
+### MarpleKit/ —— 核(纯逻辑,无 UI),按关注点分层
 
 ```
 Sources/MarpleKit/
-├── Model/         纯领域类型(最底层,人人可依赖)
-│                  Entry · Frontmatter · TrashItem
-├── Vault/         数据进出 + 关键协议缝
+├── Model/         L0 之下:纯领域类型(最底,人人可依赖)
+│                  Entry(含 EntryType)· Frontmatter · ImageAsset · TrashItem
+├── Schema/        L0:文库词汇表
+│                  VaultSchema(声明表;可由 vault/schema/schema.yaml 覆盖)· EntryTypeDisplay
+│                  + quasi 合规快照消费者(SchemaSnapshot · VaultConformance)
+├── Vault/         L1:数据进出 + 协议缝
 │                  VaultClient(协议 + StubVaultClient)· LocalVaultClient(纯 Swift 实现)
-│                  IndexDatabase(读侧:查 SQLite)· VaultWatcher · VaultConfig
+│                  IndexDatabase(读侧:查 SQLite)· VaultConfig/VaultPaths
+│                  VaultChangeSource(变更契约)· VaultWatcher(Mac FSEvents 实现)
 │                  FrontmatterPatch · NoteBuilder(写侧 helper)
-├── Indexer/       写侧:扫库 → 建 SQLite 索引(从 rust/reader-core/indexer.rs 移植)
+│                  SemanticSearcher · SemanticBackend · VectorStore(语义检索查侧)
+│                  TalkMedia/SRT(transcript 媒体)
+│                  Superset{Log,Runner,Automation}(外部 agent 派发 + 上下文打包)
+├── Indexer/       写侧:扫库 → 建 SQLite 索引(从 rust/reader-core 移植)
 │                  VaultIndexer · IndexWriter · IndexedEntry · IndexFields
-│                  IndexTitles · IndexBody · YamlFrontmatter · SourceResolver · GitDates
-├── Catalog/       编目层（L2）：全部"由馆藏派生"的索引与关联（搜索、关系图、容器上下文、theme counts）。QUA-218 中由 `Derivation/` 改名；Catalog 类型本体在 PR3 立起。
-│                  ThemeIndex · ListSort · ListFilter · Browse · CardMetrics
-│                  RelationsIndex · DocStats · DocOutline
-│                  NameResolver · RelationGraph · Containers(规则①②,QUA-218 PR2)
-├── Markdown/      渲染模型
-│                  MarkdownModel · Wikilink
-├── Nav/           导航 + 状态持久化
-│                  Navigation(Workspace/NavTab/NavHistory)· PersistedState
-└── Schema/        Vault 词汇表:VaultSchema 声明表(实体字段别名、类型显示;可由 vault/schema/schema.yaml 覆盖)
-                   + quasi 合规快照消费者(SchemaSnapshot · VaultConformance)
+│                  IndexTitles · IndexBody · YamlFrontmatter · GitDates
+│                  SourceResolver(PDF 源解析,含 Jaccard 模糊匹配)· ImageProbe
+│                  SemanticIndexer · TextEmbedder · HFTokenizer(语义写侧)
+├── Catalog/       L2:派生编目层(唯一派生 owner)。"图书馆目录"隐喻:从馆藏派生、可重编、多路检索、带交叉引用。
+│                  Catalog(@Observable 派生状态本体)
+│                  Catalog+IndexDerived/+DeferredDerived/+Visible/+OpenDoc/+Refresh(按关注点拆的重算扩展)
+│                  RefreshAuthority(actor:统一 generation/单飞)· RefreshAuthority 之上的 pass + 独立 derivedGeneration 轴
+│                  NameResolver(规则①解析端:统一两级名字归一)· RelationGraph · RelationsIndex(annotationAnchor 章→书 remap 例外)
+│                  Containers(规则②:同 slug 容器)· BookContext · TopicContext · TopicIndex · ThemeIndex
+│                  SearchRanker · CommandSearch · SearchIndex · BodyMatching/BodyLineMatches · Citation
+│                  ListSort · ListFilter · SavedView · Browse · CardMetrics · DocStats · DocOutline
+├── Markdown/      L3:渲染模型
+│                  MarkdownModel · MarkdownLine · AttributedStringRenderer
+│                  Wikilink · TableAttachment · TalkTimeline · Platform
+├── Nav/           L4:导航 + 状态持久化
+│                  Navigation(Workspace/NavTab/NavHistory/Group/TabGroup)· PersistedState
+│                  SessionSnapshot · TabShareManifest · StateStore(协议)/UserDefaultsStateStore
+├── Session/       L4:会话落盘 + 元数据写回(写侧 primitive)
+│                  SessionWriter(<vaultRoot>/session/*.json)· MetadataWriter · SessionResolver
+├── Localisation/  本地化辅助:CnDoubanIndex(中文豆瓣索引)
+├── CLI/           CLI 协议类型(壳侧 socket host 用):CLIProtocol(请求/响应/方法/错误码)
+└── Backup/        备份引擎:CloneCopy · SnapshotStore · RetentionPolicy(UI/调度在壳)
 ```
 
-依赖方向:`Model/` 在最底;`Vault/`·`Indexer/`·`Catalog/`·`Markdown/`·`Nav/`·`Schema/` 只往下依赖 `Model/`,横向之间基本不互引(例外:`Schema/` 横向依赖 `Indexer/` 的 YAML 解析工具)。
-
-## Marple/ —— 按功能竖切(feature folders)
+### Marple/ —— macOS 壳(SwiftUI + AppKit,可读写),按功能竖切
 
 ```
 Sources/Marple/
-├── App/           应用外壳 + 中枢 view-model
-│                  MarpleApp(@main + AppState.boot 组装点)· RootView(两轨外壳)
-│                  AppModel(@Observable 中枢)· SetupView(首次选文库)
-├── Sidebar/       左轨:6 类型 + 主题 + 回收站
-│                  SidebarView
-├── Browse/        中列:列表 / 卡片 / 主题 / 回收站 各 pane
-│                  EntryListView · EntryRow(列表)
-│                  EntryGridView(瀑布流外壳)· CollectionGridVariant(NSCollectionView)
-│                  WaterfallCollectionLayout · EntryCardItem(纯 AppKit 卡片)· CardLayout · GridDimensions
-│                  ThemesView · TrashView
+├── App/           应用外壳 + 中枢 view-model + 窗口
+│                  MarpleApp(@main + 组装点)· AppModel(@Observable 中枢)· SetupView(首次选文库)
+│                  MarpleWindowController · MarpleSplitViewController(AppKit split 外壳)
+│                  MainToolbar · CommandPalettePanel · MemoryWatchdog
+├── Sidebar/       左轨:类型 + 主题 + 回收站
+│                  SidebarView · SidebarTabOutlineView
+├── Browse/        中列:列表 / 表格 / 卡片 / 主题 / 回收站
+│                  EntryListView · EntryListTable · EntryRow · EntryGridView · CollectionGridVariant
+│                  WaterfallCollectionLayout · EntryCardItem(纯 AppKit)· CardLayout · GridDimensions
+│                  CommandPalette · ThemesView · TrashView
 ├── Reading/       阅读视图
-│                  DocView · MarkdownBlocksView
+│                  DocView · MarkdownTextView(TextKit 2)· TalkPlayerView
 ├── Inspector/     右轨:统计 / 信息 / 目录
-│                  InspectorView
+│                  InspectorView · InspectorMetadataRows
 ├── Tabs/          标签栏 + 快捷键
 │                  TabStripView · TabCommands
-└── Shared/        跨视图复用
-                   Tokens(Space/Typo 设计 token)· FlowLayout(chip 流式布局)
+├── Settings/      设置面板
+│                  SettingsView · AppSettings
+├── CLI/           CLI socket host(消费 MarpleKit/CLI 协议)
+│                  CLIServer · CLIHandlers · AppModel+CLI
+├── Backup/        备份 UI + 调度
+│                  BackupBrowserView · BackupScheduler
+├── Shared/        跨视图复用
+│                  Tokens(设计 token)· FlowLayout · TypeIcon · DateFormatters
+└── Resources/     Assets.xcassets
 ```
 
-## 关键缝:`VaultClient` 协议
-
-`Vault/VaultClient.swift` 一个协议把"数据从哪来"抽象掉。`LocalVaultClient` 是当前实现(进程内文件 IO + 查 `IndexDatabase`);`StubVaultClient` 供测试。当年 sidecar→纯 Swift 的迁移之所以是 drop-in,就是因为只换了协议实现、`AppModel` 一行没改。**保留这个缝。**
-
-## 数据流(开机到上屏)
+### MarpleiOS/ —— iOS 壳(SwiftUI,只读 reader),消费同一颗核
 
 ```
-VaultIndexer.reconcile()  →  写 <workspace>/.marple/index.sqlite (GRDB, WAL, 单写者)
-        │
-IndexDatabase             →  从该 SQLite 读 entries / 全文检索(trigram, CJK)
-        │
-LocalVaultClient          →  实现 VaultClient(读委派 IndexDatabase,写直接落文件)
-        │
-AppModel (@Observable)    →  编排:派生缓存(counts/themeIndex/visibleEntries)算在渲染路径之外,
-        │                    大列表 filter→sort 甩到后台线程 + 取消旧任务
-SwiftUI 视图               →  只读 AppModel 的 state
+ios/MarpleiOS/
+├── MarpleiOSApp.swift   @main
+├── App/                 ReaderModel(@Observable 中枢,持 Catalog)· SetupView
+├── UI/                  RootView · SidebarScreen · EntryListScreen · DocScreen · MarkdownTextView
+└── Vault/               IOSVaultClient(VaultClient 实现,写方法一律抛 read-only)
+                         ICloudMaterializer(iCloud 下载;VaultChangeSource 角色)· VaultBookmark
 ```
 
-组装点只有一处:`App/MarpleApp.swift` 的 `AppState.boot`(reconcile → IndexDatabase → LocalVaultClient → AppModel → FSEvents watcher)。
+## 依赖方向
 
-## 还没做的
+`Model/` 在最底。`Schema/`·`Vault/`·`Indexer/`·`Catalog/`·`Markdown/`·`Nav/`·`Session/` 只往下依赖 `Model/`,横向之间基本不互引。两层壳 `import MarpleKit`,核绝不反向依赖任何 UI。
 
-语义检索(BGE-M3 embedding)= Phase 3,目前 native 未使用,故 `Indexer/` 不含向量构建。届时新增的向量代码归入 `Indexer/`(写)+ `Vault/`(查)。
+**唯一具名横向例外**:`Schema/VaultSchema` 复用 `Indexer/` 的 `YamlFrontmatter` 解析 schema 覆盖文件。
+
+> Swift 机制提醒:同一 target 内文件互相自动可见、无需 import;只有跨 target 才写 `import MarpleKit`。子文件夹纯粹是给人看的组织,SwiftPM 递归编译 `Sources/<target>/` 下所有 `.swift`。所以"层级单向"是君子协定、编译器不强制;真要强制某条边界(违规即编译报错),再把那块拆成独立 target。
+
+## QUA-218 终态关键事实
+
+- **Catalog 是唯一 L2 派生 owner**:counts/themeIndex/visibleEntries/relationGraph/searchIndex 都算在它身上,壳只读。
+- **统一 generation / 单飞**:`RefreshAuthority`(actor)给每趟 reconcile→reload 发 `pass`,陈旧 pass 发布即丢弃;`derivedGeneration` 是独立轴(乐观单条编辑等 refresh 之外的触发也能让后台派生重算)。
+- **NameResolver = 全库唯一两级名字匹配**:wikilink 解析与实体引用共用它(第一级逐字保旧命中,第二级共用 foldedKey 兜底)。
+- **规则① 实体引用 / 规则② 容器** 两套引擎 + 具名例外:`RelationsIndex.annotationAnchor`(annotation 章→书 remap)、`SourceResolver` PDF 源的 Jaccard 模糊匹配。
+- **VaultChangeSource 契约**:Mac 用 `VaultWatcher`(FSEvents),iOS 用 `ICloudMaterializer`(iCloud 下载);两边都路由到 `catalog.refresh`。
+- **写回 primitive(`SessionWriter`/`MetadataWriter`/`FrontmatterPatch`)已沉入 MarpleKit**;iOS 只读是**产品选择**,不是平台限制——`IOSVaultClient` 的写方法存在但一律抛 read-only。
+
+## 过渡期留壳(诚实标注,尚未完全下沉)
+
+- `entries` 数组 + `loadIndex`/`reconcile` 编排的**主体**仍在各壳的中枢 view-model 里(macOS `AppModel.refreshBody`/`loadIndex`、iOS `ReaderModel`)。Catalog 持有派生状态与 refresh 权威,但**那个 reconcile→reload 闭包是壳喂进来的**(`catalog.refresh(model.refreshBody)`)——过渡态,未彻底沉入核。
+- **字段编辑语义**(`FrontmatterPatch` 组合 + 乐观更新单条 `Entry`)与 `persist()` 编排同样留在壳侧(`AppModel`)。这些都还**没做完**,是迁移过渡留壳,别当成终态。
