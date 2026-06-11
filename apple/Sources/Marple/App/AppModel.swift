@@ -202,12 +202,12 @@ final class AppModel {
     var themeIndex: [ThemeCount] { catalog.themeIndex }
     var topicMembership: TopicMembership { catalog.topicMembership }
     private(set) var visibleEntries: [Entry] = []
-    private(set) var relationGraph: RelationGraph = .empty
+    var relationGraph: RelationGraph { catalog.relationGraph }
     /// Prebuilt field-weighted index for the command palette's 快速 mode (rebuilt
     /// whenever `entries` changes, like the other derived caches). Carries a
     /// trigram inverted index so per-keystroke ranking only scores hundreds of
     /// candidate docs instead of 15k full-scans.
-    private(set) var searchIndex: SearchIndex = .empty
+    var searchIndex: SearchIndex { catalog.searchIndex }
 
     // Trash list (loaded lazily; sidebar badge reads .count).
     private(set) var trashItems: [TrashItem] = []
@@ -368,6 +368,13 @@ final class AppModel {
         }
         loadTypeOrder()
         loadHiddenTypes()
+        // deferred 派生发布后,若有开档则重算开档派生（旧 scheduleDeferredDerivedRebuild
+        // 的 `if openEntry != nil { recomputeOpenDerived() }`）。Task 5 把
+        // recomputeOpenDerived 迁入 Catalog 后改为内部直调。
+        catalog.onDerivedReady = { [weak self] in
+            guard let self, self.openEntry != nil else { return }
+            self.recomputeOpenDerived()
+        }
     }
 
     /// Last-session sidebar counts, restored from PersistedState in init. Kept
@@ -499,43 +506,6 @@ final class AppModel {
     ///   which is exercised in the first few hundred ms after launch)
     private func rebuildIndexDerived() {
         catalog.rebuildIndexDerived(entries: entries, savedViews: savedViews)
-        scheduleDeferredDerivedRebuild()   // Task 3 前暂留壳
-    }
-
-    /// Build the heavy derived caches (relation graph, search index) on a
-    /// background task and publish them on the main actor when done. If
-    /// `entries` changes again before this task completes, the in-flight task
-    /// is cancelled and stale dispatch blocks are vetoed by generation counter
-    /// — only the latest snapshot wins.
-    private var deferredDerivedTask: Task<Void, Never>?
-    private var derivedGeneration: Int = 0
-    private func scheduleDeferredDerivedRebuild() {
-        deferredDerivedTask?.cancel()
-        derivedGeneration &+= 1
-        let generation = derivedGeneration
-        let snapshot = entries
-        deferredDerivedTask = Task { [weak self] in
-            let result = await Task.detached(priority: .utility) {
-                let graph = RelationGraph.build(snapshot)
-                let search = buildSearchIndex(snapshot)
-                return (graph, search)
-            }.value
-            if Task.isCancelled { return }
-            // Hop to the next main-runloop tick (not MainActor.run, which can
-            // run synchronously inside the current render pass and triggered an
-            // NSTableView reentrant-delegate warning when @Observable
-            // invalidation cascaded back into the table mid-render).
-            //
-            // DispatchQueue.main.async can't be cancelled, so guard the
-            // assignment with the generation counter: any newer rebuild bumps
-            // `derivedGeneration` and this stale block becomes a no-op.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.derivedGeneration == generation else { return }
-                self.relationGraph = result.0
-                self.searchIndex = result.1
-                if self.openEntry != nil { self.recomputeOpenDerived() }
-            }
-        }
     }
 
     /// Recompute the open document's outline / stats / entry / relations. O(n) over
