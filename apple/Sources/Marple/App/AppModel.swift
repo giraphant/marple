@@ -22,11 +22,10 @@ final class AppModel {
     /// handlers trigger a synchronous reconcile through this. nil in stub tests.
     var cliIndexer: VaultIndexer?
 
-    /// QUA-198/QUA-212: single-flight gate shared by every reconcile→reload
-    /// chain (FSEvents watcher, boot deferred reconcile, CLI self-heal). Owned
-    /// here so the CLI extension can join an in-flight pass instead of stacking
-    /// a duplicate full vault walk behind the indexer writeLock.
-    let refreshGate = RefreshGate()
+    /// L2 编目层派生状态 owner (QUA-218 PR3a). 持全部派生缓存 + vault-变更管线的
+    /// 统一 generation/单飞权威 (QUA-198/QUA-212 的 RefreshAuthority 合流单飞 +
+    /// loadIndex staleness 2→1)，经 catalog.refresh/refreshJoining 暴露唯一入口。
+    let catalog = Catalog()
 
     /// The vault's self-describing schema snapshot, reloaded on every index load.
     /// nil when the vault has no `.quasi/schema.json` (or it's stale/unreadable) —
@@ -67,15 +66,16 @@ final class AppModel {
     func beginRefreshing() { refreshingCount += 1 }
     func endRefreshing() { refreshingCount = max(0, refreshingCount - 1) }
 
-    /// One reconcile→reload pass — the body every `refreshGate` runner executes
-    /// (watcher signal, trailing rerun, CLI self-heal). Callers must hold the
-    /// gate. No-op when no indexer is wired (stub-backed tests).
-    func refreshChain() async {
+    /// One reconcile→reload pass — the body every `catalog.refresh` runner executes
+    /// (watcher signal, trailing rerun, CLI self-heal). `myPass` is the current
+    /// refresh generation, threaded into loadIndex for stale-publish dropping.
+    /// No-op when no indexer is wired (stub-backed tests).
+    func refreshBody(_ myPass: Int) async {
         guard let indexer = cliIndexer else { return }
         beginRefreshing()
         do { _ = try await Task.detached { try indexer.reconcile() }.value }
         catch { print("[marple] reconcile failed: \(error)") }
-        await loadIndex()
+        await loadIndex(pass: myPass)
         await reloadOpen()
         endRefreshing()
     }
@@ -154,12 +154,12 @@ final class AppModel {
     private(set) var savedViews: [SavedView] = [] {
         didSet {
             persist()
-            recomputeSavedViewCounts()
+            catalog.recomputeSavedViewCounts(entries: entries, savedViews: savedViews)
         }
     }
     /// Live row counts per saved view for the sidebar (computed like the type
     /// bucket counts, over the browse universe).
-    private(set) var savedViewCounts: [UUID: Int] = [:]
+    var savedViewCounts: [UUID: Int] { catalog.savedViewCounts }
 
     func savedView(_ id: UUID) -> SavedView? { savedViews.first { $0.id == id } }
 
@@ -181,30 +181,28 @@ final class AppModel {
     private(set) var searchText: String = ""
     private var searchHits: [SearchHit] = []
     private var searchTask: Task<Void, Never>?
-    private var matchTask: Task<Void, Never>?
-    private var recomputeTask: Task<Void, Never>?
 
     /// Per-result matched body lines for the current list search (keyed by path).
     /// Populated off-main after the search settles; rows read from it.
-    private(set) var searchMatches: [String: BodyMatches] = [:]
+    var searchMatches: [String: BodyMatches] { catalog.searchMatches }
     /// The query `searchMatches` was computed for. A matched-line tap uses THIS
     /// (not the live `searchText`) so a tap during the debounce window stays
     /// self-consistent — anchor/ordinal/query always describe the same search.
-    private(set) var searchMatchQuery: String = ""
+    var searchMatchQuery: String { catalog.searchMatchQuery }
     /// Result rows whose "再显示 N 个匹配项" expander has been opened.
-    var matchExpanded: Set<String> = []
+    var matchExpanded: Set<String> { catalog.matchExpanded }
 
     // Derived caches — recomputed only when their inputs change, never in a view body.
-    private(set) var counts: [EntryType: Int] = [:]
-    private(set) var themeIndex: [ThemeCount] = []
-    private(set) var topicMembership: TopicMembership = TopicMembership()
-    private(set) var visibleEntries: [Entry] = []
-    private(set) var relationGraph: RelationGraph = .empty
+    var counts: [EntryType: Int] { catalog.counts }
+    var themeIndex: [ThemeCount] { catalog.themeIndex }
+    var topicMembership: TopicMembership { catalog.topicMembership }
+    var visibleEntries: [Entry] { catalog.visibleEntries }
+    var relationGraph: RelationGraph { catalog.relationGraph }
     /// Prebuilt field-weighted index for the command palette's 快速 mode (rebuilt
     /// whenever `entries` changes, like the other derived caches). Carries a
     /// trigram inverted index so per-keystroke ranking only scores hundreds of
     /// candidate docs instead of 15k full-scans.
-    private(set) var searchIndex: SearchIndex = .empty
+    var searchIndex: SearchIndex { catalog.searchIndex }
 
     // Trash list (loaded lazily; sidebar badge reads .count).
     private(set) var trashItems: [TrashItem] = []
@@ -212,14 +210,16 @@ final class AppModel {
     // Reading state
     var openBlocks: [RenderBlock] = []
 
-    // Open-doc derived caches (recomputed on open / reload, not per render).
-    private(set) var openEntry: Entry?
+    // Open-doc derived caches now live in Catalog (QUA-218 PR3a Task 5); facade
+    // forwarders so views keep reading `model.X`. `openBody` stays here — it's the
+    // loaded text set by loadDoc and an INPUT to recomputeOpenDerived.
     private(set) var openBody: String = ""
-    private(set) var openOutline: [OutlineItem] = []
-    private(set) var openStats: DocStats?
-    private(set) var openRelations: Relations?
-    private(set) var openBook: BookContext?
-    private(set) var openTopic: TopicContext?
+    var openEntry: Entry? { catalog.openEntry }
+    var openOutline: [OutlineItem] { catalog.openOutline }
+    var openStats: DocStats? { catalog.openStats }
+    var openRelations: Relations? { catalog.openRelations }
+    var openBook: BookContext? { catalog.openBook }
+    var openTopic: TopicContext? { catalog.openTopic }
 
     // Inspector → reader scroll channel; an outline tap sets this, DocView observes.
     var scrollTarget: Int?
@@ -336,7 +336,7 @@ final class AppModel {
             // wiping the user's restored type counts before we'd had a chance
             // to round-trip them.
             if let restored = s.counts {
-                counts = restored
+                catalog.seedCounts(restored)
                 loadedCountsSnapshot = restored
             }
             // Restore views BEFORE browsePane: its didSet persists, and a
@@ -365,6 +365,14 @@ final class AppModel {
         }
         loadTypeOrder()
         loadHiddenTypes()
+        // deferred 派生发布后,若有开档则重算开档派生（旧 scheduleDeferredDerivedRebuild
+        // 的 `if openEntry != nil { recomputeOpenDerived() }`）。openEntry 现读 catalog 的
+        // （同值）；recomputeOpenDerived 也已迁入 Catalog，经壳传入 openPath/openBody 与
+        // ReadingDefaults 渲染常量。
+        catalog.onDerivedReady = { [weak self] in
+            guard let self, self.catalog.openEntry != nil else { return }
+            self.recomputeOpenDerived()
+        }
     }
 
     /// Last-session sidebar counts, restored from PersistedState in init. Kept
@@ -495,91 +503,16 @@ final class AppModel {
     ///   the reading view's relations panel and the Cmd-K palette, neither of
     ///   which is exercised in the first few hundred ms after launch)
     private func rebuildIndexDerived() {
-        var c: [EntryType: Int] = [:]
-        for e in entries { c[e.type, default: 0] += 1 }
-        // QUA-189: the 专题 bucket folds to one row per topic (overview), so its
-        // count must match the folded list, not the raw page total.
-        if c[.topic] != nil { c[.topic] = topicBrowseSubset(entries).count }
-        counts = c
-        recomputeSavedViewCounts()
-        themeIndex = themeCounts(entries)
-        topicMembership = buildTopicMembership(entries)
-        scheduleDeferredDerivedRebuild()
+        catalog.rebuildIndexDerived(entries: entries, savedViews: savedViews)
     }
 
-    /// Sidebar counts for saved views — each view's clauses over the browse
-    /// universe, so count == list length (same contract as the topic bucket).
-    /// Cheap: clause matching over the flat array, × a handful of views.
-    private func recomputeSavedViewCounts() {
-        guard !savedViews.isEmpty else {
-            if !savedViewCounts.isEmpty { savedViewCounts = [:] }
-            return
-        }
-        let universe = browseUniverse(entries)
-        var result: [UUID: Int] = [:]
-        for view in savedViews {
-            result[view.id] = applyFilters(universe, view.clauses, match: view.match).count
-        }
-        savedViewCounts = result
-    }
-
-    /// Build the heavy derived caches (relation graph, search index) on a
-    /// background task and publish them on the main actor when done. If
-    /// `entries` changes again before this task completes, the in-flight task
-    /// is cancelled and stale dispatch blocks are vetoed by generation counter
-    /// — only the latest snapshot wins.
-    private var deferredDerivedTask: Task<Void, Never>?
-    private var derivedGeneration: Int = 0
-    private func scheduleDeferredDerivedRebuild() {
-        deferredDerivedTask?.cancel()
-        derivedGeneration &+= 1
-        let generation = derivedGeneration
-        let snapshot = entries
-        deferredDerivedTask = Task { [weak self] in
-            let result = await Task.detached(priority: .utility) {
-                let graph = RelationGraph.build(snapshot)
-                let search = buildSearchIndex(snapshot)
-                return (graph, search)
-            }.value
-            if Task.isCancelled { return }
-            // Hop to the next main-runloop tick (not MainActor.run, which can
-            // run synchronously inside the current render pass and triggered an
-            // NSTableView reentrant-delegate warning when @Observable
-            // invalidation cascaded back into the table mid-render).
-            //
-            // DispatchQueue.main.async can't be cancelled, so guard the
-            // assignment with the generation counter: any newer rebuild bumps
-            // `derivedGeneration` and this stale block becomes a no-op.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.derivedGeneration == generation else { return }
-                self.relationGraph = result.0
-                self.searchIndex = result.1
-                if self.openEntry != nil { self.recomputeOpenDerived() }
-            }
-        }
-    }
-
-    /// Recompute the open document's outline / stats / entry / relations. O(n) over
-    /// the index for relations; runs on open / reload / metadata write, not per render.
+    /// Recompute the open document's open-doc derived caches. Routes to Catalog;
+    /// `openPath`/`openBody` are shell inputs, render-style constants come from
+    /// ReadingDefaults (Marple-module only, hence passed in).
     private func recomputeOpenDerived() {
-        openEntry = entries.first { $0.path == openPath }
-        let preprocessed = Wikilink.preprocessForRendering(openBody)
-        let rendered = MarkdownRenderer.render(preprocessed, style: RenderStyle(
-            size: ReadingDefaults.fontSize, fontFamily: nil, lineHeight: ReadingDefaults.lineHeight
-        ))
-        openOutline = outline(from: rendered.headings)
-        openStats = openBody.isEmpty ? nil : computeDocStats(openBody)
-        if let e = openEntry {
-            openRelations = relations(for: e, in: entries,
-                                      graph: relationGraph,
-                                      topicMembership: topicMembership)
-            openBook = bookContext(for: e, in: entries)
-            openTopic = topicContext(for: e, in: entries)
-        } else {
-            openRelations = nil
-            openBook = nil
-            openTopic = nil
-        }
+        catalog.recomputeOpenDerived(openPath: openPath, openBody: openBody, entries: entries,
+                                     renderSize: ReadingDefaults.fontSize,
+                                     renderLineHeight: ReadingDefaults.lineHeight)
     }
 
     /// Rebuild the middle-column list. Search hits are a cheap direct swap; the pane
@@ -589,24 +522,10 @@ final class AppModel {
     /// blocks — mirrors NetNewsWire/FSNotes/CodeEdit list-search discipline (don't
     /// re-filter synchronously in the input handler).
     private func recomputeVisible() {
-        recomputeTask?.cancel()
-        if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-            visibleEntries = searchHits.map(\.entry)
-            return
-        }
-        let snapshot = entries
-        let pane = self.pane
-        let filters = activeFilterClauses
-        let match = activeFilterMatch
-        let sorts = activeSortClauses
-        recomputeTask = Task { [weak self] in
-            let result = await Task.detached(priority: .userInitiated) {
-                sortEntries(applyFilters(entriesForPane(pane, in: snapshot), filters, match: match),
-                            by: sorts)
-            }.value
-            guard !Task.isCancelled else { return }
-            self?.visibleEntries = result
-        }
+        catalog.recomputeVisible(searchText: searchText, searchHits: searchHits,
+                                 pane: pane, entries: entries,
+                                 filters: activeFilterClauses, match: activeFilterMatch,
+                                 sorts: activeSortClauses)
     }
 
     // MARK: actions
@@ -803,31 +722,34 @@ final class AppModel {
     /// `loadIndex()` runs concurrently with itself in practice: the fast-path boot
     /// kicks a deferred reconcile that calls loadIndex on completion, the FSEvents
     /// watcher calls loadIndex on every debounced vault change, and the in-progress
-    /// QUA-105 startup flow adds a background "full hydration" path. Each call
-    /// captures a `loadIndexGeneration` at entry; after every suspension point we
-    /// recheck — if a newer call has already started, the older one drops its
-    /// result instead of overwriting freshly-published `entries`/`trashItems`.
-    /// Same shape as `derivedGeneration` in `scheduleDeferredDerivedRebuild`.
-    private var loadIndexGeneration: Int = 0
-
+    /// QUA-105 startup flow adds a background "full hydration" path. Staleness is
+    /// now the Catalog's unified per-pass generation (QUA-218 2→1): a refresh pass
+    /// passes its `myPass` in; standalone callers (restoreTrash, boot first load,
+    /// tests) take a fresh pass via `catalog.beginStandalonePass()`. After every
+    /// suspension point we recheck `catalog.isStale(myPass)` — if a newer pass has
+    /// begun, the older one drops its result instead of overwriting freshly-
+    /// published `entries`/`trashItems`. Same shape as `derivedGeneration` in
+    /// `scheduleDeferredDerivedRebuild` (which stays its own independent counter).
     func loadIndex() async {
-        loadIndexGeneration &+= 1
-        let generation = loadIndexGeneration
+        await loadIndex(pass: catalog.beginStandalonePass())
+    }
+
+    func loadIndex(pass myPass: Int) async {
         let fetched: [Entry]
         do {
             fetched = try await client.index()
         } catch {
             // Only the latest call publishes failure state — an older stale
             // failure shouldn't clobber a newer call's "n entries" status.
-            if loadIndexGeneration == generation {
+            if !catalog.isStale(myPass) {
                 status = "index failed: \(error)"
                 isBootstrapping = false
                 print("[marple] index FAILED: \(error)")
             }
             return
         }
-        guard loadIndexGeneration == generation else {
-            print("[marple] loadIndex gen \(generation) stale after index() (latest \(loadIndexGeneration)), dropping")
+        guard !catalog.isStale(myPass) else {
+            print("[marple] loadIndex pass \(myPass) stale after index() (latest \(catalog.pass)), dropping")
             return
         }
         entries = fetched
@@ -858,8 +780,8 @@ final class AppModel {
         persist()
         if openPath != loadedDocPath {
             await loadDoc(openPath)
-            guard loadIndexGeneration == generation else {
-                print("[marple] loadIndex gen \(generation) stale after loadDoc, dropping trash refresh")
+            guard !catalog.isStale(myPass) else {
+                print("[marple] loadIndex pass \(myPass) stale after loadDoc, dropping trash refresh")
                 return
             }
         }
@@ -868,15 +790,15 @@ final class AppModel {
         // is also called from user actions where this guard would be wrong).
         do {
             let trash = try await client.listTrash()
-            guard loadIndexGeneration == generation else {
-                print("[marple] loadIndex gen \(generation) stale after listTrash, dropping trash result")
+            guard !catalog.isStale(myPass) else {
+                print("[marple] loadIndex pass \(myPass) stale after listTrash, dropping trash result")
                 return
             }
             trashItems = trash
         } catch {
             print("[marple] listTrash FAILED: \(error)")
         }
-        print("[marple] index loaded: \(entries.count) entries (gen \(generation))")
+        print("[marple] index loaded: \(entries.count) entries (pass \(myPass))")
     }
 
     func select(pane newPane: Pane) {
@@ -1000,7 +922,10 @@ final class AppModel {
                 if Task.isCancelled { return }
                 self?.searchHits = hits
                 self?.recomputeVisible()
-                self?.computeSearchMatches(query: q, paths: hits.map(\.entry.path))
+                guard let self else { return }
+                self.catalog.computeSearchMatches(
+                    query: q, paths: hits.map(\.entry.path), client: self.client,
+                    currentSearchText: { [weak self] in self?.searchText ?? "" })
                 print("[marple] search '\(q)' -> \(hits.count) hits")
             } catch {
                 self?.status = "search failed: \(error)"
@@ -1010,42 +935,12 @@ final class AppModel {
     }
 
     private func clearSearchMatches() {
-        matchTask?.cancel()
-        searchMatches = [:]
-        searchMatchQuery = ""
-        matchExpanded = []
-    }
-
-    /// Load each result's stripped body off-main and compute its matched lines.
-    /// Bounded to the hit set (≤ search limit); cancellable and query-versioned so a
-    /// stale load can never attach excerpts to a newer query's rows. Matches the
-    /// stripped body (not the raw file) so frontmatter can't create phantom matches.
-    private func computeSearchMatches(query: String, paths: [String]) {
-        matchTask?.cancel()
-        matchExpanded = []
-        searchMatches = [:]
-        let client = self.client
-        matchTask = Task { [weak self] in
-            var result: [String: BodyMatches] = [:]
-            for path in paths {
-                if Task.isCancelled { return }
-                guard let raw = try? await client.entryText(path: path) else { continue }
-                let body = Frontmatter.split(raw).body
-                let m = bodyLineMatches(body: body, query: query)
-                if !m.lines.isEmpty { result[path] = m }
-            }
-            if Task.isCancelled { return }
-            guard let self,
-                  self.searchText.trimmingCharacters(in: .whitespaces) == query else { return }
-            self.searchMatches = result
-            self.searchMatchQuery = query
-        }
+        catalog.clearSearchMatches()
     }
 
     /// Toggle a result row's "再显示 N 个匹配项" expander.
     func toggleMatchExpanded(_ path: String) {
-        if matchExpanded.contains(path) { matchExpanded.remove(path) }
-        else { matchExpanded.insert(path) }
+        catalog.toggleMatchExpanded(path)
     }
 
     /// Open `path` from a clicked search matched-line: opens browser-style (in-place

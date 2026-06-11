@@ -29,10 +29,8 @@ import Testing
         try "---\ntype: paper\ntitle: Before\n---\n".write(to: file, atomically: true, encoding: .utf8)
 
         let probe = Probe()
-        let watcher = VaultWatcher(vaultDirectory: vault, debounce: 0.05) {
-            await probe.signal()
-        }
-        watcher.start()
+        let watcher = VaultWatcher(vaultDirectory: vault, debounce: 0.05)
+        watcher.start { Task { await probe.signal() } }
         defer { watcher.stop() }
 
         try? await Task.sleep(nanoseconds: 200_000_000)
@@ -50,10 +48,8 @@ import Testing
         try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
 
         let probe = Probe()
-        let watcher = VaultWatcher(vaultDirectory: vault, debounce: 0.05) {
-            await probe.signal()
-        }
-        watcher.start()
+        let watcher = VaultWatcher(vaultDirectory: vault, debounce: 0.05)
+        watcher.start { Task { await probe.signal() } }
         defer { watcher.stop() }
 
         try? await Task.sleep(nanoseconds: 200_000_000)
