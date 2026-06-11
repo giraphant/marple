@@ -12,8 +12,8 @@
 
 ## 计划级决策（已定，执行者不再判断）
 
-1. **3→1 范围（用户已批准）**：统一只收 vault-变更管线的三套——`RefreshGate`（链准入/合流，**QUA-198 OOM 承重墙**）、`loadIndexGeneration`（loadIndex 管线陈旧丢弃）、`derivedGeneration`（后台派生陈旧丢弃）——为 Catalog 一套**单飞 + per-pass generation**。`searchMatchQuery`（用户搜索防抖版本号）与 `recomputeTask`（browse filter/sort 防抖取消令牌）是**另两根轴**，原样保留，**不得**并进统一 generation（耦合无关生命周期、破坏点击高亮一致性、零收益）。
-2. **OOM 安全承重点**：generation 检查只防"陈旧结果覆盖",**不 bound 并发**——陈旧 task 照样跑到挂起点。因此统一权威必须**保留 RefreshGate 的合流单飞**（"1 个在跑 + 1 个待重跑",不排队),把两个 generation 计数器并进"当前 pass 的 generation"。**绝不可**用 generation 检查替掉合流。IndexDatabase 的 cache-write 单飞（QUA-198 下层，MarpleKit/Vault）原样不动。
+1. **统一范围 = 诚实 2→1（用户已批准，修正自初版 3→1）**：只折叠**纯刷新管线**的两套——`RefreshAuthority`（链准入/合流，**QUA-198 OOM 承重墙**）+ `loadIndexGeneration`（loadIndex 管线陈旧丢弃，且 loadIndex 只在 refresh 单飞内跑）——为 Catalog 一套**单飞 + per-pass `pass` generation**（`catalog.refresh`）。`derivedGeneration` **保持独立**（已在 Task 3 搬进 Catalog，不并入 `pass`）：因为 `scheduleDeferredDerivedRebuild` 除 loadIndex 外，还被**乐观单条编辑**（`applyPatch`/`setRating`/`setAuthor`/`importImage`/`moveToTrash`）在 refresh 之外直接触发——若折进只在 refresh 时 bump 的 `pass`，连续两次乐观编辑共享同一 pass，第一次后台 `RelationGraph.build` 慢完成会覆盖第二次新结果（**正确性回归**）。与 `searchMatchQuery`/`recomputeTask`/`matchTask` 同理：**有刷新管线之外的独立触发轴的，一律保持独立**，不得并进 `pass`。
+2. **OOM 安全承重点**：generation 检查只防"陈旧结果覆盖",**不 bound 并发**——陈旧 task 照样跑到挂起点。因此统一权威必须**保留 RefreshAuthority 的合流单飞**（"1 个在跑 + 1 个待重跑",不排队),把 `loadIndexGeneration` 并进"当前 pass 的 generation"。**绝不可**用 generation 检查替掉合流。IndexDatabase 的 cache-write 单飞（QUA-198 下层，MarpleKit/Vault）原样不动。
 3. **entries 与 index 管线暂留 AppModel（过渡）**：本期 Catalog 持有**派生状态**与**统一权威**;`entries`、index reader（`client`）、`reconcile`/`loadIndex` 的 body 暂留 AppModel,作为统一单飞运行的闭包喂入。完整把 entries+loadIndex 搬进 `Catalog.refresh()` 留待后续 PR（spec 的终态,本期不做,以控制 blast radius)。这仍满足 spec「收拢为一套 generation/单飞」——统一的是 generation/flight,orchestration body 过渡期留壳。
 4. **VaultChangeSource 协议**：本期引入 `protocol VaultChangeSource`(watcher/CLI/boot 三个触发点共同契约),Mac 的 `VaultWatcher` 实现它,三处触发改为走 `catalog.refresh(body:)`。FSEvents 0.4s 防抖常量（VaultWatcher Coalescer）**逐字不动**。
 5. **门面转发**：AppModel 为每个搬走的属性加 `private(set)`-语义的计算 getter `var X: T { catalog.X }`(只读属性)或转发方法。视图继续写 `model.X`,**零改动**。先用 Task 1 验证 @Observable 嵌套转发触发重渲染,再继续。
@@ -320,9 +320,9 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: 3→1 统一 + VaultChangeSource（承重任务，最仔细）
+### Task 7: 2→1 统一 + VaultChangeSource（承重任务，最仔细）
 
-**目的**：把 `loadIndexGeneration` + `derivedGeneration` 并入 Catalog 的**一套 per-pass generation**,由 `RefreshAuthority` 的单飞驱动,经 `catalog.refresh(body:)` 暴露唯一入口;watcher/CLI/boot 走 `VaultChangeSource` 契约。**合流单飞结构保留(OOM 安全),generation 只增统一性。**
+**目的**：把 `loadIndexGeneration` 并入 Catalog 的**一套 per-pass generation**,由 `RefreshAuthority` 的单飞驱动,经 `catalog.refresh(body:)` 暴露唯一入口;watcher/CLI/boot 走 `VaultChangeSource` 契约。**合流单飞结构保留(OOM 安全),generation 只增统一性。** `derivedGeneration` **保持独立、不并入 `pass`**（决策 1：它有乐观单条编辑这条刷新管线之外的独立触发轴，折叠会引入派生覆盖竞态）。
 
 **Files:** `Catalog.swift`, `RefreshAuthority.swift`, new `VaultChangeSource.swift`, `VaultWatcher.swift`, `AppModel.swift`, `MarpleApp.swift`, `AppModel+CLI.swift`; tests.
 
@@ -351,7 +351,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
     }
     public func isStale(_ myPass: Int) -> Bool { pass != myPass }
 ```
-derivedGeneration 取消：`scheduleDeferredDerivedRebuild` 改为捕获 `let myPass = pass`,main.async 守卫 `guard !isStale(myPass)`。**注意**：deferred 派生由 `rebuildIndexDerived` 在 body 内触发,与 body 同 pass——一致。
+**derivedGeneration 不动**（决策 1 修正）：`scheduleDeferredDerivedRebuild` 仍用 Catalog 自己的 `derivedGeneration`（Task 3 已搬入），**不**改用 `pass`。原因：它被乐观单条编辑在 refresh 之外触发，折进只在 refresh 时 bump 的 `pass` 会让连续两次编辑共享同一 pass、第一次慢派生覆盖第二次（正确性回归）。`pass` 只服务 loadIndex 管线陈旧丢弃。
 
 - [ ] **Step 2: AppModel loadIndex 改吃 myPass**
 
