@@ -1,8 +1,10 @@
 import Foundation
 
-/// L2 编目层的派生状态 owner（QUA-218 PR3a）。图书馆目录隐喻：从馆藏（vault）
-/// 派生、可随时重编、多路检索、带交叉引用。本期持有派生缓存 + vault-变更管线
-/// 的统一 generation/单飞权威；entries 与 index 管线过渡期仍在 AppModel。
+/// L2 编目层的状态 owner（QUA-218 PR3a / QUA-229）。图书馆目录隐喻：从馆藏（vault）
+/// 派生、可随时重编、多路检索、带交叉引用。持有 `entries` 源快照 + 全部派生缓存 +
+/// vault-变更管线的统一 generation/单飞权威。`entries` 经 `publish`（陈旧守卫）/
+/// `mutateEntries`（乐观编辑）改；reconcile 编排与 post-publish 反应仍由各壳供给——
+/// 平台分叉决定的终态,见 ARCHITECTURE.md「下沉边界」,非过渡欠债。
 ///
 /// Stored properties live here in the primary declaration (the `@Observable`
 /// macro only sees properties declared in the class body, not extensions). The
@@ -12,6 +14,13 @@ import Foundation
 @MainActor
 @Observable
 public final class Catalog {
+    /// 全库 entries 快照 —— L2 派生层的**源**数据 owner（QUA-229：从两壳的中枢
+    /// view-model 下沉至此，让 Catalog 真正拥有它派生所依赖的源，而非只持派生）。
+    /// `internal(set)`：壳无法直接赋值，只能经 `publish`/`mutateEntries` 改（核内
+    /// 唯一权威）；壳侧以 `var entries { catalog.entries }` facade 只读转发，所有
+    /// 读 `model.entries` 的视图调用点不变。
+    public internal(set) var entries: [Entry] = []
+
     // 索引派生（entries 变即重算）
     public internal(set) var counts: [EntryType: Int] = [:]
     public internal(set) var savedViewCounts: [UUID: Int] = [:]

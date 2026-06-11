@@ -14,7 +14,10 @@ final class ReaderModel {
     enum Phase { case booting, needsFolder, indexing, ready, failed(String) }
 
     private(set) var phase: Phase = .booting
-    private(set) var entries: [Entry] = []
+    /// Facade onto the Catalog-owned snapshot (QUA-229: `entries` now lives in the
+    /// shared L2 派生 owner, same as the Mac shell). Read-only — writes go through
+    /// `catalog.publish`. Call sites (`model.entries`) unchanged.
+    var entries: [Entry] { catalog.entries }
     /// The Mac's open tabs grouped by Space (each with its name/icon + forest of
     /// groups + nesting), resolved to local entries — the read-only "Mac 上打开的"
     /// sidebar. Published by the Mac into the synced folder; refreshed whenever
@@ -98,7 +101,7 @@ final class ReaderModel {
             let c = IOSVaultClient(workspaceRoot: root, db: IndexDatabase(indexDBPath: dbPath))
             if let warm = try? await c.index() {
                 self.client = c
-                self.entries = warm
+                _ = self.catalog.publish(warm, pass: self.catalog.beginStandalonePass())
                 phase = .ready
                 Task {
                     await self.finishEntriesUpdate(warm)
@@ -149,8 +152,16 @@ final class ReaderModel {
                 try await Task.detached(priority: .utility) {
                     _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).reconcile()
                 }.value
-                if self.catalog.isStale(myPass) { return }               // newer pass started → drop this publish
-                if let c = self.client { await self.updateEntries(try await c.index()) }
+                if self.catalog.isStale(myPass) { return }               // early-out: skip the SQL read if already superseded
+                if let c = self.client {
+                    let fetched = try await c.index()
+                    // publish re-checks staleness AFTER the index() await (a newer
+                    // pass may have begun during it) and drops the assignment if so;
+                    // a live publish returns true → run the non-urgent tail.
+                    if self.catalog.publish(fetched, pass: myPass) {
+                        await self.finishEntriesUpdate(fetched)
+                    }
+                }
             } catch {
                 print("[marple] background sync failed (keeping last entries): \(error)")
             }
@@ -176,8 +187,10 @@ final class ReaderModel {
     }
 
     /// Set entries and rebuild the search index (off-actor — thousands of docs).
+    /// Cold-start only (sequential under phase==.indexing): a standalone pass makes
+    /// `publish` unconditional — no concurrent refresh to be stale against.
     private func updateEntries(_ newEntries: [Entry]) async {
-        self.entries = newEntries
+        _ = catalog.publish(newEntries, pass: catalog.beginStandalonePass())
         await finishEntriesUpdate(newEntries)
     }
 
