@@ -98,7 +98,9 @@ public extension VaultSchema {
     }
 
     /// Apply a parsed YAML mapping onto self. Unrecognized or ill-typed keys
-    /// are ignored (keep builtin) rather than failing the whole file.
+    /// are ignored (keep the existing value) rather than failing the whole
+    /// file. An empty `fields` list is ignored (keeps the existing aliases);
+    /// remove the entity key entirely instead.
     func applying(overrides: [(String, YamlValue)]) -> VaultSchema {
         var result = self
         for (key, value) in overrides {
