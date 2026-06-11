@@ -110,7 +110,12 @@ struct CollectionGridVariant: NSViewRepresentable {
             let item = EntryCardItem(nibName: nil, bundle: nil)
             guard let entry = entries[safe: indexPath.item] else { return item }
             let nonConforming = model.conformance(for: entry)?.isConforming == false
-            item.configure(entry: entry, nonConforming: nonConforming) { [model] path in
+            // Decode the thumbnail only as large as this card can show it (column width ×
+            // backing scale), not at the source resolution — see ThumbnailLoader (QUA-219).
+            let columnWidth = (collectionView.collectionViewLayout as? WaterfallCollectionLayout)?.columnWidth ?? 240
+            let scale = collectionView.window?.backingScaleFactor ?? 2
+            let maxPixel = ThumbnailLoader.maxPixel(columnWidth: columnWidth, scale: scale)
+            item.configure(entry: entry, nonConforming: nonConforming, maxPixel: maxPixel) { [model] path in
                 try? await model.client.imageOriginalURL(forImageEntryPath: path)
             }
             return item

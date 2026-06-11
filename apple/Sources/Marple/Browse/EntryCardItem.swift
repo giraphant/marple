@@ -18,9 +18,10 @@ final class EntryCardItem: NSCollectionViewItem {
 
     override func loadView() { view = CardCellView() }
 
-    func configure(entry: Entry, nonConforming: Bool,
+    func configure(entry: Entry, nonConforming: Bool, maxPixel: Int,
                    resolveURL: @escaping (String) async -> URL?) {
-        card.configure(entry: entry, nonConforming: nonConforming, resolveURL: resolveURL)
+        card.configure(entry: entry, nonConforming: nonConforming, maxPixel: maxPixel,
+                       resolveURL: resolveURL)
     }
 
     override func prepareForReuse() {
@@ -125,7 +126,7 @@ private final class CardCellView: NSView {
         f.cell?.wraps = false
     }
 
-    func configure(entry: Entry, nonConforming: Bool,
+    func configure(entry: Entry, nonConforming: Bool, maxPixel: Int,
                    resolveURL: @escaping (String) async -> URL?) {
         self.entry = entry
         self.nonConforming = nonConforming
@@ -156,7 +157,7 @@ private final class CardCellView: NSView {
             let p = entry.path
             loadTask = Task { [weak self] in
                 guard let url = await resolveURL(p) else { return }
-                let image = await Task.detached(priority: .utility) { NSImage(contentsOf: url) }.value
+                let image = await ThumbnailLoader.shared.thumbnail(for: url, maxPixel: maxPixel)
                 guard !Task.isCancelled, let self, self.entry?.path == p else { return }
                 self.thumbnail.image = image
                 self.placeholder.isHidden = (image != nil)
