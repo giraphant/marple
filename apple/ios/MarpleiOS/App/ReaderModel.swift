@@ -122,6 +122,7 @@ final class ReaderModel {
             let db = IndexDatabase(indexDBPath: dbPath)
             let c = IOSVaultClient(workspaceRoot: root, db: db)
             self.client = c
+            // Cold start is sequential under phase==.indexing — no concurrent refresh can race here, so catalog.refresh (single-flight) isn't needed; the first index publishes directly.
             await updateEntries(try await c.index())
             phase = .ready
         } catch {
