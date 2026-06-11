@@ -45,6 +45,12 @@ public final class VaultIndexer: @unchecked Sendable {
     /// Path of the sources directory: `<workspaceRoot>/sources`.
     private let sourcesPath: String
 
+    /// Vocabulary table loaded once per indexer instance (builtin + optional
+    /// vault/schema/schema.yaml override). Immutable thereafter — a schema edit
+    /// takes effect on the next VaultIndexer construction (macOS: once per
+    /// launch; iOS ReaderModel constructs one per refresh).
+    private let schema: VaultSchema
+
     // MARK: - Write lock (mirrors INDEX_WRITE_LOCK in Rust)
 
     /// Serialises every mutation of the live index file — both the atomic
@@ -63,6 +69,7 @@ public final class VaultIndexer: @unchecked Sendable {
         self.indexDBPath  = indexDBPath ?? (workspaceRoot + "/.marple/index.sqlite")
         self.vaultPath    = workspaceRoot + "/vault"
         self.sourcesPath  = workspaceRoot + "/sources"
+        self.schema       = VaultSchema.load(workspaceRoot: workspaceRoot)
     }
 
     // MARK: - buildFull
@@ -100,7 +107,8 @@ public final class VaultIndexer: @unchecked Sendable {
                 fileStem: fileStem,
                 sourceSlugs: sourceSlugs,
                 mtimeMs: mtimeMs,
-                sourceIndex: sourceIndex
+                sourceIndex: sourceIndex,
+                schema: schema
             )
             guard case .indexed(var entry) = outcome else { continue }
             entry.added = addedDates[rel] ?? 0
@@ -468,7 +476,8 @@ public final class VaultIndexer: @unchecked Sendable {
             fileStem: fileStem,
             sourceSlugs: sourceSlugs,
             mtimeMs: mtimeMs,
-            sourceIndex: sourceIndex
+            sourceIndex: sourceIndex,
+            schema: schema
         )
 
         if case .indexed(var entry) = outcome {

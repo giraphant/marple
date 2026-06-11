@@ -842,6 +842,7 @@ final class AppModel {
         // feature dark. Loaded here (not watched) since `.quasi/` is a sibling of
         // the watched `vault/` dir.
         schemaSnapshot = SchemaSnapshot.load(workspaceRoot: workspaceRoot)
+        VaultSchema.active = VaultSchema.load(workspaceRoot: workspaceRoot)
         // 译本 index — same cadence/rationale as the schema snapshot above:
         // a tiny `.quasi/` sidecar, loaded (not watched) since it's a sibling of
         // the watched `vault/` dir and maintained by `quasi-helpers localise`.
