@@ -21,10 +21,11 @@ public enum NameResolver {
 
     // MARK: - 作者页
 
-    /// 获胜层级的全部匹配作者页（文档序）。第一级 = 旧 RelationsIndex 扫描
-    /// （name 小写+trim vs title 小写）；第二级 = foldedKey 相等。
-    /// 返回"全部"而非首个：RelationGraph 对同名多页全连边以保持旧的
-    /// 按-title-键查询语义。
+    /// 获胜层级的全部匹配作者页（文档序）。第一级 = 旧 AppModel.authorProfile
+    /// 扫描（name 小写+trim vs title 小写；RelationsIndex 内联扫描同形但不
+    /// trim——两者本就不一致，统一取 trim 形，严格扩大命中）；第二级 =
+    /// foldedKey 相等。返回"全部"而非首个：RelationGraph 对同名多页全连边
+    /// 以保持旧的按-title-键查询语义。
     public static func authorPages(named name: String, in entries: [Entry]) -> [Entry] {
         let key = name.lowercased().trimmingCharacters(in: .whitespaces)
         guard !key.isEmpty else { return [] }
@@ -96,6 +97,8 @@ public enum NameResolver {
         return keys
     }
 
+    /// 与 foldedKey 同语义但刻意不共享实现：journal 匹配器逐字保留（verbatim
+    /// port 纪律），避免日后一处微调悄悄改动另一处语义。
     private static func normalizedJournalKey(_ value: String?) -> String? {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else { return nil }
