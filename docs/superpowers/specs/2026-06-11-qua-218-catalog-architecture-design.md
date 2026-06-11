@@ -129,17 +129,22 @@ quasi 可共读；**不放 `.marple/`**——那是可 `rm -rf` 重建的缓存�
   现存四套各自为政的防竞态机制（loadIndexGeneration、searchMatchQuery 版本号、
   deferredDerivedTask、RefreshGate）收拢为一套 generation/单飞。
 - **RelationGraph**：`(from, type, to, position?)` 正反双向索引。
-- **两条规则引擎**：
+- **三条规则引擎**：
   - 规则①实体引用：任何 entry 的别名字段值，经 NameResolver 解析为同名实体
     类型的页面，自动产生双向边（正向 paper→author 页；反向 author 页←全部作品，
     按来源类型分组）。
   - 规则②容器：同 `<slug>/` 文件夹 = 同对象的目录式处理（overview + 有序子页）。
     统一替代 BookContext / TopicContext / siblingEntry 三份手写。
+  - 规则③路径引用（QUA-221 声明化）：`schema.pathReferences` 声明 (onType,
+    field, kind)，把路径值字段（note.annotates）变成关联边；边忠实指向目标，
+    不改写。配套**容器附属聚合**（规则②∘③）：容器 overview 在查询期把成员
+    （章节）的附属笔记上卷过来，替代旧 annotationAnchor 写入期章→书重映射。
 - **NameResolver**：全库唯一的名字归一/匹配器（大小写、变音符、标题/文件名
   词干回退）。wikilink 正文解析与实体引用共用。
 - 搜索索引（SearchRanker）、theme counts、向量库照旧挂在此层。
-- **点名的例外**（有名字的 Swift，不塞进规则）：annotates 的"章节→书 overview"
-  锚点重映射；PDF 源的 Jaccard+年份模糊匹配。
+- **点名的例外**（有名字的 Swift，不塞进规则）：无。（原 annotates 章→书重映射
+  已由规则③+容器聚合消解；PDF 源的 Jaccard+年份模糊匹配属 L1 `hasPDF` 派生，
+  不在本层——见 `SourceResolver`。）
 
 被替代删除的胶水（七处合一）：`RelationsIndex` 的 authorIndex/annotationIndex/
 authorProfile、`BookContext`、`TopicContext`、`ThemeIndex` 的关联部分、
@@ -238,7 +243,7 @@ AppKit 窗壳、IndexDatabase 的 SQLite 结构、FSEvents 0.4s 防抖时序。
 ## 9. 非目标
 
 - 不做声明表 UI 编辑器（本期）
-- 不做规则③路径引用的声明化（标记后延）
+- ~~不做规则③路径引用的声明化（标记后延）~~ → 已由 QUA-221 落地（`VaultSchema.pathReferences`）
 - 不做 Entry 动态记录化 / 运行时类型系统 / 可编辑 profile 引擎
 - 不做 big-bang 切换
 - 不改任何用户可见行为（除 PR2 列明并经确认的匹配边界 case）

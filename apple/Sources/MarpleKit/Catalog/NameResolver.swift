@@ -96,11 +96,42 @@ public enum NameResolver {
         guard !needle.isEmpty else { return nil }
         return entries.first { entry in
             guard entry.type == .journal else { return false }
-            let keys = journalKeys(entry.journal)
-                .union(journalKeys(entry.title))
-                .union(journalKeys(journalSlug(entry.path)))
-                .union(journalKeys(fileStem(entry.path)))
-            return !needle.isDisjoint(with: keys)
+            return !needle.isDisjoint(with: pageKeys(entry))
+        }
+    }
+
+    /// 期刊页全部匹配键（journal / title / 路径 slug / 文件名 stem）。
+    private static func pageKeys(_ entry: Entry) -> Set<String> {
+        journalKeys(entry.journal)
+            .union(journalKeys(entry.title))
+            .union(journalKeys(journalSlug(entry.path)))
+            .union(journalKeys(fileStem(entry.path)))
+    }
+
+    /// journalEntry 的批量形式：建一次 key→页 字典，逐论文 O(键数) 查询。
+    /// 保留 `journalEntry` 的 first-by-document-order 语义（跨键命中取文档序最早页）。
+    /// RelationGraph.build 用它避免 O(论文×全库) 扫描。
+    struct JournalPageIndex {
+        private let byKey: [String: [(idx: Int, entry: Entry)]]
+
+        init(_ entries: [Entry]) {
+            var m: [String: [(Int, Entry)]] = [:]
+            for (i, e) in entries.enumerated() where e.type == .journal {
+                for k in NameResolver.pageKeys(e) { m[k, default: []].append((i, e)) }
+            }
+            byKey = m
+        }
+
+        func firstPage(matching value: String) -> Entry? {
+            let needle = NameResolver.journalKeys(value)
+            guard !needle.isEmpty else { return nil }
+            var best: (idx: Int, entry: Entry)?
+            for k in needle {
+                for cand in byKey[k] ?? [] where best == nil || cand.idx < best!.idx {
+                    best = cand
+                }
+            }
+            return best?.entry
         }
     }
 

@@ -1,8 +1,8 @@
 import Foundation
 
 // Deferred (background) derive：relationGraph / searchIndex，独立 derivedGeneration +
-// onDerivedReady 回调。Split out of Catalog.swift (QUA-218 PR3a Task 8); method body
-// is byte-identical to the original.
+// onDerivedReady 回调。Split out of Catalog.swift (QUA-218 PR3a Task 8); QUA-221 threads
+// the active VaultSchema into RelationGraph.build so rule③ path references are table-driven.
 extension Catalog {
     /// Build the heavy derived caches (relation graph, search index) on a
     /// background task and publish them on the main actor when done. If
@@ -14,9 +14,12 @@ extension Catalog {
         derivedGeneration &+= 1
         let generation = derivedGeneration
         let snapshot = entries
+        // Capture the active schema on the main actor; the detached build below
+        // can't reach `VaultSchema.active` (@MainActor). VaultSchema is Sendable.
+        let schema = VaultSchema.active
         deferredDerivedTask = Task { [weak self] in
             let result = await Task.detached(priority: .utility) {
-                let graph = RelationGraph.build(snapshot)
+                let graph = RelationGraph.build(snapshot, schema: schema)
                 let search = buildSearchIndex(snapshot)
                 return (graph, search)
             }.value

@@ -22,6 +22,25 @@ public struct VaultSchema: Sendable, Equatable {
         }
     }
 
+    /// A frontmatter field whose *value is a vault path* to another entry —
+    /// contrast `entityAliases`, whose values are entity *names* resolved by
+    /// NameResolver. An entry of `onType` carrying a non-empty `field` produces
+    /// a `kind` relation edge to the referenced path (QUA-218 rule③). The edge
+    /// stays faithful to the frontmatter path; rolling a chapter's notes up onto
+    /// the book overview happens at query time via container attachment
+    /// aggregation (`relations` / `attachmentSources`), not by rewriting it here.
+    public struct PathReference: Sendable, Equatable {
+        public let onType: String   // source entry type carrying the field
+        public let field: String    // frontmatter field holding the target vault path
+        public let kind: String     // RelationKind rawValue of the produced edge
+
+        public init(onType: String, field: String, kind: String) {
+            self.onType = onType
+            self.field = field
+            self.kind = kind
+        }
+    }
+
     /// SF Symbol name + platform-agnostic tint name for one entry type.
     /// Tint names are mapped to concrete colors by each UI shell.
     public struct TypeDisplay: Sendable, Equatable {
@@ -38,6 +57,13 @@ public struct VaultSchema: Sendable, Equatable {
     /// Order matters: first present field wins (mirrors the legacy fallback
     /// chain `author ?? authors ?? speaker ?? creator`).
     public var entityAliases: [String: [FieldAlias]]
+
+    /// Path-reference rules (QUA-218 rule③). Each row turns a path-valued
+    /// frontmatter field into a relation edge; scanned in order by
+    /// `RelationGraph.build`. Today holds the one note→annotates rule that used
+    /// to be hard-coded; adding `translator-of`, `transcript`-style refs, etc.
+    /// is one more row.
+    public var pathReferences: [PathReference]
 
     /// EntryType rawValue → display. Unknown types fall back to `fallbackDisplay`.
     public var displayByType: [String: TypeDisplay]
@@ -59,6 +85,10 @@ public struct VaultSchema: Sendable, Equatable {
             ],
             "journal": [FieldAlias("journal")],
             "topic": [FieldAlias("topics")],
+        ],
+        pathReferences: [
+            // 笔记 → 标注锚点。章→书 overview 重映射是点名的 Swift 例外（spec §3.4）。
+            PathReference(onType: "note", field: "annotates", kind: "annotates"),
         ],
         displayByType: [
             "paper":      TypeDisplay(symbol: "doc.text", tint: "blue"),
@@ -114,6 +144,13 @@ public extension VaultSchema {
                     let aliases = items.compactMap { Self.alias(from: $0) }
                     if !aliases.isEmpty { result.entityAliases[entity] = aliases }
                 }
+            case "pathReferences":
+                // Whole-list replacement (parallel to an entity's `fields`): a
+                // non-empty `pathReferences:` sequence replaces the builtin rows;
+                // an empty/ill-typed list is ignored (keeps builtin).
+                guard case .sequence(let items) = value else { continue }
+                let refs = items.compactMap { Self.pathReference(from: $0) }
+                if !refs.isEmpty { result.pathReferences = refs }
             case "display":
                 guard case .mapping(let types) = value else { continue }
                 for (type, spec) in types {
@@ -145,5 +182,17 @@ public extension VaultSchema {
         default:
             return nil
         }
+    }
+
+    /// A pathReferences item is a mapping `{onType, field, kind}`; all three
+    /// keys are required (a row missing any is meaningless), so a partial entry
+    /// is dropped rather than defaulted.
+    private static func pathReference(from value: YamlValue) -> PathReference? {
+        guard case .mapping(let pairs) = value,
+              case .string(let onType)? = pairs.first(where: { $0.0 == "onType" })?.1,
+              case .string(let field)?  = pairs.first(where: { $0.0 == "field" })?.1,
+              case .string(let kind)?   = pairs.first(where: { $0.0 == "kind" })?.1
+        else { return nil }
+        return PathReference(onType: onType, field: field, kind: kind)
     }
 }

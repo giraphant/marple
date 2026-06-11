@@ -16,25 +16,26 @@ public func splitAuthors(_ s: String?) -> [String] {
     return parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
 }
 
-public func annotationAnchor(for entry: Entry, in entries: [Entry]) -> Entry {
-    let overviewBySlug = bookOverviewBySlug(entries)
-    return annotationAnchor(for: entry, overviewBySlug: overviewBySlug)
-}
-
-func bookOverviewBySlug(_ entries: [Entry]) -> [String: Entry] {
-    var out: [String: Entry] = [:]
-    for e in entries where e.type == .book {
-        if let slug = bookSlug(e.path), out[slug] == nil { out[slug] = e }
+/// 规则：容器附属聚合。容器 overview 的反向附属（如 annotates 笔记）=
+/// 自身 ∪ 所有成员；非 overview（章节、普通文档）只取直接标注自己的。上卷只在
+/// 查询期发生，边本身忠实真相——替代旧 annotationAnchor 的写入期章→书重映射
+/// （QUA-221）。去重保留来源顺序（overview 自身 → 各章节，按 bookContext 序）。
+func attachmentSources(for entry: Entry, in entries: [Entry],
+                       graph: RelationGraph, kind: RelationKind) -> [Entry] {
+    let anchors: [Entry]
+    if let ctx = bookContext(for: entry, in: entries), ctx.overview?.path == entry.path {
+        anchors = [entry] + ctx.chapters
+    } else {
+        anchors = [entry]
     }
-    return out
-}
-
-func annotationAnchor(for entry: Entry, overviewBySlug: [String: Entry]) -> Entry {
-    if entry.type == .chapter {
-        let slug = entry.book ?? bookSlug(entry.path)
-        if let slug, let overview = overviewBySlug[slug] { return overview }
+    var seen = Set<String>()
+    var acc: [Entry] = []
+    for anchor in anchors {
+        for n in graph.sources(of: anchor.path, kind: kind) where !seen.contains(n.path) {
+            seen.insert(n.path); acc.append(n)
+        }
     }
-    return entry
+    return acc
 }
 
 public struct Relations: Equatable, Sendable {
@@ -43,6 +44,7 @@ public struct Relations: Equatable, Sendable {
     public var similar: [Entry] = []        // same-type entries sharing ≥2 themes (cap 6)
     public var annotations: [Entry] = []    // notes keyed by this entry's annotation anchor
     public var topicMembers: [Entry] = []   // topic: entries declaring membership via `topics:`
+    public var journalArticles: [Entry] = [] // journal: papers published in this journal
     public var authorProfile: Entry?        // paper/book: matching author entry (kept named
                                             // `authorProfile` to disambiguate from `Entry.author: [String]`)
     public init() {}
@@ -64,14 +66,23 @@ public func relations(for entry: Entry, in entries: [Entry],
     var out = Relations()
     // 旧 isEmpty 回退：deferred 图未就绪时同步重建（author 部分用）。
     // annotations 沿用旧时序：只读传入的图，未就绪即空（旧 annotationIndex 无回退，
-    // 故意用 graph 非 liveGraph）。
+    // 故意用 graph 非 liveGraph）。容器附属聚合把章节笔记上卷到书 overview（查询期）。
     let liveGraph = graph.isEmpty ? RelationGraph.build(entries) : graph
-    let anchor = annotationAnchor(for: entry, in: entries)
-    out.annotations = graph.sources(of: anchor.path, kind: .annotates).sorted(by: byRatingDesc)
+    out.annotations = attachmentSources(for: entry, in: entries, graph: graph, kind: .annotates)
+        .sorted(by: byRatingDesc)
 
+    // topic 成员现入图（inTopic 反向）。任何 topic 子页都归一到该 slug 的代表页
+    // （overview = topicEntryBySlug），与旧 membersBySlug[slug] 的 slug-键语义一致。
     if entry.type == .topic, let slug = topicSlug(entry.path) {
-        out.topicMembers = (topicMembership.membersBySlug[slug] ?? [])
+        let anchor = topicMembership.topicEntryBySlug[slug] ?? entry
+        out.topicMembers = liveGraph.sources(of: anchor.path, kind: .inTopic)
             .filter { $0.path != entry.path && relationPanelType($0) != nil }
+            .sorted(by: byRatingDesc)
+    }
+
+    if entry.type == .journal {
+        out.journalArticles = liveGraph.sources(of: entry.path, kind: .inJournal)
+            .filter { $0.path != entry.path }
             .sorted(by: byRatingDesc)
     }
 

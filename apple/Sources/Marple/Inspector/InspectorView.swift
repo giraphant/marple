@@ -1140,10 +1140,15 @@ private struct RelationsView: View {
                 if !r.works.isEmpty {
                     let books = r.works.filter { $0.type == .book }
                     let papers = r.works.filter { $0.type == .paper }
+                    let talks = r.works.filter { $0.type == .talk }
+                    let images = r.works.filter { $0.type == .image }
                     relGroup("图书", books)
                     relGroup("论文", papers)
+                    relGroup("讲座", talks)
+                    relGroup("图像", images)
                 }
                 relGroup("专题成员", r.topicMembers)
+                relGroup("本刊论文", r.journalArticles)
                 let siblingBooks = r.siblings.filter { $0.type == .book }
                 let siblingPapers = r.siblings.filter { $0.type == .paper }
                 relGroup("同作者专著", siblingBooks)
