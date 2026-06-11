@@ -23,9 +23,10 @@ final class ReaderModel {
     /// When the Mac last published its open tabs (from the snapshot's updatedAtMs).
     /// nil when no snapshot — drives the "同步于…" footer.
     private(set) var openTabsUpdatedAt: Date?
-    /// Field-weighted in-memory search index (same engine as the Mac's 快速 palette).
-    /// Rebuilt off-actor whenever `entries` change.
-    private var searchIndex: SearchIndex = .empty
+    /// Shared derived-state owner: holds the field-weighted searchIndex (rebuilt
+    /// via scheduleDeferredDerivedRebuild after each entries update) plus counts,
+    /// topicMembership, themeIndex, and relationGraph — same engine as the Mac.
+    let catalog = Catalog()
     /// Progress during the indexing phase. nil = indeterminate (e.g. the build step).
     private(set) var progress: (done: Int, total: Int)?
     /// Human-readable status under the progress bar.
@@ -167,7 +168,7 @@ final class ReaderModel {
     func search(_ q: String) async -> [Entry] {
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return [] }
-        let index = searchIndex
+        let index = catalog.searchIndex
         let ranked = await Task.detached(priority: .userInitiated) {
             searchDocuments(index, trimmed)
         }.value
@@ -184,9 +185,7 @@ final class ReaderModel {
     /// session load. Split out so the warm-launch path can flip `.ready` first
     /// and run this in the background.
     private func finishEntriesUpdate(_ newEntries: [Entry]) async {
-        self.searchIndex = await Task.detached(priority: .utility) {
-            buildSearchIndex(newEntries)
-        }.value
+        catalog.rebuildIndexDerived(entries: newEntries, savedViews: [])
         if let root = workspaceRoot { await loadSession(root: root) }
     }
 
