@@ -4,7 +4,8 @@ import Foundation
 /// for the iOS companion to read. Mac-only — the iOS app never writes. This is the
 /// same "Mac writes derived state into the synced folder" arrangement as the
 /// `.marple` index; the open-tab list just lives outside `.marple` so it still syncs
-/// even if the index directory is excluded from iCloud.
+/// even if the index directory is excluded from iCloud. Lives in MarpleKit for
+/// code-sharing, but only instantiated by the macOS app (iOS is read-only).
 ///
 /// Publishes **every Space** (name + icon + its full recursive forest of groups and
 /// nesting), in sidebar order — not just the active one — so the iOS sidebar can
