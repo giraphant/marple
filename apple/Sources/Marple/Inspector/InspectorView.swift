@@ -415,6 +415,8 @@ private struct InspectorInfoRowsView: View {
             await model.setYear(value)
         case .imageAuthor:
             await model.setAuthor(splitAuthors(value))
+        case .imageDate:
+            await model.setImageDate(value)
         case .source:
             await model.setSource(value)
         case .doi:
@@ -644,8 +646,15 @@ private struct AuthorRow: View {
     @State private var editingIndex: Int? = nil
     @State private var editingAll = false
 
-    /// Talks store presenters under `speaker:`, so label this row 讲者 for them.
-    private var noun: String { entry.type == .talk ? "讲者" : "作者" }
+    /// Talks store presenters under `speaker:` and images their makers under
+    /// `creator:`, so label this row 讲者/创作者 for them.
+    private var noun: String {
+        switch entry.type {
+        case .talk:  return "讲者"
+        case .image: return "创作者"
+        default:     return "作者"
+        }
+    }
 
     var body: some View {
         FieldRow(noun) {

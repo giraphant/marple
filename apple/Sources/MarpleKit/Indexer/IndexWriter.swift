@@ -22,7 +22,7 @@ public enum IndexWriter {
     /// - DROP IF EXISTS for every table this writer creates (idempotent;
     ///   safe to call twice) PLUS `entry_search`/`entry_text` so any older
     ///   DB that happens to be opened directly is also stripped.
-    /// - CREATE TABLE entries (27 columns)
+    /// - CREATE TABLE entries (34 columns)
     /// - CREATE TABLE entry_themes
     /// - CREATE VIRTUAL TABLE entry_trigram USING fts5(tokenize='trigram')
     /// - CREATE TABLE meta
@@ -67,6 +67,9 @@ public enum IndexWriter {
               annotates TEXT,
               created TEXT,
               media TEXT,
+              width INTEGER,
+              height INTEGER,
+              file_size INTEGER,
               pdf_slug TEXT,
               has_pdf INTEGER NOT NULL DEFAULT 0,
               mtime INTEGER,
@@ -172,8 +175,8 @@ public enum IndexWriter {
                   path, type, book, title, title_en, title_cn, author, year_json, rating_json,
                   rating_score, themes_json, topics_json, kind, journal, source, doi, publisher, isbn, category,
                   translation_title_cn, translation_douban_url, chapters_analyzed,
-                  annotates, created, media, pdf_slug, has_pdf, mtime, preview, body_len, added
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  annotates, created, media, width, height, file_size, pdf_slug, has_pdf, mtime, preview, body_len, added
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
             arguments: [
                 entry.path,
@@ -201,6 +204,9 @@ public enum IndexWriter {
                 entry.annotates,
                 entry.created,
                 entry.media,
+                entry.width,
+                entry.height,
+                entry.fileSize,
                 entry.pdfSlug,
                 entry.hasPDF ? 1 : 0,
                 entry.mtime,

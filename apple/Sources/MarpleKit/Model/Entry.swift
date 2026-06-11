@@ -129,6 +129,14 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     /// required `media` key is present — playback resolves the file on disk via
     /// `TalkMedia`, not this value. nil for every non-talk type (QUA-185).
     public let media: String?
+    /// Image technical fields, derived at index time from `original.<ext>` by
+    /// `ImageProbe` — never from frontmatter (QUA-175). Display-oriented pixel
+    /// size (EXIF rotation already applied). nil for non-image entries or when
+    /// the original was missing at index time.
+    public let width: Int?
+    public let height: Int?
+    /// Byte size of the image entry's `original.<ext>` (see `width`).
+    public let fileSize: Int?
 
     enum CodingKeys: String, CodingKey {
         case path, type, title, author, year, preview
@@ -137,6 +145,8 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         case hasPDF = "has_pdf"
         case pdfSlug = "pdf_slug"
         case mtime, added, source, book, kind, journal, doi, publisher, isbn, category, annotates, created, media
+        case width, height
+        case fileSize = "file_size"
     }
 
     public init(from decoder: Decoder) throws {
@@ -181,6 +191,9 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         annotates = (try? c.decodeIfPresent(String.self, forKey: .annotates)) ?? nil
         created = (try? c.decodeIfPresent(String.self, forKey: .created)) ?? nil
         media = (try? c.decodeIfPresent(String.self, forKey: .media)) ?? nil
+        width = (try? c.decodeIfPresent(Int.self, forKey: .width)) ?? nil
+        height = (try? c.decodeIfPresent(Int.self, forKey: .height)) ?? nil
+        fileSize = (try? c.decodeIfPresent(Int.self, forKey: .fileSize)) ?? nil
     }
 
     public init(path: String, type: EntryType, title: String?, author: [String],
@@ -191,7 +204,8 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
                 book: String? = nil, kind: String? = nil,
                 journal: String? = nil, doi: String? = nil, publisher: String? = nil,
                 isbn: String? = nil, category: String? = nil, annotates: String? = nil,
-                created: String? = nil, media: String? = nil) {
+                created: String? = nil, media: String? = nil,
+                width: Int? = nil, height: Int? = nil, fileSize: Int? = nil) {
         self.path = path
         self.type = type
         self.title = title
@@ -216,6 +230,18 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         self.annotates = annotates
         self.created = created
         self.media = media
+        self.width = width
+        self.height = height
+        self.fileSize = fileSize
+    }
+}
+
+public extension Entry {
+    /// Pixel aspect ratio (w/h) of an image entry, from the indexed technical
+    /// fields. nil when dimensions are unknown (non-image, original missing).
+    var imageAspect: Double? {
+        guard let width, let height, width > 0, height > 0 else { return nil }
+        return Double(width) / Double(height)
     }
 }
 
@@ -226,7 +252,8 @@ public extension Entry {
     /// (`[String]`) already encodes "empty" — pass `[]` to clear.
     func with(title: String?? = nil, author: [String]? = nil,
               ratingScore: Double? = nil, year: String?? = nil, source: String?? = nil,
-              doi: String?? = nil, themes: [String]? = nil, topics: [String]? = nil) -> Entry {
+              doi: String?? = nil, themes: [String]? = nil, topics: [String]? = nil,
+              created: String?? = nil) -> Entry {
         Entry(path: path, type: type, title: title ?? self.title,
               author: author ?? self.author,
               year: year ?? self.year, ratingScore: ratingScore ?? self.ratingScore,
@@ -235,6 +262,7 @@ public extension Entry {
               pdfSlug: pdfSlug, mtime: mtime, added: added, source: source ?? self.source,
               book: book, kind: kind, journal: journal,
               doi: doi ?? self.doi, publisher: publisher, isbn: isbn, category: category,
-              annotates: annotates, created: created, media: media)
+              annotates: annotates, created: created ?? self.created, media: media,
+              width: width, height: height, fileSize: fileSize)
     }
 }

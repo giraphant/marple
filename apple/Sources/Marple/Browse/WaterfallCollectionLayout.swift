@@ -3,8 +3,8 @@ import AppKit
 /// Column-packing waterfall layout for `NSCollectionView`: derive the column
 /// count from the available width and the target `columnWidth`, then drop each
 /// item into the currently shortest column. Heights come from the injected
-/// `heightForItem` (real image ratios via `GridDimensions`, `CardMetrics` for
-/// text). Single section. This is the engine Apple's CocoaSlideCollection sample
+/// `heightForItem` (indexed image dimensions + measured text, memoised by
+/// `GridDimensions`). Single section. This is the engine Apple's CocoaSlideCollection sample
 /// uses (custom layout + native drag/select) — the part that was never the crash.
 final class WaterfallCollectionLayout: NSCollectionViewLayout {
     var columnWidth: CGFloat = 260
