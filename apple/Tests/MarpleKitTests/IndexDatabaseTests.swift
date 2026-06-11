@@ -22,7 +22,8 @@ import GRDB
                   rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topics_json TEXT, kind TEXT, journal TEXT, source TEXT,
                   doi TEXT, publisher TEXT, isbn TEXT, category TEXT, translation_title_cn TEXT,
                   translation_douban_url TEXT, chapters_analyzed INTEGER, annotates TEXT,
-                  created TEXT, media TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
+                  created TEXT, media TEXT, width INTEGER, height INTEGER, file_size INTEGER,
+                  pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
                   preview TEXT NOT NULL DEFAULT '', body_len INTEGER NOT NULL DEFAULT 0,
                   added INTEGER NOT NULL DEFAULT 0
                 );
@@ -221,7 +222,8 @@ import GRDB
                       rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topics_json TEXT, kind TEXT, journal TEXT, source TEXT,
                       doi TEXT, publisher TEXT, isbn TEXT, category TEXT, translation_title_cn TEXT,
                       translation_douban_url TEXT, chapters_analyzed INTEGER, annotates TEXT,
-                      created TEXT, media TEXT, pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
+                      created TEXT, media TEXT, width INTEGER, height INTEGER, file_size INTEGER,
+                      pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
                       preview TEXT NOT NULL DEFAULT '', body_len INTEGER NOT NULL DEFAULT 0,
                       added INTEGER NOT NULL DEFAULT 0
                     );
@@ -430,7 +432,8 @@ import GRDB
         var blob = Data()
         // Magic "MARPLE\0C" — must match IndexDatabase.cacheMagic.
         blob.append(contentsOf: [0x4D, 0x41, 0x52, 0x50, 0x4C, 0x45, 0x00, 0x43])
-        var v = UInt32(1).littleEndian
+        // Format version — must match IndexDatabase.cacheFormatVersion (2 since QUA-175).
+        var v = UInt32(2).littleEndian
         withUnsafeBytes(of: &v) { blob.append(contentsOf: $0) }
         var r = UInt64(bitPattern: revision).littleEndian
         withUnsafeBytes(of: &r) { blob.append(contentsOf: $0) }
