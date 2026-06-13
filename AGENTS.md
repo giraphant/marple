@@ -1,8 +1,10 @@
-# CLAUDE.md
+# AGENTS.md
 
 ## 0. Learn From Others
 
-When you want to create or modify something, double-check if there is established open-source app (e.g. fsnotes, NetNewsWire, CotEditor)we can use as an example (https://github.com/serhii-londar/open-source-mac-os-apps#editors) and how they achieve specific functions: animations, layouts etc.
+When you want to create or modify something, double-check if there is established open-source app (e.g. fsnotes, NetNewsWire, CotEditor) we can use as an example (https://github.com/serhii-londar/open-source-mac-os-apps#editors) and how they achieve specific functions: animations, layouts etc.
+
+Please check these repos at /tmp/marple-reference-repos as reference. If there is no, clone them.
 
 ## 1. Think Before Coding
 
@@ -75,3 +77,37 @@ The `linear` CLI is the source of truth for tasks. Team key: **QUA** (Quasi Fish
 - Reference the new issue ID in the PR body.
 
 Run `linear --help` for the full command reference. Don't create issues for trivial in-session steps — only for work that survives the PR.
+
+## 6. iOS Companion — Build & Release
+
+The read-only iPhone reader lives in `apple/Mobile/` (xcodegen project; the `.xcodeproj` is
+gitignored — always `xcodegen generate` first). It reuses `MarpleKit`. The macOS app
+(`apple/`, `make` targets) is unaffected; both ship from this one repo.
+
+**Build / test the iOS app** (Command Line Tools lack the iOS platform by default —
+one-time `xcodebuild -downloadPlatform iOS`):
+```
+cd apple/Mobile && xcodegen generate
+# build
+xcodebuild build -project MarpleiOS.xcodeproj -scheme MarpleiOS \
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/marple-ios-dd CODE_SIGNING_ALLOWED=NO
+# test
+xcodebuild test  -project MarpleiOS.xcodeproj -scheme MarpleiOS \
+  -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath /tmp/marple-ios-dd CODE_SIGNING_ALLOWED=NO
+```
+
+**Release to TestFlight is fully scripted** — `apple/Mobile/release.sh` regenerates the
+project, archives, signs, and uploads via the App Store Connect API key. Bump
+`CURRENT_PROJECT_VERSION` in `apple/Mobile/project.yml` first, then:
+```
+cd apple/Mobile && ./release.sh
+```
+One-time prerequisites (secrets gitignored): an **Apple Distribution** cert in the login
+keychain; the `.p8` at `~/.appstoreconnect/private_keys/AuthKey_<id>.p8`; key id/issuer in
+`apple/Mobile/.release.env`. Processing on Apple's side takes ~10–30 min before the build
+appears in TestFlight.
+
+**Tab-sync caveat:** the iOS "Mac 上打开的" list is fed by the macOS app writing
+`<vaultRoot>/session/open-tabs.json`. After changing that writer (`SessionWriter`),
+reinstall the Mac app (`cd apple && make install`) and relaunch it, or the running
+instance keeps publishing the old format.
