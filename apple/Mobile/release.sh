@@ -1,7 +1,7 @@
 #!/bin/bash
 # One-shot: regenerate project, archive, sign, and upload to TestFlight via the
 # App Store Connect API key. Bump CURRENT_PROJECT_VERSION in project.yml first.
-# Secrets: apple/ios/.release.env (gitignored) + ~/.appstoreconnect/private_keys/AuthKey_<id>.p8
+# Secrets: apple/Mobile/.release.env (gitignored) + ~/.appstoreconnect/private_keys/AuthKey_<id>.p8
 set -euo pipefail
 cd "$(dirname "$0")"
 source .release.env
