@@ -91,7 +91,7 @@ Sources/Marple/
 ### MarpleiOS/ —— iOS 壳(SwiftUI,只读 reader),消费同一颗核
 
 ```
-ios/MarpleiOS/
+Mobile/MarpleiOS/
 ├── MarpleiOSApp.swift   @main
 ├── App/                 ReaderModel(@Observable 中枢,持 Catalog)· SetupView
 ├── UI/                  RootView · SidebarScreen · EntryListScreen · DocScreen · MarkdownTextView
