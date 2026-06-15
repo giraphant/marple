@@ -34,7 +34,7 @@ targets:
         # iPhone only (TARGETED_DEVICE_FAMILY 1) — matches the iPhone-only scope.
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "19"
+        CURRENT_PROJECT_VERSION: "25"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         # Supported orientations (iPhone): portrait + both landscapes.

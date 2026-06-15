@@ -18,29 +18,19 @@ struct EntryListScreen: View {
             NavigationLink {
                 DocScreen(model: model, entry: entry)
             } label: {
-                EntryRow(entry: entry)
+                EntrySummaryRow(entry: entry)
             }
         }
         .navigationTitle(type.label)
         .searchable(text: $query, prompt: "在\(type.label)中搜索")
+        .overlay {
+            if !query.isEmpty && shown.isEmpty {
+                ContentUnavailableView.search(text: query)
+            }
+        }
         .task(id: query) {
             guard !query.isEmpty else { hits = []; return }
             hits = (await model.search(query)).filter { $0.type == type }
         }
-    }
-}
-
-private struct EntryRow: View {
-    let entry: Entry
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(entry.title ?? (entry.path as NSString).lastPathComponent)
-                .font(.body).lineLimit(2)
-            if !entry.author.isEmpty {
-                Text(entry.author.joined(separator: ", "))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-        }
-        .padding(.vertical, 2)
     }
 }

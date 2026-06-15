@@ -54,6 +54,12 @@ final class ReaderModel {
     /// iOS requires the security scope to be active, so doing it here would
     /// silently throw and the bookmark would never freshen (then eventually die).
     func boot() async {
+        #if DEBUG && targetEnvironment(simulator)
+        if DemoVaultWorkspace.isEnabled {
+            await startDemoVault()
+            return
+        }
+        #endif
         guard let (url, isStale) = VaultBookmark.resolve() else { phase = .needsFolder; return }
         await start(folder: url, resaveBookmark: isStale)
     }
@@ -62,6 +68,39 @@ final class ReaderModel {
     func didPickFolder(_ url: URL) async {
         await start(folder: url, resaveBookmark: true)
     }
+
+    #if DEBUG && targetEnvironment(simulator)
+    /// Simulator-only deterministic fixture path for UI screenshots/tests. It
+    /// exercises the real indexer/client/reader pipeline without iCloud or the
+    /// document picker, and is gated by `DemoVaultWorkspace.isEnabled`.
+    private func startDemoVault() async {
+        scopedURL?.stopAccessingSecurityScopedResource()
+        scopedURL = nil
+
+        phase = .indexing
+        progress = nil
+        statusLabel = "正在准备演示文库…"
+
+        do {
+            let rootURL = try DemoVaultWorkspace.prepare()
+            let root = rootURL.path
+            let dbPath = DemoVaultWorkspace.indexDBPath(workspaceRoot: rootURL).path
+            workspaceRoot = root
+
+            statusLabel = "正在建立演示索引…"
+            try await Task.detached(priority: .utility) {
+                _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).buildFull()
+            }.value
+
+            let c = IOSVaultClient(workspaceRoot: root, db: IndexDatabase(indexDBPath: dbPath))
+            self.client = c
+            await updateEntries(try await c.index())
+            phase = .ready
+        } catch {
+            phase = .failed("载入演示文库失败:\(error.localizedDescription)")
+        }
+    }
+    #endif
 
     private func start(folder url: URL, resaveBookmark: Bool = false) async {
         // Release any previously held scope before acquiring a new one (re-pick
