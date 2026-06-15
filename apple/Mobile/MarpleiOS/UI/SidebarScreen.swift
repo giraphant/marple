@@ -37,7 +37,7 @@ struct SidebarScreen: View {
                         NavigationLink {
                             MacSpaceScreen(space: space, model: model)
                         } label: {
-                            Label(space.name, systemImage: space.iconName ?? "square.grid.2x2")
+                            MacSpaceRow(space: space)
                         }
                     }
                 } header: {
@@ -54,12 +54,13 @@ struct SidebarScreen: View {
                     NavigationLink {
                         EntryListScreen(model: model, type: type)
                     } label: {
-                        Label(type.label, systemImage: type.symbolName)
+                        LibraryTypeRow(type: type)
                             .badge(counts[type] ?? 0)
                     }
                 }
             }
         }
+        .listStyle(.insetGrouped)
     }
 
     private var resultsList: some View {
@@ -67,7 +68,7 @@ struct SidebarScreen: View {
             NavigationLink {
                 DocScreen(model: model, entry: entry)
             } label: {
-                GlobalResultRow(entry: entry)
+                EntrySummaryRow(entry: entry, showsType: true)
             }
         }
         .overlay {
@@ -75,6 +76,41 @@ struct SidebarScreen: View {
         }
     }
 
+}
+
+private struct MacSpaceRow: View {
+    let space: MacSpaceTabs
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: space.iconName ?? "square.grid.2x2")
+                .font(.system(size: 21, weight: .regular))
+                .foregroundStyle(.secondary)
+                .frame(width: 28)
+            Text(space.name)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.primary)
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+private struct LibraryTypeRow: View {
+    let type: EntryType
+
+    var body: some View {
+        Label {
+            Text(type.label)
+                .font(.body)
+                .foregroundStyle(.primary)
+        } icon: {
+            Image(systemName: type.symbolName)
+                .font(.system(size: 21, weight: .regular))
+                .foregroundStyle(.secondary)
+                .frame(width: 28)
+        }
+        .padding(.vertical, 4)
+    }
 }
 
 /// One Mac Space's tab list, pushed from the sidebar (Ulysses-项目 navigation, not
@@ -109,18 +145,19 @@ private struct MacTabNodeView: View {
             NavigationLink {
                 DocScreen(model: model, entry: entry)
             } label: {
-                HStack {
-                    Label {
-                        Text(label).lineLimit(1)
-                            .fontWeight(active ? .medium : .regular)
-                    } icon: {
-                        Image(systemName: entry.type.symbolName)
-                    }
+                HStack(spacing: 10) {
+                    Image(systemName: entry.type.symbolName)
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(active ? Color.accentColor : .secondary)
+                        .frame(width: 22)
+                    Text(label).lineLimit(1)
+                        .fontWeight(active ? .medium : .regular)
                     if active {
                         Spacer(minLength: 6)
-                        Circle().fill(.tint).frame(width: 6, height: 6)
+                        Circle().fill(.tint).frame(width: 5, height: 5)
                     }
                 }
+                .padding(.vertical, 2)
             }
         case .group(_, let name, let collapsed, let children):
             MacTabGroupView(name: name, collapsed: collapsed, children: children,
@@ -151,29 +188,15 @@ private struct MacTabGroupView: View {
                 MacTabNodeView(node: $0, model: model, activePath: activePath)
             }
         } label: {
-            Label(name, systemImage: "folder")
-        }
-    }
-}
-
-/// A global-search result row: title + a small type chip + author.
-private struct GlobalResultRow: View {
-    let entry: Entry
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(entry.title ?? (entry.path as NSString).lastPathComponent)
-                .font(.body).lineLimit(2)
-            HStack(spacing: 6) {
-                Text(entry.type.label)
-                    .font(.caption2)
-                    .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(.quaternary, in: Capsule())
-                if !entry.author.isEmpty {
-                    Text(entry.author.joined(separator: ", "))
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
+            HStack(spacing: 10) {
+                Image(systemName: "folder")
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22)
+                Text(name)
+                    .foregroundStyle(.primary)
             }
+            .padding(.vertical, 2)
         }
-        .padding(.vertical, 2)
     }
 }

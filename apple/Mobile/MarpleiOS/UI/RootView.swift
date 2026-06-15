@@ -2,6 +2,9 @@ import SwiftUI
 
 struct RootView: View {
     @Bindable var model: ReaderModel
+    #if DEBUG && targetEnvironment(simulator)
+    @State private var demoNavigationPath = DemoVaultWorkspace.initialNavigationPath
+    #endif
 
     var body: some View {
         switch model.phase {
@@ -38,7 +41,24 @@ struct RootView: View {
                 Button("重新选择文件夹") { Task { VaultBookmark.clear(); await model.boot() } }
             }
         case .ready:
+            #if DEBUG && targetEnvironment(simulator)
+            if DemoVaultWorkspace.shouldOpenReader {
+                NavigationStack(path: $demoNavigationPath) {
+                    SidebarScreen(model: model)
+                        .navigationDestination(for: String.self) { path in
+                            if let entry = model.entries.first(where: { $0.path == path }) {
+                                DocScreen(model: model, entry: entry)
+                            } else {
+                                Text("文档不可用")
+                            }
+                        }
+                }
+            } else {
+                NavigationStack { SidebarScreen(model: model) }
+            }
+            #else
             NavigationStack { SidebarScreen(model: model) }
+            #endif
         }
     }
 }
