@@ -30,9 +30,6 @@ public final class Catalog {
     // deferred 派生（entries 变更后台重算）
     public internal(set) var relationGraph: RelationGraph = .empty
     public internal(set) var searchIndex: SearchIndex = .empty
-    /// 派生就绪回调（过渡期）：deferred 派生发布后,若有开档则重算开档派生。
-    /// Task 5 把 recomputeOpenDerived 迁入后改为内部直调。
-    public var onDerivedReady: (() -> Void)?
     var deferredDerivedTask: Task<Void, Never>?
     // Independent of `pass` (Decision 1): bumped by every scheduleDeferredDerivedRebuild
     // incl. optimistic edits; do NOT fold into pass.
@@ -61,6 +58,11 @@ public final class Catalog {
     public internal(set) var openRelations: Relations?
     public internal(set) var openBook: BookContext?
     public internal(set) var openTopic: TopicContext?
+    /// Last shell-supplied open-doc inputs. Catalog owns the derived outputs, so it
+    /// keeps the inputs needed to refresh them when deferred index-wide caches land.
+    var openDerivedPath: String?
+    var openDerivedBody: String = ""
+    var openDerivedBlocks: [RenderBlock] = []
 
     // MARK: - 统一刷新权威 (QUA-218 PR3a Task 7)
     // vault-变更管线的唯一 generation/单飞：RefreshAuthority（合流单飞，QUA-198 OOM

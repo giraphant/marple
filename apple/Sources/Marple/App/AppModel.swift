@@ -158,7 +158,7 @@ final class AppModel {
     private(set) var savedViews: [SavedView] = [] {
         didSet {
             persist()
-            catalog.recomputeSavedViewCounts(entries: entries, savedViews: savedViews)
+            catalog.recomputeSavedViewCounts(savedViews: savedViews)
         }
     }
     /// Live row counts per saved view for the sidebar (computed like the type
@@ -371,14 +371,6 @@ final class AppModel {
         }
         loadTypeOrder()
         loadHiddenTypes()
-        // deferred 派生发布后,若有开档则重算开档派生（旧 scheduleDeferredDerivedRebuild
-        // 的 `if openEntry != nil { recomputeOpenDerived() }`）。openEntry 现读 catalog 的
-        // （同值）；recomputeOpenDerived 也已迁入 Catalog，经壳传入 openPath/openBody/
-        // openBlocks。
-        catalog.onDerivedReady = { [weak self] in
-            guard let self, self.catalog.openEntry != nil else { return }
-            self.recomputeOpenDerived()
-        }
     }
 
     /// Last-session sidebar counts, restored from PersistedState in init. Kept
@@ -509,7 +501,7 @@ final class AppModel {
     ///   the reading view's relations panel and the Cmd-K palette, neither of
     ///   which is exercised in the first few hundred ms after launch)
     private func rebuildIndexDerived() {
-        catalog.rebuildIndexDerived(entries: entries, savedViews: savedViews)
+        catalog.rebuildIndexDerived(savedViews: savedViews)
     }
 
     /// Recompute the open document's open-doc derived caches. Routes to Catalog;
@@ -517,7 +509,7 @@ final class AppModel {
     /// from the font-free `openBlocks`, so no render-style constants cross over).
     private func recomputeOpenDerived() {
         catalog.recomputeOpenDerived(openPath: openPath, openBody: openBody,
-                                     openBlocks: openBlocks, entries: entries)
+                                     openBlocks: openBlocks)
     }
 
     /// Rebuild the middle-column list. Search hits are a cheap direct swap; the pane
