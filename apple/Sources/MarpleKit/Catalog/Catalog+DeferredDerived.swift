@@ -1,8 +1,8 @@
 import Foundation
 
-// Deferred (background) derive：relationGraph / searchIndex，独立 derivedGeneration +
-// onDerivedReady 回调。Split out of Catalog.swift (QUA-218 PR3a Task 8); QUA-221 threads
-// the active VaultSchema into RelationGraph.build so rule③ path references are table-driven.
+// Deferred (background) derive：relationGraph / searchIndex，独立 derivedGeneration。
+// Split out of Catalog.swift (QUA-218 PR3a Task 8); QUA-221 threads the active
+// VaultSchema into RelationGraph.build so rule③ path references are table-driven.
 extension Catalog {
     /// Build the heavy derived caches (relation graph, search index) on a
     /// background task and publish them on the main actor when done. If
@@ -36,7 +36,9 @@ extension Catalog {
                 guard let self, self.derivedGeneration == generation else { return }
                 self.relationGraph = result.0
                 self.searchIndex = result.1
-                self.onDerivedReady?()
+                if self.hasOpenDerivedInput {
+                    self.recomputeOpenDerivedFromStoredInput()
+                }
             }
         }
     }
