@@ -143,7 +143,7 @@ final class ReaderModel {
                 _ = self.catalog.publish(warm, pass: self.catalog.beginStandalonePass())
                 phase = .ready
                 Task {
-                    await self.finishEntriesUpdate(warm)
+                    await self.finishEntriesUpdate()
                     await self.backgroundSync(root: root, dbPath: dbPath)
                 }
                 return
@@ -198,7 +198,7 @@ final class ReaderModel {
                     // pass may have begun during it) and drops the assignment if so;
                     // a live publish returns true → run the non-urgent tail.
                     if self.catalog.publish(fetched, pass: myPass) {
-                        await self.finishEntriesUpdate(fetched)
+                        await self.finishEntriesUpdate()
                     }
                 }
             } catch {
@@ -230,18 +230,18 @@ final class ReaderModel {
     /// `publish` unconditional — no concurrent refresh to be stale against.
     private func updateEntries(_ newEntries: [Entry]) async {
         _ = catalog.publish(newEntries, pass: catalog.beginStandalonePass())
-        await finishEntriesUpdate(newEntries)
+        await finishEntriesUpdate()
     }
 
     /// The non-urgent tail of an entries update: search-index rebuild + Mac
     /// session load. Split out so the warm-launch path can flip `.ready` first
     /// and run this in the background.
-    private func finishEntriesUpdate(_ newEntries: [Entry]) async {
+    private func finishEntriesUpdate() async {
         // searchIndex is filled asynchronously by Catalog (scheduleDeferredDerivedRebuild,
         // fire-and-forget); search(_:) may return stale/empty for ~100–300ms after this
         // returns — matches the warm-launch behaviour (QUA-218 PR4 decision 2).
         // savedViews: [] — iOS has no saved views (recomputeSavedViewCounts early-returns).
-        catalog.rebuildIndexDerived(entries: newEntries, savedViews: [])
+        catalog.rebuildIndexDerived(savedViews: [])
         if let root = workspaceRoot { await loadSession(root: root) }
     }
 

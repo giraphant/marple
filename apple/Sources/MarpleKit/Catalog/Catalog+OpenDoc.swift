@@ -2,7 +2,8 @@ import Foundation
 
 // Open-doc derived caches：recomputeOpenDerived（openEntry/openOutline/openStats/
 // openRelations/openBook/openTopic）。Split out of Catalog.swift (QUA-218 PR3a Task 8);
-// method body is byte-identical to the original.
+// stores shell-supplied open-doc inputs so deferred Catalog rebuilds can refresh
+// the derived outputs without a shell callback.
 extension Catalog {
     /// Recompute the open document's outline / stats / entry / relations. O(n) over
     /// the index for relations; runs on open / reload / metadata write, not per render.
@@ -14,7 +15,21 @@ extension Catalog {
     /// level/text 与字体无关，故编目层不再关心渲染样式（QUA-227）。代价：OutlineItem
     /// 无 characterRange，Inspector 点击滚动的偏移改由 live MarkdownTextView 按序号提供。
     public func recomputeOpenDerived(openPath: String?, openBody: String,
-                                     openBlocks: [RenderBlock], entries: [Entry]) {
+                                     openBlocks: [RenderBlock]) {
+        openDerivedPath = openPath
+        openDerivedBody = openBody
+        openDerivedBlocks = openBlocks
+        recomputeOpenDerivedFromStoredInput()
+    }
+
+    var hasOpenDerivedInput: Bool {
+        openDerivedPath != nil || !openDerivedBody.isEmpty || !openDerivedBlocks.isEmpty
+    }
+
+    func recomputeOpenDerivedFromStoredInput() {
+        let openPath = openDerivedPath
+        let openBody = openDerivedBody
+        let openBlocks = openDerivedBlocks
         openEntry = entries.first { $0.path == openPath }
         openOutline = outline(from: openBlocks)
         openStats = openBody.isEmpty ? nil : computeDocStats(openBody)
