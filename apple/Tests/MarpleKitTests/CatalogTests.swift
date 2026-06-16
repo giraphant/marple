@@ -28,8 +28,9 @@ import Testing
         let overview = mk("vault/topics/embodiment/00-overview.md", "topic")
         let resources = mk("vault/topics/embodiment/01-resources.md", "topic")
         let entries = [paper, note, overview, resources]
+        c.entries = entries
 
-        c.rebuildIndexDerived(entries: entries, savedViews: [])
+        c.rebuildIndexDerived(savedViews: [])
 
         // Raw counts per type, except the topic bucket folds to one row per slug.
         #expect(c.counts[.paper] == 1)
@@ -50,12 +51,13 @@ import Testing
         let view = SavedView(name: "papers",
                              clauses: [FilterClause(field: .type, op: .is_, value: "paper")],
                              match: .all, sorts: [])
+        c.entries = entries
 
-        c.recomputeSavedViewCounts(entries: entries, savedViews: [view])
+        c.recomputeSavedViewCounts(savedViews: [view])
         #expect(c.savedViewCounts[view.id] == 2)
 
         // Empty saved-view list clears the cache.
-        c.recomputeSavedViewCounts(entries: entries, savedViews: [])
+        c.recomputeSavedViewCounts(savedViews: [])
         #expect(c.savedViewCounts.isEmpty)
     }
 
@@ -108,10 +110,10 @@ import Testing
         let ch1 = mk("vault/books/being-time/01-intro.md", "chapter", book: "being-time")
         let ch2 = mk("vault/books/being-time/02-care.md", "chapter", book: "being-time")
         let entries = [overview, ch1, ch2]
+        c.entries = entries
 
         c.recomputeOpenDerived(openPath: ch1.path, openBody: "# Intro\n\nbody",
-                               openBlocks: MarkdownModel.blocks(from: "# Intro\n\nbody"),
-                               entries: entries)
+                               openBlocks: MarkdownModel.blocks(from: "# Intro\n\nbody"))
 
         #expect(c.openEntry?.path == ch1.path)
         #expect(c.openBook?.slug == "being-time")
@@ -127,10 +129,10 @@ import Testing
         let overview = mk("vault/topics/embodiment/00-overview.md", "topic")
         let resources = mk("vault/topics/embodiment/01-resources.md", "topic")
         let entries = [overview, resources]
+        c.entries = entries
 
         c.recomputeOpenDerived(openPath: overview.path, openBody: "# 本专题",
-                               openBlocks: MarkdownModel.blocks(from: "# 本专题"),
-                               entries: entries)
+                               openBlocks: MarkdownModel.blocks(from: "# 本专题"))
 
         #expect(c.openEntry?.path == overview.path)
         #expect(c.openTopic?.slug == "embodiment")
@@ -146,26 +148,48 @@ import Testing
         let p1 = mk("vault/papers/distinction.md", "paper", author: "Pierre Bourdieu", rating: 5)
         let p2 = mk("vault/papers/habitus.md", "paper", author: "Pierre Bourdieu", rating: 3)
         let entries = [author, p1, p2]
+        c.entries = entries
         // Seed the catalog's relation graph (works→author edges) so relations()
         // reads it rather than the empty-graph fallback.
         c.relationGraph = RelationGraph.build(entries)
 
         c.recomputeOpenDerived(openPath: author.path, openBody: "# Pierre Bourdieu",
-                               openBlocks: MarkdownModel.blocks(from: "# Pierre Bourdieu"),
-                               entries: entries)
+                               openBlocks: MarkdownModel.blocks(from: "# Pierre Bourdieu"))
 
         #expect(c.openEntry?.path == author.path)
         // works ordered by rating desc.
         #expect(c.openRelations?.works.map(\.path) == [p1.path, p2.path])
     }
 
+    /// Deferred relation-graph publication refreshes the stored open-doc inputs
+    /// inside Catalog; no shell callback is needed for annotation-backed relations.
+    @Test func deferredDerivedRefreshesStoredOpenDocRelations() async {
+        let c = Catalog()
+        let book = mk("vault/books/being-time/00-overview.md", "book", title: "Being and Time")
+        let note = mk("vault/notes/annotation.md", "note", rating: 5, annotates: book.path)
+        let entries = [book, note]
+        c.entries = entries
+
+        c.recomputeOpenDerived(openPath: book.path, openBody: "# Being and Time",
+                               openBlocks: MarkdownModel.blocks(from: "# Being and Time"))
+        #expect(c.openRelations?.annotations.isEmpty == true)
+
+        c.rebuildIndexDerived(savedViews: [])
+
+        for _ in 0..<20 {
+            if c.openRelations?.annotations.map(\.path) == [note.path] { break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(c.openRelations?.annotations.map(\.path) == [note.path])
+    }
+
     /// No open path → entry/relations/book/topic clear; outline/stats reflect body.
     @Test func openDerivedNoOpenClears() {
         let c = Catalog()
         let entries = [mk("vault/papers/a.md", "paper")]
+        c.entries = entries
         c.recomputeOpenDerived(openPath: nil, openBody: "",
-                               openBlocks: MarkdownModel.blocks(from: ""),
-                               entries: entries)
+                               openBlocks: MarkdownModel.blocks(from: ""))
         #expect(c.openEntry == nil)
         #expect(c.openRelations == nil)
         #expect(c.openBook == nil)
