@@ -4,6 +4,7 @@ import MarpleKit
 struct DocScreen: View {
     @Bindable var model: ReaderModel
     let entry: Entry
+    @State private var currentEntry: Entry?
     @Environment(\.dismiss) private var dismiss
     @State private var rendered = NSAttributedString()
     @State private var stats: DocStats?
@@ -14,10 +15,9 @@ struct DocScreen: View {
     @State private var showInfo = false
     @State private var showOutline = false
     @State private var showOutlineAfterInfo = false
-    // Chapter navigation: the sheet records the tapped path, the push happens in
-    // onDismiss so it doesn't race the sheet's dismissal animation.
-    @State private var pendingPush: String?
-    @State private var pushedPath: String?
+    // Chapter navigation replaces the current reader entry instead of pushing a
+    // new DocScreen, so Back returns to the catalogue after any number of jumps.
+    @State private var pendingBookSelection: Entry?
     @State private var showFontControl = false
     @State private var showBookContents = false
     #if DEBUG && targetEnvironment(simulator)
@@ -31,6 +31,8 @@ struct DocScreen: View {
     // comfortable phone default.
     @AppStorage("iosReadingFontSize") private var fontSize: Double = 17
 
+    private var activeEntry: Entry { currentEntry ?? entry }
+
     private var style: RenderStyle {
         RenderStyle(size: fontSize, fontFamily: nil, bodyWeight: .regular,
                     letterSpacing: 0, lineHeight: 1.6)
@@ -41,6 +43,7 @@ struct DocScreen: View {
             Color(.systemBackground)
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
             MarkdownTextView(attributed: rendered, scrollTarget: scrollTarget, scrollNonce: scrollNonce)
+                .id(activeEntry.id)
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
             floatingControls
         }
@@ -64,10 +67,14 @@ struct DocScreen: View {
                 .readerMaterialSheetChrome()
             }
             .sheet(isPresented: $showBookContents, onDismiss: {
-                if let p = pendingPush { pendingPush = nil; pushedPath = p }
+                if let target = pendingBookSelection {
+                    pendingBookSelection = nil
+                    resetReaderStateForEntryChange()
+                    currentEntry = target
+                }
             }) {
-                BookContentsSheet(entry: entry, book: book) { target in
-                    if target.path != entry.path { pendingPush = target.path }
+                BookContentsSheet(entry: activeEntry, book: book) { target in
+                    if target.path != activeEntry.path { pendingBookSelection = target }
                     showBookContents = false
                 }
                 .presentationDetents([.fraction(0.54), .large])
@@ -79,27 +86,22 @@ struct DocScreen: View {
                     showOutline = true
                 }
             }) {
-                InfoSheet(entry: entry, stats: stats, canShowOutline: !outline.isEmpty) {
+                InfoSheet(entry: activeEntry, stats: stats, canShowOutline: !outline.isEmpty) {
                     showOutlineAfterInfo = true
                     showInfo = false
                 }
                     .presentationDetents([.large])
                     .readerMaterialSheetChrome()
             }
-            .navigationDestination(item: $pushedPath) { path in
-                if let target = model.entries.first(where: { $0.path == path }) {
-                    DocScreen(model: model, entry: target)
-                }
-            }
             .sheet(isPresented: $showFontControl) {
                 FontControlSheet(size: $fontSize)
                     .presentationDetents([.height(160)])
                     .readerSheetChrome()
             }
-            .task(id: entry.id) {
-                await load()
+            .task(id: activeEntry.id) {
+                await load(activeEntry)
             }
-            .onChange(of: fontSize) { _, _ in Task { await load() } }
+            .onChange(of: fontSize) { _, _ in Task { await load(activeEntry) } }
     }
 
     /// Ulysses-style floating reading chrome: outline + statistics/details.
@@ -108,7 +110,7 @@ struct DocScreen: View {
     private var floatingControls: some View {
         ReaderFloatingControls(
             canShowOutline: !outline.isEmpty,
-            canShowBookContents: !bookRows(for: book, current: entry).isEmpty,
+            canShowBookContents: !bookRows(for: book, current: activeEntry).isEmpty,
             onOutline: {
                 showOutline = true
             },
@@ -161,13 +163,14 @@ struct DocScreen: View {
         .accessibilityLabel("更多")
     }
 
-    private func load() async {
+    private func load(_ entry: Entry) async {
         let raw = await model.text(for: entry)
         // Strip YAML frontmatter before rendering/stats, same as the Mac reader
         // (metadata lives in the info sheet, not the reading surface).
         let body = Frontmatter.split(raw).body
         let md = Wikilink.preprocessForRendering(body)
         let doc = MarkdownRenderer.render(md, style: style)
+        guard !Task.isCancelled, activeEntry.id == entry.id else { return }
         rendered = doc.attributedString
         outline = MarpleKit.outline(from: doc.headings)
         stats = computeDocStats(body)
@@ -175,6 +178,15 @@ struct DocScreen: View {
         #if DEBUG && targetEnvironment(simulator)
         openInitialDemoOverlayIfNeeded()
         #endif
+    }
+
+    private func resetReaderStateForEntryChange() {
+        rendered = NSAttributedString()
+        stats = nil
+        outline = []
+        book = nil
+        scrollTarget = nil
+        scrollNonce = 0
     }
 
     #if DEBUG && targetEnvironment(simulator)
@@ -445,42 +457,50 @@ private struct BookContentsSheet: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                ForEach(rows, id: \.id) { row in
-                    let active = row.entry.path == entry.path
-                    Button { onOpen(row.entry) } label: {
-                        HStack(spacing: 12) {
-                            Circle()
-                                .fill(active ? Color.accentColor : Color.secondary.opacity(0.44))
-                                .frame(width: 6, height: 6)
-                            Text(row.label)
-                                .font(.system(size: 17, weight: active ? .medium : .regular))
-                                .foregroundStyle(active ? Color.accentColor : Color.primary)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
-                            if !active {
-                                Image(systemName: "chevron.right")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
+        ScrollViewReader { proxy in
+            List {
+                Section {
+                    ForEach(rows, id: \.id) { row in
+                        let active = row.entry.path == entry.path
+                        Button { onOpen(row.entry) } label: {
+                            HStack(spacing: 12) {
+                                Circle()
+                                    .fill(active ? Color.accentColor : Color.secondary.opacity(0.44))
+                                    .frame(width: 6, height: 6)
+                                Text(row.label)
+                                    .font(.system(size: 17, weight: active ? .medium : .regular))
+                                    .foregroundStyle(active ? Color.accentColor : Color.primary)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 0)
+                                if !active {
+                                    Image(systemName: "chevron.right")
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
                             }
+                            .contentShape(Rectangle())
                         }
-                        .contentShape(Rectangle())
+                        .id(row.id)
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 11, leading: 16, bottom: 11, trailing: 16))
                     }
-                    .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 11, leading: 16, bottom: 11, trailing: 16))
+                } header: {
+                    Text("目录")
+                        .font(.system(size: 15))
+                        .textCase(nil)
                 }
-            } header: {
-                Text("目录")
-                    .font(.system(size: 15))
-                    .textCase(nil)
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .contentMargins(.top, 27, for: .scrollContent)
+            .background(Color.clear)
+            .onAppear {
+                DispatchQueue.main.async {
+                    proxy.scrollTo(entry.path, anchor: .center)
+                }
             }
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .contentMargins(.top, 27, for: .scrollContent)
-        .background(Color.clear)
     }
 }
 
