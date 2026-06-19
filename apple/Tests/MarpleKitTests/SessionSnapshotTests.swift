@@ -1,8 +1,9 @@
-import XCTest
+import Foundation
+import Testing
 @testable import MarpleKit
 
-final class SessionSnapshotTests: XCTestCase {
-    func testRoundTripSpacesWithNestedForests() throws {
+@Suite struct SessionSnapshotTests {
+    @Test func roundTripSpacesWithNestedForests() throws {
         let snap = SessionSnapshot(
             updatedAtMs: 1_700_000_000_000,
             spaces: [
@@ -25,23 +26,27 @@ final class SessionSnapshotTests: XCTestCase {
             ])
         let data = try JSONEncoder().encode(snap)
         let back = try JSONDecoder().decode(SessionSnapshot.self, from: data)
-        XCTAssertEqual(back, snap)
+        #expect(back == snap)
         // Space name/icon + group name + custom label survive the round-trip.
-        XCTAssertEqual(back.spaces[0].name, "研究")
-        XCTAssertEqual(back.spaces[0].iconName, "books.vertical")
-        XCTAssertNil(back.spaces[1].iconName)
+        #expect(back.spaces[0].name == "研究")
+        #expect(back.spaces[0].iconName == "books.vertical")
+        #expect(back.spaces[1].iconName == nil)
         guard case .group(let name, _, let children) = back.spaces[0].roots[1] else {
-            return XCTFail("expected a group at spaces[0].roots[1]")
+            Issue.record("expected a group at spaces[0].roots[1]")
+            return
         }
-        XCTAssertEqual(name, "阅读中")
-        guard case .doc(let leaf) = children[0] else { return XCTFail("expected a doc leaf") }
-        XCTAssertEqual(leaf.title, "我的别名")
+        #expect(name == "阅读中")
+        guard case .doc(let leaf) = children[0] else {
+            Issue.record("expected a doc leaf")
+            return
+        }
+        #expect(leaf.title == "我的别名")
     }
 
-    func testFileURLIsOutsideVaultAndMarple() {
+    @Test func fileURLIsOutsideVaultAndMarple() {
         let url = SessionFile.url(workspaceRoot: "/tmp/ws")
-        XCTAssertEqual(url.path, "/tmp/ws/session/open-tabs.json")
-        XCTAssertFalse(url.path.contains("/vault/"))
-        XCTAssertFalse(url.path.contains("/.marple/"))
+        #expect(url.path == "/tmp/ws/session/open-tabs.json")
+        #expect(!url.path.contains("/vault/"))
+        #expect(!url.path.contains("/.marple/"))
     }
 }
