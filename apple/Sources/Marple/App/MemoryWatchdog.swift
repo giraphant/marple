@@ -1,18 +1,17 @@
 import Foundation
 import Darwin
 
-/// Persistent log + in-process memory watchdog (QUA-OOM diagnostics).
+/// Persistent log + opt-in in-process memory watchdog (QUA-OOM diagnostics).
 ///
 /// A Finder-launched .app sends `print()` to /dev/null, so the existing
 /// diagnostics (`loadEntries: cache MISS …`, `watcher reload …`) vanish — which
 /// is why a one-off 48 GB blow-up left no forensic trail. `MarpleLog` re-points
-/// stdout/stderr at a rotating file so those lines survive, and `MemoryWatchdog`
-/// stamps the app's own footprint into the same file on a fixed cadence. Next
-/// time memory runs away, the log shows footprint climbing line-by-line next to
-/// whatever print() is flooding — the evidence needed to pin the cause.
+/// stdout/stderr at a rotating file so those lines survive. `MemoryPressureMonitor`
+/// logs only when the OS reports pressure; `MemoryWatchdog` can still stamp the
+/// app's own footprint on a fixed cadence when explicitly enabled for forensics.
 ///
 /// This is diagnostics only: it changes no app behaviour, just makes the next
-/// occurrence observable.
+/// occurrence observable without a default periodic wakeup.
 enum MarpleLog {
     /// `~/Library/Logs/Marple/marple.log`.
     static let fileURL: URL = {
@@ -65,6 +64,28 @@ func currentMemoryFootprintBytes() -> UInt64? {
     return kr == KERN_SUCCESS ? info.phys_footprint : nil
 }
 
+@MainActor
+final class MemoryPressureMonitor {
+    private var source: DispatchSourceMemoryPressure?
+
+    func start() {
+        guard source == nil else { return }
+        let s = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        s.setEventHandler { [weak self] in
+            Task { @MainActor in self?.logPressure() }
+        }
+        s.activate()
+        source = s
+    }
+
+    private func logPressure() {
+        guard let bytes = currentMemoryFootprintBytes() else { return }
+        let gb = Double(bytes) / 1_073_741_824
+        print(String(format: "%@ [marple] memory pressure: footprint=%.2fGB",
+                     MarpleLog.stamp(), gb))
+    }
+}
+
 /// Stamps `footprint=<GB> entries=<n> refreshing=<bool>` into the log every
 /// `interval` seconds; emits a loud `!!!` line each time footprint crosses a new
 /// whole-GB mark above `warnGB`, so a runaway is caught at GB-by-GB resolution.
@@ -80,12 +101,23 @@ final class MemoryWatchdog {
         self.warnBytes = UInt64(warnGB * 1_073_741_824)
     }
 
+    static func isEnabled(
+        defaults: UserDefaults = .standard,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) -> Bool {
+        defaults.bool(forKey: SettingsKeys.memoryWatchdogEnabled)
+            || environment["MARPLE_MEMORY_WATCHDOG"] == "1"
+            || arguments.contains("--memory-watchdog")
+    }
+
     func start() {
-        guard timer == nil else { return }
+        guard timer == nil, Self.isEnabled() else { return }
         tick()  // baseline line at launch
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        t.tolerance = interval / 2
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }

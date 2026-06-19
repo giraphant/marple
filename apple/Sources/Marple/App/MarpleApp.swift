@@ -17,6 +17,7 @@ final class AppState: ObservableObject {
     // QUA-106: periodic local snapshot backups. Constructed during boot,
     // started/stopped by `applyBackupSetting` per `marple.backupEnabled`.
     private var backupScheduler: BackupScheduler?
+    private var backupWatcher: VaultWatcher?
 
     /// Synchronous (no awaits inside) since Phase A — the heavy reconcile +
     /// loadIndex moved to a background Task at the bottom of this method. Lets
@@ -82,6 +83,7 @@ final class AppState: ObservableObject {
         let scheduler = BackupScheduler(store: store)
         self.backupScheduler = scheduler
         ActiveBackup.scheduler = scheduler
+        self.backupWatcher = VaultWatcher(vaultDirectory: URL(fileURLWithPath: paths.workspaceRoot))
         applyBackupSetting()
 
         // QUA-107: construct the CLI socket holder now, but defer the actual
@@ -168,7 +170,13 @@ final class AppState: ObservableObject {
         guard let backupScheduler else { return }
         let defaults = UserDefaults.standard
         let wanted = defaults.object(forKey: SettingsKeys.backupEnabled) as? Bool ?? true
-        if wanted { backupScheduler.start() } else { backupScheduler.stop() }
+        if wanted {
+            backupWatcher?.start { [weak backupScheduler] in backupScheduler?.noteVaultChanged() }
+            backupScheduler.start()
+        } else {
+            backupWatcher?.stop()
+            backupScheduler.stop()
+        }
     }
 
     func shutdownCLIBridge() {
@@ -204,6 +212,7 @@ struct MarpleApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: MarpleWindowController?
+    private let memoryPressureMonitor = MemoryPressureMonitor()
     private let memoryWatchdog = MemoryWatchdog()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -212,6 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wc = MarpleWindowController()
         windowController = wc
         wc.start()
+        memoryPressureMonitor.start()
         memoryWatchdog.start()
     }
 
