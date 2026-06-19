@@ -77,11 +77,16 @@ final class AppModel {
     func refreshBody(_ myPass: Int) async {
         guard let indexer = cliIndexer else { return }
         beginRefreshing()
-        do { _ = try await Task.detached { try indexer.reconcile() }.value }
-        catch { print("[marple] reconcile failed: \(error)") }
+        defer { endRefreshing() }
+        let stats: ReconcileStats?
+        do { stats = try await Task.detached { try indexer.reconcile() }.value }
+        catch {
+            print("[marple] reconcile failed: \(error)")
+            stats = nil
+        }
+        guard let stats, stats.upserted + stats.removed > 0 else { return }
         await loadIndex(pass: myPass)
         await reloadOpen()
-        endRefreshing()
     }
 
     /// Card grid vs single-column list. Pure UI toggle; no derived cache depends on it.

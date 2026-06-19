@@ -27,6 +27,8 @@ enum SettingsKeys {
     // feature). `backupLocation` empty ⇒ ~/Library/Application Support/Marple/Backups/.
     static let backupEnabled = "marple.backupEnabled"
     static let backupLocation = "marple.backupLocation"
+    // QUA-OOM diagnostics: opt-in; the watchdog wakes periodically by design.
+    static let memoryWatchdogEnabled = "marple.memoryWatchdogEnabled"
 }
 
 /// What a single click on the 引用 toolbar button does. Right-click always shows

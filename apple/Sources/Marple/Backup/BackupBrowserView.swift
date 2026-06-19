@@ -15,12 +15,13 @@ final class BackupBrowserPresenter {
             NSApp.activate()
             return
         }
+        guard let scheduler = ActiveBackup.scheduler else { return }
         let w = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 460),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         w.title = "浏览备份"
-        w.contentViewController = NSHostingController(rootView: BackupBrowserView())
+        w.contentViewController = NSHostingController(rootView: BackupBrowserView(scheduler: scheduler))
         w.isReleasedWhenClosed = false
         w.center()
         window = w
@@ -32,13 +33,17 @@ final class BackupBrowserPresenter {
 /// Browse snapshots → pick a document → restore it as a side copy (never
 /// overwrites the live file). Reads the live `SnapshotStore` via `ActiveBackup`.
 struct BackupBrowserView: View {
+    @ObservedObject private var scheduler: BackupScheduler
     @State private var snapshots: [SnapshotStore.Snapshot] = []
     @State private var selected: SnapshotStore.Snapshot?
     @State private var documents: [String] = []
     @State private var status: String?
 
-    private let tick = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
-    private var store: SnapshotStore? { ActiveBackup.scheduler?.store }
+    private var store: SnapshotStore { scheduler.store }
+
+    init(scheduler: BackupScheduler) {
+        self.scheduler = scheduler
+    }
 
     var body: some View {
         HSplitView {
@@ -49,7 +54,7 @@ struct BackupBrowserView: View {
         }
         .frame(minWidth: 640, minHeight: 380)
         .onAppear(perform: reload)
-        .onReceive(tick) { _ in reload() }
+        .onReceive(scheduler.$lastBackup) { _ in reload() }
     }
 
     private var snapshotList: some View {
@@ -57,7 +62,7 @@ struct BackupBrowserView: View {
             get: { selected?.date },
             set: { newDate in
                 selected = snapshots.first { $0.date == newDate }
-                documents = selected.map { store?.documents(in: $0) ?? [] } ?? []
+                documents = selected.map { store.documents(in: $0) } ?? []
                 status = nil
             })
         ) {
@@ -103,15 +108,18 @@ struct BackupBrowserView: View {
     // MARK: - Actions
 
     private func reload() {
-        snapshots = store?.list() ?? []
-        if let sel = selected, !snapshots.contains(where: { $0.date == sel.date }) {
-            selected = nil
-            documents = []
+        snapshots = store.list()
+        if let sel = selected {
+            if snapshots.contains(where: { $0.date == sel.date }) {
+                documents = store.documents(in: sel)
+            } else {
+                selected = nil
+                documents = []
+            }
         }
     }
 
     private func restore(_ snapshot: SnapshotStore.Snapshot, _ rel: String) {
-        guard let store else { return }
         do {
             let newRel = try store.restoreCopy(snapshot: snapshot, relPath: rel)
             status = "已恢复为副本：\(newRel)"
