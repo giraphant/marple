@@ -379,12 +379,32 @@ private struct AIBridgeSettings: View {
 /// buttons, and a backup-location picker. Retention tiers and interval are
 /// constants (not user-tunable) to keep the panel as simple as the reference.
 private struct BackupSettings: View {
+    @State private var scheduler: BackupScheduler?
+
+    var body: some View {
+        Group {
+            if let scheduler {
+                BackupSettingsContent(scheduler: scheduler)
+            } else {
+                Text("主窗口尚未就绪。").foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { scheduler = ActiveBackup.scheduler }
+        .onReceive(NotificationCenter.default.publisher(for: ActiveBackup.didChangeNotification)) { note in
+            scheduler = note.object as? BackupScheduler
+        }
+    }
+}
+
+private struct BackupSettingsContent: View {
+    @ObservedObject private var scheduler: BackupScheduler
     @AppStorage(SettingsKeys.backupEnabled) private var enabled = true
     @AppStorage(SettingsKeys.backupLocation) private var location = ""
-    @State private var lastBackup: Date?
     @State private var footprint: SnapshotStore.Footprint?
 
-    private let tick = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+    init(scheduler: BackupScheduler) {
+        self.scheduler = scheduler
+    }
 
     var body: some View {
         Form {
@@ -399,7 +419,7 @@ private struct BackupSettings: View {
             }
 
             Section("最新备份") {
-                Text(lastBackup.map(Self.friendly) ?? "尚未备份")
+                Text(scheduler.lastBackup.map(Self.friendly) ?? "尚未备份")
                     .foregroundStyle(.secondary)
                 if let fp = footprint, fp.snapshotCount > 0 {
                     Text("占用磁盘约 \(Self.formatBytes(fp.bytes)) · \(fp.snapshotCount) 份快照")
@@ -409,7 +429,7 @@ private struct BackupSettings: View {
                 }
                 HStack {
                     Button("立即备份") {
-                        ActiveBackup.scheduler?.backupNow()
+                        scheduler.backupNow()
                     }
                     Button("浏览备份…") {
                         BackupBrowserPresenter.shared.show()
@@ -432,10 +452,8 @@ private struct BackupSettings: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { lastBackup = ActiveBackup.scheduler?.lastBackup }
-        .onReceive(tick) { _ in lastBackup = ActiveBackup.scheduler?.lastBackup }
-        .task(id: lastBackup) {
-            guard let store = ActiveBackup.scheduler?.store else { footprint = nil; return }
+        .task(id: scheduler.lastBackup) {
+            let store = scheduler.store
             footprint = await Task.detached { store.diskFootprint() }.value
         }
     }
