@@ -22,20 +22,12 @@ import Foundation
         #expect(d.keep.isEmpty && d.delete.isEmpty)
     }
 
-    @Test func hourlyTierCollapsesSameHour() {
-        // Both within the last hour and the same calendar hour → newest wins.
-        let newer = ago(hours: 0.1)   // 11:54
-        let older = ago(hours: 0.3)   // 11:42
-        let d = policy.evaluate(snapshots: [older, newer], now: now)
-        #expect(d.keep == [newer])
-        #expect(d.delete == [older])
-    }
-
-    @Test func hourlyTierKeepsDistinctHours() {
-        let h11 = ago(hours: 0.5)   // 11:30
-        let h10 = ago(hours: 1.5)   // 10:30
-        let d = policy.evaluate(snapshots: [h10, h11], now: now)
-        #expect(Set(d.keep) == Set([h10, h11]))
+    @Test func dailyTierKeepsDistinctDays() {
+        // Two snapshots on different days, both within 7d → both kept.
+        let yesterday = ago(days: 1)
+        let threeDaysAgo = ago(days: 3)
+        let d = policy.evaluate(snapshots: [threeDaysAgo, yesterday], now: now)
+        #expect(Set(d.keep) == Set([threeDaysAgo, yesterday]))
         #expect(d.delete.isEmpty)
     }
 
