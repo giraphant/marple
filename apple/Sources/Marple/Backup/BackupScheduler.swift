@@ -12,8 +12,8 @@ import MarpleKit
     }
 }
 
-/// Drives periodic invisible whole-vault snapshots. On each tick (default every
-/// 15 min) it snapshots only if the vault changed since the last backup, then
+/// Drives periodic invisible whole-vault snapshots. On each tick (default once
+/// per day) it snapshots only if the vault changed since the last backup, then
 /// prunes to the tiered retention density. Snapshot/prune run off the main actor
 /// (`SnapshotStore` is `Sendable`); UI-facing state stays on the main actor.
 @MainActor
@@ -28,7 +28,7 @@ final class BackupScheduler: ObservableObject {
     @Published private(set) var isRunning = false
     private var snapshotInFlight = false
 
-    init(store: SnapshotStore, interval: TimeInterval = 15 * 60) {
+    init(store: SnapshotStore, interval: TimeInterval = 24 * 60 * 60) {
         self.store = store
         self.interval = interval
         self.lastBackup = store.lastBackupDate

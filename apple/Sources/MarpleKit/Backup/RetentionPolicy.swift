@@ -5,8 +5,7 @@ import Foundation
 /// the visible density without changing this logic — pruning normalizes it.
 ///
 /// Tiers (by age = now − snapshot):
-///   · < 12h        keep the newest snapshot per calendar hour
-///   · 12h … 7d     keep the newest per calendar day
+///   · < 7d          keep the newest snapshot per calendar day
 ///   · 7d … 6 months keep the newest per calendar week
 ///   · > 6 months    delete
 public struct RetentionPolicy: Sendable {
@@ -24,20 +23,19 @@ public struct RetentionPolicy: Sendable {
     /// One bucket key per tier resolution. Snapshots sharing a key collapse to
     /// the newest one.
     private enum Granularity {
-        case hour, day, week
+        case day, week
     }
 
     public func evaluate(snapshots: [Date], now: Date) -> Decision {
         guard !snapshots.isEmpty else { return Decision(keep: [], delete: []) }
 
-        let cutoff12h = now.addingTimeInterval(-12 * 3600)
         let cutoff7d = calendar.date(byAdding: .day, value: -7, to: now) ?? now.addingTimeInterval(-7 * 86400)
         let cutoff6mo = calendar.date(byAdding: .month, value: -6, to: now) ?? now.addingTimeInterval(-182 * 86400)
 
         // Future-dated snapshots (clock skew) are always kept — never delete
         // something newer than "now".
         var keep: Set<Date> = []
-        var perTier: [Granularity: [String: Date]] = [.hour: [:], .day: [:], .week: [:]]
+        var perTier: [Granularity: [String: Date]] = [.day: [:], .week: [:]]
 
         for date in snapshots {
             if date >= now {
@@ -48,8 +46,7 @@ public struct RetentionPolicy: Sendable {
                 continue  // dropped
             }
             let gran: Granularity
-            if date > cutoff12h { gran = .hour }
-            else if date > cutoff7d { gran = .day }
+            if date > cutoff7d { gran = .day }
             else { gran = .week }
 
             let key = bucketKey(for: date, gran: gran)
@@ -71,9 +68,6 @@ public struct RetentionPolicy: Sendable {
 
     private func bucketKey(for date: Date, gran: Granularity) -> String {
         switch gran {
-        case .hour:
-            let c = calendar.dateComponents([.year, .month, .day, .hour], from: date)
-            return "\(c.year ?? 0)-\(c.month ?? 0)-\(c.day ?? 0)-\(c.hour ?? 0)"
         case .day:
             let c = calendar.dateComponents([.year, .month, .day], from: date)
             return "\(c.year ?? 0)-\(c.month ?? 0)-\(c.day ?? 0)"
