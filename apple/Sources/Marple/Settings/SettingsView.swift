@@ -411,7 +411,6 @@ private struct BackupSettingsContent: View {
             Section("自动备份") {
                 Toggle("备份已启用", isOn: $enabled)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("过去 12 小时每小时保留一份")
                     Text("过去 7 天每天保留一份")
                     Text("过去 6 个月每周保留一份")
                 }
