@@ -5,6 +5,16 @@ import Observation
 /// Middle-column display mode for the entry list.
 enum BrowseMode: String, CaseIterable, Sendable { case list, grid }
 
+/// Save lifecycle for the note card expanded in the right Inspector.
+enum InspectorNoteStatus: Equatable {
+    case idle
+    case loading
+    case dirty
+    case saving
+    case saved
+    case failed(String)
+}
+
 @Observable @MainActor
 final class AppModel {
     let client: VaultClient
@@ -229,6 +239,38 @@ final class AppModel {
     var openRelations: Relations? { catalog.openRelations }
     var openBook: BookContext? { catalog.openBook }
     var openTopic: TopicContext? { catalog.openTopic }
+
+    // Inspector note editor state. This is intentionally separate from `openPath`:
+    // selecting a note in the right rail must not replace the document in the reader.
+    private(set) var inspectorSelectedNotePath: String?
+    private(set) var inspectorSelectedNoteEntry: Entry?
+    private(set) var inspectorNoteDraft: String = ""
+    private(set) var inspectorNoteOriginal: String = ""
+    private(set) var inspectorNoteStatus: InspectorNoteStatus = .idle
+    private(set) var inspectorNoteDrafts: [String: String] = [:]
+    private var inspectorNoteOriginals: [String: String] = [:]
+    private(set) var inspectorNoteStatuses: [String: InspectorNoteStatus] = [:]
+    var inspectorNoteHeights: [String: Double] = [:]
+    var inspectorFocusedNotePath: String?
+    @ObservationIgnored private var inspectorNoteSaveTask: Task<Void, Never>?
+    @ObservationIgnored private var inspectorNoteSaveTasks: [String: Task<Void, Never>] = [:]
+
+    var inspectorAnnotationNotes: [Entry] {
+        var notes = (openRelations?.annotations ?? []).sorted(by: inspectorNoteComesBefore)
+        if let selected = inspectorSelectedNoteEntry,
+           selected.annotates == openPath,
+           !notes.contains(where: { $0.path == selected.path }) {
+            notes.append(selected)
+        }
+        return notes
+    }
+
+    var canCreateInlineAnnotationForOpenDoc: Bool {
+        openEntry != nil && inspectorAnnotationNotes.allSatisfy { note in
+            guard let draft = inspectorNoteDrafts[note.path] else { return true }
+            return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
 
     // Inspector → reader scroll channel; an outline tap sets this, DocView observes.
     var scrollTarget: Int?
@@ -991,6 +1033,10 @@ final class AppModel {
     /// Always loads (no `loadedDocPath` guard) so it doubles as the FSEvents refresh.
     private func loadDoc(_ path: String?) async {
         writeError = nil
+        if path != loadedDocPath {
+            await flushAllInspectorNoteSaves()
+            if inspectorSelectedNoteEntry?.annotates != path { clearInspectorNoteSelection() }
+        }
         guard let path else {
             openBlocks = []; openBody = ""; loadedDocPath = nil
             recomputeOpenDerived()
@@ -1392,14 +1438,225 @@ final class AppModel {
 
     func openExternally() async {
         guard let p = openPath else { return }
+        await openExternally(path: p)
+    }
+
+    private func openExternally(path: String) async {
         let app = UserDefaults.standard.string(forKey: SettingsKeys.externalEditor) ?? ""
         do {
-            try await client.openInEditor(path: p, app: app)
-            print("[marple] openInEditor \(p) app='\(app)'")
+            try await client.openInEditor(path: path, app: app)
+            print("[marple] openInEditor \(path) app='\(app)'")
         } catch {
             status = "open-in-editor failed: \(error)"
-            print("[marple] openInEditor FAILED \(p): \(error)")
+            print("[marple] openInEditor FAILED \(path): \(error)")
         }
+    }
+
+    // MARK: inspector note editing
+
+    func ensureInspectorNoteLoaded(_ note: Entry) async {
+        guard canEditInspectorNote(note), inspectorNoteDrafts[note.path] == nil else { return }
+        inspectorNoteStatuses[note.path] = .loading
+        do {
+            let raw = try await client.entryText(path: note.path)
+            let body = Frontmatter.split(raw).body
+            inspectorNoteDrafts[note.path] = body
+            inspectorNoteOriginals[note.path] = body
+            inspectorNoteStatuses[note.path] = .idle
+            syncLegacyInspectorNoteState(path: note.path)
+        } catch {
+            inspectorNoteStatuses[note.path] = .failed("\(error)")
+            writeError = "\(error)"
+            print("[marple] load note FAILED \(note.path): \(error)")
+        }
+    }
+
+    func inspectorNoteDraft(for path: String) -> String { inspectorNoteDrafts[path] ?? "" }
+    func inspectorNoteStatus(for path: String) -> InspectorNoteStatus { inspectorNoteStatuses[path] ?? .idle }
+
+    func setInspectorNoteFocused(_ note: Entry, focused: Bool) {
+        guard canEditInspectorNote(note) else { return }
+        if focused {
+            inspectorFocusedNotePath = note.path
+            inspectorSelectedNotePath = note.path
+            inspectorSelectedNoteEntry = note
+            syncLegacyInspectorNoteState(path: note.path)
+        } else if inspectorFocusedNotePath == note.path {
+            inspectorFocusedNotePath = nil
+        }
+    }
+
+    func setInspectorNoteDraft(_ text: String, for note: Entry) {
+        guard canEditInspectorNote(note) else { return }
+        let path = note.path
+        if inspectorNoteDrafts[path] == text { return }
+        inspectorNoteDrafts[path] = text
+        inspectorSelectedNotePath = path
+        inspectorSelectedNoteEntry = note
+        let original = inspectorNoteOriginals[path] ?? ""
+        if text == original {
+            inspectorNoteStatuses[path] = .saved
+            inspectorNoteSaveTasks[path]?.cancel(); inspectorNoteSaveTasks[path] = nil
+        } else {
+            inspectorNoteStatuses[path] = .dirty
+            scheduleInspectorNoteSave(path: path)
+        }
+        syncLegacyInspectorNoteState(path: path)
+    }
+
+    func saveInspectorNoteDraft(_ text: String, for note: Entry) {
+        guard canEditInspectorNote(note) else { return }
+        let path = note.path
+        inspectorNoteDrafts[path] = text
+        inspectorSelectedNotePath = path
+        inspectorSelectedNoteEntry = note
+        let original = inspectorNoteOriginals[path] ?? ""
+        if text == original {
+            inspectorNoteStatuses[path] = .saved
+            syncLegacyInspectorNoteState(path: path)
+            return
+        }
+        inspectorNoteStatuses[path] = .dirty
+        syncLegacyInspectorNoteState(path: path)
+        Task { await flushInspectorNoteSave(path: path) }
+    }
+
+    func flushInspectorNoteSave() async {
+        guard let path = inspectorSelectedNotePath else { return }
+        await flushInspectorNoteSave(path: path)
+    }
+
+    private func flushAllInspectorNoteSaves() async {
+        let paths = Array(inspectorNoteDrafts.keys)
+        for path in paths { await flushInspectorNoteSave(path: path) }
+    }
+
+    private func flushInspectorNoteSave(path: String) async {
+        inspectorNoteSaveTasks[path]?.cancel(); inspectorNoteSaveTasks[path] = nil
+        guard canEditInspectorNotePath(path), let text = inspectorNoteDrafts[path] else { return }
+        let original = inspectorNoteOriginals[path] ?? ""
+        guard text != original else {
+            if inspectorNoteStatuses[path] != .loading { inspectorNoteStatuses[path] = .saved }
+            syncLegacyInspectorNoteState(path: path)
+            return
+        }
+        inspectorNoteStatuses[path] = .saving
+        syncLegacyInspectorNoteState(path: path)
+        writeError = nil
+        do {
+            let raw = try await client.entryText(path: path)
+            let patched = MarkdownBody.replace(in: raw, with: text)
+            try await client.writeFile(path: path, text: patched)
+            inspectorNoteOriginals[path] = text
+            inspectorNoteStatuses[path] = (inspectorNoteDrafts[path] == text) ? .saved : .dirty
+            syncLegacyInspectorNoteState(path: path)
+            let preview = Self.notePreview(from: text)
+            catalog.mutateEntries { entries in
+                if let i = entries.firstIndex(where: { $0.path == path }) {
+                    entries[i] = entries[i].with(preview: preview)
+                }
+            }
+            rebuildIndexDerived()
+            recomputeVisible()
+            recomputeOpenDerived()
+            print("[marple] saved inspector note \(path)")
+        } catch {
+            inspectorNoteStatuses[path] = .failed("\(error)")
+            syncLegacyInspectorNoteState(path: path)
+            writeError = "\(error)"
+            print("[marple] save inspector note FAILED \(path): \(error)")
+        }
+    }
+
+    func createInlineAnnotationForOpenDoc() async {
+        guard let target = openEntry else { return }
+        guard canCreateInlineAnnotationForOpenDoc else { return }
+        await flushAllInspectorNoteSaves()
+        let draft = NoteBuilder.annotation(target: target)
+        let entry = annotationEntry(from: draft, target: target)
+        let initialText = MarkdownBody.replace(in: draft.text, with: "")
+        writeError = nil
+        do {
+            try await client.createNote(path: draft.path, text: initialText)
+            catalog.mutateEntries { $0.append(entry) }
+            rebuildIndexDerived(); recomputeVisible(); recomputeOpenDerived()
+            inspectorSelectedNotePath = entry.path
+            inspectorSelectedNoteEntry = entry
+            inspectorFocusedNotePath = entry.path
+            let body = Frontmatter.split(initialText).body
+            inspectorNoteDrafts[entry.path] = body
+            inspectorNoteOriginals[entry.path] = body
+            inspectorNoteStatuses[entry.path] = .saved
+            syncLegacyInspectorNoteState(path: entry.path)
+            flash("已新建笔记")
+            print("[marple] created inline note \(draft.path)")
+        } catch {
+            writeError = "\(error)"
+            inspectorNoteStatus = .failed("\(error)")
+            print("[marple] create inline note FAILED \(draft.path): \(error)")
+        }
+    }
+
+    func openInspectorNoteExternally() async {
+        guard let path = inspectorSelectedNotePath else { return }
+        await flushInspectorNoteSave(path: path)
+        await openExternally(path: path)
+    }
+
+    private func clearInspectorNoteSelection() {
+        inspectorNoteSaveTask?.cancel(); inspectorNoteSaveTask = nil
+        inspectorNoteSaveTasks.values.forEach { $0.cancel() }
+        inspectorNoteSaveTasks = [:]
+        inspectorSelectedNotePath = nil
+        inspectorSelectedNoteEntry = nil
+        inspectorFocusedNotePath = nil
+        inspectorNoteDraft = ""
+        inspectorNoteOriginal = ""
+        inspectorNoteStatus = .idle
+        inspectorNoteDrafts = [:]
+        inspectorNoteOriginals = [:]
+        inspectorNoteStatuses = [:]
+        inspectorNoteHeights = [:]
+    }
+
+    private func scheduleInspectorNoteSave(path: String) {
+        inspectorNoteSaveTasks[path]?.cancel()
+        inspectorNoteSaveTasks[path] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_700_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.flushInspectorNoteSave(path: path)
+        }
+    }
+
+    private func syncLegacyInspectorNoteState(path: String) {
+        guard inspectorSelectedNotePath == path else { return }
+        inspectorNoteDraft = inspectorNoteDrafts[path] ?? ""
+        inspectorNoteOriginal = inspectorNoteOriginals[path] ?? ""
+        inspectorNoteStatus = inspectorNoteStatuses[path] ?? .idle
+    }
+
+    private func inspectorNoteComesBefore(_ a: Entry, _ b: Entry) -> Bool {
+        let ac = a.created ?? ""
+        let bc = b.created ?? ""
+        if ac != bc { return ac < bc }
+        let at = a.mtime ?? a.added ?? 0
+        let bt = b.mtime ?? b.added ?? 0
+        if at != bt { return at < bt }
+        return a.path < b.path
+    }
+
+    private func canEditInspectorNote(_ entry: Entry) -> Bool {
+        entry.type == .note && canEditInspectorNotePath(entry.path)
+    }
+
+    private func canEditInspectorNotePath(_ path: String) -> Bool {
+        path.hasPrefix("vault/notes/")
+    }
+
+    private static func notePreview(from text: String) -> String {
+        text.split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? ""
     }
 
     var openCitationEntry: Entry? {
