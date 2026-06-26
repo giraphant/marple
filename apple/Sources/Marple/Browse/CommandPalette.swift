@@ -15,7 +15,7 @@ struct PaletteResult: Sendable {
 /// "/" hops across type sections, relevance badges) and CodeEdit's panel patterns (hidden `.keyboardShortcut`
 /// buttons for nav so they coexist with the focused field; focus comes from the
 /// key panel, not a SwiftUI hack). 快速 = in-memory ranker, 平衡 = FTS, 深度 =
-/// semantic vectors (disabled until the vector index is built).
+/// semantic vectors (disabled until the vector index and MLX runtime are ready).
 struct CommandPalette: View {
     @Bindable var model: AppModel
     let onClose: () -> Void
@@ -165,7 +165,7 @@ struct CommandPalette: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(disabled)
-                .help(disabled ? "深度检索需要先建立向量索引（构建中）" : "Tab 切换模式")
+                .help(disabled ? "深度检索需要向量索引和 MLX 运行时" : "Tab 切换模式")
             }
         }
         .padding(2)
@@ -181,7 +181,7 @@ struct CommandPalette: View {
 
     @ViewBuilder private var results: some View {
         if mode == .deep && !model.semanticAvailable {
-            placeholder("深度检索需要先建立向量索引（构建中）")
+            placeholder("深度检索需要向量索引和 MLX 运行时")
         } else if sections.isEmpty && openMatches.isEmpty {
             placeholder(loading ? "搜索中…" : "没有匹配的条目")
         } else {

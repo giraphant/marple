@@ -38,19 +38,26 @@ fi
 #      actually ran in this checkout).
 #   2. Any sibling git worktree that already has it at its package root
 #      (typically `main`, which is where the file usually ends up first).
-# If neither exists, warn and keep going — 快速 / 平衡 modes don't need it.
+# If neither exists, fail closed: a bundled app without MLX kernels can hard-crash
+# on the first 深度 query. Set MARPLE_SKIP_METALLIB=1 for 快速 / 平衡-only builds.
 if [ ! -f default.metallib ]; then
     candidates=(
         "$PKG_ROOT/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib"
+        "$PKG_ROOT/mlx-swift_Cmlx.bundle/Contents/Resources/mlx.metallib"
+        "$PKG_ROOT/mlx.metallib"
         ".build/arm64-apple-macosx/release/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib"
+        ".build/arm64-apple-macosx/release/mlx-swift_Cmlx.bundle/Contents/Resources/mlx.metallib"
+        ".build/arm64-apple-macosx/release/mlx.metallib"
     )
     # Fall back to any other worktree's package-root copy.
     HERE_APPLE="$(pwd)"
     while IFS= read -r wt; do
-        cand="$wt/apple/default.metallib"
-        if [ -f "$cand" ] && [ "$wt/apple" != "$HERE_APPLE" ]; then
-            candidates+=("$cand")
-        fi
+        for name in default.metallib mlx.metallib; do
+            cand="$wt/apple/$name"
+            if [ -f "$cand" ] && [ "$wt/apple" != "$HERE_APPLE" ]; then
+                candidates+=("$cand")
+            fi
+        done
     done < <(git worktree list --porcelain 2>/dev/null | awk '/^worktree/ {print $2}')
 
     for cand in "${candidates[@]}"; do
@@ -61,7 +68,13 @@ if [ ! -f default.metallib ]; then
         fi
     done
     if [ ! -f default.metallib ]; then
-        echo "WARNING: no default.metallib located — 深度 mode will crash at first query." >&2
+        if [ "${MARPLE_SKIP_METALLIB:-}" = "1" ]; then
+            echo "WARNING: no default.metallib located — 深度 mode will be disabled." >&2
+        else
+            echo "ERROR: no default.metallib located; refusing to build a 深度-crashable app." >&2
+            echo "Install/build the MLX Metal kernels, or rerun with MARPLE_SKIP_METALLIB=1 for 快速 / 平衡-only iteration." >&2
+            exit 1
+        fi
     fi
 fi
 
@@ -86,8 +99,11 @@ cp "$PKG_ROOT/marple-cli" "$APP/MacOS/marple-cli"
 # before any of the bundle/CWD paths are tried.
 if [ -f default.metallib ]; then
     cp default.metallib "$APP/MacOS/mlx.metallib"
+elif [ "${MARPLE_SKIP_METALLIB:-}" = "1" ]; then
+    echo "WARNING: default.metallib missing — 深度 mode will be disabled in the bundled .app." >&2
 else
-    echo "WARNING: default.metallib missing — 深度 mode will crash in the bundled .app." >&2
+    echo "ERROR: default.metallib missing after bootstrap; refusing to build a 深度-crashable app." >&2
+    exit 1
 fi
 
 # Icon: build a .iconset from the appiconset PNGs in xcassets, then run
