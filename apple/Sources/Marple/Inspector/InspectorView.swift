@@ -1073,62 +1073,89 @@ private struct ThemeChip: View {
 
 private struct NotesSection: View {
     @Bindable var model: AppModel
-    private var notes: [Entry] { model.openRelations?.annotations ?? [] }
+    private var notes: [Entry] { model.inspectorAnnotationNotes }
 
     var body: some View {
         VStack(alignment: .leading, spacing: InspectorStyle.headerSpacing) {
             SectionHeader(notes.isEmpty ? "笔记" : "笔记 (\(notes.count))")
-            if notes.isEmpty {
-                Text("暂无关联笔记").foregroundStyle(.secondary).font(Typo.callout)
+            if model.openEntry == nil {
+                Text("打开文档后可记录笔记").foregroundStyle(.secondary).font(Typo.callout)
             } else {
-                VStack(alignment: .leading, spacing: Space.s1) {
-                    ForEach(notes) { note in
-                        NoteRow(entry: note) { Task { await model.open(note.path) } }
+                if notes.isEmpty {
+                    Text("暂无关联笔记").foregroundStyle(.secondary).font(Typo.callout)
+                } else {
+                    VStack(alignment: .leading, spacing: Space.s4) {
+                        ForEach(Array(notes.enumerated()), id: \.element.id) { index, note in
+                            if index > 0 { Divider().opacity(0.45) }
+                            NoteCard(model: model, entry: note)
+                        }
                     }
                 }
+                Button { Task { await model.createInlineAnnotationForOpenDoc() } } label: {
+                    Text("添加...")
+                        .font(Typo.callout)
+                        .foregroundStyle(model.canCreateInlineAnnotationForOpenDoc ? .secondary : .tertiary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, Space.s2)
+                }
+                .buttonStyle(.plain)
+                .disabled(!model.canCreateInlineAnnotationForOpenDoc)
             }
-            Button { Task { await model.newAnnotationForOpenDoc() } } label: {
-                Text("添加...")
-                    .font(Typo.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, Space.s2)
-            }
-            .buttonStyle(.plain)
-            .disabled(model.openEntry == nil)
         }
     }
 }
 
-private struct NoteRow: View {
+private struct NoteCard: View {
+    @Bindable var model: AppModel
     let entry: Entry
-    let action: () -> Void
-    @State private var hovering = false
+    @State private var editorHeight: CGFloat = 80
+
+    private var focused: Bool { model.inspectorFocusedNotePath == entry.path }
+    private var draft: String { model.inspectorNoteDraft(for: entry.path) }
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(entry.title ?? fallbackTitle)
-                    .font(Typo.callout)
-                    .lineLimit(1)
-                Text(entry.preview.isEmpty ? entry.path : entry.preview)
-                    .font(Typo.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+        VStack(alignment: .leading, spacing: Space.s1) {
+            editor
+            if case .failed = model.inspectorNoteStatus(for: entry.path) {
+                Text("保存失败")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .padding(.leading, Space.s2)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, Space.s2)
-            .padding(.horizontal, Space.s2)
         }
-        .buttonStyle(.plain)
-        .background {
-            RoundedRectangle(cornerRadius: 6).fill(.quaternary).opacity(hovering ? 1 : 0)
-        }
-        .onHover { hovering = $0 }
+        .contentShape(Rectangle())
+        .onTapGesture { model.setInspectorNoteFocused(entry, focused: true) }
+        .task { await model.ensureInspectorNoteLoaded(entry) }
     }
 
-    private var fallbackTitle: String {
-        (entry.path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+    private var editor: some View {
+        ZStack(alignment: .topLeading) {
+            NoteMarkdownEditor(
+                text: model.inspectorNoteDraft(for: entry.path),
+                height: $editorHeight,
+                isFocused: Binding(
+                    get: { model.inspectorFocusedNotePath == entry.path },
+                    set: { model.setInspectorNoteFocused(entry, focused: $0) }
+                ),
+                onDebouncedChange: { model.saveInspectorNoteDraft($0, for: entry) },
+                onCommit: { model.saveInspectorNoteDraft($0, for: entry) }
+            )
+            .frame(height: editorHeight)
+            .padding(.horizontal, Space.s2)
+            .padding(.vertical, 6)
+            .overlay {
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(focused ? Color.accentColor : .clear, lineWidth: 2)
+            }
+            if draft.isEmpty && !focused {
+                Text("写下这条笔记…")
+                    .font(Typo.callout)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, Space.s2)
+                    .padding(.vertical, 6)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 }
 
