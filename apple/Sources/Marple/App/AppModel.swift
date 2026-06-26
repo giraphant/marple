@@ -309,7 +309,7 @@ final class AppModel {
     private let sessionWriter: SessionWriter?
     private let metadataWriter: MetadataWriter
 
-    /// True when a vector index exists, so 深度 (semantic) mode can run.
+    /// True when the vector index and MLX runtime are present, so 深度 can run.
     var semanticAvailable: Bool { semantic != nil }
 
     /// User-customised sidebar type order. Defaults to the canonical order; persisted

@@ -48,4 +48,35 @@ import Foundation
             .appendingPathComponent("vecstore-missing-\(UUID().uuidString)")
         #expect(try VectorIndexIO.read(dir: dir) == nil)
     }
+
+    @Test func testReadRejectsZeroDimensionManifest() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("vecstore-zero-dim-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let manifest = VectorIndexIO.Manifest(
+            model: "test-model", dim: 0,
+            rows: [.init(path: "A", hash: "h1")])
+        try JSONEncoder().encode(manifest).write(to: VectorIndexIO.manifestURL(dir: dir))
+        try Data().write(to: VectorIndexIO.matrixURL(dir: dir))
+
+        #expect(try VectorIndexIO.read(dir: dir) == nil)
+    }
+
+    @Test func testReadRejectsTruncatedMatrix() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("vecstore-truncated-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let manifest = VectorIndexIO.Manifest(
+            model: "test-model", dim: 2,
+            rows: [.init(path: "A", hash: "h1"), .init(path: "B", hash: "h2")])
+        try JSONEncoder().encode(manifest).write(to: VectorIndexIO.manifestURL(dir: dir))
+        let floats: [Float] = [1, 0]
+        try floats.withUnsafeBufferPointer { try Data(buffer: $0).write(to: VectorIndexIO.matrixURL(dir: dir)) }
+
+        #expect(try VectorIndexIO.read(dir: dir) == nil)
+    }
 }

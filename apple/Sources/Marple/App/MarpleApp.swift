@@ -39,11 +39,11 @@ final class AppState: ObservableObject {
         let canSkip = indexer.canSkipFullBuild()
         let index = IndexDatabase(indexDBPath: paths.workspaceRoot + "/.marple/index.sqlite")
         let client = LocalVaultClient(workspaceRoot: paths.workspaceRoot, index: index)
-        // 深度 (semantic) mode: wire the MLX backend only when a vector index exists
-        // (built via `semantic-tool build`). Absent → AppModel keeps 深度 disabled.
+        // 深度 (semantic) mode: wire the MLX backend only when both the vector
+        // index and MLX Metal kernels are present. Missing kernels hard-crash MLX
+        // below Swift's do/catch, so fail closed and let the palette disable 深度.
         let marpleDir = URL(fileURLWithPath: paths.workspaceRoot).appendingPathComponent(".marple")
-        let semantic: (any SemanticBackend)? =
-            FileManager.default.fileExists(atPath: marpleDir.appendingPathComponent("vectors.json").path)
+        let semantic: (any SemanticBackend)? = Self.semanticRuntimeAvailable(marpleDir: marpleDir)
             ? MLXSemanticBackend(dir: marpleDir) : nil
         let m = AppModel(client: client, stateStore: UserDefaultsStateStore(),
                          semantic: semantic, isFirstRun: !canSkip,
@@ -162,6 +162,25 @@ final class AppState: ObservableObject {
         } else {
             cliServer.stop()
         }
+    }
+
+    private static func semanticRuntimeAvailable(marpleDir: URL) -> Bool {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: marpleDir.appendingPathComponent("vectors.json").path),
+              fm.fileExists(atPath: marpleDir.appendingPathComponent("vectors.f32").path) else {
+            return false
+        }
+
+        if let exeDir = Bundle.main.executableURL?.deletingLastPathComponent(),
+           fm.fileExists(atPath: exeDir.appendingPathComponent("mlx.metallib").path) {
+            return true
+        }
+        if fm.fileExists(atPath: FileManager.default.currentDirectoryPath + "/default.metallib") {
+            return true
+        }
+
+        print("[marple] semantic disabled: missing MLX metallib")
+        return false
     }
 
     /// Start/stop the backup scheduler per `marple.backupEnabled` (default true
