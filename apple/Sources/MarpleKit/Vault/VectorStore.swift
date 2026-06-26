@@ -88,9 +88,12 @@ public enum VectorIndexIO {
         guard FileManager.default.fileExists(atPath: mURL.path),
               FileManager.default.fileExists(atPath: fURL.path) else { return nil }
         let manifest = try JSONDecoder().decode(Manifest.self, from: Data(contentsOf: mURL))
+        guard manifest.dim > 0 else { return nil }
         let data = try Data(contentsOf: fURL)
-        let expected = manifest.rows.count * manifest.dim * MemoryLayout<Float>.size
-        guard data.count == expected else { return nil }  // stale/corrupt → rebuild
+        let (floats, floatOverflow) = manifest.rows.count.multipliedReportingOverflow(by: manifest.dim)
+        guard !floatOverflow else { return nil }
+        let (expected, byteOverflow) = floats.multipliedReportingOverflow(by: MemoryLayout<Float>.size)
+        guard !byteOverflow, data.count == expected else { return nil }  // stale/corrupt → rebuild
         let matrix = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
         let store = VectorStore(dim: manifest.dim,
                                 paths: manifest.rows.map(\.path), matrix: matrix)
