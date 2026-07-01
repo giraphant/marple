@@ -3,14 +3,14 @@ import MarpleKit
 
 /// MLX-backed `SemanticBackend`. Lazily loads the embedding model + the on-disk
 /// vector index on the FIRST query (the actor serializes that init), so launching
-/// the app costs nothing until a 深度 search actually runs — and the ~600MB model
-/// only resides in memory once semantic search has been used.
+/// the app costs nothing until a 深度 search actually runs — and the model only
+/// resides in memory once semantic search has been used.
 public actor MLXSemanticBackend: SemanticBackend {
     private let dir: URL
     private let modelId: String
     private var searcher: SemanticSearcher?
 
-    public init(dir: URL, modelId: String = "mlx-community/Qwen3-Embedding-0.6B-8bit") {
+    public init(dir: URL, modelId: String = "mlx-community/Qwen3-Embedding-8B-4bit-DWQ") {
         self.dir = dir
         self.modelId = modelId
     }
