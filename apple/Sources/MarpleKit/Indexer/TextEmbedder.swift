@@ -2,9 +2,8 @@ import Foundation
 
 /// The seam that hides "how text becomes a vector" from the rest of the app —
 /// same idea as `VaultClient`: callers depend on this protocol, the concrete
-/// model/runtime (MLX, ONNX, …) is a swappable impl. Lets us prototype the
-/// pipeline on a small model now and drop in Qwen3-Embedding-8B later without
-/// touching call sites.
+/// model/runtime (MLX, ONNX, …) is a swappable impl. Marple's local semantic
+/// search currently uses Qwen3-Embedding-8B without leaking that into call sites.
 public protocol TextEmbedder: Sendable {
     /// Output vector length. Constant for a given model.
     var dimension: Int { get }
