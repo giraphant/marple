@@ -5,8 +5,8 @@ import MarpleKit
 import Tokenizers
 
 /// `TextEmbedder` backed by MLX (Apple-Silicon GPU) via MLXEmbedders' native
-/// Qwen3 embedding model. Prototype on Qwen3-Embedding-0.6B now; swap `modelId`
-/// for the 8B variant on the new Mac with no call-site changes (the seam).
+/// Qwen3 embedding model. The default is the 8B 4-bit model used for Marple's
+/// local semantic search.
 ///
 /// One text at a time (batch=1, no padding) so last-token pooling picks the
 /// real final token — MLXEmbedders' `.last` pooling is literally
@@ -18,9 +18,9 @@ public actor MLXTextEmbedder: TextEmbedder {
     private let maxTokens: Int
 
     public init(
-        modelId: String = "mlx-community/Qwen3-Embedding-0.6B-8bit",
-        dimension: Int = 1024,
-        maxTokens: Int = 512
+        modelId: String = "mlx-community/Qwen3-Embedding-8B-4bit-DWQ",
+        dimension: Int = 4096,
+        maxTokens: Int = 32_768
     ) async throws {
         self.dimension = dimension
         self.maxTokens = maxTokens

@@ -11,7 +11,7 @@ import MarpleEmbeddings
 
 setvbuf(stdout, nil, _IONBF, 0)   // unbuffered: progress shows live, even through a pipe
 
-let MODEL = "mlx-community/Qwen3-Embedding-0.6B-8bit"
+let MODEL = "mlx-community/Qwen3-Embedding-8B-4bit-DWQ"
 
 func die(_ msg: String) -> Never { FileHandle.standardError.write(Data((msg + "\n").utf8)); exit(1) }
 
@@ -24,9 +24,10 @@ func usage() -> Never {
     """)
 }
 
-/// Embeddable text for an entry: title + body with YAML frontmatter stripped,
-/// capped (the embedder also caps tokens; this avoids tokenizing huge files).
-func embedText(workspaceRoot: String, entry: Entry, cap: Int = 2000) -> String {
+/// Embeddable text for an entry: title + body with YAML frontmatter stripped.
+/// The embedder caps tokens at the model context length; this character cap only
+/// avoids tokenizing pathological inputs far beyond that window.
+func embedText(workspaceRoot: String, entry: Entry, cap: Int = 128_000) -> String {
     let url = URL(fileURLWithPath: workspaceRoot).appendingPathComponent(entry.path)
     var body = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     if body.hasPrefix("---") {
@@ -124,9 +125,9 @@ case "build":
     print("building vector index for \(docs.count) docs …")
     let start = Date()
     let result = try await SemanticIndexer(embedder: embedder).build(
-        dir: marpleDir, model: MODEL, docs: docs, batchSize: 64
+        dir: marpleDir, model: MODEL, docs: docs, batchSize: 1, checkpointEvery: 64
     ) { done, total in
-        if done % 512 == 0 || done == total { print("  embedded \(done)/\(total)") }
+        if done % 64 == 0 || done == total { print("  embedded \(done)/\(total)") }
     }
     print("done in \(Int(Date().timeIntervalSince(start)))s — embedded \(result.embedded), reused \(result.reused), total \(result.total)")
 

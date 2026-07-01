@@ -4,7 +4,7 @@ import Accelerate
 /// In-memory dense-vector index for semantic search: an N×dim row-major matrix of
 /// **unit-normalized** embeddings plus their paths. Query is brute-force cosine
 /// (== dot, since rows and query are unit-norm) via a single BLAS matrix-vector
-/// multiply — trivially fast at marple's scale (~15k × 1024). The MLX/embedding
+/// multiply — trivially fast at marple's scale (~15k × 4096). The MLX/embedding
 /// side lives in MarpleEmbeddings; this stays pure so it's testable in core.
 public struct VectorStore: Sendable {
     public let dim: Int
