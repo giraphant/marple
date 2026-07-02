@@ -10,7 +10,7 @@ public actor MLXSemanticBackend: SemanticBackend {
     private let modelId: String
     private var searcher: SemanticSearcher?
 
-    public init(dir: URL, modelId: String = "mlx-community/Qwen3-Embedding-8B-4bit-DWQ") {
+    public init(dir: URL, modelId: String = SemanticIndexDefaults.modelID) {
         self.dir = dir
         self.modelId = modelId
     }

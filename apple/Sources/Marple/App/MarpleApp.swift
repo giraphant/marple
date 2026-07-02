@@ -18,6 +18,7 @@ final class AppState: ObservableObject {
     // started/stopped by `applyBackupSetting` per `marple.backupEnabled`.
     private var backupScheduler: BackupScheduler?
     private var backupWatcher: VaultWatcher?
+    private var semanticIndexController: SemanticIndexRefreshController?
 
     /// Synchronous (no awaits inside) since Phase A — the heavy reconcile +
     /// loadIndex moved to a background Task at the bottom of this method. Lets
@@ -43,13 +44,25 @@ final class AppState: ObservableObject {
         // index and MLX Metal kernels are present. Missing kernels hard-crash MLX
         // below Swift's do/catch, so fail closed and let the palette disable 深度.
         let marpleDir = URL(fileURLWithPath: paths.workspaceRoot).appendingPathComponent(".marple")
-        let semantic: (any SemanticBackend)? = Self.semanticRuntimeAvailable(marpleDir: marpleDir)
+        let semanticRuntimeAvailable = Self.semanticRuntimeAvailable()
+        let semanticIndexAvailable = Self.semanticIndexAvailable(marpleDir: marpleDir)
+        let semantic: (any SemanticBackend)? = semanticRuntimeAvailable && semanticIndexAvailable
             ? MLXSemanticBackend(dir: marpleDir) : nil
         let m = AppModel(client: client, stateStore: UserDefaultsStateStore(),
                          semantic: semantic, isFirstRun: !canSkip,
                          workspaceRoot: paths.workspaceRoot)
         self.model = m
         m.cliIndexer = indexer
+        if semanticRuntimeAvailable {
+            let semanticIndexController = SemanticIndexRefreshController(
+                workspaceRoot: paths.workspaceRoot,
+                marpleDir: marpleDir)
+            self.semanticIndexController = semanticIndexController
+            ActiveSemanticIndex.controller = semanticIndexController
+        } else {
+            self.semanticIndexController = nil
+            ActiveSemanticIndex.controller = nil
+        }
         self.booting = false
 
         // Wire the FSEvents watcher and CLI server up front — they're safe to
@@ -164,13 +177,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    private static func semanticRuntimeAvailable(marpleDir: URL) -> Bool {
+    private static func semanticRuntimeAvailable() -> Bool {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: marpleDir.appendingPathComponent("vectors.json").path),
-              fm.fileExists(atPath: marpleDir.appendingPathComponent("vectors.f32").path) else {
-            return false
-        }
-
         if let exeDir = Bundle.main.executableURL?.deletingLastPathComponent(),
            fm.fileExists(atPath: exeDir.appendingPathComponent("mlx.metallib").path) {
             return true
@@ -181,6 +189,12 @@ final class AppState: ObservableObject {
 
         print("[marple] semantic disabled: missing MLX metallib")
         return false
+    }
+
+    private static func semanticIndexAvailable(marpleDir: URL) -> Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: marpleDir.appendingPathComponent("vectors.json").path)
+            && fm.fileExists(atPath: marpleDir.appendingPathComponent("vectors.f32").path)
     }
 
     /// Start/stop the backup scheduler per `marple.backupEnabled` (default true
