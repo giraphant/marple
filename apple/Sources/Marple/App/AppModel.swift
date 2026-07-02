@@ -344,7 +344,7 @@ final class AppModel {
     var writeError: String?
 
     private let stateStore: StateStore?
-    private let semantic: (any SemanticBackend)?
+    private var semantic: (any SemanticBackend)?
     private let supersetRunner: SupersetRunner
     /// Publishes open tabs to the synced folder for the iOS companion. nil without
     /// a workspace root (e.g. tests).
@@ -353,6 +353,10 @@ final class AppModel {
 
     /// True when the vector index and MLX runtime are present, so 深度 can run.
     var semanticAvailable: Bool { semantic != nil }
+
+    func installSemanticBackend(_ semantic: (any SemanticBackend)?) {
+        self.semantic = semantic
+    }
 
     /// User-customised sidebar type order. Defaults to the canonical order; persisted
     /// separately from workspace state via UserDefaults.
