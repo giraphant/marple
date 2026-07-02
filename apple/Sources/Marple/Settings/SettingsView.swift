@@ -272,6 +272,7 @@ private struct AIBridgeSettings: View {
     @State private var workspaceLookupMessage: String?
     @State private var workspaceLookupIsError = false
     @State private var isLoadingWorkspaces = false
+    @State private var semanticIndexController: SemanticIndexRefreshController?
 
     var body: some View {
         Form {
@@ -304,6 +305,21 @@ private struct AIBridgeSettings: View {
                 Text("默认通过 PATH 调用 `superset`；也可以填写绝对路径。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("语义索引") {
+                if let semanticIndexController {
+                    SemanticIndexRefreshSettings(controller: semanticIndexController)
+                } else if ActiveModel.current == nil {
+                    Text("主窗口尚未就绪。")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("本机缺少 MLX Metal runtime，暂不能刷新语义索引。")
+                        .foregroundStyle(.secondary)
+                    Text("安装包内需要 mlx.metallib；开发运行时可在当前目录提供 default.metallib。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("AI 咒语") {
@@ -339,6 +355,10 @@ private struct AIBridgeSettings: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { semanticIndexController = ActiveSemanticIndex.controller }
+        .onReceive(NotificationCenter.default.publisher(for: ActiveSemanticIndex.didChangeNotification)) { note in
+            semanticIndexController = note.object as? SemanticIndexRefreshController
+        }
     }
 
     @MainActor private func refreshSupersetWorkspaces() async {
@@ -369,6 +389,67 @@ private struct AIBridgeSettings: View {
             workspaceLookupMessage = "无法获取 Superset workspace，请查看日志。"
             print("[marple] Superset workspace lookup FAILED: \(error)")
         }
+    }
+}
+
+private struct SemanticIndexRefreshSettings: View {
+    @ObservedObject var controller: SemanticIndexRefreshController
+    @State private var confirmingRefresh = false
+
+    var body: some View {
+        if controller.isRunning {
+            Text("正在刷新 \(controller.done)/\(controller.total)")
+                .foregroundStyle(.secondary)
+            if controller.total > 0 {
+                ProgressView(value: Double(controller.done), total: Double(controller.total))
+            } else {
+                ProgressView()
+            }
+        } else if let error = controller.lastError {
+            Text(error)
+                .foregroundStyle(Color.red)
+        } else if let result = controller.lastResult {
+            Text("上次刷新：嵌入 \(result.embedded)，复用 \(result.reused)，共 \(result.total)")
+                .foregroundStyle(.secondary)
+            if let date = controller.lastCompletedAt {
+                Text(AppDateFormatters.friendlyMinute.string(from: date))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else if let existing = controller.existingIndex {
+            Text("已有语义索引：\(existing.count) 条 · \(existing.dimension) 维")
+                .foregroundStyle(.secondary)
+            Text(existing.model)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let date = existing.updatedAt {
+                Text("更新于 \(AppDateFormatters.friendlyMinute.string(from: date))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Text("尚未建立语义索引。")
+                .foregroundStyle(.secondary)
+        }
+        Button(controller.isRunning ? "刷新中…" : "刷新语义索引") {
+            confirmingRefresh = true
+        }
+        .disabled(controller.isRunning)
+        .confirmationDialog(
+            "刷新语义索引？",
+            isPresented: $confirmingRefresh,
+            titleVisibility: .visible
+        ) {
+            Button("开始刷新") { controller.refreshNow(model: ActiveModel.current) }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这是增量刷新：只会嵌入新增或内容变化的文档，并复用未变化的旧向量。运行期间会占用本机 MLX/GPU，可能耗时较久。不会从头重建；如需全量重建，请使用 CLI/手工维护路径。")
+        }
+        Text("仅手动增量刷新；不会跟随自动备份周期运行，也不在 UI 中提供从头重建。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 }
 

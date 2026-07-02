@@ -18,7 +18,7 @@ public actor MLXTextEmbedder: TextEmbedder {
     private let maxTokens: Int
 
     public init(
-        modelId: String = "mlx-community/Qwen3-Embedding-8B-4bit-DWQ",
+        modelId: String = SemanticIndexDefaults.modelID,
         dimension: Int = 4096,
         maxTokens: Int = 32_768
     ) async throws {

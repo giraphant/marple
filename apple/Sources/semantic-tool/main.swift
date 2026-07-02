@@ -11,7 +11,7 @@ import MarpleEmbeddings
 
 setvbuf(stdout, nil, _IONBF, 0)   // unbuffered: progress shows live, even through a pipe
 
-let MODEL = "mlx-community/Qwen3-Embedding-8B-4bit-DWQ"
+let MODEL = SemanticIndexDefaults.modelID
 
 func die(_ msg: String) -> Never { FileHandle.standardError.write(Data((msg + "\n").utf8)); exit(1) }
 
@@ -22,23 +22,6 @@ func usage() -> Never {
       semantic-tool query <workspace> "<text>" [topK]
       semantic-tool bench <workspace>          # QUA-102/104: time buildFull + loadEntries
     """)
-}
-
-/// Embeddable text for an entry: title + body with YAML frontmatter stripped.
-/// The embedder caps tokens at the model context length; this character cap only
-/// avoids tokenizing pathological inputs far beyond that window.
-func embedText(workspaceRoot: String, entry: Entry, cap: Int = 128_000) -> String {
-    let url = URL(fileURLWithPath: workspaceRoot).appendingPathComponent(entry.path)
-    var body = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-    if body.hasPrefix("---") {
-        let lines = body.split(separator: "\n", omittingEmptySubsequences: false)
-        if let end = lines.dropFirst().firstIndex(where: { $0 == "---" }) {
-            body = lines[(end + 1)...].joined(separator: "\n")
-        }
-    }
-    let title = entry.title ?? ""
-    let text = (title.isEmpty ? "" : title + "\n") + body
-    return String(text.prefix(cap)).trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 let args = CommandLine.arguments
@@ -121,11 +104,13 @@ switch cmd {
 case "build":
     print("loading embedder (\(MODEL)) …")
     let embedder = try await MLXTextEmbedder(modelId: MODEL)
-    let docs = entries.map { SemanticDoc(path: $0.path, text: embedText(workspaceRoot: workspaceRoot, entry: $0)) }
+    let docs = SemanticDocumentBuilder.docs(workspaceRoot: workspaceRoot, entries: entries)
     print("building vector index for \(docs.count) docs …")
     let start = Date()
     let result = try await SemanticIndexer(embedder: embedder).build(
-        dir: marpleDir, model: MODEL, docs: docs, batchSize: 1, checkpointEvery: 64
+        dir: marpleDir, model: MODEL, docs: docs,
+        batchSize: SemanticIndexDefaults.batchSize,
+        checkpointEvery: SemanticIndexDefaults.checkpointEvery
     ) { done, total in
         if done % 64 == 0 || done == total { print("  embedded \(done)/\(total)") }
     }

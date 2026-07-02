@@ -49,6 +49,22 @@ import Foundation
         #expect(r.embedded == 1 && r.reused == 0)   // different model ⇒ ignore old vectors
     }
 
+    @Test func testBuildReportsEmbeddingProgress() async throws {
+        let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let idx = SemanticIndexer(embedder: StubTextEmbedder(dimension: 8))
+        let docs = [SemanticDoc(path: "a.md", text: "x"),
+                    SemanticDoc(path: "b.md", text: "y")]
+        let progress = ProgressRecorder()
+
+        _ = try await idx.build(dir: dir, model: "stub", docs: docs, batchSize: 1, checkpointEvery: 0) {
+            progress.append(($0, $1))
+        }
+
+        let values = progress.values
+        #expect(values.map(\.0) == [1, 2])
+        #expect(values.allSatisfy { $0.1 == 2 })
+    }
+
     @Test func testSearcherReturnsRankedSubset() async throws {
         let stub = StubTextEmbedder(dimension: 16)
         let docs = [SemanticDoc(path: "a.md", text: "机器学习与统计"),
@@ -88,5 +104,22 @@ private struct FixedTextEmbedder: TextEmbedder {
 
     func embed(_ texts: [String]) async throws -> [[Float]] {
         texts.map { _ in vector }
+    }
+}
+
+private final class ProgressRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [(Int, Int)] = []
+
+    var values: [(Int, Int)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ value: (Int, Int)) {
+        lock.lock()
+        storage.append(value)
+        lock.unlock()
     }
 }
