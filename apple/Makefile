@@ -62,10 +62,28 @@ dist:
 	rm -rf "$$work"
 	@echo "Packaged $(DIST_DMG)"
 
-notarize: dist
-	xcrun notarytool submit "$(DIST_DMG)" --keychain-profile "$(NOTARY_PROFILE)" --wait
-	xcrun stapler staple "$(DIST_DMG)"
-	@echo "Notarized and stapled $(DIST_DMG)"
+notarize:
+	@rm -rf "$(DIST_DIR)"
+	@mkdir -p "$(DIST_DIR)"
+	@work=$$(mktemp -d /tmp/marple-dist.XXXXXX); \
+	set -e; \
+	trap 'rm -rf "$$work"' EXIT; \
+	staging="$$work/dmg"; mkdir -p "$$staging"; \
+	CONFIG=release SIGN=1 VERSION=$(VERSION) APP_DIR="$$staging/$(APP_BUNDLE)" \
+		CODESIGN_IDENTITY="$(DEVELOPER_ID_IDENTITY)" ./build-app.sh || exit 1; \
+	ditto -c -k --keepParent "$$staging/$(APP_BUNDLE)" "$$work/$(APP_NAME).app.zip"; \
+	xcrun notarytool submit "$$work/$(APP_NAME).app.zip" --keychain-profile "$(NOTARY_PROFILE)" --wait; \
+	xcrun stapler staple "$$staging/$(APP_BUNDLE)"; \
+	xcrun stapler validate "$$staging/$(APP_BUNDLE)"; \
+	ln -s /Applications "$$staging/Applications"; \
+	hdiutil create -volname "$(APP_NAME)" -srcfolder "$$staging" -ov -format UDZO "$$work/$(APP_NAME).dmg" >/dev/null; \
+	codesign --force --sign "$(DEVELOPER_ID_IDENTITY)" --timestamp "$$work/$(APP_NAME).dmg"; \
+	xcrun notarytool submit "$$work/$(APP_NAME).dmg" --keychain-profile "$(NOTARY_PROFILE)" --wait; \
+	xcrun stapler staple "$$work/$(APP_NAME).dmg"; \
+	xcrun stapler validate "$$work/$(APP_NAME).dmg"; \
+	cp -R "$$staging/$(APP_BUNDLE)" "$(DIST_DIR)/$(APP_BUNDLE)"; \
+	cp "$$work/$(APP_NAME).dmg" "$(DIST_DMG)"
+	@echo "Notarized and stapled app + DMG: $(DIST_DMG)"
 
 # One-shot release: bump VERSION + commit first. Notarizes the DMG, publishes a
 # GitHub release with the DMG attached (gh pushes the v$(VERSION) tag), and bumps
