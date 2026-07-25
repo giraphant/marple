@@ -57,10 +57,50 @@ public enum SupersetAction: String, CaseIterable, Sendable, Equatable {
     }
 }
 
+/// Where AI actions get dispatched. Each preset is only a default command
+/// template — the template is the real mechanism, the picker just pre-fills it,
+/// so any terminal/agent combo is reachable by editing the template.
+public enum AIDispatchTarget: String, CaseIterable, Sendable {
+    case superset
+    case orca
+    case otty
+    case terminal
+    case custom
+
+    public var label: String {
+        switch self {
+        case .superset: return "Superset"
+        case .orca: return "Orca"
+        case .otty: return "Otty"
+        case .terminal: return "终端 (Terminal)"
+        case .custom: return "自定义"
+        }
+    }
+
+    /// Templates run through `zsh -lc` with `MARPLE_*` variables exported (see
+    /// `SupersetRunner.dispatch`). Terminal-style targets open the generated
+    /// `$MARPLE_RUN_SCRIPT` (.command), so any app that can run a shell script works.
+    public var defaultTemplate: String {
+        switch self {
+        case .superset:
+            return #"superset agents create --workspace "$MARPLE_WORKSPACE" --agent "$MARPLE_AGENT" --prompt "$(cat "$MARPLE_PROMPT_FILE")" --attachment "$MARPLE_CONTEXT_FILE""#
+        case .orca:
+            return #"orca terminal create --worktree "path:$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" --command "$MARPLE_RUN_SCRIPT" --focus"#
+        case .otty:
+            return #"open -a Otty "$MARPLE_RUN_SCRIPT""#
+        case .terminal:
+            return #"open -a Terminal "$MARPLE_RUN_SCRIPT""#
+        case .custom:
+            return ""
+        }
+    }
+}
+
 public struct SupersetDispatchConfig: Sendable, Equatable {
     public let workspaceID: String
     public let agent: String
     public let cliPath: String
+    public let commandTemplate: String
     public let reanalyzePrompt: String?
     public let formatPrompt: String?
     public let translatePrompt: String?
@@ -70,6 +110,7 @@ public struct SupersetDispatchConfig: Sendable, Equatable {
         workspaceID: String,
         agent: String = "claude",
         cliPath: String = "superset",
+        commandTemplate: String = AIDispatchTarget.superset.defaultTemplate,
         reanalyzePrompt: String? = nil,
         formatPrompt: String? = nil,
         translatePrompt: String? = nil,
@@ -78,6 +119,7 @@ public struct SupersetDispatchConfig: Sendable, Equatable {
         self.workspaceID = workspaceID
         self.agent = agent
         self.cliPath = cliPath
+        self.commandTemplate = commandTemplate
         self.reanalyzePrompt = reanalyzePrompt
         self.formatPrompt = formatPrompt
         self.translatePrompt = translatePrompt

@@ -278,33 +278,72 @@ import Testing
         #expect(related.summary == nil)
     }
 
-    @Test func invocationUsesEnvWhenCLIPathIsCommandName() throws {
-        let invocation = SupersetRunner.invocation(
-            config: SupersetDispatchConfig(workspaceID: "ws_123", agent: "claude", cliPath: "superset"),
-            prompt: "Prompt text",
-            contextPackagePath: "/tmp/context.md"
+    @Test func templateInvocationRunsTemplateThroughLoginShell() {
+        let invocation = SupersetRunner.templateInvocation(
+            template: "echo hi",
+            environment: ["MARPLE_AGENT": "claude"]
         )
 
-        #expect(invocation.executablePath == "/usr/bin/env")
-        #expect(invocation.arguments == [
-            "superset", "agents", "create",
-            "--workspace", "ws_123",
-            "--agent", "claude",
-            "--prompt", "Prompt text",
-            "--attachment", "/tmp/context.md"
-        ])
+        #expect(invocation.executablePath == "/bin/zsh")
+        #expect(invocation.arguments == ["-lc", "echo hi"])
+        #expect(invocation.environment["MARPLE_AGENT"] == "claude")
     }
 
-    @Test func invocationUsesAbsoluteCLIPathDirectly() throws {
-        let invocation = SupersetRunner.invocation(
-            config: SupersetDispatchConfig(workspaceID: "ws_123", agent: "superset", cliPath: "/opt/bin/superset"),
-            prompt: "Prompt text",
-            contextPackagePath: "/tmp/context.md"
+    @Test func dispatchEnvironmentExportsMarpleVariablesAndAugmentedPATH() {
+        let environment = SupersetRunner.dispatchEnvironment(
+            agent: "claude",
+            workspaceID: "ws_123",
+            cliPath: "/opt/bin/superset",
+            vaultRoot: "/tmp/vault",
+            title: "对话讨论 · a.md",
+            promptFilePath: "/tmp/pkg/prompt.md",
+            contextFilePath: "/tmp/pkg/context.md",
+            runScriptPath: "/tmp/pkg/run.command",
+            basePATH: "/usr/bin:/bin"
         )
 
-        #expect(invocation.executablePath == "/opt/bin/superset")
-        #expect(invocation.arguments.first == "agents")
-        #expect(invocation.arguments.contains("superset"))
+        #expect(environment["MARPLE_AGENT"] == "claude")
+        #expect(environment["MARPLE_WORKSPACE"] == "ws_123")
+        #expect(environment["MARPLE_VAULT_ROOT"] == "/tmp/vault")
+        #expect(environment["MARPLE_TITLE"] == "对话讨论 · a.md")
+        #expect(environment["MARPLE_PROMPT_FILE"] == "/tmp/pkg/prompt.md")
+        #expect(environment["MARPLE_CONTEXT_FILE"] == "/tmp/pkg/context.md")
+        #expect(environment["MARPLE_RUN_SCRIPT"] == "/tmp/pkg/run.command")
+        let path = environment["PATH"] ?? ""
+        // Absolute CLI path contributes its directory; known install dirs and
+        // the inherited PATH follow.
+        #expect(path.hasPrefix("/opt/bin:"))
+        #expect(path.contains("/.superset/bin"))
+        #expect(path.contains("/Applications/Orca.app/Contents/Resources/bin"))
+        #expect(path.hasSuffix(":/usr/bin:/bin"))
+    }
+
+    @Test func runScriptChangesToVaultAndHandsPromptToAgent() {
+        let script = SupersetRunner.runScript(
+            agent: "claude",
+            vaultRoot: "/tmp/my vault",
+            promptFilePath: "/tmp/pkg/prompt.md"
+        )
+
+        #expect(script.hasPrefix("#!/bin/zsh\n"))
+        #expect(script.contains("cd '/tmp/my vault'"))
+        #expect(script.contains("exec claude \"$(cat '/tmp/pkg/prompt.md')\""))
+    }
+
+    @Test func shellQuoteEscapesSingleQuotes() {
+        #expect(SupersetRunner.shellQuote("it's") == "'it'\\''s'")
+    }
+
+    @Test func defaultTemplatesCoverKnownTargets() {
+        #expect(AIDispatchTarget.superset.defaultTemplate.contains("agents create"))
+        #expect(AIDispatchTarget.superset.defaultTemplate.contains("$MARPLE_WORKSPACE"))
+        #expect(AIDispatchTarget.superset.defaultTemplate.contains("--attachment \"$MARPLE_CONTEXT_FILE\""))
+        #expect(AIDispatchTarget.orca.defaultTemplate.contains("terminal create"))
+        #expect(AIDispatchTarget.orca.defaultTemplate.contains("path:$MARPLE_VAULT_ROOT"))
+        #expect(AIDispatchTarget.orca.defaultTemplate.contains("$MARPLE_RUN_SCRIPT"))
+        #expect(AIDispatchTarget.otty.defaultTemplate == #"open -a Otty "$MARPLE_RUN_SCRIPT""#)
+        #expect(AIDispatchTarget.terminal.defaultTemplate == #"open -a Terminal "$MARPLE_RUN_SCRIPT""#)
+        #expect(AIDispatchTarget.custom.defaultTemplate.isEmpty)
     }
 
     @Test func resolveCLIPathPrefersKnownInstallLocationForBareName() {
@@ -464,7 +503,7 @@ import Testing
         let log = LogBox()
         let runner = SupersetRunner(
             execute: { invocation in
-                #expect(invocation.arguments.contains("--attachment"))
+                #expect(invocation.environment["MARPLE_CONTEXT_FILE"] != nil)
                 return SupersetProcessResult(terminationStatus: 2, stdout: "", stderr: "bad workspace")
             },
             log: { log.append($0) }
@@ -568,12 +607,14 @@ import Testing
             context: context
         )
 
-        // env-fallback ("/usr/bin/env" + "superset" argv) or a locally-resolved
-        // absolute path — either way the invocation must target the superset CLI.
+        // The default (Superset) template runs through the login shell with the
+        // workspace exported in the environment.
         let invocation = try #require(box.invocation)
-        #expect(invocation.executablePath.hasSuffix("superset") || invocation.arguments.first == "superset")
-        #expect(invocation.arguments.contains("--workspace"))
-        #expect(invocation.arguments.contains("ws_123"))
+        #expect(invocation.executablePath == "/bin/zsh")
+        #expect(invocation.arguments.first == "-lc")
+        #expect(invocation.arguments.last?.contains("agents create") == true)
+        #expect(invocation.environment["MARPLE_WORKSPACE"] == "ws_123")
+        #expect(invocation.environment["MARPLE_AGENT"] == "claude")
     }
 
     @Test func runnerPassesCustomPromptIntentToInvocation() async throws {
@@ -589,9 +630,8 @@ import Testing
         }
         let box = PromptBox()
         let runner = SupersetRunner { invocation in
-            let promptIndex = try #require(invocation.arguments.firstIndex(of: "--prompt"))
-            let promptValueIndex = invocation.arguments.index(after: promptIndex)
-            box.prompt = invocation.arguments[promptValueIndex]
+            let promptPath = try #require(invocation.environment["MARPLE_PROMPT_FILE"])
+            box.prompt = try String(contentsOfFile: promptPath, encoding: .utf8)
             return SupersetProcessResult(terminationStatus: 0, stdout: "run_123", stderr: "")
         }
 
@@ -612,7 +652,9 @@ import Testing
         #expect(prompt.contains("请先阅读上下文包。只编辑目标文件，不要编辑上下文包或其他文件。"))
     }
 
-    @Test func runnerRemovesContextPackageAfterDispatch() async throws {
+    // The package files must outlive dispatch: terminal targets (`open -a …`)
+    // return before the agent has read prompt.md / context.md.
+    @Test func runnerKeepsPackageFilesAliveAfterDispatch() async throws {
         let context = try SupersetDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
@@ -620,27 +662,86 @@ import Testing
             documentText: "Body",
             related: SupersetRelatedContext()
         )
-        final class AttachmentBox: @unchecked Sendable {
-            var url: URL?
+        final class EnvBox: @unchecked Sendable {
+            var environment: [String: String] = [:]
         }
-        let box = AttachmentBox()
+        let box = EnvBox()
         let runner = SupersetRunner { invocation in
-            let attachmentIndex = try #require(invocation.arguments.firstIndex(of: "--attachment"))
-            let attachmentPathIndex = invocation.arguments.index(after: attachmentIndex)
-            let attachmentURL = URL(fileURLWithPath: invocation.arguments[attachmentPathIndex])
-            box.url = attachmentURL
-            #expect(FileManager.default.fileExists(atPath: attachmentURL.path))
+            box.environment = invocation.environment
             return SupersetProcessResult(terminationStatus: 0, stdout: "run_123", stderr: "")
         }
 
         try await runner.dispatch(
-            action: .reanalyze,
+            action: .discuss,
             config: SupersetDispatchConfig(workspaceID: "ws_123", agent: "claude", cliPath: "superset"),
             context: context
         )
 
-        let attachmentURL = try #require(box.url)
-        #expect(!FileManager.default.fileExists(atPath: attachmentURL.path))
-        #expect(!FileManager.default.fileExists(atPath: attachmentURL.deletingLastPathComponent().path))
+        let contextPath = try #require(box.environment["MARPLE_CONTEXT_FILE"])
+        let promptPath = try #require(box.environment["MARPLE_PROMPT_FILE"])
+        let runScriptPath = try #require(box.environment["MARPLE_RUN_SCRIPT"])
+        defer { try? FileManager.default.removeItem(at: URL(fileURLWithPath: contextPath).deletingLastPathComponent()) }
+        #expect(FileManager.default.fileExists(atPath: contextPath))
+        let prompt = try String(contentsOfFile: promptPath, encoding: .utf8)
+        #expect(prompt.contains("对话讨论"))
+        let runScript = try String(contentsOfFile: runScriptPath, encoding: .utf8)
+        #expect(runScript.contains("exec claude"))
+        #expect(FileManager.default.isExecutableFile(atPath: runScriptPath))
+    }
+
+    @Test func runnerSkipsWorkspaceRequirementWhenTemplateOmitsIt() async throws {
+        let context = try SupersetDispatchContext(
+            workspaceRoot: "/tmp/marple-workspace",
+            targetPath: "vault/papers/a.md",
+            entry: entry,
+            documentText: "Body",
+            related: SupersetRelatedContext()
+        )
+        final class InvocationBox: @unchecked Sendable {
+            var invocation: SupersetInvocation?
+        }
+        let box = InvocationBox()
+        let runner = SupersetRunner { invocation in
+            box.invocation = invocation
+            return SupersetProcessResult(terminationStatus: 0, stdout: "", stderr: "")
+        }
+
+        try await runner.dispatch(
+            action: .discuss,
+            config: SupersetDispatchConfig(
+                workspaceID: "",
+                commandTemplate: AIDispatchTarget.terminal.defaultTemplate
+            ),
+            context: context
+        )
+
+        let invocation = try #require(box.invocation)
+        #expect(invocation.arguments.last == AIDispatchTarget.terminal.defaultTemplate)
+        #expect(invocation.environment["MARPLE_WORKSPACE"] == "")
+        if let contextPath = invocation.environment["MARPLE_CONTEXT_FILE"] {
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: contextPath).deletingLastPathComponent())
+        }
+    }
+
+    @Test func runnerRejectsEmptyCommandTemplate() async throws {
+        let context = try SupersetDispatchContext(
+            workspaceRoot: "/tmp/marple-workspace",
+            targetPath: "vault/papers/a.md",
+            entry: entry,
+            documentText: "Body",
+            related: SupersetRelatedContext()
+        )
+        let runner = SupersetRunner { _ in
+            Issue.record("runner should not execute without a template")
+            return SupersetProcessResult(terminationStatus: 0, stdout: "", stderr: "")
+        }
+
+        await #expect(throws: SupersetDispatchError.missingCommandTemplate) {
+            try await runner.dispatch(
+                action: .discuss,
+                config: SupersetDispatchConfig(workspaceID: "ws_123", commandTemplate: "  \n "),
+                context: context
+            )
+        }
     }
 }

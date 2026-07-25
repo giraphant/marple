@@ -1707,10 +1707,14 @@ final class AppModel {
         }
 
         let defaults = UserDefaults.standard
+        let target = AIDispatchTarget(rawValue: defaults.string(forKey: SettingsKeys.aiDispatchTarget) ?? "") ?? .superset
+        let storedTemplate = (defaults.string(forKey: SettingsKeys.aiDispatchTemplate) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let config = SupersetDispatchConfig(
             workspaceID: defaults.string(forKey: SettingsKeys.supersetWorkspaceID) ?? "",
             agent: defaults.string(forKey: SettingsKeys.supersetAgent) ?? "claude",
             cliPath: defaults.string(forKey: SettingsKeys.supersetCLIPath) ?? "superset",
+            commandTemplate: storedTemplate.isEmpty ? target.defaultTemplate : storedTemplate,
             reanalyzePrompt: defaults.string(forKey: SettingsKeys.supersetReanalyzePrompt),
             formatPrompt: defaults.string(forKey: SettingsKeys.supersetFormatPrompt),
             translatePrompt: defaults.string(forKey: SettingsKeys.supersetTranslatePrompt),
@@ -1727,14 +1731,14 @@ final class AppModel {
                 related: supersetRelatedContext(for: entry, rawDocumentText: raw)
             )
             try await supersetRunner.dispatch(action: action, config: config, context: context)
-            flash("已交给 Superset：\(action.label)", symbol: "sparkles")
-            print("[marple] superset \(action.rawValue) dispatched \(path)")
+            flash("已分发：\(action.label)", symbol: "sparkles")
+            print("[marple] dispatch \(action.rawValue) \(path)")
         } catch let error as SupersetDispatchError {
             flash(error.friendlyMessage, symbol: "exclamationmark.triangle.fill")
-            print("[marple] superset \(action.rawValue) FAILED \(path): \(error)")
+            print("[marple] dispatch \(action.rawValue) FAILED \(path): \(error)")
         } catch {
-            flash("Superset 调用失败，请查看日志。", symbol: "exclamationmark.triangle.fill")
-            print("[marple] superset \(action.rawValue) FAILED \(path): \(error)")
+            flash("AI 分发失败，请查看日志。", symbol: "exclamationmark.triangle.fill")
+            print("[marple] dispatch \(action.rawValue) FAILED \(path): \(error)")
         }
     }
 
