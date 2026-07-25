@@ -18,6 +18,7 @@ enum SettingsKeys {
     // template it pre-filled. Defaults keep old installs on the Superset flow.
     static let aiDispatchTarget = "marple.aiDispatchTarget"
     static let aiDispatchTemplate = "marple.aiDispatchTemplate"
+    static let aiAgentChoice = "marple.aiAgentChoice"
     static let supersetWorkspaceID = "marple.supersetWorkspaceID"
     static let supersetAgent = "marple.supersetAgent"
     static let supersetCLIPath = "marple.supersetCLIPath"

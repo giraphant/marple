@@ -304,6 +304,7 @@ import Testing
 
         #expect(environment["MARPLE_AGENT"] == "claude")
         #expect(environment["MARPLE_WORKSPACE"] == "ws_123")
+        #expect(environment["MARPLE_SUPERSET_CLI"] == "/opt/bin/superset")
         #expect(environment["MARPLE_VAULT_ROOT"] == "/tmp/vault")
         #expect(environment["MARPLE_TITLE"] == "对话讨论 · a.md")
         #expect(environment["MARPLE_PROMPT_FILE"] == "/tmp/pkg/prompt.md")
@@ -325,9 +326,89 @@ import Testing
             promptFilePath: "/tmp/pkg/prompt.md"
         )
 
-        #expect(script.hasPrefix("#!/bin/zsh\n"))
+        #expect(script.hasPrefix("#!/bin/zsh\nset -e\n"))
         #expect(script.contains("cd '/tmp/my vault'"))
-        #expect(script.contains("exec claude \"$(cat '/tmp/pkg/prompt.md')\""))
+        #expect(script.contains("marple_prompt=\"$(cat '/tmp/pkg/prompt.md')\""))
+        #expect(script.contains("exec claude \"$marple_prompt\""))
+    }
+
+    // Integration: really run the generated launcher through zsh with awkward
+    // paths and prompt content — the check that fails if quoting breaks.
+    @Test func runScriptExecutionSurvivesQuotesAndSpaces() async throws {
+        let fileManager = FileManager.default
+        let base = fileManager.temporaryDirectory
+            .appendingPathComponent("marple-runscript-\(UUID().uuidString)", isDirectory: true)
+        let vault = base.appendingPathComponent("it's a vault", isDirectory: true)
+        try fileManager.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: base) }
+        let promptURL = base.appendingPathComponent("my prompt's file.md")
+        let promptContent = "line1 \"quoted\" $HOME 'single'\nline2"
+        try promptContent.write(to: promptURL, atomically: true, encoding: .utf8)
+        let scriptURL = base.appendingPathComponent("run.command")
+        try SupersetRunner.runScript(
+            agent: "/usr/bin/printf %s",
+            vaultRoot: vault.path,
+            promptFilePath: promptURL.path
+        ).write(to: scriptURL, atomically: true, encoding: .utf8)
+
+        let result = try await SupersetRunner.defaultExecute(
+            SupersetInvocation(executablePath: "/bin/zsh", arguments: [scriptURL.path])
+        )
+
+        #expect(result.terminationStatus == 0)
+        #expect(result.stdout == promptContent)
+    }
+
+    @Test func runScriptExecutionAbortsWhenPromptFileMissing() async throws {
+        let fileManager = FileManager.default
+        let base = fileManager.temporaryDirectory
+            .appendingPathComponent("marple-runscript-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: base) }
+        let scriptURL = base.appendingPathComponent("run.command")
+        try SupersetRunner.runScript(
+            agent: "/usr/bin/printf agent-ran",
+            vaultRoot: base.path,
+            promptFilePath: base.appendingPathComponent("missing.md").path
+        ).write(to: scriptURL, atomically: true, encoding: .utf8)
+
+        let result = try await SupersetRunner.defaultExecute(
+            SupersetInvocation(executablePath: "/bin/zsh", arguments: [scriptURL.path])
+        )
+
+        #expect(result.terminationStatus != 0)
+        #expect(!result.stdout.contains("agent-ran"))
+    }
+
+    // Integration: template expansion happens inside zsh from MARPLE_* env
+    // vars — verify awkward values round-trip without shell mangling.
+    @Test func templateExecutionExpandsEnvironmentVerbatim() async throws {
+        let title = #"weird "title" with $dollar 'quote'"#
+        let invocation = SupersetRunner.templateInvocation(
+            template: #"printf '%s' "$MARPLE_TITLE""#,
+            environment: ["MARPLE_TITLE": title]
+        )
+
+        let result = try await SupersetRunner.defaultExecute(invocation)
+
+        #expect(result.terminationStatus == 0)
+        // -l sources the user's zprofile, which may print noise; contains is enough.
+        #expect(result.stdout.contains(title))
+    }
+
+    @Test func resolveTemplateFallsBackByStoredTarget() {
+        // Legacy install: nothing stored ⇒ unchanged Superset flow.
+        #expect(AIDispatchTarget.resolveTemplate(targetRawValue: nil, storedTemplate: nil)
+            == AIDispatchTarget.superset.defaultTemplate)
+        #expect(AIDispatchTarget.resolveTemplate(targetRawValue: "orca", storedTemplate: " \n ")
+            == AIDispatchTarget.orca.defaultTemplate)
+        #expect(AIDispatchTarget.resolveTemplate(targetRawValue: "custom", storedTemplate: "echo hi")
+            == "echo hi")
+        // Custom with nothing stored resolves empty ⇒ dispatch reports the
+        // missing-template error instead of silently running a preset.
+        #expect(AIDispatchTarget.resolveTemplate(targetRawValue: "custom", storedTemplate: nil).isEmpty)
+        #expect(AIDispatchTarget.resolveTemplate(targetRawValue: "garbage", storedTemplate: nil)
+            == AIDispatchTarget.superset.defaultTemplate)
     }
 
     @Test func shellQuoteEscapesSingleQuotes() {
@@ -335,6 +416,7 @@ import Testing
     }
 
     @Test func defaultTemplatesCoverKnownTargets() {
+        #expect(AIDispatchTarget.superset.defaultTemplate.hasPrefix("\"$MARPLE_SUPERSET_CLI\""))
         #expect(AIDispatchTarget.superset.defaultTemplate.contains("agents create"))
         #expect(AIDispatchTarget.superset.defaultTemplate.contains("$MARPLE_WORKSPACE"))
         #expect(AIDispatchTarget.superset.defaultTemplate.contains("--attachment \"$MARPLE_CONTEXT_FILE\""))

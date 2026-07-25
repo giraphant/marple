@@ -275,6 +275,7 @@ private struct AIBridgeSettings: View {
     @AppStorage(SettingsKeys.cliServerEnabled) private var enabled = false
     @AppStorage(SettingsKeys.aiDispatchTarget) private var dispatchTargetRaw = AIDispatchTarget.superset.rawValue
     @AppStorage(SettingsKeys.aiDispatchTemplate) private var dispatchTemplate = AIDispatchTarget.superset.defaultTemplate
+    @AppStorage(SettingsKeys.aiAgentChoice) private var agentChoiceRaw = ""
     @AppStorage(SettingsKeys.supersetWorkspaceID) private var supersetWorkspaceID = ""
     @AppStorage(SettingsKeys.supersetAgent) private var supersetAgent = "claude"
     @AppStorage(SettingsKeys.supersetCLIPath) private var supersetCLIPath = "superset"
@@ -295,28 +296,34 @@ private struct AIBridgeSettings: View {
                     get: { AIDispatchTarget(rawValue: dispatchTargetRaw) ?? .superset },
                     set: { newTarget in
                         dispatchTargetRaw = newTarget.rawValue
-                        // Preset picked ⇒ pre-fill its template; 自定义 keeps the box as-is.
-                        if newTarget != .custom {
-                            dispatchTemplate = newTarget.defaultTemplate
-                        }
+                        // Preset picked ⇒ pre-fill its template. 自定义 keeps the
+                        // box text but re-persists it, so the displayed template
+                        // is exactly what dispatch will run (the AppStorage
+                        // default is otherwise never written to disk).
+                        dispatchTemplate = newTarget == .custom ? dispatchTemplate : newTarget.defaultTemplate
                     }
                 )) {
                     ForEach(AIDispatchTarget.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
 
+                // The choice is stored separately from the command text so typing
+                // a custom command that momentarily equals "claude" doesn't
+                // flip the picker and hide the field mid-edit.
+                let agentChoice = AgentChoice(rawValue: agentChoiceRaw)
+                    ?? AgentChoice(rawValue: supersetAgent)
+                    ?? .custom
                 Picker("Agent", selection: Binding(
-                    get: { AgentChoice(rawValue: supersetAgent) ?? .custom },
+                    get: { agentChoice },
                     set: { choice in
+                        agentChoiceRaw = choice.rawValue
                         if choice != .custom {
                             supersetAgent = choice.rawValue
-                        } else if AgentChoice(rawValue: supersetAgent) != nil {
-                            supersetAgent = ""
                         }
                     }
                 )) {
                     ForEach(AgentChoice.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
-                if AgentChoice(rawValue: supersetAgent) == nil || supersetAgent.isEmpty {
+                if agentChoice == .custom {
                     TextField("Agent 命令（如 claude --model opus）", text: $supersetAgent)
                         .textFieldStyle(.roundedBorder)
                 }

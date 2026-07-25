@@ -83,7 +83,9 @@ public enum AIDispatchTarget: String, CaseIterable, Sendable {
     public var defaultTemplate: String {
         switch self {
         case .superset:
-            return #"superset agents create --workspace "$MARPLE_WORKSPACE" --agent "$MARPLE_AGENT" --prompt "$(cat "$MARPLE_PROMPT_FILE")" --attachment "$MARPLE_CONTEXT_FILE""#
+            // $MARPLE_SUPERSET_CLI carries the (resolved) CLI 路径 setting, so
+            // legacy installs pointing at a custom binary keep working.
+            return #""$MARPLE_SUPERSET_CLI" agents create --workspace "$MARPLE_WORKSPACE" --agent "$MARPLE_AGENT" --prompt "$(cat "$MARPLE_PROMPT_FILE")" --attachment "$MARPLE_CONTEXT_FILE""#
         case .orca:
             return #"orca terminal create --worktree "path:$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" --command "$MARPLE_RUN_SCRIPT" --focus"#
         case .otty:
@@ -93,6 +95,15 @@ public enum AIDispatchTarget: String, CaseIterable, Sendable {
         case .custom:
             return ""
         }
+    }
+
+    /// Resolves the effective dispatch template from the stored settings.
+    /// Unset/blank stored template falls back to the selected preset's default,
+    /// so legacy installs (nothing stored) keep the Superset flow unchanged.
+    public static func resolveTemplate(targetRawValue: String?, storedTemplate: String?) -> String {
+        let target = AIDispatchTarget(rawValue: targetRawValue ?? "") ?? .superset
+        let stored = (storedTemplate ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return stored.isEmpty ? target.defaultTemplate : stored
     }
 }
 

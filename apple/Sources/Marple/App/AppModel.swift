@@ -1707,14 +1707,14 @@ final class AppModel {
         }
 
         let defaults = UserDefaults.standard
-        let target = AIDispatchTarget(rawValue: defaults.string(forKey: SettingsKeys.aiDispatchTarget) ?? "") ?? .superset
-        let storedTemplate = (defaults.string(forKey: SettingsKeys.aiDispatchTemplate) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
         let config = SupersetDispatchConfig(
             workspaceID: defaults.string(forKey: SettingsKeys.supersetWorkspaceID) ?? "",
             agent: defaults.string(forKey: SettingsKeys.supersetAgent) ?? "claude",
             cliPath: defaults.string(forKey: SettingsKeys.supersetCLIPath) ?? "superset",
-            commandTemplate: storedTemplate.isEmpty ? target.defaultTemplate : storedTemplate,
+            commandTemplate: AIDispatchTarget.resolveTemplate(
+                targetRawValue: defaults.string(forKey: SettingsKeys.aiDispatchTarget),
+                storedTemplate: defaults.string(forKey: SettingsKeys.aiDispatchTemplate)
+            ),
             reanalyzePrompt: defaults.string(forKey: SettingsKeys.supersetReanalyzePrompt),
             formatPrompt: defaults.string(forKey: SettingsKeys.supersetFormatPrompt),
             translatePrompt: defaults.string(forKey: SettingsKeys.supersetTranslatePrompt),

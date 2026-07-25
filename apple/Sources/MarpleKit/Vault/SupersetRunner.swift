@@ -270,6 +270,9 @@ public struct SupersetRunner: Sendable {
         [
             "MARPLE_AGENT": agent,
             "MARPLE_WORKSPACE": workspaceID,
+            // Resolved like the pre-template dispatch did, so a legacy 自定义
+            // CLI 路径 (any basename) keeps working via the Superset preset.
+            "MARPLE_SUPERSET_CLI": resolveCLIPath(cliPath),
             "MARPLE_VAULT_ROOT": vaultRoot,
             "MARPLE_TITLE": title,
             "MARPLE_PROMPT_FILE": promptFilePath,
@@ -296,11 +299,16 @@ public struct SupersetRunner: Sendable {
     /// The launcher terminal targets execute: cd into the vault, hand the
     /// prompt to the agent CLI. `.command` so Terminal/Otty open it directly.
     static func runScript(agent: String, vaultRoot: String, promptFilePath: String) -> String {
+        // set -e: a launch can happen well after dispatch (open -a …), so a
+        // vanished vault or prompt file must abort instead of running the
+        // agent in the wrong directory or with an empty prompt.
         """
         #!/bin/zsh
+        set -e
         export PATH=\(shellQuote(augmentedPATHPrefix())):"$PATH"
         cd \(shellQuote(vaultRoot))
-        exec \(agent) "$(cat \(shellQuote(promptFilePath)))"
+        marple_prompt="$(cat \(shellQuote(promptFilePath)))"
+        exec \(agent) "$marple_prompt"
         """
     }
 
