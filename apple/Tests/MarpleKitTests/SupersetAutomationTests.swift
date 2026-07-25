@@ -35,7 +35,7 @@ import Testing
 
         let markdown = SupersetContextPackageBuilder.markdown(for: .reanalyze, context: context)
 
-        #expect(markdown.contains("# Marple Superset Context"))
+        #expect(markdown.contains("# Marple Context"))
         #expect(markdown.contains("## Action\n重新分析"))
         #expect(markdown.contains("Workspace-relative path: vault/papers/a.md"))
         #expect(markdown.contains("Absolute path: /tmp/marple-workspace/vault/papers/a.md"))

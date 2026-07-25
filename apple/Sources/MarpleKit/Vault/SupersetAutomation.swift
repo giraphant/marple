@@ -258,7 +258,7 @@ public struct SupersetDispatchContext: Sendable, Equatable {
 public enum SupersetContextPackageBuilder {
     public static func markdown(for action: SupersetAction, context: SupersetDispatchContext) -> String {
         var lines: [String] = []
-        lines.append("# Marple Superset Context")
+        lines.append("# Marple Context")
         lines.append("")
         lines.append("## Action")
         lines.append(action.label)
@@ -392,7 +392,7 @@ public enum SupersetPromptBuilder {
         }
         let guardrailBlock = renderedGuardrail.map { "\n\n\($0)" } ?? ""
         return """
-        请执行 Marple Superset 动作：\(action.label)
+        请执行 Marple 动作：\(action.label)
 
         目标文件（工作区相对路径）：\(targetRelativePath)
         目标文件（绝对路径）：\(targetAbsolutePath)
