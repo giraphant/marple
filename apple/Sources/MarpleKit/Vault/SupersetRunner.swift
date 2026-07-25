@@ -4,10 +4,13 @@ import Foundation
 public struct SupersetInvocation: Sendable, Equatable {
     public let executablePath: String
     public let arguments: [String]
+    /// Extra environment merged over the inherited one (MARPLE_* variables + PATH).
+    public let environment: [String: String]
 
-    public init(executablePath: String, arguments: [String]) {
+    public init(executablePath: String, arguments: [String], environment: [String: String] = [:]) {
         self.executablePath = executablePath
         self.arguments = arguments
+        self.environment = environment
     }
 }
 
@@ -64,6 +67,7 @@ public struct SupersetWorkspace: Codable, Sendable, Equatable, Identifiable {
 public enum SupersetDispatchError: Error, Equatable, LocalizedError, Sendable {
     case missingWorkspaceID
     case missingAgent
+    case missingCommandTemplate
     case launchFailed(String)
     case failed(status: Int32, stderr: String)
 
@@ -72,11 +76,13 @@ public enum SupersetDispatchError: Error, Equatable, LocalizedError, Sendable {
         case .missingWorkspaceID:
             return "请先在设置里填写 Superset workspace ID。"
         case .missingAgent:
-            return "请先在设置里填写 Superset agent。"
+            return "请先在设置里填写 Agent 命令。"
+        case .missingCommandTemplate:
+            return "请先在设置里填写分发命令模板。"
         case .launchFailed:
-            return "无法启动 Superset CLI，请检查路径。"
+            return "无法启动分发命令，请检查设置。"
         case .failed:
-            return "Superset 调用失败，请查看日志。"
+            return "分发命令失败，请查看日志。"
         }
     }
 
@@ -122,9 +128,9 @@ public struct SupersetRunner: Sendable {
         config: SupersetDispatchConfig,
         context: SupersetDispatchContext
     ) async throws {
-        let workspaceID = config.workspaceID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !workspaceID.isEmpty else {
-            throw SupersetDispatchError.missingWorkspaceID
+        let template = config.commandTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !template.isEmpty else {
+            throw SupersetDispatchError.missingCommandTemplate
         }
 
         let agent = config.agent.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -132,28 +138,46 @@ public struct SupersetRunner: Sendable {
             throw SupersetDispatchError.missingAgent
         }
 
-        let trimmedConfig = SupersetDispatchConfig(
-            workspaceID: workspaceID,
-            agent: agent,
-            cliPath: Self.resolveCLIPath(config.cliPath),
-            reanalyzePrompt: config.reanalyzePrompt,
-            formatPrompt: config.formatPrompt,
-            translatePrompt: config.translatePrompt,
-            discussPrompt: config.discussPrompt
-        )
+        // Only templates that actually reference the workspace need one.
+        let workspaceID = config.workspaceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if template.contains("MARPLE_WORKSPACE") {
+            guard !workspaceID.isEmpty else {
+                throw SupersetDispatchError.missingWorkspaceID
+            }
+        }
+
+        // The package directory intentionally outlives this call: terminal
+        // targets (`open -a …`, `orca terminal create`) return before the
+        // agent reads prompt.md/context.md. It sits in the system temp dir,
+        // which macOS cleans up on its own.
         let contextPackageURL = try SupersetContextPackageBuilder.write(action: action, context: context)
-        defer { try? FileManager.default.removeItem(at: contextPackageURL.deletingLastPathComponent()) }
+        let packageDirectory = contextPackageURL.deletingLastPathComponent()
         let prompt = SupersetPromptBuilder.prompt(
             action: action,
             targetRelativePath: context.targetPath,
             targetAbsolutePath: context.targetAbsolutePath,
             contextPackagePath: contextPackageURL.path,
-            promptIntent: trimmedConfig.promptIntent(for: action)
+            promptIntent: config.promptIntent(for: action)
         )
-        let invocation = Self.invocation(
-            config: trimmedConfig,
-            prompt: prompt,
-            contextPackagePath: contextPackageURL.path
+        let promptFileURL = packageDirectory.appendingPathComponent("prompt.md")
+        try prompt.write(to: promptFileURL, atomically: true, encoding: .utf8)
+        let runScriptURL = packageDirectory.appendingPathComponent("run.command")
+        try Self.runScript(agent: agent, vaultRoot: context.workspaceRoot, promptFilePath: promptFileURL.path)
+            .write(to: runScriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runScriptURL.path)
+
+        let invocation = Self.templateInvocation(
+            template: template,
+            environment: Self.dispatchEnvironment(
+                agent: agent,
+                workspaceID: workspaceID,
+                cliPath: config.cliPath,
+                vaultRoot: context.workspaceRoot,
+                title: "\(action.label) · \((context.targetPath as NSString).lastPathComponent)",
+                promptFilePath: promptFileURL.path,
+                contextFilePath: contextPackageURL.path,
+                runScriptPath: runScriptURL.path
+            )
         )
         let result: SupersetProcessResult
         do {
@@ -226,20 +250,70 @@ public struct SupersetRunner: Sendable {
         try await listWorkspaces(cliPath: cliPath).map(\.id)
     }
 
-    public static func invocation(
-        config: SupersetDispatchConfig,
-        prompt: String,
-        contextPackagePath: String
-    ) -> SupersetInvocation {
-        let runArguments = [
-            "agents", "create",
-            "--workspace", config.workspaceID,
-            "--agent", config.agent,
-            "--prompt", prompt,
-            "--attachment", contextPackagePath
-        ]
+    // Templates are user-authored zsh snippets; a login shell (-l) picks up the
+    // user's own PATH additions on top of the explicit ones in the environment.
+    public static func templateInvocation(template: String, environment: [String: String]) -> SupersetInvocation {
+        SupersetInvocation(executablePath: "/bin/zsh", arguments: ["-lc", template], environment: environment)
+    }
 
-        return invocation(cliPath: config.cliPath, arguments: runArguments)
+    static func dispatchEnvironment(
+        agent: String,
+        workspaceID: String,
+        cliPath: String,
+        vaultRoot: String,
+        title: String,
+        promptFilePath: String,
+        contextFilePath: String,
+        runScriptPath: String,
+        basePATH: String? = ProcessInfo.processInfo.environment["PATH"]
+    ) -> [String: String] {
+        [
+            "MARPLE_AGENT": agent,
+            "MARPLE_WORKSPACE": workspaceID,
+            // Resolved like the pre-template dispatch did, so a legacy 自定义
+            // CLI 路径 (any basename) keeps working via the Superset preset.
+            "MARPLE_SUPERSET_CLI": resolveCLIPath(cliPath),
+            "MARPLE_VAULT_ROOT": vaultRoot,
+            "MARPLE_TITLE": title,
+            "MARPLE_PROMPT_FILE": promptFilePath,
+            "MARPLE_CONTEXT_FILE": contextFilePath,
+            "MARPLE_RUN_SCRIPT": runScriptPath,
+            "PATH": [augmentedPATHPrefix(cliPath: cliPath), basePATH ?? "/usr/bin:/bin"].joined(separator: ":")
+        ]
+    }
+
+    // GUI apps inherit a minimal PATH, so bare `superset` / `orca` / `claude`
+    // would exit 127. Prepend the known install dirs; an absolute CLI path from
+    // settings contributes its directory too.
+    static func augmentedPATHPrefix(cliPath: String = "") -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        var directories = defaultSearchDirectories
+        directories.append("\(home)/.local/bin")
+        directories.append("/Applications/Orca.app/Contents/Resources/bin")
+        if cliPath.contains("/") {
+            directories.insert((cliPath as NSString).deletingLastPathComponent, at: 0)
+        }
+        return directories.joined(separator: ":")
+    }
+
+    /// The launcher terminal targets execute: cd into the vault, hand the
+    /// prompt to the agent CLI. `.command` so Terminal/Otty open it directly.
+    static func runScript(agent: String, vaultRoot: String, promptFilePath: String) -> String {
+        // set -e: a launch can happen well after dispatch (open -a …), so a
+        // vanished vault or prompt file must abort instead of running the
+        // agent in the wrong directory or with an empty prompt.
+        """
+        #!/bin/zsh
+        set -e
+        export PATH=\(shellQuote(augmentedPATHPrefix())):"$PATH"
+        cd \(shellQuote(vaultRoot))
+        marple_prompt="$(cat \(shellQuote(promptFilePath)))"
+        exec \(agent) "$marple_prompt"
+        """
+    }
+
+    static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     public static func workspaceListInvocation(cliPath: String) -> SupersetInvocation {
@@ -301,6 +375,10 @@ public struct SupersetRunner: Sendable {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: invocation.executablePath)
             process.arguments = invocation.arguments
+            if !invocation.environment.isEmpty {
+                process.environment = ProcessInfo.processInfo.environment
+                    .merging(invocation.environment) { _, override in override }
+            }
 
             let fileManager = FileManager.default
             let outputDirectory = fileManager.temporaryDirectory

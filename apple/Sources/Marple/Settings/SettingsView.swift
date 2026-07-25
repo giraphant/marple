@@ -260,7 +260,22 @@ private struct ToolbarSettings: View {
 /// nothing runs unless the user explicitly turns it on; toggling here flips
 /// the listener live (no relaunch needed).
 private struct AIBridgeSettings: View {
+    /// GUI-pickable agent CLIs; `custom` falls back to a free-text command.
+    private enum AgentChoice: String, CaseIterable {
+        case claude, codex, custom
+        var label: String {
+            switch self {
+            case .claude: return "Claude Code (claude)"
+            case .codex:  return "Codex (codex)"
+            case .custom: return "自定义"
+            }
+        }
+    }
+
     @AppStorage(SettingsKeys.cliServerEnabled) private var enabled = false
+    @AppStorage(SettingsKeys.aiDispatchTarget) private var dispatchTargetRaw = AIDispatchTarget.superset.rawValue
+    @AppStorage(SettingsKeys.aiDispatchTemplate) private var dispatchTemplate = AIDispatchTarget.superset.defaultTemplate
+    @AppStorage(SettingsKeys.aiAgentChoice) private var agentChoiceRaw = ""
     @AppStorage(SettingsKeys.supersetWorkspaceID) private var supersetWorkspaceID = ""
     @AppStorage(SettingsKeys.supersetAgent) private var supersetAgent = "claude"
     @AppStorage(SettingsKeys.supersetCLIPath) private var supersetCLIPath = "superset"
@@ -277,32 +292,76 @@ private struct AIBridgeSettings: View {
     var body: some View {
         Form {
             Section("Reader AI 助手") {
-                HStack {
-                    TextField("Superset workspace ID", text: $supersetWorkspaceID)
-                        .textFieldStyle(.roundedBorder)
-                    Button(isLoadingWorkspaces ? "获取中…" : "获取") {
-                        Task { await refreshSupersetWorkspaces() }
+                Picker("分发目标", selection: Binding(
+                    get: { AIDispatchTarget(rawValue: dispatchTargetRaw) ?? .superset },
+                    set: { newTarget in
+                        dispatchTargetRaw = newTarget.rawValue
+                        // Preset picked ⇒ pre-fill its template. 自定义 keeps the
+                        // box text but re-persists it, so the displayed template
+                        // is exactly what dispatch will run (the AppStorage
+                        // default is otherwise never written to disk).
+                        dispatchTemplate = newTarget == .custom ? dispatchTemplate : newTarget.defaultTemplate
                     }
-                    .disabled(isLoadingWorkspaces)
+                )) {
+                    ForEach(AIDispatchTarget.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
-                if !discoveredWorkspaces.isEmpty {
-                    Picker("已发现", selection: $supersetWorkspaceID) {
-                        ForEach(discoveredWorkspaces) { workspace in
-                            Text(workspace.displayName).tag(workspace.id)
+
+                // The choice is stored separately from the command text so typing
+                // a custom command that momentarily equals "claude" doesn't
+                // flip the picker and hide the field mid-edit.
+                let agentChoice = AgentChoice(rawValue: agentChoiceRaw)
+                    ?? AgentChoice(rawValue: supersetAgent)
+                    ?? .custom
+                Picker("Agent", selection: Binding(
+                    get: { agentChoice },
+                    set: { choice in
+                        agentChoiceRaw = choice.rawValue
+                        if choice != .custom {
+                            supersetAgent = choice.rawValue
                         }
                     }
-                    .pickerStyle(.menu)
+                )) {
+                    ForEach(AgentChoice.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
-                if let workspaceLookupMessage {
-                    Text(workspaceLookupMessage)
+                if agentChoice == .custom {
+                    TextField("Agent 命令（如 claude --model opus）", text: $supersetAgent)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                if AIDispatchTarget(rawValue: dispatchTargetRaw) ?? .superset == .superset {
+                    HStack {
+                        TextField("Superset workspace ID", text: $supersetWorkspaceID)
+                            .textFieldStyle(.roundedBorder)
+                        Button(isLoadingWorkspaces ? "获取中…" : "获取") {
+                            Task { await refreshSupersetWorkspaces() }
+                        }
+                        .disabled(isLoadingWorkspaces)
+                    }
+                    if !discoveredWorkspaces.isEmpty {
+                        Picker("已发现", selection: $supersetWorkspaceID) {
+                            ForEach(discoveredWorkspaces) { workspace in
+                                Text(workspace.displayName).tag(workspace.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    if let workspaceLookupMessage {
+                        Text(workspaceLookupMessage)
+                            .font(.caption)
+                            .foregroundStyle(workspaceLookupIsError ? Color.red : Color(.secondaryLabelColor))
+                    }
+                    TextField("CLI 路径", text: $supersetCLIPath)
+                        .textFieldStyle(.roundedBorder)
+                    Text("默认通过 PATH 调用 `superset`；也可以填写绝对路径。")
                         .font(.caption)
-                        .foregroundStyle(workspaceLookupIsError ? Color.red : Color(.secondaryLabelColor))
+                        .foregroundStyle(.secondary)
                 }
-                TextField("Agent", text: $supersetAgent)
+
+                TextField("命令模板", text: $dispatchTemplate, axis: .vertical)
+                    .lineLimit(2...8)
+                    .font(.system(.caption, design: .monospaced))
                     .textFieldStyle(.roundedBorder)
-                TextField("CLI 路径", text: $supersetCLIPath)
-                    .textFieldStyle(.roundedBorder)
-                Text("默认通过 PATH 调用 `superset`；也可以填写绝对路径。")
+                Text("命令经 zsh 执行。可用变量：`$MARPLE_PROMPT_FILE`、`$MARPLE_CONTEXT_FILE`、`$MARPLE_VAULT_ROOT`、`$MARPLE_TITLE`、`$MARPLE_AGENT`、`$MARPLE_WORKSPACE`、`$MARPLE_RUN_SCRIPT`。`$MARPLE_RUN_SCRIPT` 是生成好的启动脚本：cd 到 vault 后把 prompt 交给 Agent。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
