@@ -1137,7 +1137,11 @@ private struct NoteCard: View {
                     get: { model.inspectorFocusedNotePath == entry.path },
                     set: { model.setInspectorNoteFocused(entry, focused: $0) }
                 ),
-                onDebouncedChange: { model.saveInspectorNoteDraft($0, for: entry) },
+                // While typing, only stage the draft (memory + a long safety-net
+                // flush): an eager disk write here triggered a full FSEvents
+                // reindex per typing pause, stuttering IME input (issue #87).
+                // The real write lands on blur/doc-switch/quit.
+                onDebouncedChange: { model.setInspectorNoteDraft($0, for: entry) },
                 onCommit: { model.saveInspectorNoteDraft($0, for: entry) }
             )
             .frame(height: editorHeight)

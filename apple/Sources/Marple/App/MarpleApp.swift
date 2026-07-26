@@ -260,6 +260,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// Inline-note edits are staged in memory while typing (issue #87) and
+    /// normally flushed on blur/doc-switch; quitting mid-edit must not lose them.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let model = ActiveModel.current, model.hasDirtyInspectorNotes else {
+            return .terminateNow
+        }
+        Task { @MainActor in
+            await model.flushAllInspectorNoteSaves()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     /// QUA-107: cold-start handler for marple:// URLs. The primary IPC path is
     /// the Unix socket served by CLIServer; this URL scheme exists so
     /// `marple-cli open <path>` can launch Marple and open a document page.

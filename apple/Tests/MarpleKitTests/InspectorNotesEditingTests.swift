@@ -36,4 +36,32 @@ import Testing
 
         #expect(model.inspectorAnnotationNotes.map(\.path) == [noteA.path, noteB.path])
     }
+
+    /// While typing, drafts are only staged in memory (an eager disk write per
+    /// typing pause triggered a full reindex that stuttered IME input); the
+    /// write must land on commit (blur/doc-switch/quit).
+    @MainActor
+    @Test func stagingDoesNotWriteUntilCommit() async throws {
+        let notePath = "vault/notes/p-note-aaaa.md"
+        let note = Entry(path: notePath, type: .note, title: "A", author: [],
+                         year: nil, ratingScore: 0, themes: [], preview: "",
+                         hasPDF: false, annotates: "vault/papers/p.md", created: "2026-07-26")
+        let client = StubVaultClient(
+            entries: [note],
+            texts: [notePath: "---\ntype: note\n---\n\nold\n"])
+        let model = AppModel(client: client)
+        await model.loadIndex()
+        await model.ensureInspectorNoteLoaded(note)
+
+        model.setInspectorNoteDraft("new text", for: note)
+        #expect(model.hasDirtyInspectorNotes)
+        #expect(client.writeLog.last == nil)
+
+        model.saveInspectorNoteDraft("new text", for: note)
+        for _ in 0..<200 where client.writeLog.last == nil {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(client.writeLog.last?.path == notePath)
+        #expect(model.hasDirtyInspectorNotes == false)
+    }
 }

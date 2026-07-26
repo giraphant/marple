@@ -1539,7 +1539,12 @@ final class AppModel {
         await flushInspectorNoteSave(path: path)
     }
 
-    private func flushAllInspectorNoteSaves() async {
+    /// Unsaved staged edits — the quit hook only delays termination when true.
+    var hasDirtyInspectorNotes: Bool {
+        inspectorNoteDrafts.contains { inspectorNoteOriginals[$0.key] != $0.value }
+    }
+
+    func flushAllInspectorNoteSaves() async {
         let paths = Array(inspectorNoteDrafts.keys)
         for path in paths { await flushInspectorNoteSave(path: path) }
     }
@@ -1636,7 +1641,10 @@ final class AppModel {
     private func scheduleInspectorNoteSave(path: String) {
         inspectorNoteSaveTasks[path]?.cancel()
         inspectorNoteSaveTasks[path] = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_700_000_000)
+            // Safety net only: the primary flush points are blur, doc switch,
+            // and quit. Writing while the user types kicks off a full vault
+            // reindex mid-IME-composition (issue #87), so keep this long.
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
             guard !Task.isCancelled else { return }
             await self?.flushInspectorNoteSave(path: path)
         }
