@@ -142,16 +142,26 @@ struct NoteMarkdownEditor: NSViewRepresentable {
                 localDirty = false
                 return
             }
-            guard !localDirty else { return }
+            // During IME composition (Chinese/Japanese marked text) textDidChange
+            // hasn't fired yet, so localDirty can't protect the buffer — replacing
+            // the storage would destroy the composition and throw the caret to the
+            // end (issue #87). Never clobber marked text.
+            guard !localDirty, !textView.hasMarkedText() else { return }
             isApplying = true
             apply(text, to: textView)
             isApplying = false
         }
 
         func apply(_ text: String, to textView: NSTextView) {
+            let selection = textView.selectedRange()
             textView.textStorage?.setAttributedString(NSAttributedString(
                 string: text,
                 attributes: Self.textAttributes))
+            // setAttributedString leaves the caret at the end; keep the user's
+            // position (clamped) so an external refresh doesn't yank the cursor.
+            let length = (text as NSString).length
+            textView.setSelectedRange(NSRange(
+                location: min(selection.location, length), length: 0))
         }
 
         func textDidChange(_ notification: Notification) {
