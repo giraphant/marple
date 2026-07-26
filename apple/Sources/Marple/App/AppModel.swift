@@ -1986,9 +1986,9 @@ final class AppModel {
 
     func setRating(_ stars: Int?) async {
         let n = stars ?? 0
-        let value = n > 0 ? String(repeating: "★", count: min(5, n)) : nil
+        let value = n > 0 ? String(min(5, n)) : nil
         await applyPatch(field: "rating",
-            { FrontmatterPatch.setScalar($0, key: "rating", value: value) },
+            { FrontmatterPatch.setScalar($0, key: "rating", value: value, numeric: true) },
             local: { $0.with(ratingScore: Double(max(0, n))) })
     }
 
