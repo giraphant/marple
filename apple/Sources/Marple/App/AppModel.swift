@@ -1048,7 +1048,16 @@ final class AppModel {
         }
         do {
             let raw = try await client.entryText(path: path)
-            openBody = Frontmatter.split(raw).body
+            let body = Frontmatter.split(raw).body
+            // Watcher refreshes land here for ANY vault change (e.g. inline-note
+            // autosaves, issue #87). When the doc text didn't change, skip the
+            // re-parse/republish; still recompute derived state — the index the
+            // relations panel reads may have moved.
+            if path == loadedDocPath, body == openBody {
+                recomputeOpenDerived()
+                return
+            }
+            openBody = body
             openBlocks = MarkdownModel.blocks(from: openBody)
             loadedDocPath = path
             recomputeOpenDerived()
@@ -1530,7 +1539,12 @@ final class AppModel {
         await flushInspectorNoteSave(path: path)
     }
 
-    private func flushAllInspectorNoteSaves() async {
+    /// Unsaved staged edits — the quit hook only delays termination when true.
+    var hasDirtyInspectorNotes: Bool {
+        inspectorNoteDrafts.contains { inspectorNoteOriginals[$0.key] != $0.value }
+    }
+
+    func flushAllInspectorNoteSaves() async {
         let paths = Array(inspectorNoteDrafts.keys)
         for path in paths { await flushInspectorNoteSave(path: path) }
     }
@@ -1560,9 +1574,10 @@ final class AppModel {
                     entries[i] = entries[i].with(preview: preview)
                 }
             }
-            rebuildIndexDerived()
-            recomputeVisible()
-            recomputeOpenDerived()
+            // No eager rebuildIndexDerived/recomputeVisible/recomputeOpenDerived
+            // here: the FSEvents pass triggered by this very write redoes all of
+            // them moments later, and running the full index-wide recomputes on
+            // every autosave is what made typing stutter (issue #87).
             print("[marple] saved inspector note \(path)")
         } catch {
             inspectorNoteStatuses[path] = .failed("\(error)")
@@ -1626,7 +1641,10 @@ final class AppModel {
     private func scheduleInspectorNoteSave(path: String) {
         inspectorNoteSaveTasks[path]?.cancel()
         inspectorNoteSaveTasks[path] = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_700_000_000)
+            // Safety net only: the primary flush points are blur, doc switch,
+            // and quit. Writing while the user types kicks off a full vault
+            // reindex mid-IME-composition (issue #87), so keep this long.
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
             guard !Task.isCancelled else { return }
             await self?.flushInspectorNoteSave(path: path)
         }
@@ -1643,9 +1661,9 @@ final class AppModel {
         let ac = a.created ?? ""
         let bc = b.created ?? ""
         if ac != bc { return ac < bc }
-        let at = a.mtime ?? a.added ?? 0
-        let bt = b.mtime ?? b.added ?? 0
-        if at != bt { return at < bt }
+        // No mtime tiebreak: `created` is date-only, so same-day notes always
+        // tied — and every autosave bumps mtime, making the card being edited
+        // jump to the end of the list after each reindex (issue #87).
         return a.path < b.path
     }
 
