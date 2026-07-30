@@ -1,26 +1,26 @@
 import Foundation
 
 #if os(macOS)
-/// Append-only persistent log for Superset CLI failures. GUI-launched apps
+/// Append-only persistent log for Reader AI dispatch failures. GUI-launched apps
 /// don't inherit a console, so `print()` to stdout is invisible — yet the
 /// failure messages tell the user to "请查看日志". This writes the exit code
 /// and stderr to a file they can actually open, making that hint true.
-public struct SupersetLog: Sendable {
-    public static let shared = SupersetLog()
+public struct ReaderAILog: Sendable {
+    public static let shared = ReaderAILog()
 
     let fileURL: URL
 
-    public init(fileURL: URL = SupersetLog.defaultFileURL) {
+    public init(fileURL: URL = ReaderAILog.defaultFileURL) {
         self.fileURL = fileURL
     }
 
-    /// ~/Library/Logs/Marple/superset.log — the conventional macOS location
+    /// ~/Library/Logs/Marple/reader-ai.log — the conventional macOS location
     /// surfaced by Console.app and easy to point users at.
     public static var defaultFileURL: URL {
         FileManager.default
             .homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/Marple", isDirectory: true)
-            .appendingPathComponent("superset.log")
+            .appendingPathComponent("reader-ai.log")
     }
 
     public func append(_ message: String, timestamp: Date = Date()) {

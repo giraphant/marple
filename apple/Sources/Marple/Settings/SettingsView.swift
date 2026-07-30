@@ -277,12 +277,12 @@ private struct AIBridgeSettings: View {
     @AppStorage(SettingsKeys.aiDispatchTemplate) private var dispatchTemplate = AIDispatchTarget.superset.defaultTemplate
     @AppStorage(SettingsKeys.aiAgentChoice) private var agentChoiceRaw = ""
     @AppStorage(SettingsKeys.supersetWorkspaceID) private var supersetWorkspaceID = ""
-    @AppStorage(SettingsKeys.supersetAgent) private var supersetAgent = "claude"
+    @AppStorage(SettingsKeys.readerAIAgent) private var readerAIAgent = "claude"
     @AppStorage(SettingsKeys.supersetCLIPath) private var supersetCLIPath = "superset"
-    @AppStorage(SettingsKeys.supersetReanalyzePrompt) private var supersetReanalyzePrompt = ""
-    @AppStorage(SettingsKeys.supersetFormatPrompt) private var supersetFormatPrompt = ""
-    @AppStorage(SettingsKeys.supersetTranslatePrompt) private var supersetTranslatePrompt = ""
-    @AppStorage(SettingsKeys.supersetDiscussPrompt) private var supersetDiscussPrompt = ""
+    @AppStorage(SettingsKeys.readerAIReanalyzePrompt) private var readerAIReanalyzePrompt = ""
+    @AppStorage(SettingsKeys.readerAIFormatPrompt) private var readerAIFormatPrompt = ""
+    @AppStorage(SettingsKeys.readerAITranslatePrompt) private var readerAITranslatePrompt = ""
+    @AppStorage(SettingsKeys.readerAIDiscussPrompt) private var readerAIDiscussPrompt = ""
     @State private var discoveredWorkspaces: [SupersetWorkspace] = []
     @State private var workspaceLookupMessage: String?
     @State private var workspaceLookupIsError = false
@@ -310,21 +310,21 @@ private struct AIBridgeSettings: View {
                 // a custom command that momentarily equals "claude" doesn't
                 // flip the picker and hide the field mid-edit.
                 let agentChoice = AgentChoice(rawValue: agentChoiceRaw)
-                    ?? AgentChoice(rawValue: supersetAgent)
+                    ?? AgentChoice(rawValue: readerAIAgent)
                     ?? .custom
                 Picker("Agent", selection: Binding(
                     get: { agentChoice },
                     set: { choice in
                         agentChoiceRaw = choice.rawValue
                         if choice != .custom {
-                            supersetAgent = choice.rawValue
+                            readerAIAgent = choice.rawValue
                         }
                     }
                 )) {
                     ForEach(AgentChoice.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 if agentChoice == .custom {
-                    TextField("Agent 命令（如 claude --model opus）", text: $supersetAgent)
+                    TextField("Agent 命令（如 claude --model opus）", text: $readerAIAgent)
                         .textFieldStyle(.roundedBorder)
                 }
 
@@ -356,6 +356,11 @@ private struct AIBridgeSettings: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if AIDispatchTarget(rawValue: dispatchTargetRaw) == .otty {
+                    Text("请先在 Otty 设置中安装 CLI，并在“高级”中开启“IPC Allow Send Keys”。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 TextField("命令模板", text: $dispatchTemplate, axis: .vertical)
                     .lineLimit(2...8)
@@ -383,24 +388,24 @@ private struct AIBridgeSettings: View {
 
             Section("AI 咒语") {
                 PromptTemplateEditor(
-                    title: SupersetAction.reanalyze.label,
-                    prompt: $supersetReanalyzePrompt,
-                    defaultPrompt: SupersetAction.reanalyze.defaultPromptIntent
+                    title: ReaderAIAction.reanalyze.label,
+                    prompt: $readerAIReanalyzePrompt,
+                    defaultPrompt: ReaderAIAction.reanalyze.defaultPromptIntent
                 )
                 PromptTemplateEditor(
-                    title: SupersetAction.format.label,
-                    prompt: $supersetFormatPrompt,
-                    defaultPrompt: SupersetAction.format.defaultPromptIntent
+                    title: ReaderAIAction.format.label,
+                    prompt: $readerAIFormatPrompt,
+                    defaultPrompt: ReaderAIAction.format.defaultPromptIntent
                 )
                 PromptTemplateEditor(
-                    title: SupersetAction.translate.label,
-                    prompt: $supersetTranslatePrompt,
-                    defaultPrompt: SupersetAction.translate.defaultPromptIntent
+                    title: ReaderAIAction.translate.label,
+                    prompt: $readerAITranslatePrompt,
+                    defaultPrompt: ReaderAIAction.translate.defaultPromptIntent
                 )
                 PromptTemplateEditor(
-                    title: SupersetAction.discuss.label,
-                    prompt: $supersetDiscussPrompt,
-                    defaultPrompt: SupersetAction.discuss.defaultPromptIntent
+                    title: ReaderAIAction.discuss.label,
+                    prompt: $readerAIDiscussPrompt,
+                    defaultPrompt: ReaderAIAction.discuss.defaultPromptIntent
                 )
                 Text("支持变量：`{{action}}`、`{{target_relative_path}}`、`{{target_absolute_path}}`、`{{context_package_path}}`。Marple 会固定追加安全边界；格式整理会额外强制使用 quasi:audit-agent / quasi-audit。")
                     .font(.caption)
@@ -414,7 +419,16 @@ private struct AIBridgeSettings: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { semanticIndexController = ActiveSemanticIndex.controller }
+        .onAppear {
+            semanticIndexController = ActiveSemanticIndex.controller
+            let resolvedTemplate = AIDispatchTarget.resolveTemplate(
+                targetRawValue: dispatchTargetRaw,
+                storedTemplate: dispatchTemplate
+            )
+            if resolvedTemplate != dispatchTemplate {
+                dispatchTemplate = resolvedTemplate
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: ActiveSemanticIndex.didChangeNotification)) { note in
             semanticIndexController = note.object as? SemanticIndexRefreshController
         }
@@ -427,7 +441,7 @@ private struct AIBridgeSettings: View {
         defer { isLoadingWorkspaces = false }
 
         do {
-            let workspaces = try await SupersetRunner().listWorkspaces(cliPath: supersetCLIPath)
+            let workspaces = try await ReaderAIRunner().listWorkspaces(cliPath: supersetCLIPath)
             discoveredWorkspaces = workspaces
             let ids = workspaces.map(\.id)
             if let first = workspaces.first {
