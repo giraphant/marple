@@ -31,9 +31,16 @@ import Testing
         #expect(rel.annotations.map(\.path) == ["vault/notes/n.md"])
     }
 
-    // QUA-221 容器附属聚合：边忠实指向章节；书 overview 在查询期聚合各章节的
-    // 笔记，章节只显示直接标注自己的。
-    @Test func bookOverviewAggregatesChapterAnnotations() {
+    @Test func chapterAnnotationTargetsBookOverview() {
+        let overview = mk("vault/books/smith-2020/00-overview.md", "book")
+        let chapter = mk("vault/books/smith-2020/ch01.md", "chapter", book: "smith-2020")
+
+        #expect(annotationTarget(for: chapter, in: [overview, chapter]).path == overview.path)
+    }
+
+    // A book and every chapter share one annotation surface. Existing notes whose
+    // frontmatter still points at a chapter remain part of that book-level set.
+    @Test func bookAndChaptersShareAnnotations() {
         let overview = mk("vault/books/smith-2020/00-overview.md", "book")
         let ch1 = mk("vault/books/smith-2020/ch01.md", "chapter", book: "smith-2020")
         let ch2 = mk("vault/books/smith-2020/ch02.md", "chapter", book: "smith-2020")
@@ -46,12 +53,10 @@ import Testing
         #expect(graph.sources(of: ch1.path, kind: .annotates).map(\.path) == [chNote.path])
         #expect(graph.sources(of: overview.path, kind: .annotates).map(\.path) == [bookNote.path])
 
-        // overview 聚合：自身 + 各章节（自身先、再章节）
-        let overviewRel = relations(for: overview, in: entries, graph: graph)
-        #expect(Set(overviewRel.annotations.map(\.path)) == [bookNote.path, chNote.path])
-        // 章节只看本章
-        #expect(relations(for: ch1, in: entries, graph: graph).annotations.map(\.path) == [chNote.path])
-        #expect(relations(for: ch2, in: entries, graph: graph).annotations.isEmpty)
+        let expected = Set([bookNote.path, chNote.path])
+        #expect(Set(relations(for: overview, in: entries, graph: graph).annotations.map(\.path)) == expected)
+        #expect(Set(relations(for: ch1, in: entries, graph: graph).annotations.map(\.path)) == expected)
+        #expect(Set(relations(for: ch2, in: entries, graph: graph).annotations.map(\.path)) == expected)
     }
 
     // overview 聚合靠 bookContext 的 path-slug 匹配，章节缺 `book` 字段也成立。

@@ -16,15 +16,14 @@ public func splitAuthors(_ s: String?) -> [String] {
     return parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
 }
 
-/// 规则：容器附属聚合。容器 overview 的反向附属（如 annotates 笔记）=
-/// 自身 ∪ 所有成员；非 overview（章节、普通文档）只取直接标注自己的。上卷只在
-/// 查询期发生，边本身忠实真相——替代旧 annotationAnchor 的写入期章→书重映射
-/// （QUA-221）。去重保留来源顺序（overview 自身 → 各章节，按 bookContext 序）。
+/// 规则：容器附属聚合。一本书的 overview 与所有章节共享同一组附属内容：
+/// overview 自身 ∪ 所有章节。边仍忠实保留 frontmatter 的原始目标，因此现有
+/// 章节笔记也会进入书级集合；非书籍文档只取直接标注自己的。
 func attachmentSources(for entry: Entry, in entries: [Entry],
                        graph: RelationGraph, kind: RelationKind) -> [Entry] {
     let anchors: [Entry]
-    if let ctx = bookContext(for: entry, in: entries), ctx.overview?.path == entry.path {
-        anchors = [entry] + ctx.chapters
+    if let ctx = bookContext(for: entry, in: entries) {
+        anchors = [ctx.overview].compactMap { $0 } + ctx.chapters
     } else {
         anchors = [entry]
     }
@@ -36,6 +35,15 @@ func attachmentSources(for entry: Entry, in entries: [Entry],
         }
     }
     return acc
+}
+
+/// New notes created while reading a chapter belong to the book overview so the
+/// persisted association matches the shared book-level Notes surface.
+public func annotationTarget(for entry: Entry, in entries: [Entry]) -> Entry {
+    if entry.type == .chapter, let overview = bookContext(for: entry, in: entries)?.overview {
+        return overview
+    }
+    return entry
 }
 
 public struct Relations: Equatable, Sendable {
@@ -66,7 +74,7 @@ public func relations(for entry: Entry, in entries: [Entry],
     var out = Relations()
     // 旧 isEmpty 回退：deferred 图未就绪时同步重建（author 部分用）。
     // annotations 沿用旧时序：只读传入的图，未就绪即空（旧 annotationIndex 无回退，
-    // 故意用 graph 非 liveGraph）。容器附属聚合把章节笔记上卷到书 overview（查询期）。
+    // 故意用 graph 非 liveGraph）。书籍成员在查询期共享容器附属内容。
     let liveGraph = graph.isEmpty ? RelationGraph.build(entries) : graph
     out.annotations = attachmentSources(for: entry, in: entries, graph: graph, kind: .annotates)
         .sorted(by: byRatingDesc)
