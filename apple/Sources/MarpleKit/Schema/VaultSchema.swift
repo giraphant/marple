@@ -26,9 +26,9 @@ public struct VaultSchema: Sendable, Equatable {
     /// contrast `entityAliases`, whose values are entity *names* resolved by
     /// NameResolver. An entry of `onType` carrying a non-empty `field` produces
     /// a `kind` relation edge to the referenced path (QUA-218 rule③). The edge
-    /// stays faithful to the frontmatter path; rolling a chapter's notes up onto
-    /// the book overview happens at query time via container attachment
-    /// aggregation (`relations` / `attachmentSources`), not by rewriting it here.
+    /// stays faithful to the frontmatter path; book members share their notes at
+    /// query time via container attachment aggregation (`relations` /
+    /// `attachmentSources`), not by rewriting existing metadata here.
     public struct PathReference: Sendable, Equatable {
         public let onType: String   // source entry type carrying the field
         public let field: String    // frontmatter field holding the target vault path
@@ -87,7 +87,7 @@ public struct VaultSchema: Sendable, Equatable {
             "topic": [FieldAlias("topics")],
         ],
         pathReferences: [
-            // 笔记 → 标注锚点。章→书 overview 重映射是点名的 Swift 例外（spec §3.4）。
+            // 笔记 → 标注锚点。书籍成员在查询期共享反向关联。
             PathReference(onType: "note", field: "annotates", kind: "annotates"),
         ],
         displayByType: [

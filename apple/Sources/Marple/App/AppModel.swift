@@ -258,7 +258,7 @@ final class AppModel {
     var inspectorAnnotationNotes: [Entry] {
         var notes = (openRelations?.annotations ?? []).sorted(by: inspectorNoteComesBefore)
         if let selected = inspectorSelectedNoteEntry,
-           selected.annotates == openPath,
+           selected.annotates == openEntry.map({ annotationTarget(for: $0, in: entries).path }),
            !notes.contains(where: { $0.path == selected.path }) {
             notes.append(selected)
         }
@@ -1039,7 +1039,9 @@ final class AppModel {
         writeError = nil
         if path != loadedDocPath {
             await flushAllInspectorNoteSaves()
-            if inspectorSelectedNoteEntry?.annotates != path { clearInspectorNoteSelection() }
+            let nextTargetPath = entries.first(where: { $0.path == path })
+                .map { annotationTarget(for: $0, in: entries).path }
+            if inspectorSelectedNoteEntry?.annotates != nextTargetPath { clearInspectorNoteSelection() }
         }
         guard let path else {
             openBlocks = []; openBody = ""; loadedDocPath = nil
@@ -1588,8 +1590,9 @@ final class AppModel {
     }
 
     func createInlineAnnotationForOpenDoc() async {
-        guard let target = openEntry else { return }
+        guard let openEntry else { return }
         guard canCreateInlineAnnotationForOpenDoc else { return }
+        let target = annotationTarget(for: openEntry, in: entries)
         await flushAllInspectorNoteSaves()
         let draft = NoteBuilder.annotation(target: target)
         let entry = annotationEntry(from: draft, target: target)
@@ -1864,10 +1867,9 @@ final class AppModel {
     }
 
     func newAnnotation(for entry: Entry) async {
-        // 忠实标注当前打开的文档（章节就写章节）。书 overview 的关联面板靠
-        // relations() 的容器附属聚合把章节笔记上卷过来（QUA-221）。
-        let draft = NoteBuilder.annotation(target: entry)
-        await createAndReveal(draft, entry: annotationEntry(from: draft, target: entry))
+        let target = annotationTarget(for: entry, in: entries)
+        let draft = NoteBuilder.annotation(target: target)
+        await createAndReveal(draft, entry: annotationEntry(from: draft, target: target))
     }
 
     func newAnnotationForOpenDoc() async {
