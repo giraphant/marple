@@ -187,20 +187,20 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
         assistantMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
     }
 
-    @objc private func reanalyzeWithSuperset() {
-        Task { await model?.runSupersetAction(.reanalyze) }
+    @objc private func reanalyzeWithReaderAI() {
+        Task { await model?.runReaderAIAction(.reanalyze) }
     }
 
-    @objc private func formatWithSuperset() {
-        Task { await model?.runSupersetAction(.format) }
+    @objc private func formatWithReaderAI() {
+        Task { await model?.runReaderAIAction(.format) }
     }
 
-    @objc private func translateWithSuperset() {
-        Task { await model?.runSupersetAction(.translate) }
+    @objc private func translateWithReaderAI() {
+        Task { await model?.runReaderAIAction(.translate) }
     }
 
-    @objc private func discussWithSuperset() {
-        Task { await model?.runSupersetAction(.discuss) }
+    @objc private func discussWithReaderAI() {
+        Task { await model?.runReaderAIAction(.discuss) }
     }
 
     /// Click on 引用: per the setting, copy the default format or pop the menu.
@@ -261,29 +261,29 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
     }
 
     private func buildAssistantMenu(_ menu: NSMenu) {
-        let reanalyze = NSMenuItem(title: SupersetAction.reanalyze.label,
-                                   action: #selector(reanalyzeWithSuperset),
+        let reanalyze = NSMenuItem(title: ReaderAIAction.reanalyze.label,
+                                   action: #selector(reanalyzeWithReaderAI),
                                    keyEquivalent: "")
         reanalyze.target = self
         reanalyze.isEnabled = model?.openPath != nil
         menu.addItem(reanalyze)
 
-        let format = NSMenuItem(title: SupersetAction.format.label,
-                                action: #selector(formatWithSuperset),
+        let format = NSMenuItem(title: ReaderAIAction.format.label,
+                                action: #selector(formatWithReaderAI),
                                 keyEquivalent: "")
         format.target = self
         format.isEnabled = model?.openPath != nil
         menu.addItem(format)
 
-        let translate = NSMenuItem(title: SupersetAction.translate.label,
-                                   action: #selector(translateWithSuperset),
+        let translate = NSMenuItem(title: ReaderAIAction.translate.label,
+                                   action: #selector(translateWithReaderAI),
                                    keyEquivalent: "")
         translate.target = self
         translate.isEnabled = model?.openPath != nil
         menu.addItem(translate)
 
-        let discuss = NSMenuItem(title: SupersetAction.discuss.label,
-                                 action: #selector(discussWithSuperset),
+        let discuss = NSMenuItem(title: ReaderAIAction.discuss.label,
+                                 action: #selector(discussWithReaderAI),
                                  keyEquivalent: "")
         discuss.target = self
         discuss.isEnabled = model?.openPath != nil

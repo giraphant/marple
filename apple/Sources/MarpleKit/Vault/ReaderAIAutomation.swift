@@ -1,7 +1,7 @@
 import Foundation
 
 // Reader actions are high-level shortcuts over Quasi worker capabilities, not separate workflows.
-public enum SupersetAction: String, CaseIterable, Sendable, Equatable {
+public enum ReaderAIAction: String, CaseIterable, Sendable, Equatable {
     case reanalyze
     case format
     case translate
@@ -78,7 +78,7 @@ public enum AIDispatchTarget: String, CaseIterable, Sendable {
     }
 
     /// Templates run through `zsh -lc` with `MARPLE_*` variables exported (see
-    /// `SupersetRunner.dispatch`). Terminal-style targets open the generated
+    /// `ReaderAIRunner.dispatch`). Terminal-style targets open the generated
     /// `$MARPLE_RUN_SCRIPT` (.command), so any app that can run a shell script works.
     public var defaultTemplate: String {
         switch self {
@@ -89,7 +89,7 @@ public enum AIDispatchTarget: String, CaseIterable, Sendable {
         case .orca:
             return #"orca terminal create --worktree "path:$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" --command "$MARPLE_RUN_SCRIPT" --focus"#
         case .otty:
-            return #"open -a Otty "$MARPLE_RUN_SCRIPT""#
+            return #"(otty tab new --window current --cwd "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" || otty open "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE") && otty pane send-text "exec /bin/zsh \"$MARPLE_RUN_SCRIPT\"\n""#
         case .terminal:
             return #"open -a Terminal "$MARPLE_RUN_SCRIPT""#
         case .custom:
@@ -97,17 +97,36 @@ public enum AIDispatchTarget: String, CaseIterable, Sendable {
         }
     }
 
+    /// Template used by versions before Otty's CLI integration.
+    static let legacyOttyTemplate = #"open -a Otty "$MARPLE_RUN_SCRIPT""#
+
+    /// Template used when Otty dispatch always opened a new window.
+    static let legacyOttyWindowTemplate = #"otty-cli open "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" --command "$MARPLE_RUN_SCRIPT""#
+
+    /// Template used when Otty accepted `--command` but did not execute it.
+    static let legacyOttyTabCommandTemplate = #"otty-cli tab new --window current --cwd "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" --command "$MARPLE_RUN_SCRIPT" || otty-cli open "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" --command "$MARPLE_RUN_SCRIPT""#
+
+    /// Template saved while migrating from Otty's bundled CLI name to its installed name.
+    static let legacyOttyMixedCLINameTemplate = #"otty tab new --window current --cwd "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" --command "$MARPLE_RUN_SCRIPT" || otty-cli open "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" --command "$MARPLE_RUN_SCRIPT""#
+
     /// Resolves the effective dispatch template from the stored settings.
     /// Unset/blank stored template falls back to the selected preset's default,
     /// so legacy installs (nothing stored) keep the Superset flow unchanged.
     public static func resolveTemplate(targetRawValue: String?, storedTemplate: String?) -> String {
         let target = AIDispatchTarget(rawValue: targetRawValue ?? "") ?? .superset
         let stored = (storedTemplate ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if target == .otty,
+           stored == legacyOttyTemplate
+            || stored == legacyOttyWindowTemplate
+            || stored == legacyOttyTabCommandTemplate
+            || stored == legacyOttyMixedCLINameTemplate {
+            return target.defaultTemplate
+        }
         return stored.isEmpty ? target.defaultTemplate : stored
     }
 }
 
-public struct SupersetDispatchConfig: Sendable, Equatable {
+public struct ReaderAIDispatchConfig: Sendable, Equatable {
     public let workspaceID: String
     public let agent: String
     public let cliPath: String
@@ -137,7 +156,7 @@ public struct SupersetDispatchConfig: Sendable, Equatable {
         self.discussPrompt = discussPrompt
     }
 
-    public func promptIntent(for action: SupersetAction) -> String {
+    public func promptIntent(for action: ReaderAIAction) -> String {
         let customPrompt = switch action {
         case .reanalyze: reanalyzePrompt
         case .format: formatPrompt
@@ -149,7 +168,7 @@ public struct SupersetDispatchConfig: Sendable, Equatable {
     }
 }
 
-public struct SupersetRelatedEntry: Sendable, Equatable {
+public struct ReaderAIRelatedEntry: Sendable, Equatable {
     public let path: String
     public let type: String
     public let title: String?
@@ -174,7 +193,7 @@ public struct SupersetRelatedEntry: Sendable, Equatable {
     }
 }
 
-public struct SupersetWikiTarget: Sendable, Equatable {
+public struct ReaderAIWikiTarget: Sendable, Equatable {
     public let target: String
     public let label: String
     public let path: String
@@ -188,18 +207,18 @@ public struct SupersetWikiTarget: Sendable, Equatable {
     }
 }
 
-public struct SupersetRelatedContext: Sendable, Equatable {
-    public let annotations: [SupersetRelatedEntry]
-    public let bookEntries: [SupersetRelatedEntry]
-    public let relatedWorks: [SupersetRelatedEntry]
-    public let wikilinks: [SupersetWikiTarget]
+public struct ReaderAIRelatedContext: Sendable, Equatable {
+    public let annotations: [ReaderAIRelatedEntry]
+    public let bookEntries: [ReaderAIRelatedEntry]
+    public let relatedWorks: [ReaderAIRelatedEntry]
+    public let wikilinks: [ReaderAIWikiTarget]
     public let sourcePaths: [String]
 
     public init(
-        annotations: [SupersetRelatedEntry] = [],
-        bookEntries: [SupersetRelatedEntry] = [],
-        relatedWorks: [SupersetRelatedEntry] = [],
-        wikilinks: [SupersetWikiTarget] = [],
+        annotations: [ReaderAIRelatedEntry] = [],
+        bookEntries: [ReaderAIRelatedEntry] = [],
+        relatedWorks: [ReaderAIRelatedEntry] = [],
+        wikilinks: [ReaderAIWikiTarget] = [],
         sourcePaths: [String] = []
     ) {
         self.annotations = annotations
@@ -210,17 +229,17 @@ public struct SupersetRelatedContext: Sendable, Equatable {
     }
 }
 
-public enum SupersetContextError: Error, Equatable {
+public enum ReaderAIContextError: Error, Equatable {
     case absoluteTargetPath
     case targetEscapesWorkspace
 }
 
-public struct SupersetDispatchContext: Sendable, Equatable {
+public struct ReaderAIDispatchContext: Sendable, Equatable {
     public let workspaceRoot: String
     public let targetPath: String
     public let entry: Entry
     public let documentText: String
-    public let related: SupersetRelatedContext
+    public let related: ReaderAIRelatedContext
     private let resolvedTargetAbsolutePath: String
 
     public var targetAbsolutePath: String { resolvedTargetAbsolutePath }
@@ -230,10 +249,10 @@ public struct SupersetDispatchContext: Sendable, Equatable {
         targetPath: String,
         entry: Entry,
         documentText: String,
-        related: SupersetRelatedContext
+        related: ReaderAIRelatedContext
     ) throws {
         guard !(targetPath as NSString).isAbsolutePath else {
-            throw SupersetContextError.absoluteTargetPath
+            throw ReaderAIContextError.absoluteTargetPath
         }
 
         let standardizedWorkspaceRoot = URL(fileURLWithPath: workspaceRoot).standardizedFileURL.path
@@ -243,7 +262,7 @@ public struct SupersetDispatchContext: Sendable, Equatable {
             .path
         let workspacePrefix = standardizedWorkspaceRoot.hasSuffix("/") ? standardizedWorkspaceRoot : standardizedWorkspaceRoot + "/"
         guard standardizedTarget == standardizedWorkspaceRoot || standardizedTarget.hasPrefix(workspacePrefix) else {
-            throw SupersetContextError.targetEscapesWorkspace
+            throw ReaderAIContextError.targetEscapesWorkspace
         }
 
         self.workspaceRoot = workspaceRoot
@@ -255,8 +274,8 @@ public struct SupersetDispatchContext: Sendable, Equatable {
     }
 }
 
-public enum SupersetContextPackageBuilder {
-    public static func markdown(for action: SupersetAction, context: SupersetDispatchContext) -> String {
+public enum ReaderAIContextPackageBuilder {
+    public static func markdown(for action: ReaderAIAction, context: ReaderAIDispatchContext) -> String {
         var lines: [String] = []
         lines.append("# Marple Context")
         lines.append("")
@@ -301,12 +320,12 @@ public enum SupersetContextPackageBuilder {
     }
 
     public static func write(
-        action: SupersetAction,
-        context: SupersetDispatchContext,
+        action: ReaderAIAction,
+        context: ReaderAIDispatchContext,
         fileManager: FileManager = .default
     ) throws -> URL {
         let directory = fileManager.temporaryDirectory
-            .appendingPathComponent("marple-superset-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("marple-reader-ai-\(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("context.md")
         try markdown(for: action, context: context).write(to: url, atomically: true, encoding: .utf8)
@@ -318,7 +337,7 @@ public enum SupersetContextPackageBuilder {
         lines.append("- \(label): \(value)")
     }
 
-    private static func appendEntries(title: String, _ entries: [SupersetRelatedEntry], to lines: inout [String]) {
+    private static func appendEntries(title: String, _ entries: [ReaderAIRelatedEntry], to lines: inout [String]) {
         lines.append("### \(title)")
         if entries.isEmpty {
             lines.append("- None")
@@ -338,7 +357,7 @@ public enum SupersetContextPackageBuilder {
         lines.append("")
     }
 
-    private static func appendWikilinks(_ wikilinks: [SupersetWikiTarget], to lines: inout [String]) {
+    private static func appendWikilinks(_ wikilinks: [ReaderAIWikiTarget], to lines: inout [String]) {
         lines.append("### Wikilinks")
         if wikilinks.isEmpty {
             lines.append("- None")
@@ -366,9 +385,9 @@ public enum SupersetContextPackageBuilder {
     }
 }
 
-public enum SupersetPromptBuilder {
+public enum ReaderAIPromptBuilder {
     public static func prompt(
-        action: SupersetAction,
+        action: ReaderAIAction,
         targetRelativePath: String,
         targetAbsolutePath: String,
         contextPackagePath: String,
@@ -406,7 +425,7 @@ public enum SupersetPromptBuilder {
 
     public static func renderTemplate(
         _ template: String,
-        action: SupersetAction,
+        action: ReaderAIAction,
         targetRelativePath: String,
         targetAbsolutePath: String,
         contextPackagePath: String

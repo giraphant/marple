@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MarpleKit
 
-@Suite struct SupersetAutomationTests {
+@Suite struct ReaderAIAutomationTests {
     private final class LogBox: @unchecked Sendable {
         private(set) var entries: [String] = []
         func append(_ message: String) { entries.append(message) }
@@ -25,15 +25,15 @@ import Testing
     )
 
     @Test func contextPackageIncludesTargetMetadataBodyAndBoundary() throws {
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
             documentText: "---\ntitle: Paper A\n---\n\n# Old analysis",
-            related: SupersetRelatedContext()
+            related: ReaderAIRelatedContext()
         )
 
-        let markdown = SupersetContextPackageBuilder.markdown(for: .reanalyze, context: context)
+        let markdown = ReaderAIContextPackageBuilder.markdown(for: .reanalyze, context: context)
 
         #expect(markdown.contains("# Marple Context"))
         #expect(markdown.contains("## Action\n重新分析"))
@@ -48,15 +48,15 @@ import Testing
     }
 
     @Test func discussionContextPackageUsesNoEditBoundary() throws {
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
             documentText: "Body",
-            related: SupersetRelatedContext()
+            related: ReaderAIRelatedContext()
         )
 
-        let markdown = SupersetContextPackageBuilder.markdown(for: .discuss, context: context)
+        let markdown = ReaderAIContextPackageBuilder.markdown(for: .discuss, context: context)
 
         #expect(markdown.contains("## Action\n对话讨论"))
         #expect(markdown.contains("Do not edit, create, or delete files for this discussion action."))
@@ -64,21 +64,21 @@ import Testing
     }
 
     @Test func contextPackageIncludesRelatedEntriesWikilinksAndSources() throws {
-        let annotation = SupersetRelatedEntry(
+        let annotation = ReaderAIRelatedEntry(
             path: "vault/notes/a-note.md",
             type: "note",
             title: "My note",
             summary: "Personal annotation",
             reason: "annotation"
         )
-        let related = SupersetRelatedContext(
+        let related = ReaderAIRelatedContext(
             annotations: [annotation],
-            bookEntries: [SupersetRelatedEntry(path: "vault/books/b.md", type: "book", title: "Book B", summary: "Book context", reason: "same book")],
-            relatedWorks: [SupersetRelatedEntry(path: "vault/papers/b.md", type: "paper", title: "Paper B", summary: "Related", reason: "shared themes")],
-            wikilinks: [SupersetWikiTarget(target: "Concept", label: "Concept", path: "vault/topics/concept.md", title: "Concept")],
+            bookEntries: [ReaderAIRelatedEntry(path: "vault/books/b.md", type: "book", title: "Book B", summary: "Book context", reason: "same book")],
+            relatedWorks: [ReaderAIRelatedEntry(path: "vault/papers/b.md", type: "paper", title: "Paper B", summary: "Related", reason: "shared themes")],
+            wikilinks: [ReaderAIWikiTarget(target: "Concept", label: "Concept", path: "vault/topics/concept.md", title: "Concept")],
             sourcePaths: ["sources/paper-a.pdf", "processing/translations/paper-a-zh.pdf"]
         )
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
@@ -86,7 +86,7 @@ import Testing
             related: related
         )
 
-        let markdown = SupersetContextPackageBuilder.markdown(for: .format, context: context)
+        let markdown = ReaderAIContextPackageBuilder.markdown(for: .format, context: context)
 
         #expect(markdown.contains("## Action\n格式整理"))
         #expect(markdown.contains("vault/notes/a-note.md — My note — annotation — Personal annotation"))
@@ -98,29 +98,29 @@ import Testing
     }
 
     @Test func actionLabelsIncludeTranslateAndDiscuss() {
-        #expect(SupersetAction.allCases.map(\.label) == ["重新分析", "格式整理", "制作译本", "对话讨论"])
+        #expect(ReaderAIAction.allCases.map(\.label) == ["重新分析", "格式整理", "制作译本", "对话讨论"])
     }
 
     @Test func promptBuilderUsesDistinctActionIntentAndStablePaths() {
-        let reanalyze = SupersetPromptBuilder.prompt(
+        let reanalyze = ReaderAIPromptBuilder.prompt(
             action: .reanalyze,
             targetRelativePath: "vault/papers/a.md",
             targetAbsolutePath: "/tmp/marple-workspace/vault/papers/a.md",
             contextPackagePath: "/tmp/context.md"
         )
-        let format = SupersetPromptBuilder.prompt(
+        let format = ReaderAIPromptBuilder.prompt(
             action: .format,
             targetRelativePath: "vault/papers/a.md",
             targetAbsolutePath: "/tmp/marple-workspace/vault/papers/a.md",
             contextPackagePath: "/tmp/context.md"
         )
-        let translate = SupersetPromptBuilder.prompt(
+        let translate = ReaderAIPromptBuilder.prompt(
             action: .translate,
             targetRelativePath: "vault/papers/a.md",
             targetAbsolutePath: "/tmp/marple-workspace/vault/papers/a.md",
             contextPackagePath: "/tmp/context.md"
         )
-        let discuss = SupersetPromptBuilder.prompt(
+        let discuss = ReaderAIPromptBuilder.prompt(
             action: .discuss,
             targetRelativePath: "vault/papers/a.md",
             targetAbsolutePath: "/tmp/marple-workspace/vault/papers/a.md",
@@ -148,7 +148,7 @@ import Testing
     }
 
     @Test func promptBuilderRendersCustomTemplateAndKeepsSafetyBoundary() {
-        let prompt = SupersetPromptBuilder.prompt(
+        let prompt = ReaderAIPromptBuilder.prompt(
             action: .format,
             targetRelativePath: "vault/papers/a.md",
             targetAbsolutePath: "/tmp/marple-workspace/vault/papers/a.md",
@@ -165,7 +165,7 @@ import Testing
     }
 
     @Test func reanalysisPromptAllowsSameBookCompletionWhenNeeded() {
-        let prompt = SupersetPromptBuilder.prompt(
+        let prompt = ReaderAIPromptBuilder.prompt(
             action: .reanalyze,
             targetRelativePath: "vault/books/book-a/00-overview.md",
             targetAbsolutePath: "/tmp/marple-workspace/vault/books/book-a/00-overview.md",
@@ -179,7 +179,7 @@ import Testing
     }
 
     @Test func discussionPromptUsesNoEditBoundary() {
-        let prompt = SupersetPromptBuilder.prompt(
+        let prompt = ReaderAIPromptBuilder.prompt(
             action: .discuss,
             targetRelativePath: "vault/papers/a.md",
             targetAbsolutePath: "/tmp/marple-workspace/vault/papers/a.md",
@@ -193,42 +193,42 @@ import Testing
     }
 
     @Test func dispatchConfigChoosesCustomPromptByActionAndFallsBackForBlankPrompt() {
-        let config = SupersetDispatchConfig(
+        let config = ReaderAIDispatchConfig(
             workspaceID: "ws_123",
             reanalyzePrompt: "重做 {{target_relative_path}}",
             formatPrompt: "  \n\t  "
         )
 
         #expect(config.promptIntent(for: .reanalyze) == "重做 {{target_relative_path}}")
-        #expect(config.promptIntent(for: .format) == SupersetAction.format.defaultPromptIntent)
+        #expect(config.promptIntent(for: .format) == ReaderAIAction.format.defaultPromptIntent)
         #expect(config.promptIntent(for: .format).contains("audit-agent"))
     }
 
     @Test func defaultPromptsWrapSingleQuasiCapabilities() {
-        #expect(SupersetAction.format.defaultPromptIntent.contains("quasi:audit-agent"))
-        #expect(SupersetAction.format.defaultPromptIntent.contains("quasi-audit --path {{target_relative_path}}"))
-        #expect(SupersetAction.format.defaultPromptIntent.contains("quasi-audit 是唯一入口"))
-        #expect(SupersetAction.format.defaultPromptIntent.contains("保留原事实和原措辞"))
-        #expect(!SupersetAction.format.defaultPromptIntent.contains("analyse-agent"))
-        #expect(SupersetAction.reanalyze.defaultPromptIntent.contains("analyse-agent"))
-        #expect(SupersetAction.reanalyze.defaultPromptIntent.contains("synthesis-agent"))
-        #expect(SupersetAction.reanalyze.defaultPromptIntent.contains("quasi:process-book"))
-        #expect(!SupersetAction.reanalyze.defaultPromptIntent.contains("audit-agent"))
-        #expect(SupersetAction.translate.defaultPromptIntent.contains("quasi:translate-agent"))
-        #expect(SupersetAction.translate.defaultPromptIntent.contains("processing/translations/{slug}-zh.pdf"))
-        #expect(SupersetAction.discuss.defaultPromptIntent.contains("不要编辑任何文件"))
+        #expect(ReaderAIAction.format.defaultPromptIntent.contains("quasi:audit-agent"))
+        #expect(ReaderAIAction.format.defaultPromptIntent.contains("quasi-audit --path {{target_relative_path}}"))
+        #expect(ReaderAIAction.format.defaultPromptIntent.contains("quasi-audit 是唯一入口"))
+        #expect(ReaderAIAction.format.defaultPromptIntent.contains("保留原事实和原措辞"))
+        #expect(!ReaderAIAction.format.defaultPromptIntent.contains("analyse-agent"))
+        #expect(ReaderAIAction.reanalyze.defaultPromptIntent.contains("analyse-agent"))
+        #expect(ReaderAIAction.reanalyze.defaultPromptIntent.contains("synthesis-agent"))
+        #expect(ReaderAIAction.reanalyze.defaultPromptIntent.contains("quasi:process-book"))
+        #expect(!ReaderAIAction.reanalyze.defaultPromptIntent.contains("audit-agent"))
+        #expect(ReaderAIAction.translate.defaultPromptIntent.contains("quasi:translate-agent"))
+        #expect(ReaderAIAction.translate.defaultPromptIntent.contains("processing/translations/{slug}-zh.pdf"))
+        #expect(ReaderAIAction.discuss.defaultPromptIntent.contains("不要编辑任何文件"))
     }
 
     @Test func contextPackageWritesToTemporaryMarkdownFile() throws {
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
             documentText: "Body",
-            related: SupersetRelatedContext()
+            related: ReaderAIRelatedContext()
         )
 
-        let url = try SupersetContextPackageBuilder.write(action: .reanalyze, context: context)
+        let url = try ReaderAIContextPackageBuilder.write(action: .reanalyze, context: context)
         let text = try String(contentsOf: url, encoding: .utf8)
 
         #expect(url.lastPathComponent == "context.md")
@@ -237,25 +237,25 @@ import Testing
     }
 
     @Test func dispatchContextRejectsParentTraversalTargetPath() {
-        #expect(throws: SupersetContextError.targetEscapesWorkspace) {
-            try SupersetDispatchContext(
+        #expect(throws: ReaderAIContextError.targetEscapesWorkspace) {
+            try ReaderAIDispatchContext(
                 workspaceRoot: "/tmp/marple-workspace",
                 targetPath: "../outside.md",
                 entry: entry,
                 documentText: "Body",
-                related: SupersetRelatedContext()
+                related: ReaderAIRelatedContext()
             )
         }
     }
 
     @Test func dispatchContextRejectsAbsoluteTargetPath() {
-        #expect(throws: SupersetContextError.absoluteTargetPath) {
-            try SupersetDispatchContext(
+        #expect(throws: ReaderAIContextError.absoluteTargetPath) {
+            try ReaderAIDispatchContext(
                 workspaceRoot: "/tmp/marple-workspace",
                 targetPath: "/tmp/outside.md",
                 entry: entry,
                 documentText: "Body",
-                related: SupersetRelatedContext()
+                related: ReaderAIRelatedContext()
             )
         }
     }
@@ -273,13 +273,13 @@ import Testing
             hasPDF: false
         )
 
-        let related = SupersetRelatedEntry(entry: entryWithoutPreview, reason: "test")
+        let related = ReaderAIRelatedEntry(entry: entryWithoutPreview, reason: "test")
 
         #expect(related.summary == nil)
     }
 
     @Test func templateInvocationRunsTemplateThroughLoginShell() {
-        let invocation = SupersetRunner.templateInvocation(
+        let invocation = ReaderAIRunner.templateInvocation(
             template: "echo hi",
             environment: ["MARPLE_AGENT": "claude"]
         )
@@ -290,7 +290,7 @@ import Testing
     }
 
     @Test func dispatchEnvironmentExportsMarpleVariablesAndAugmentedPATH() {
-        let environment = SupersetRunner.dispatchEnvironment(
+        let environment = ReaderAIRunner.dispatchEnvironment(
             agent: "claude",
             workspaceID: "ws_123",
             cliPath: "/opt/bin/superset",
@@ -316,11 +316,12 @@ import Testing
         #expect(path.hasPrefix("/opt/bin:"))
         #expect(path.contains("/.superset/bin"))
         #expect(path.contains("/Applications/Orca.app/Contents/Resources/bin"))
+        #expect(path.contains("/Applications/Otty.app/Contents/MacOS"))
         #expect(path.hasSuffix(":/usr/bin:/bin"))
     }
 
     @Test func runScriptChangesToVaultAndHandsPromptToAgent() {
-        let script = SupersetRunner.runScript(
+        let script = ReaderAIRunner.runScript(
             agent: "claude",
             vaultRoot: "/tmp/my vault",
             promptFilePath: "/tmp/pkg/prompt.md"
@@ -345,14 +346,14 @@ import Testing
         let promptContent = "line1 \"quoted\" $HOME 'single'\nline2"
         try promptContent.write(to: promptURL, atomically: true, encoding: .utf8)
         let scriptURL = base.appendingPathComponent("run.command")
-        try SupersetRunner.runScript(
+        try ReaderAIRunner.runScript(
             agent: "/usr/bin/printf %s",
             vaultRoot: vault.path,
             promptFilePath: promptURL.path
         ).write(to: scriptURL, atomically: true, encoding: .utf8)
 
-        let result = try await SupersetRunner.defaultExecute(
-            SupersetInvocation(executablePath: "/bin/zsh", arguments: [scriptURL.path])
+        let result = try await ReaderAIRunner.defaultExecute(
+            ReaderAIInvocation(executablePath: "/bin/zsh", arguments: [scriptURL.path])
         )
 
         #expect(result.terminationStatus == 0)
@@ -366,14 +367,14 @@ import Testing
         try fileManager.createDirectory(at: base, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: base) }
         let scriptURL = base.appendingPathComponent("run.command")
-        try SupersetRunner.runScript(
+        try ReaderAIRunner.runScript(
             agent: "/usr/bin/printf agent-ran",
             vaultRoot: base.path,
             promptFilePath: base.appendingPathComponent("missing.md").path
         ).write(to: scriptURL, atomically: true, encoding: .utf8)
 
-        let result = try await SupersetRunner.defaultExecute(
-            SupersetInvocation(executablePath: "/bin/zsh", arguments: [scriptURL.path])
+        let result = try await ReaderAIRunner.defaultExecute(
+            ReaderAIInvocation(executablePath: "/bin/zsh", arguments: [scriptURL.path])
         )
 
         #expect(result.terminationStatus != 0)
@@ -384,12 +385,12 @@ import Testing
     // vars — verify awkward values round-trip without shell mangling.
     @Test func templateExecutionExpandsEnvironmentVerbatim() async throws {
         let title = #"weird "title" with $dollar 'quote'"#
-        let invocation = SupersetRunner.templateInvocation(
+        let invocation = ReaderAIRunner.templateInvocation(
             template: #"printf '%s' "$MARPLE_TITLE""#,
             environment: ["MARPLE_TITLE": title]
         )
 
-        let result = try await SupersetRunner.defaultExecute(invocation)
+        let result = try await ReaderAIRunner.defaultExecute(invocation)
 
         #expect(result.terminationStatus == 0)
         // -l sources the user's zprofile, which may print noise; contains is enough.
@@ -402,6 +403,22 @@ import Testing
             == AIDispatchTarget.superset.defaultTemplate)
         #expect(AIDispatchTarget.resolveTemplate(targetRawValue: "orca", storedTemplate: " \n ")
             == AIDispatchTarget.orca.defaultTemplate)
+        #expect(AIDispatchTarget.resolveTemplate(
+            targetRawValue: "otty",
+            storedTemplate: AIDispatchTarget.legacyOttyTemplate
+        ) == AIDispatchTarget.otty.defaultTemplate)
+        #expect(AIDispatchTarget.resolveTemplate(
+            targetRawValue: "otty",
+            storedTemplate: AIDispatchTarget.legacyOttyWindowTemplate
+        ) == AIDispatchTarget.otty.defaultTemplate)
+        #expect(AIDispatchTarget.resolveTemplate(
+            targetRawValue: "otty",
+            storedTemplate: AIDispatchTarget.legacyOttyTabCommandTemplate
+        ) == AIDispatchTarget.otty.defaultTemplate)
+        #expect(AIDispatchTarget.resolveTemplate(
+            targetRawValue: "otty",
+            storedTemplate: AIDispatchTarget.legacyOttyMixedCLINameTemplate
+        ) == AIDispatchTarget.otty.defaultTemplate)
         #expect(AIDispatchTarget.resolveTemplate(targetRawValue: "custom", storedTemplate: "echo hi")
             == "echo hi")
         // Custom with nothing stored resolves empty ⇒ dispatch reports the
@@ -412,7 +429,7 @@ import Testing
     }
 
     @Test func shellQuoteEscapesSingleQuotes() {
-        #expect(SupersetRunner.shellQuote("it's") == "'it'\\''s'")
+        #expect(ReaderAIRunner.shellQuote("it's") == "'it'\\''s'")
     }
 
     @Test func defaultTemplatesCoverKnownTargets() {
@@ -423,13 +440,14 @@ import Testing
         #expect(AIDispatchTarget.orca.defaultTemplate.contains("terminal create"))
         #expect(AIDispatchTarget.orca.defaultTemplate.contains("path:$MARPLE_VAULT_ROOT"))
         #expect(AIDispatchTarget.orca.defaultTemplate.contains("$MARPLE_RUN_SCRIPT"))
-        #expect(AIDispatchTarget.otty.defaultTemplate == #"open -a Otty "$MARPLE_RUN_SCRIPT""#)
+        #expect(AIDispatchTarget.otty.defaultTemplate == #"(otty tab new --window current --cwd "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" || otty open "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE") && otty pane send-text "exec /bin/zsh \"$MARPLE_RUN_SCRIPT\"\n""#)
+        #expect(!AIDispatchTarget.otty.defaultTemplate.contains("open -a Otty"))
         #expect(AIDispatchTarget.terminal.defaultTemplate == #"open -a Terminal "$MARPLE_RUN_SCRIPT""#)
         #expect(AIDispatchTarget.custom.defaultTemplate.isEmpty)
     }
 
     @Test func resolveCLIPathPrefersKnownInstallLocationForBareName() {
-        let resolved = SupersetRunner.resolveCLIPath(
+        let resolved = ReaderAIRunner.resolveCLIPath(
             "superset",
             searchDirectories: ["/opt/missing", "/Users/me/.superset/bin"],
             isExecutable: { $0 == "/Users/me/.superset/bin/superset" }
@@ -439,7 +457,7 @@ import Testing
     }
 
     @Test func resolveCLIPathResolvesEmptyPathToSupersetBinary() {
-        let resolved = SupersetRunner.resolveCLIPath(
+        let resolved = ReaderAIRunner.resolveCLIPath(
             "",
             searchDirectories: ["/Users/me/.superset/bin"],
             isExecutable: { $0 == "/Users/me/.superset/bin/superset" }
@@ -449,7 +467,7 @@ import Testing
     }
 
     @Test func resolveCLIPathRespectsExplicitPathWithSlash() {
-        let resolved = SupersetRunner.resolveCLIPath(
+        let resolved = ReaderAIRunner.resolveCLIPath(
             "/custom/superset",
             searchDirectories: ["/Users/me/.superset/bin"],
             isExecutable: { _ in true }
@@ -459,7 +477,7 @@ import Testing
     }
 
     @Test func resolveCLIPathFallsBackToInputWhenNotFound() {
-        let resolved = SupersetRunner.resolveCLIPath(
+        let resolved = ReaderAIRunner.resolveCLIPath(
             "superset",
             searchDirectories: ["/opt/missing", "/also/missing"],
             isExecutable: { _ in false }
@@ -469,14 +487,14 @@ import Testing
     }
 
     @Test func workspaceListInvocationUsesJSONLocalWorkspacesCommand() {
-        let invocation = SupersetRunner.workspaceListInvocation(cliPath: "superset")
+        let invocation = ReaderAIRunner.workspaceListInvocation(cliPath: "superset")
 
         #expect(invocation.executablePath == "/usr/bin/env")
         #expect(invocation.arguments == ["superset", "workspaces", "list", "--json", "--local"])
     }
 
     @Test func workspaceIDsParserTrimsAndDeduplicates() {
-        let ids = SupersetRunner.workspaceIDs(from: "  ws_123  \n\nws_456\nws_123\n")
+        let ids = ReaderAIRunner.workspaceIDs(from: "  ws_123  \n\nws_456\nws_123\n")
 
         #expect(ids == ["ws_123", "ws_456"])
     }
@@ -490,7 +508,7 @@ import Testing
         ]
         """
 
-        let workspaces = try SupersetRunner.workspaces(from: json)
+        let workspaces = try ReaderAIRunner.workspaces(from: json)
 
         #expect(workspaces.map(\.id) == ["ws_123", "ws_456"])
         #expect(workspaces[0].displayName == "marple / 基于 Superset CLI 的自动化功能 (qua-45-superset-cli) · RamuG · worktree")
@@ -498,13 +516,13 @@ import Testing
     }
 
     @Test func runnerListsWorkspaceIDs() async throws {
-        let runner = SupersetRunner { invocation in
+        let runner = ReaderAIRunner { invocation in
             // Resolution may turn a bare `superset` into an absolute executable
             // (dropping the leading argv) when the CLI is installed locally;
             // assert the workspaces command regardless of how it's targeted.
             #expect(invocation.executablePath.hasSuffix("superset") || invocation.arguments.first == "superset")
             #expect(Array(invocation.arguments.suffix(4)) == ["workspaces", "list", "--json", "--local"])
-            return SupersetProcessResult(terminationStatus: 0, stdout: """
+            return ReaderAIProcessResult(terminationStatus: 0, stdout: """
             [
               {"id":"ws_123","name":"Current","branch":"main","projectName":"marple","hostName":"RamuG","type":"worktree"},
               {"id":"ws_456","name":"main","branch":"main","projectName":"quasi","hostName":"RamuG","type":"main"}
@@ -518,8 +536,8 @@ import Testing
     }
 
     @Test func runnerReportsWorkspaceListAuthFailure() async {
-        let runner = SupersetRunner { _ in
-            SupersetProcessResult(terminationStatus: 1, stdout: "", stderr: "Error: Not logged in")
+        let runner = ReaderAIRunner { _ in
+            ReaderAIProcessResult(terminationStatus: 1, stdout: "", stderr: "Error: Not logged in")
         }
 
         await #expect(throws: SupersetWorkspaceListError.notAuthenticated) {
@@ -528,8 +546,8 @@ import Testing
     }
 
     @Test func runnerTreatsInvalidAPIKeyAsAuthFailure() async {
-        let runner = SupersetRunner { _ in
-            SupersetProcessResult(terminationStatus: 1, stdout: "", stderr: "Error: Invalid API key.")
+        let runner = ReaderAIRunner { _ in
+            ReaderAIProcessResult(terminationStatus: 1, stdout: "", stderr: "Error: Invalid API key.")
         }
 
         await #expect(throws: SupersetWorkspaceListError.notAuthenticated) {
@@ -539,8 +557,8 @@ import Testing
 
     @Test func runnerReportsWorkspaceListLaunchFailure() async {
         let log = LogBox()
-        let runner = SupersetRunner(
-            execute: { _ in throw SupersetDispatchError.launchFailed("No such file") },
+        let runner = ReaderAIRunner(
+            execute: { _ in throw ReaderAIDispatchError.launchFailed("No such file") },
             log: { log.append($0) }
         )
 
@@ -553,48 +571,48 @@ import Testing
     }
 
     @Test func runnerRejectsMissingWorkspaceID() async throws {
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
             documentText: "Body",
-            related: SupersetRelatedContext()
+            related: ReaderAIRelatedContext()
         )
-        let runner = SupersetRunner { _ in
+        let runner = ReaderAIRunner { _ in
             Issue.record("runner should not execute without workspace ID")
-            return SupersetProcessResult(terminationStatus: 0, stdout: "", stderr: "")
+            return ReaderAIProcessResult(terminationStatus: 0, stdout: "", stderr: "")
         }
 
-        await #expect(throws: SupersetDispatchError.missingWorkspaceID) {
+        await #expect(throws: ReaderAIDispatchError.missingWorkspaceID) {
             try await runner.dispatch(
                 action: .reanalyze,
-                config: SupersetDispatchConfig(workspaceID: "   "),
+                config: ReaderAIDispatchConfig(workspaceID: "   "),
                 context: context
             )
         }
     }
 
     @Test func runnerConvertsNonZeroExitToDispatchError() async throws {
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
             documentText: "Body",
-            related: SupersetRelatedContext()
+            related: ReaderAIRelatedContext()
         )
         let log = LogBox()
-        let runner = SupersetRunner(
+        let runner = ReaderAIRunner(
             execute: { invocation in
                 #expect(invocation.environment["MARPLE_CONTEXT_FILE"] != nil)
-                return SupersetProcessResult(terminationStatus: 2, stdout: "", stderr: "bad workspace")
+                return ReaderAIProcessResult(terminationStatus: 2, stdout: "", stderr: "bad workspace")
             },
             log: { log.append($0) }
         )
 
-        await #expect(throws: SupersetDispatchError.failed(status: 2, stderr: "bad workspace")) {
+        await #expect(throws: ReaderAIDispatchError.failed(status: 2, stderr: "bad workspace")) {
             try await runner.dispatch(
                 action: .format,
-                config: SupersetDispatchConfig(workspaceID: "ws_123"),
+                config: ReaderAIDispatchConfig(workspaceID: "ws_123"),
                 context: context
             )
         }
@@ -608,23 +626,23 @@ import Testing
     }
 
     @Test func runnerLogsStdoutWhenStderrEmptyOnFailure() async throws {
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
             documentText: "Body",
-            related: SupersetRelatedContext()
+            related: ReaderAIRelatedContext()
         )
         let log = LogBox()
-        let runner = SupersetRunner(
-            execute: { _ in SupersetProcessResult(terminationStatus: 1, stdout: "fatal: boom", stderr: "") },
+        let runner = ReaderAIRunner(
+            execute: { _ in ReaderAIProcessResult(terminationStatus: 1, stdout: "fatal: boom", stderr: "") },
             log: { log.append($0) }
         )
 
-        await #expect(throws: SupersetDispatchError.failed(status: 1, stderr: "")) {
+        await #expect(throws: ReaderAIDispatchError.failed(status: 1, stderr: "")) {
             try await runner.dispatch(
                 action: .reanalyze,
-                config: SupersetDispatchConfig(workspaceID: "ws_123"),
+                config: ReaderAIDispatchConfig(workspaceID: "ws_123"),
                 context: context
             )
         }
@@ -634,8 +652,8 @@ import Testing
 
     @Test func runnerDoesNotLogAuthFailureAsError() async {
         let log = LogBox()
-        let runner = SupersetRunner(
-            execute: { _ in SupersetProcessResult(terminationStatus: 1, stdout: "", stderr: "Error: Not logged in") },
+        let runner = ReaderAIRunner(
+            execute: { _ in ReaderAIProcessResult(terminationStatus: 1, stdout: "", stderr: "Error: Not logged in") },
             log: { log.append($0) }
         )
 
@@ -646,19 +664,19 @@ import Testing
         #expect(log.entries.isEmpty)
     }
 
-    @Test func supersetLogFormatsTimestampedLineWithTrailingNewline() {
-        let line = SupersetLog.line("boom", timestamp: Date(timeIntervalSince1970: 0))
+    @Test func readerAILogFormatsTimestampedLineWithTrailingNewline() {
+        let line = ReaderAILog.line("boom", timestamp: Date(timeIntervalSince1970: 0))
 
         #expect(line == "[1970-01-01T00:00:00Z] boom\n")
     }
 
-    @Test func supersetLogAppendsToFile() throws {
+    @Test func readerAILogAppendsToFile() throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("marple-superset-log-test-\(UUID().uuidString)", isDirectory: true)
-        let fileURL = directory.appendingPathComponent("superset.log")
+            .appendingPathComponent("marple-reader-ai-log-test-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("reader-ai.log")
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        let log = SupersetLog(fileURL: fileURL)
+        let log = ReaderAILog(fileURL: fileURL)
         log.append("first", timestamp: Date(timeIntervalSince1970: 0))
         log.append("second", timestamp: Date(timeIntervalSince1970: 1))
 
@@ -667,25 +685,25 @@ import Testing
     }
 
     @Test func runnerExecutesSuccessfulDispatch() async throws {
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
             documentText: "Body",
-            related: SupersetRelatedContext()
+            related: ReaderAIRelatedContext()
         )
         final class InvocationBox: @unchecked Sendable {
-            var invocation: SupersetInvocation?
+            var invocation: ReaderAIInvocation?
         }
         let box = InvocationBox()
-        let runner = SupersetRunner { invocation in
+        let runner = ReaderAIRunner { invocation in
             box.invocation = invocation
-            return SupersetProcessResult(terminationStatus: 0, stdout: "run_123", stderr: "")
+            return ReaderAIProcessResult(terminationStatus: 0, stdout: "run_123", stderr: "")
         }
 
         try await runner.dispatch(
             action: .reanalyze,
-            config: SupersetDispatchConfig(workspaceID: "ws_123", agent: "claude", cliPath: "superset"),
+            config: ReaderAIDispatchConfig(workspaceID: "ws_123", agent: "claude", cliPath: "superset"),
             context: context
         )
 
@@ -700,26 +718,26 @@ import Testing
     }
 
     @Test func runnerPassesCustomPromptIntentToInvocation() async throws {
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
             documentText: "Body",
-            related: SupersetRelatedContext()
+            related: ReaderAIRelatedContext()
         )
         final class PromptBox: @unchecked Sendable {
             var prompt: String?
         }
         let box = PromptBox()
-        let runner = SupersetRunner { invocation in
+        let runner = ReaderAIRunner { invocation in
             let promptPath = try #require(invocation.environment["MARPLE_PROMPT_FILE"])
             box.prompt = try String(contentsOfFile: promptPath, encoding: .utf8)
-            return SupersetProcessResult(terminationStatus: 0, stdout: "run_123", stderr: "")
+            return ReaderAIProcessResult(terminationStatus: 0, stdout: "run_123", stderr: "")
         }
 
         try await runner.dispatch(
             action: .format,
-            config: SupersetDispatchConfig(
+            config: ReaderAIDispatchConfig(
                 workspaceID: "ws_123",
                 agent: "claude",
                 cliPath: "superset",
@@ -737,25 +755,25 @@ import Testing
     // The package files must outlive dispatch: terminal targets (`open -a …`)
     // return before the agent has read prompt.md / context.md.
     @Test func runnerKeepsPackageFilesAliveAfterDispatch() async throws {
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
             documentText: "Body",
-            related: SupersetRelatedContext()
+            related: ReaderAIRelatedContext()
         )
         final class EnvBox: @unchecked Sendable {
             var environment: [String: String] = [:]
         }
         let box = EnvBox()
-        let runner = SupersetRunner { invocation in
+        let runner = ReaderAIRunner { invocation in
             box.environment = invocation.environment
-            return SupersetProcessResult(terminationStatus: 0, stdout: "run_123", stderr: "")
+            return ReaderAIProcessResult(terminationStatus: 0, stdout: "run_123", stderr: "")
         }
 
         try await runner.dispatch(
             action: .discuss,
-            config: SupersetDispatchConfig(workspaceID: "ws_123", agent: "claude", cliPath: "superset"),
+            config: ReaderAIDispatchConfig(workspaceID: "ws_123", agent: "claude", cliPath: "superset"),
             context: context
         )
 
@@ -772,25 +790,25 @@ import Testing
     }
 
     @Test func runnerSkipsWorkspaceRequirementWhenTemplateOmitsIt() async throws {
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
             documentText: "Body",
-            related: SupersetRelatedContext()
+            related: ReaderAIRelatedContext()
         )
         final class InvocationBox: @unchecked Sendable {
-            var invocation: SupersetInvocation?
+            var invocation: ReaderAIInvocation?
         }
         let box = InvocationBox()
-        let runner = SupersetRunner { invocation in
+        let runner = ReaderAIRunner { invocation in
             box.invocation = invocation
-            return SupersetProcessResult(terminationStatus: 0, stdout: "", stderr: "")
+            return ReaderAIProcessResult(terminationStatus: 0, stdout: "", stderr: "")
         }
 
         try await runner.dispatch(
             action: .discuss,
-            config: SupersetDispatchConfig(
+            config: ReaderAIDispatchConfig(
                 workspaceID: "",
                 commandTemplate: AIDispatchTarget.terminal.defaultTemplate
             ),
@@ -806,22 +824,22 @@ import Testing
     }
 
     @Test func runnerRejectsEmptyCommandTemplate() async throws {
-        let context = try SupersetDispatchContext(
+        let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
             entry: entry,
             documentText: "Body",
-            related: SupersetRelatedContext()
+            related: ReaderAIRelatedContext()
         )
-        let runner = SupersetRunner { _ in
+        let runner = ReaderAIRunner { _ in
             Issue.record("runner should not execute without a template")
-            return SupersetProcessResult(terminationStatus: 0, stdout: "", stderr: "")
+            return ReaderAIProcessResult(terminationStatus: 0, stdout: "", stderr: "")
         }
 
-        await #expect(throws: SupersetDispatchError.missingCommandTemplate) {
+        await #expect(throws: ReaderAIDispatchError.missingCommandTemplate) {
             try await runner.dispatch(
                 action: .discuss,
-                config: SupersetDispatchConfig(workspaceID: "ws_123", commandTemplate: "  \n "),
+                config: ReaderAIDispatchConfig(workspaceID: "ws_123", commandTemplate: "  \n "),
                 context: context
             )
         }

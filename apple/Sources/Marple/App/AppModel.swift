@@ -345,7 +345,7 @@ final class AppModel {
 
     private let stateStore: StateStore?
     private var semantic: (any SemanticBackend)?
-    private let supersetRunner: SupersetRunner
+    private let readerAIRunner: ReaderAIRunner
     /// Publishes open tabs to the synced folder for the iOS companion. nil without
     /// a workspace root (e.g. tests).
     private let sessionWriter: SessionWriter?
@@ -377,13 +377,13 @@ final class AppModel {
     init(client: VaultClient, stateStore: StateStore? = nil,
          semantic: (any SemanticBackend)? = nil, isFirstRun: Bool = false,
          workspaceRoot: String = "",
-         supersetRunner: SupersetRunner = SupersetRunner()) {
+         readerAIRunner: ReaderAIRunner = ReaderAIRunner()) {
         self.client = client
         self.metadataWriter = MetadataWriter(client: client)
         self.workspaceRoot = workspaceRoot
         self.stateStore = stateStore
         self.semantic = semantic
-        self.supersetRunner = supersetRunner
+        self.readerAIRunner = readerAIRunner
         self.sessionWriter = workspaceRoot.isEmpty ? nil : SessionWriter(workspaceRoot: workspaceRoot)
         self.isFirstRun = isFirstRun
         if let s = stateStore?.load() {
@@ -1721,40 +1721,40 @@ final class AppModel {
         }
     }
 
-    func runSupersetAction(_ action: SupersetAction) async {
+    func runReaderAIAction(_ action: ReaderAIAction) async {
         guard let path = openPath, let entry = openEntry else {
             flash("请先打开一篇文档。", symbol: "exclamationmark.triangle.fill")
             return
         }
 
         let defaults = UserDefaults.standard
-        let config = SupersetDispatchConfig(
+        let config = ReaderAIDispatchConfig(
             workspaceID: defaults.string(forKey: SettingsKeys.supersetWorkspaceID) ?? "",
-            agent: defaults.string(forKey: SettingsKeys.supersetAgent) ?? "claude",
+            agent: defaults.string(forKey: SettingsKeys.readerAIAgent) ?? "claude",
             cliPath: defaults.string(forKey: SettingsKeys.supersetCLIPath) ?? "superset",
             commandTemplate: AIDispatchTarget.resolveTemplate(
                 targetRawValue: defaults.string(forKey: SettingsKeys.aiDispatchTarget),
                 storedTemplate: defaults.string(forKey: SettingsKeys.aiDispatchTemplate)
             ),
-            reanalyzePrompt: defaults.string(forKey: SettingsKeys.supersetReanalyzePrompt),
-            formatPrompt: defaults.string(forKey: SettingsKeys.supersetFormatPrompt),
-            translatePrompt: defaults.string(forKey: SettingsKeys.supersetTranslatePrompt),
-            discussPrompt: defaults.string(forKey: SettingsKeys.supersetDiscussPrompt)
+            reanalyzePrompt: defaults.string(forKey: SettingsKeys.readerAIReanalyzePrompt),
+            formatPrompt: defaults.string(forKey: SettingsKeys.readerAIFormatPrompt),
+            translatePrompt: defaults.string(forKey: SettingsKeys.readerAITranslatePrompt),
+            discussPrompt: defaults.string(forKey: SettingsKeys.readerAIDiscussPrompt)
         )
 
         do {
             let raw = try await client.entryText(path: path)
-            let context = try SupersetDispatchContext(
+            let context = try ReaderAIDispatchContext(
                 workspaceRoot: workspaceRoot,
                 targetPath: path,
                 entry: entry,
                 documentText: raw,
-                related: supersetRelatedContext(for: entry, rawDocumentText: raw)
+                related: readerAIRelatedContext(for: entry, rawDocumentText: raw)
             )
-            try await supersetRunner.dispatch(action: action, config: config, context: context)
+            try await readerAIRunner.dispatch(action: action, config: config, context: context)
             flash("已分发：\(action.label)", symbol: "sparkles")
             print("[marple] dispatch \(action.rawValue) \(path)")
-        } catch let error as SupersetDispatchError {
+        } catch let error as ReaderAIDispatchError {
             flash(error.friendlyMessage, symbol: "exclamationmark.triangle.fill")
             print("[marple] dispatch \(action.rawValue) FAILED \(path): \(error)")
         } catch {
@@ -1763,9 +1763,9 @@ final class AppModel {
         }
     }
 
-    private func supersetRelatedContext(for entry: Entry, rawDocumentText: String) -> SupersetRelatedContext {
+    private func readerAIRelatedContext(for entry: Entry, rawDocumentText: String) -> ReaderAIRelatedContext {
         let annotations = (openRelations?.annotations.prefix(12) ?? [])
-            .map { SupersetRelatedEntry(entry: $0, reason: "annotation") }
+            .map { ReaderAIRelatedEntry(entry: $0, reason: "annotation") }
 
         var bookEntries: [(entry: Entry, reason: String)] = []
         if let overview = openBook?.overview, overview.path != entry.path {
@@ -1785,17 +1785,17 @@ final class AppModel {
             relatedEntries.append(contentsOf: relations.similar.map { (entry: $0, reason: "shared themes") })
         }
 
-        return SupersetRelatedContext(
+        return ReaderAIRelatedContext(
             annotations: annotations,
-            bookEntries: uniqueSupersetEntries(bookEntries).map { SupersetRelatedEntry(entry: $0.entry, reason: $0.reason) },
-            relatedWorks: Array(uniqueSupersetEntries(relatedEntries).prefix(12))
-                .map { SupersetRelatedEntry(entry: $0.entry, reason: $0.reason) },
-            wikilinks: supersetWikilinks(from: rawDocumentText),
-            sourcePaths: supersetSourcePaths(for: entry)
+            bookEntries: uniqueReaderAIEntries(bookEntries).map { ReaderAIRelatedEntry(entry: $0.entry, reason: $0.reason) },
+            relatedWorks: Array(uniqueReaderAIEntries(relatedEntries).prefix(12))
+                .map { ReaderAIRelatedEntry(entry: $0.entry, reason: $0.reason) },
+            wikilinks: readerAIWikilinks(from: rawDocumentText),
+            sourcePaths: readerAISourcePaths(for: entry)
         )
     }
 
-    private func uniqueSupersetEntries(_ entries: [(entry: Entry, reason: String)]) -> [(entry: Entry, reason: String)] {
+    private func uniqueReaderAIEntries(_ entries: [(entry: Entry, reason: String)]) -> [(entry: Entry, reason: String)] {
         var seen = Set<String>()
         var unique: [(entry: Entry, reason: String)] = []
         for item in entries where !seen.contains(item.entry.path) {
@@ -1805,18 +1805,18 @@ final class AppModel {
         return unique
     }
 
-    private func supersetWikilinks(from rawDocumentText: String) -> [SupersetWikiTarget] {
+    private func readerAIWikilinks(from rawDocumentText: String) -> [ReaderAIWikiTarget] {
         let body = Frontmatter.split(rawDocumentText).body
         let refs = Wikilink.protect(body).refs.values.sorted {
             if $0.target == $1.target { return $0.label < $1.label }
             return $0.target < $1.target
         }
         var seen = Set<String>()
-        var targets: [SupersetWikiTarget] = []
+        var targets: [ReaderAIWikiTarget] = []
         for ref in refs where !seen.contains(ref.target) {
             seen.insert(ref.target)
             guard let resolved = NameResolver.resolveWikilink(ref.target, in: entries) else { continue }
-            targets.append(SupersetWikiTarget(
+            targets.append(ReaderAIWikiTarget(
                 target: ref.target,
                 label: ref.label,
                 path: resolved.path,
@@ -1826,7 +1826,7 @@ final class AppModel {
         return targets
     }
 
-    private func supersetSourcePaths(for entry: Entry) -> [String] {
+    private func readerAISourcePaths(for entry: Entry) -> [String] {
         var paths: [String] = []
         if let slug = pdfEntry(for: entry, in: entries)?.pdfSlug, !slug.isEmpty {
             paths.append("sources/\(slug).pdf")

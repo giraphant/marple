@@ -1,7 +1,7 @@
 import Foundation
 
 #if os(macOS)
-public struct SupersetInvocation: Sendable, Equatable {
+public struct ReaderAIInvocation: Sendable, Equatable {
     public let executablePath: String
     public let arguments: [String]
     /// Extra environment merged over the inherited one (MARPLE_* variables + PATH).
@@ -14,7 +14,7 @@ public struct SupersetInvocation: Sendable, Equatable {
     }
 }
 
-public struct SupersetProcessResult: Sendable, Equatable {
+public struct ReaderAIProcessResult: Sendable, Equatable {
     public let terminationStatus: Int32
     public let stdout: String
     public let stderr: String
@@ -64,7 +64,7 @@ public struct SupersetWorkspace: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
-public enum SupersetDispatchError: Error, Equatable, LocalizedError, Sendable {
+public enum ReaderAIDispatchError: Error, Equatable, LocalizedError, Sendable {
     case missingWorkspaceID
     case missingAgent
     case missingCommandTemplate
@@ -111,38 +111,38 @@ public enum SupersetWorkspaceListError: Error, Equatable, LocalizedError, Sendab
     public var errorDescription: String? { friendlyMessage }
 }
 
-public struct SupersetRunner: Sendable {
-    public let execute: @Sendable (SupersetInvocation) async throws -> SupersetProcessResult
+public struct ReaderAIRunner: Sendable {
+    public let execute: @Sendable (ReaderAIInvocation) async throws -> ReaderAIProcessResult
     public let log: @Sendable (String) -> Void
 
     public init(
-        execute: @escaping @Sendable (SupersetInvocation) async throws -> SupersetProcessResult = SupersetRunner.defaultExecute,
-        log: @escaping @Sendable (String) -> Void = { SupersetLog.shared.append($0) }
+        execute: @escaping @Sendable (ReaderAIInvocation) async throws -> ReaderAIProcessResult = ReaderAIRunner.defaultExecute,
+        log: @escaping @Sendable (String) -> Void = { ReaderAILog.shared.append($0) }
     ) {
         self.execute = execute
         self.log = log
     }
 
     public func dispatch(
-        action: SupersetAction,
-        config: SupersetDispatchConfig,
-        context: SupersetDispatchContext
+        action: ReaderAIAction,
+        config: ReaderAIDispatchConfig,
+        context: ReaderAIDispatchContext
     ) async throws {
         let template = config.commandTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !template.isEmpty else {
-            throw SupersetDispatchError.missingCommandTemplate
+            throw ReaderAIDispatchError.missingCommandTemplate
         }
 
         let agent = config.agent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !agent.isEmpty else {
-            throw SupersetDispatchError.missingAgent
+            throw ReaderAIDispatchError.missingAgent
         }
 
         // Only templates that actually reference the workspace need one.
         let workspaceID = config.workspaceID.trimmingCharacters(in: .whitespacesAndNewlines)
         if template.contains("MARPLE_WORKSPACE") {
             guard !workspaceID.isEmpty else {
-                throw SupersetDispatchError.missingWorkspaceID
+                throw ReaderAIDispatchError.missingWorkspaceID
             }
         }
 
@@ -150,9 +150,9 @@ public struct SupersetRunner: Sendable {
         // targets (`open -a …`, `orca terminal create`) return before the
         // agent reads prompt.md/context.md. It sits in the system temp dir,
         // which macOS cleans up on its own.
-        let contextPackageURL = try SupersetContextPackageBuilder.write(action: action, context: context)
+        let contextPackageURL = try ReaderAIContextPackageBuilder.write(action: action, context: context)
         let packageDirectory = contextPackageURL.deletingLastPathComponent()
-        let prompt = SupersetPromptBuilder.prompt(
+        let prompt = ReaderAIPromptBuilder.prompt(
             action: action,
             targetRelativePath: context.targetPath,
             targetAbsolutePath: context.targetAbsolutePath,
@@ -179,12 +179,12 @@ public struct SupersetRunner: Sendable {
                 runScriptPath: runScriptURL.path
             )
         )
-        let result: SupersetProcessResult
+        let result: ReaderAIProcessResult
         do {
             result = try await execute(invocation)
-        } catch SupersetDispatchError.launchFailed(let message) {
+        } catch ReaderAIDispatchError.launchFailed(let message) {
             log("[\(action.rawValue)] \(context.targetPath) — 启动失败: \(message)")
-            throw SupersetDispatchError.launchFailed(message)
+            throw ReaderAIDispatchError.launchFailed(message)
         }
         guard result.terminationStatus == 0 else {
             log(Self.failureDetail(
@@ -193,7 +193,7 @@ public struct SupersetRunner: Sendable {
                 stdout: result.stdout,
                 stderr: result.stderr
             ))
-            throw SupersetDispatchError.failed(status: result.terminationStatus, stderr: result.stderr)
+            throw ReaderAIDispatchError.failed(status: result.terminationStatus, stderr: result.stderr)
         }
     }
 
@@ -204,10 +204,10 @@ public struct SupersetRunner: Sendable {
         }
 
         let invocation = Self.workspaceListInvocation(cliPath: Self.resolveCLIPath(trimmedCLIPath))
-        let result: SupersetProcessResult
+        let result: ReaderAIProcessResult
         do {
             result = try await execute(invocation)
-        } catch SupersetDispatchError.launchFailed(let message) {
+        } catch ReaderAIDispatchError.launchFailed(let message) {
             log("[workspaces list] 启动失败: \(message)")
             throw SupersetWorkspaceListError.launchFailed(message)
         }
@@ -252,8 +252,8 @@ public struct SupersetRunner: Sendable {
 
     // Templates are user-authored zsh snippets; a login shell (-l) picks up the
     // user's own PATH additions on top of the explicit ones in the environment.
-    public static func templateInvocation(template: String, environment: [String: String]) -> SupersetInvocation {
-        SupersetInvocation(executablePath: "/bin/zsh", arguments: ["-lc", template], environment: environment)
+    public static func templateInvocation(template: String, environment: [String: String]) -> ReaderAIInvocation {
+        ReaderAIInvocation(executablePath: "/bin/zsh", arguments: ["-lc", template], environment: environment)
     }
 
     static func dispatchEnvironment(
@@ -282,14 +282,16 @@ public struct SupersetRunner: Sendable {
         ]
     }
 
-    // GUI apps inherit a minimal PATH, so bare `superset` / `orca` / `claude`
-    // would exit 127. Prepend the known install dirs; an absolute CLI path from
-    // settings contributes its directory too.
+    // GUI apps inherit a minimal PATH, so bare `superset` / `orca` / `claude` /
+    // `otty` would exit 127. Prepend the known install dirs; an absolute
+    // CLI path from settings contributes its directory too.
     static func augmentedPATHPrefix(cliPath: String = "") -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         var directories = defaultSearchDirectories
         directories.append("\(home)/.local/bin")
         directories.append("/Applications/Orca.app/Contents/Resources/bin")
+        directories.append("/Applications/Otty.app/Contents/MacOS")
+        directories.append("\(home)/Applications/Otty.app/Contents/MacOS")
         if cliPath.contains("/") {
             directories.insert((cliPath as NSString).deletingLastPathComponent, at: 0)
         }
@@ -316,7 +318,7 @@ public struct SupersetRunner: Sendable {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    public static func workspaceListInvocation(cliPath: String) -> SupersetInvocation {
+    public static func workspaceListInvocation(cliPath: String) -> ReaderAIInvocation {
         invocation(cliPath: cliPath, arguments: ["workspaces", "list", "--json", "--local"])
     }
 
@@ -343,7 +345,7 @@ public struct SupersetRunner: Sendable {
     // matches. An explicit path (contains "/") is always respected as-is.
     static func resolveCLIPath(
         _ cliPath: String,
-        searchDirectories: [String] = SupersetRunner.defaultSearchDirectories,
+        searchDirectories: [String] = ReaderAIRunner.defaultSearchDirectories,
         isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
     ) -> String {
         guard !cliPath.contains("/") else { return cliPath }
@@ -362,15 +364,15 @@ public struct SupersetRunner: Sendable {
         return ["\(home)/.superset/bin", "/opt/homebrew/bin", "/usr/local/bin"]
     }
 
-    private static func invocation(cliPath: String, arguments: [String]) -> SupersetInvocation {
+    private static func invocation(cliPath: String, arguments: [String]) -> ReaderAIInvocation {
         if cliPath.contains("/") {
-            return SupersetInvocation(executablePath: cliPath, arguments: arguments)
+            return ReaderAIInvocation(executablePath: cliPath, arguments: arguments)
         } else {
-            return SupersetInvocation(executablePath: "/usr/bin/env", arguments: [cliPath] + arguments)
+            return ReaderAIInvocation(executablePath: "/usr/bin/env", arguments: [cliPath] + arguments)
         }
     }
 
-    public static func defaultExecute(_ invocation: SupersetInvocation) async throws -> SupersetProcessResult {
+    public static func defaultExecute(_ invocation: ReaderAIInvocation) async throws -> ReaderAIProcessResult {
         try await Task.detached(priority: .userInitiated) {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: invocation.executablePath)
@@ -382,7 +384,7 @@ public struct SupersetRunner: Sendable {
 
             let fileManager = FileManager.default
             let outputDirectory = fileManager.temporaryDirectory
-                .appendingPathComponent("marple-superset-output-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent("marple-reader-ai-output-\(UUID().uuidString)", isDirectory: true)
             try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
             defer { try? fileManager.removeItem(at: outputDirectory) }
 
@@ -401,7 +403,7 @@ public struct SupersetRunner: Sendable {
             } catch {
                 stdoutHandle.closeFile()
                 stderrHandle.closeFile()
-                throw SupersetDispatchError.launchFailed(error.localizedDescription)
+                throw ReaderAIDispatchError.launchFailed(error.localizedDescription)
             }
 
             process.waitUntilExit()
@@ -413,7 +415,7 @@ public struct SupersetRunner: Sendable {
             let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
             let stderr = String(data: stderrData, encoding: .utf8) ?? ""
 
-            return SupersetProcessResult(
+            return ReaderAIProcessResult(
                 terminationStatus: process.terminationStatus,
                 stdout: stdout,
                 stderr: stderr

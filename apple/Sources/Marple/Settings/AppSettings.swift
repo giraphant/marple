@@ -20,12 +20,14 @@ enum SettingsKeys {
     static let aiDispatchTemplate = "marple.aiDispatchTemplate"
     static let aiAgentChoice = "marple.aiAgentChoice"
     static let supersetWorkspaceID = "marple.supersetWorkspaceID"
-    static let supersetAgent = "marple.supersetAgent"
+    // Raw names stay unchanged so existing installs keep their configured agent
+    // and prompts after the client-neutral Reader AI rename.
+    static let readerAIAgent = "marple.supersetAgent"
     static let supersetCLIPath = "marple.supersetCLIPath"
-    static let supersetReanalyzePrompt = "marple.supersetReanalyzePrompt"
-    static let supersetFormatPrompt = "marple.supersetFormatPrompt"
-    static let supersetTranslatePrompt = "marple.supersetTranslatePrompt"
-    static let supersetDiscussPrompt = "marple.supersetDiscussPrompt"
+    static let readerAIReanalyzePrompt = "marple.supersetReanalyzePrompt"
+    static let readerAIFormatPrompt = "marple.supersetFormatPrompt"
+    static let readerAITranslatePrompt = "marple.supersetTranslatePrompt"
+    static let readerAIDiscussPrompt = "marple.supersetDiscussPrompt"
     // QUA-107: opt-in switch for the local CLI socket server (off by default).
     static let cliServerEnabled = "marple.cliServerEnabled"
     // QUA-106: local APFS-snapshot backups. Enabled by default (cheap + a safety
