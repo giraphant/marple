@@ -264,12 +264,12 @@ private struct SpaceControlView: NSViewRepresentable {
         @objc private func renameAction() {
             guard let spaceID, let current = model?.spaces.first(where: { $0.id == spaceID }) else { return }
             let alert = NSAlert()
-            alert.messageText = "重命名 Space"
+            alert.messageText = "重命名空间"
             alert.addButton(withTitle: "确定")
             alert.addButton(withTitle: "取消")
             let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
             field.stringValue = current.name
-            field.placeholderString = "Space 名称"
+            field.placeholderString = "空间名称"
             alert.accessoryView = field
             alert.window.initialFirstResponder = field
             if alert.runModal() == .alertFirstButtonReturn {
@@ -286,7 +286,7 @@ private struct SpaceControlView: NSViewRepresentable {
             guard let spaceID, let current = model?.spaces.first(where: { $0.id == spaceID }) else { return }
             let alert = NSAlert()
             alert.messageText = "删除“\(current.name)”？"
-            alert.informativeText = "该 Space 及其打开的标签页都会被移除，此操作无法撤销。"
+            alert.informativeText = "该空间及其打开的标签页都会被移除，此操作无法撤销。"
             alert.alertStyle = .warning
             alert.addButton(withTitle: "删除")
             alert.addButton(withTitle: "取消")

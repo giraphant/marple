@@ -2,28 +2,139 @@ import SwiftUI
 import AppKit
 import MarpleKit
 
-/// The macOS preferences window (⌘,). Three tabs mirror the web SettingsPanel,
-/// minus the parts that don't apply to a pure native reader (in-app editor toggle,
-/// LLM-body editing) or aren't built yet (semantic vectors / Phase 3).
+/// The macOS preferences window (⌘,). Tabs are grouped by what the user is
+/// doing: display (外观/阅读) → vault organization (类型/空间) → data
+/// maintenance (索引/备份) → integrations (AI 接入).
 struct SettingsView: View {
     var body: some View {
         TabView {
             AppearanceSettings()
                 .tabItem { Label("外观", systemImage: "paintbrush") }
             ReadingSettings()
-                .tabItem { Label("阅读", systemImage: "textformat") }
-            ToolbarSettings()
-                .tabItem { Label("工具栏", systemImage: "hand.tap") }
+                // Not "textformat": that symbol has a zh-Hans variant that renders
+                // as the characters 格式 instead of a graphic icon.
+                .tabItem { Label("阅读", systemImage: "book") }
+            SchemaSettings()
+                .tabItem { Label("类型", systemImage: "tablecells") }
+            SpacesSettings()
+                .tabItem { Label("空间", systemImage: "square.stack") }
+            IndexSettings()
+                .tabItem { Label("索引", systemImage: "externaldrive") }
             AIBridgeSettings()
-                .tabItem { Label("AI 接入", systemImage: "terminal") }
+                .tabItem { Label("智能", systemImage: "sparkles") }
             BackupSettings()
                 .tabItem { Label("备份", systemImage: "clock.arrow.circlepath") }
-            SpacesSettings()
-                .tabItem { Label("Spaces", systemImage: "square.stack") }
-            SchemaSettings()
-                .tabItem { Label("声明表", systemImage: "tablecells") }
         }
         .frame(width: 620, height: 560)
+    }
+}
+
+// MARK: - 索引
+
+private struct IndexSettings: View {
+    @State private var confirmingRebuild = false
+    @State private var isRebuilding = false
+    @State private var result: ResultMessage?
+    @State private var semanticIndexController: SemanticIndexRefreshController?
+
+    var body: some View {
+        Form {
+            Section("普通索引") {
+                if let model = ActiveModel.current {
+                    LabeledContent("条目") {
+                        Text("\(model.entries.count)")
+                    }
+                    LabeledContent("状态") {
+                        Text(model.isRebuildingGeneralIndex ? "正在重建" : "就绪")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let failure = model.lastIndexFailure {
+                        Text(failure)
+                            .foregroundStyle(Color.red)
+                            .textSelection(.enabled)
+                    } else {
+                        Text("当前没有已知的索引障碍。重复的 themes 条目会自动去重。")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button("清除并重建普通索引…") {
+                        confirmingRebuild = true
+                    }
+                    .disabled(isRebuilding || model.isRebuildingGeneralIndex)
+
+                    Text("从 vault 文件重新建立普通索引。新索引完整生成后才会替换当前索引；重建失败时保留当前索引。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("主窗口尚未就绪。")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("语义索引") {
+                if let semanticIndexController {
+                    SemanticIndexRefreshSettings(controller: semanticIndexController)
+                } else if ActiveModel.current == nil {
+                    Text("主窗口尚未就绪。")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("本机缺少 MLX Metal runtime，暂不能刷新语义索引。")
+                        .foregroundStyle(.secondary)
+                    Text("安装包内需要 mlx.metallib；开发运行时可在当前目录提供 default.metallib。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear {
+            semanticIndexController = ActiveSemanticIndex.controller
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ActiveSemanticIndex.didChangeNotification)) { note in
+            semanticIndexController = note.object as? SemanticIndexRefreshController
+        }
+        .confirmationDialog(
+            "清除并重建普通索引？",
+            isPresented: $confirmingRebuild,
+            titleVisibility: .visible
+        ) {
+            Button("清除并重建", role: .destructive) { rebuild() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("Marple 会从 vault 文件重新建立索引。只有新索引完整生成后才会替换当前索引。")
+        }
+        .alert(item: $result) { result in
+            Alert(
+                title: Text(result.title),
+                message: Text(result.detail),
+                dismissButton: .default(Text("好"))
+            )
+        }
+    }
+
+    private func rebuild() {
+        guard let model = ActiveModel.current else { return }
+        isRebuilding = true
+        Task { @MainActor in
+            result = switch await model.rebuildGeneralIndex() {
+            case .success(let count):
+                ResultMessage(title: "普通索引已重建", detail: "已索引 \(count) 个条目。")
+            case .failure(let detail):
+                ResultMessage(title: "普通索引重建失败", detail: detail)
+            case .alreadyRunning:
+                ResultMessage(title: "普通索引正在重建", detail: "请等待当前重建完成。")
+            case .unavailable:
+                ResultMessage(title: "无法重建普通索引", detail: "主窗口的索引器尚未就绪。")
+            }
+            isRebuilding = false
+        }
+    }
+
+    private struct ResultMessage: Identifiable {
+        let id = UUID()
+        let title: String
+        let detail: String
     }
 }
 
@@ -35,11 +146,11 @@ struct SettingsView: View {
 private struct SpacesSettings: View {
     var body: some View {
         Form {
-            Section("已封存的 Spaces") {
+            Section("已封存的空间") {
                 if let model = ActiveModel.current {
                     let archived = model.archivedSpaces
                     if archived.isEmpty {
-                        Text("暂无已封存的 Space。右键底部切换栏的 Space 可选择「封存归档」。")
+                        Text("暂无已封存的空间。右键底部切换栏的空间可选择「封存归档」。")
                             .font(.caption).foregroundStyle(.secondary)
                     } else {
                         ForEach(archived) { space in
@@ -66,6 +177,10 @@ private struct SpacesSettings: View {
 
 private struct AppearanceSettings: View {
     @AppStorage(SettingsKeys.theme) private var theme = ThemePreference.system
+    @AppStorage(SettingsKeys.readingFontFamily) private var family = ReadingFontFamily.sans
+    @AppStorage(SettingsKeys.readingFontSize) private var size = ReadingDefaults.fontSize
+    @AppStorage(SettingsKeys.readingLineHeight) private var lineHeight = ReadingDefaults.lineHeight
+    @AppStorage(SettingsKeys.readingLetterSpacing) private var letterSpacing = ReadingDefaults.letterSpacing
 
     var body: some View {
         Form {
@@ -76,9 +191,38 @@ private struct AppearanceSettings: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
             }
+            Section("阅读排版") {
+                Picker("字体", selection: $family) {
+                    ForEach(ReadingFontFamily.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.menu)
+
+                Picker("字号", selection: $size) {
+                    ForEach(ReadingDefaults.fontSizeOptions, id: \.self) {
+                        Text(String(Int($0))).tag($0)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Picker("行距", selection: $lineHeight) {
+                    ForEach(ReadingDefaults.lineHeightOptions, id: \.self) {
+                        Text(String(format: "%.2f", $0)).tag($0)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Picker("字间距", selection: $letterSpacing) {
+                    ForEach(ReadingDefaults.letterSpacingOptions, id: \.self) {
+                        Text(ReadingDefaults.letterSpacingLabel($0)).tag($0)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("仅作用于中文字符，英文不受影响。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("侧栏物件") {
                 SidebarTypeToggles()
-                Text("关掉的类型只从侧栏隐藏；⌘K 搜索、已打开的页面和保存的视图不受影响。")
+                Text("关掉的类型只从侧栏隐藏；⌘T 搜索、已打开的页面和保存的视图不受影响。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -109,47 +253,35 @@ private struct SidebarTypeToggles: View {
 // MARK: - 阅读
 
 private struct ReadingSettings: View {
-    @AppStorage(SettingsKeys.readingFontFamily) private var family = ReadingFontFamily.sans
-    @AppStorage(SettingsKeys.readingFontSize) private var size = ReadingDefaults.fontSize
-    @AppStorage(SettingsKeys.readingLineHeight) private var lineHeight = ReadingDefaults.lineHeight
-    @AppStorage(SettingsKeys.readingLetterSpacing) private var letterSpacing = ReadingDefaults.letterSpacing
     @AppStorage(SettingsKeys.externalEditor) private var editor = ""
+    @AppStorage(SettingsKeys.citationFormat) private var format = CitationFormat.inlineEN
+    @AppStorage(SettingsKeys.citationClickAction) private var citationClick = CitationClickAction.copyDefault
+    @AppStorage(SettingsKeys.originalClickAction) private var originalClick = OriginalClickAction.openOriginal
 
     var body: some View {
         Form {
-            Section("阅读排版") {
-                Picker("字体", selection: $family) {
-                    ForEach(ReadingFontFamily.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.menu)
-
-                Picker("字号", selection: $size) {
-                    ForEach(ReadingDefaults.fontSizeOptions, id: \.self) {
-                        Text(String(Int($0))).tag($0)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Picker("行距", selection: $lineHeight) {
-                    ForEach(ReadingDefaults.lineHeightOptions, id: \.self) {
-                        Text(String(format: "%.2f", $0)).tag($0)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Picker("字间距", selection: $letterSpacing) {
-                    ForEach(ReadingDefaults.letterSpacingOptions, id: \.self) {
-                        Text(ReadingDefaults.letterSpacingLabel($0)).tag($0)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Text("仅作用于中文字符，英文不受影响。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
             Section("外部编辑器") {
                 EditorPicker(value: $editor)
                 Text("用应用名打开（`open -a`）；留空则用系统默认 `.md` 程序。改动立即生效。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("引用与原文按钮") {
+                Picker("引用", selection: $citationClick) {
+                    ForEach(CitationClickAction.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                Picker("原文", selection: $originalClick) {
+                    ForEach(OriginalClickAction.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                Text("右键始终弹出完整菜单。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("默认引用格式") {
+                Picker("格式", selection: $format) {
+                    ForEach(CitationFormat.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.inline)
+                Text("示例：\(format.example)")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -222,38 +354,6 @@ private struct PromptTemplateEditor: View {
     }
 }
 
-// MARK: - 工具栏
-
-private struct ToolbarSettings: View {
-    @AppStorage(SettingsKeys.citationFormat) private var format = CitationFormat.inlineEN
-    @AppStorage(SettingsKeys.citationClickAction) private var citationClick = CitationClickAction.copyDefault
-    @AppStorage(SettingsKeys.originalClickAction) private var originalClick = OriginalClickAction.openOriginal
-
-    var body: some View {
-        Form {
-            Section("按钮点击行为") {
-                Picker("引用", selection: $citationClick) {
-                    ForEach(CitationClickAction.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                Picker("原文", selection: $originalClick) {
-                    ForEach(OriginalClickAction.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                Text("右键始终弹出完整菜单。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("默认引用格式") {
-                Picker("格式", selection: $format) {
-                    ForEach(CitationFormat.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.inline)
-                Text("示例：\(format.example)")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-    }
-}
-
 // MARK: - AI 接入
 
 /// QUA-107: opt-in switch for the local CLI socket server. Off by default so
@@ -287,11 +387,10 @@ private struct AIBridgeSettings: View {
     @State private var workspaceLookupMessage: String?
     @State private var workspaceLookupIsError = false
     @State private var isLoadingWorkspaces = false
-    @State private var semanticIndexController: SemanticIndexRefreshController?
 
     var body: some View {
         Form {
-            Section("Reader AI 助手") {
+            Section("阅读助手") {
                 Picker("分发目标", selection: Binding(
                     get: { AIDispatchTarget(rawValue: dispatchTargetRaw) ?? .superset },
                     set: { newTarget in
@@ -312,7 +411,7 @@ private struct AIBridgeSettings: View {
                 let agentChoice = AgentChoice(rawValue: agentChoiceRaw)
                     ?? AgentChoice(rawValue: readerAIAgent)
                     ?? .custom
-                Picker("Agent", selection: Binding(
+                Picker("代理", selection: Binding(
                     get: { agentChoice },
                     set: { choice in
                         agentChoiceRaw = choice.rawValue
@@ -324,13 +423,13 @@ private struct AIBridgeSettings: View {
                     ForEach(AgentChoice.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 if agentChoice == .custom {
-                    TextField("Agent 命令（如 claude --model opus）", text: $readerAIAgent)
+                    TextField("代理命令（如 claude --model opus）", text: $readerAIAgent)
                         .textFieldStyle(.roundedBorder)
                 }
 
                 if AIDispatchTarget(rawValue: dispatchTargetRaw) ?? .superset == .superset {
                     HStack {
-                        TextField("Superset workspace ID", text: $supersetWorkspaceID)
+                        TextField("Superset 工作区 ID", text: $supersetWorkspaceID)
                             .textFieldStyle(.roundedBorder)
                         Button(isLoadingWorkspaces ? "获取中…" : "获取") {
                             Task { await refreshSupersetWorkspaces() }
@@ -366,27 +465,12 @@ private struct AIBridgeSettings: View {
                     .lineLimit(2...8)
                     .font(.system(.caption, design: .monospaced))
                     .textFieldStyle(.roundedBorder)
-                Text("命令经 zsh 执行。可用变量：`$MARPLE_PROMPT_FILE`、`$MARPLE_CONTEXT_FILE`、`$MARPLE_VAULT_ROOT`、`$MARPLE_TITLE`、`$MARPLE_AGENT`、`$MARPLE_WORKSPACE`、`$MARPLE_RUN_SCRIPT`。`$MARPLE_RUN_SCRIPT` 是生成好的启动脚本：cd 到 vault 后把 prompt 交给 Agent。")
+                Text("命令经 zsh 执行。可用变量：`$MARPLE_PROMPT_FILE`、`$MARPLE_CONTEXT_FILE`、`$MARPLE_VAULT_ROOT`、`$MARPLE_TITLE`、`$MARPLE_AGENT`、`$MARPLE_WORKSPACE`、`$MARPLE_RUN_SCRIPT`。`$MARPLE_RUN_SCRIPT` 是生成好的启动脚本：cd 到 vault 后把提示词交给代理。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section("语义索引") {
-                if let semanticIndexController {
-                    SemanticIndexRefreshSettings(controller: semanticIndexController)
-                } else if ActiveModel.current == nil {
-                    Text("主窗口尚未就绪。")
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("本机缺少 MLX Metal runtime，暂不能刷新语义索引。")
-                        .foregroundStyle(.secondary)
-                    Text("安装包内需要 mlx.metallib；开发运行时可在当前目录提供 default.metallib。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("AI 咒语") {
+            Section("提示词模板") {
                 PromptTemplateEditor(
                     title: ReaderAIAction.reanalyze.label,
                     prompt: $readerAIReanalyzePrompt,
@@ -420,7 +504,6 @@ private struct AIBridgeSettings: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            semanticIndexController = ActiveSemanticIndex.controller
             let resolvedTemplate = AIDispatchTarget.resolveTemplate(
                 targetRawValue: dispatchTargetRaw,
                 storedTemplate: dispatchTemplate
@@ -428,9 +511,6 @@ private struct AIBridgeSettings: View {
             if resolvedTemplate != dispatchTemplate {
                 dispatchTemplate = resolvedTemplate
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: ActiveSemanticIndex.didChangeNotification)) { note in
-            semanticIndexController = note.object as? SemanticIndexRefreshController
         }
     }
 
@@ -448,10 +528,10 @@ private struct AIBridgeSettings: View {
                 if supersetWorkspaceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !ids.contains(supersetWorkspaceID) {
                     supersetWorkspaceID = first.id
                 }
-                workspaceLookupMessage = workspaces.count == 1 ? "已填入 workspace ID：\(first.displayName)" : "找到 \(workspaces.count) 个本机 workspace，请选择一个。"
+                workspaceLookupMessage = workspaces.count == 1 ? "已填入工作区 ID：\(first.displayName)" : "找到 \(workspaces.count) 个本机工作区，请选择一个。"
             } else {
                 workspaceLookupIsError = true
-                workspaceLookupMessage = "没有找到本机 Superset workspace。"
+                workspaceLookupMessage = "没有找到本机 Superset 工作区。"
             }
         } catch let error as SupersetWorkspaceListError {
             workspaceLookupIsError = true
@@ -459,7 +539,7 @@ private struct AIBridgeSettings: View {
             print("[marple] Superset workspace lookup FAILED: \(error)")
         } catch {
             workspaceLookupIsError = true
-            workspaceLookupMessage = "无法获取 Superset workspace，请查看日志。"
+            workspaceLookupMessage = "无法获取 Superset 工作区，请查看日志。"
             print("[marple] Superset workspace lookup FAILED: \(error)")
         }
     }

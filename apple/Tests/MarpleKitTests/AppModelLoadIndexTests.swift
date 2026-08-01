@@ -105,6 +105,36 @@ import Testing
     }
 
     @MainActor
+    @Test func userRebuildIndexesDuplicateThemesAndReloadsTheModel() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GeneralIndexRebuildTests-\(UUID().uuidString)")
+        let papers = root.appendingPathComponent("vault/papers")
+        try FileManager.default.createDirectory(at: papers, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("sources"), withIntermediateDirectories: true)
+        try """
+        ---
+        type: paper
+        title: Duplicate Themes
+        themes: [repeat, repeat]
+        ---
+        body
+        """.write(to: papers.appendingPathComponent("duplicate.md"),
+                  atomically: true, encoding: .utf8)
+
+        let indexer = VaultIndexer(workspaceRoot: root.path)
+        let database = IndexDatabase(indexDBPath: root.appendingPathComponent(".marple/index.sqlite").path)
+        let client = LocalVaultClient(workspaceRoot: root.path, index: database)
+        let model = AppModel(client: client, workspaceRoot: root.path)
+        model.cliIndexer = indexer
+
+        #expect(await model.rebuildGeneralIndex() == .success(1))
+        #expect(model.entries.first?.themes == ["repeat"])
+        #expect(model.lastIndexFailure == nil)
+        #expect(model.isRebuildingGeneralIndex == false)
+    }
+
+    @MainActor
     @Test func staleLoadIndexDoesNotResetBootstrapping() async throws {
         // Same race as `staleLoadIndexDoesNotOverwriteFresherEntries`, but the
         // invariant we're pinning is the bootstrap flag — once a newer call

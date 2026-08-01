@@ -21,6 +21,15 @@ public final class IndexDatabase: @unchecked Sendable {
     public let indexDBPath: String
     private let lock = NSLock()
     private var cachedQueue: DatabaseQueue?
+    private var cachedFileIdentity: FileIdentity?
+
+    /// `VaultIndexer.buildFull()` replaces index.sqlite atomically. A queue opened
+    /// before that swap remains attached to the unlinked old inode, so reuse is
+    /// safe only while the file at `indexDBPath` is still the same file.
+    private struct FileIdentity: Equatable {
+        let device: UInt64
+        let inode: UInt64
+    }
 
     /// QUA-198: single-flight + drop-stale cache writes. During a vault write
     /// storm every watcher fire takes the SQL path and used to queue its own
@@ -63,11 +72,20 @@ public final class IndexDatabase: @unchecked Sendable {
 
     private func openQueue() throws -> DatabaseQueue? {
         lock.lock(); defer { lock.unlock() }
-        if let q = cachedQueue { return q }
+        let identity = Self.fileIdentity(atPath: indexDBPath)
+        if identity == nil {
+            cachedQueue = nil
+            cachedFileIdentity = nil
+            return nil
+        }
+        if let q = cachedQueue, cachedFileIdentity == identity { return q }
+        // The path now names a rebuilt DB. Dropping the old queue closes its
+        // connection to the unlinked predecessor before we open the replacement.
+        cachedQueue = nil
+        cachedFileIdentity = nil
         // Don't cache negative results: the DB file may not exist yet at the time
         // of the first read (boot may construct IndexDatabase before reconcile
         // has finished), and we want a later read to pick it up.
-        guard FileManager.default.fileExists(atPath: indexDBPath) else { return nil }
         var config = Configuration()
         // NOT read-only: the index is a WAL database written by the indexer, and a
         // read-only connection cannot open the -shm wal-index (SQLITE_CANTOPEN,
@@ -76,7 +94,15 @@ public final class IndexDatabase: @unchecked Sendable {
         config.busyMode = .timeout(5)
         let q = try DatabaseQueue(path: indexDBPath, configuration: config)
         cachedQueue = q
+        cachedFileIdentity = identity
         return q
+    }
+
+    private static func fileIdentity(atPath path: String) -> FileIdentity? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let device = attributes[.systemNumber] as? NSNumber,
+              let inode = attributes[.systemFileNumber] as? NSNumber else { return nil }
+        return FileIdentity(device: device.uint64Value, inode: inode.uint64Value)
     }
 
     public func loadEntries() throws -> [Entry] {

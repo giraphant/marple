@@ -131,7 +131,14 @@ cat > "$APP/Info.plist" <<PLIST
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <!-- The app declares itself zh-Hans-localized so AppKit's standard menus
+       (File/Edit/View/Window/Help + their items) render in Chinese instead of
+       falling back to English next to our Chinese custom menus. -->
+  <key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>zh-Hans</string>
+  </array>
   <key>CFBundleExecutable</key><string>Marple</string>
   <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
   <key>CFBundleName</key><string>Marple</string>
