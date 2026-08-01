@@ -75,12 +75,14 @@ public func intValue(_ v: YamlValue?) -> Int64? {
 
 // MARK: - themeArray  (:1104-1109)
 
-/// Extract an array of text values from a sequence YamlValue.
+/// Extract an array of unique text values from a sequence YamlValue.
 /// Returns nil if the value is not a sequence.
-/// Mirrors `theme_array` (:1104-1109).
+/// Preserves first-seen order. Duplicate themes would otherwise violate the
+/// `(path, theme)` primary key in `entry_themes` and abort the whole index build.
 public func themeArray(_ v: YamlValue?) -> [String]? {
     guard case .sequence(let items) = v else { return nil }
-    return items.compactMap { textValue($0) }
+    var seen = Set<String>()
+    return items.compactMap { textValue($0) }.filter { seen.insert($0).inserted }
 }
 
 // MARK: - stripWiki  (:901-922)

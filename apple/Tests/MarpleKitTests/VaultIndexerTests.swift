@@ -122,6 +122,44 @@ struct VaultIndexerTests {
         #expect(paths == ["vault/notes/b.md", "vault/papers/a.md"])
     }
 
+    @Test("buildFull deduplicates repeated themes")
+    func buildFullDeduplicatesThemes() throws {
+        let ws = try makeTempWorkspace()
+        try writeRaw(at: ws + "/vault/papers/a.md", """
+        ---
+        type: paper
+        title: Paper A
+        themes: [duplicate, duplicate]
+        ---
+        body
+        """)
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        #expect(try indexer.buildFull() == 1)
+
+        let entry = try #require(try openDB(ws).loadEntries().first)
+        #expect(entry.themes == ["duplicate"])
+    }
+
+    @Test("an existing IndexDatabase follows an atomic full rebuild")
+    func existingReaderFollowsAtomicRebuild() throws {
+        let ws = try makeTempWorkspace()
+        let path = ws + "/vault/papers/a.md"
+        try write(at: path, type: "paper", title: "Before")
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+        let revisionBefore = try entriesRevision(ws + "/.marple/index.sqlite")
+        let reader = openDB(ws)
+        #expect(try reader.loadEntries().first?.title == "Before")
+
+        try write(at: path, type: "paper", title: "After")
+        _ = try indexer.buildFull()
+
+        #expect(try entriesRevision(ws + "/.marple/index.sqlite") > revisionBefore)
+        #expect(try reader.loadEntries().first?.title == "After")
+    }
+
     @Test("buildFull leaves the live DB in WAL mode")
     func buildFullLeavesWALMode() throws {
         let ws = try makeTempWorkspace()
@@ -455,7 +493,35 @@ struct VaultIndexerTests {
         #expect(revAfter == revBefore)
     }
 
-    @Test("reconcile rolls back partial writes when a later upsert fails")
+    @Test("duplicate themes do not abort a reconcile")
+    func reconcileDeduplicatesThemes() throws {
+        let ws = try makeTempWorkspace()
+        try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+
+        try writeRaw(at: ws + "/vault/papers/b.md", """
+        ---
+        type: paper
+        title: Paper B
+        themes: [duplicate, duplicate]
+        ---
+        body
+        """)
+
+        let stats = try indexer.reconcile()
+
+        #expect(stats.upserted == 1)
+        let indexPath = ws + "/.marple/index.sqlite"
+        let themes = try DatabaseQueue(path: indexPath).read { db in
+            try String.fetchAll(db, sql: "SELECT theme FROM entry_themes WHERE path = ?",
+                                arguments: ["vault/papers/b.md"])
+        }
+        #expect(themes == ["duplicate"])
+    }
+
+    @Test("reconcile rolls back partial writes when a later insert fails")
     func reconcileRollsBackPartialWritesOnFailure() throws {
         let ws = try makeTempWorkspace()
         try write(at: ws + "/vault/papers/a.md", type: "paper", title: "Paper A")
@@ -466,12 +532,21 @@ struct VaultIndexerTests {
         let indexPath = ws + "/.marple/index.sqlite"
         let revBefore = try entriesRevision(indexPath)
 
-        try write(at: ws + "/vault/papers/b.md", type: "paper", title: "Paper B")
-        try writeRaw(at: ws + "/vault/papers/c.md", """
+        try DatabaseQueue(path: indexPath).write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER reject_exploding_theme
+                BEFORE INSERT ON entry_themes
+                WHEN NEW.theme = 'explode'
+                BEGIN
+                  SELECT RAISE(ABORT, 'scripted insert failure');
+                END
+                """)
+        }
+        try writeRaw(at: ws + "/vault/papers/b.md", """
         ---
         type: paper
         title: Broken Paper
-        themes: [duplicate, duplicate]
+        themes: [safe, explode]
         ---
         body
         """)

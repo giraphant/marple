@@ -15,6 +15,13 @@ enum InspectorNoteStatus: Equatable {
     case failed(String)
 }
 
+enum GeneralIndexRebuildResult: Equatable {
+    case success(Int)
+    case failure(String)
+    case alreadyRunning
+    case unavailable
+}
+
 @Observable @MainActor
 final class AppModel {
     let client: VaultClient
@@ -24,6 +31,8 @@ final class AppModel {
     /// sites stay unchanged, like the `counts`/`visibleEntries` facades below.
     var entries: [Entry] { catalog.entries }
     var status: String = ""
+    private(set) var lastIndexFailure: String?
+    private(set) var isRebuildingGeneralIndex = false
 
     /// Workspace root (parent of `vault/`). Used only to locate the optional
     /// `.quasi/schema.json` conformance snapshot. Empty in stub-backed tests.
@@ -91,12 +100,56 @@ final class AppModel {
         let stats: ReconcileStats?
         do { stats = try await Task.detached { try indexer.reconcile() }.value }
         catch {
+            recordIndexFailure(error, context: "增量更新失败")
             print("[marple] reconcile failed: \(error)")
             stats = nil
         }
         guard let stats, stats.upserted + stats.removed > 0 else { return }
         await loadIndex(pass: myPass)
         await reloadOpen()
+    }
+
+    /// User-initiated recovery for the ordinary SQLite index. `buildFull` writes
+    /// a temporary DB and atomically swaps it over the live file, so a failed
+    /// rebuild leaves the previous readable index intact.
+    func rebuildGeneralIndex() async -> GeneralIndexRebuildResult {
+        guard !isRebuildingGeneralIndex else { return .alreadyRunning }
+        guard let indexer = cliIndexer else { return .unavailable }
+
+        isRebuildingGeneralIndex = true
+        status = "正在清除并重建普通索引…"
+        defer { isRebuildingGeneralIndex = false }
+
+        do {
+            let count = try await Task.detached { try indexer.buildFull() }.value
+            lastIndexFailure = nil
+            await loadIndex()
+            if let failure = lastIndexFailure { return .failure(failure) }
+            return .success(count)
+        } catch {
+            recordIndexFailure(error, context: "完整重建失败")
+            return .failure(lastIndexFailure ?? String(describing: error))
+        }
+    }
+
+    func recordIndexFailure(_ error: any Error, context: String) {
+        let detail = String(describing: error)
+        let message = "\(context)：\(detail)"
+        lastIndexFailure = message
+        status = message
+    }
+
+    var generalIndexStatusDescription: String {
+        var lines = [
+            "普通索引包含 \(entries.count) 个条目。",
+            isRebuildingGeneralIndex ? "状态：正在清除并重建。" : "状态：\(status.isEmpty ? "就绪" : status)"
+        ]
+        if let lastIndexFailure {
+            lines.append("\n最近一次索引障碍：\n\(lastIndexFailure)")
+        } else {
+            lines.append("\n当前没有已知的索引障碍。重复的 themes 条目会自动去重。")
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Card grid vs single-column list. Pure UI toggle; no derived cache depends on it.
@@ -364,7 +417,7 @@ final class AppModel {
         didSet { persistTypeOrder() }
     }
 
-    /// Sidebar-hidden type buckets (QUA-127). Display-only: ⌘K, search, open tabs
+    /// Sidebar-hidden type buckets (QUA-127). Display-only: ⌘T, search, open tabs
     /// and saved views still reach a hidden type's entries — only the 物件 row
     /// disappears. Persisted like `typeOrder`, separate from workspace state.
     private(set) var hiddenTypes: Set<EntryType> = [] {
@@ -416,7 +469,7 @@ final class AppModel {
             browseMode = BrowseMode(rawValue: s.browseMode) ?? .grid
         }
         if spaces.isEmpty {
-            let initial = WorkspaceSpace(name: "Space 1", workspace: nil, isBrowsing: true)
+            let initial = WorkspaceSpace(name: "空间 1", workspace: nil, isBrowsing: true)
             spaces = [initial]
             activeSpaceID = initial.id
         }
@@ -580,7 +633,7 @@ final class AppModel {
 
     func addSpace() {
         let nextNumber = spaces.count + 1
-        let space = WorkspaceSpace(name: "Space \(nextNumber)", workspace: nil, isBrowsing: true)
+        let space = WorkspaceSpace(name: "空间 \(nextNumber)", workspace: nil, isBrowsing: true)
         spaces.append(space)
         activeSpaceID = space.id
         isBrowsing = true
@@ -683,7 +736,7 @@ final class AppModel {
         if let next = spaces.first(where: { !$0.isArchived }) {
             Task { await selectSpace(next.id) }
         } else {
-            let fresh = WorkspaceSpace(name: "Space \(spaces.count + 1)", workspace: nil, isBrowsing: true)
+            let fresh = WorkspaceSpace(name: "空间 \(spaces.count + 1)", workspace: nil, isBrowsing: true)
             spaces.append(fresh)
             activeSpaceID = fresh.id
             isBrowsing = true
@@ -790,6 +843,7 @@ final class AppModel {
             // Only the latest call publishes failure state — an older stale
             // failure shouldn't clobber a newer call's "n entries" status.
             if !catalog.isStale(myPass) {
+                recordIndexFailure(error, context: "读取索引失败")
                 status = "index failed: \(error)"
                 isBootstrapping = false
                 print("[marple] index FAILED: \(error)")

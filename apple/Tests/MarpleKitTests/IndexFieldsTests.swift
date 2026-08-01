@@ -175,6 +175,13 @@ struct IndexFieldsTests {
         #expect(themeArray(.sequence([.string("ai"), .string("ethics")])) == ["ai", "ethics"])
     }
 
+    @Test("themeArray: duplicate values are removed in first-seen order")
+    func themeArrayDeduplicates() {
+        #expect(themeArray(.sequence([
+            .string("ai"), .string("ethics"), .string("ai"), .string("ethics")
+        ])) == ["ai", "ethics"])
+    }
+
     @Test("themeArray: scalar → nil")
     func themeArrayScalar() {
         #expect(themeArray(.string("ai")) == nil)

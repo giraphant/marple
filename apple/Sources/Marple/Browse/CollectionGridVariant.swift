@@ -131,10 +131,10 @@ struct CollectionGridVariant: NSViewRepresentable {
             menu.addItem(ClosureMenuItem(title: "新标签打开") { [weak self] in
                 Task { await self?.model.openInNewTab(entry.path) } })
             menu.addItem(.separator())
-            let spacesItem = NSMenuItem(title: "在 Space 中打开", action: nil, keyEquivalent: "")
+            let spacesItem = NSMenuItem(title: "在空间中打开", action: nil, keyEquivalent: "")
             let submenu = NSMenu()
             for (i, space) in model.spaces.enumerated() {
-                let title = space.name.isEmpty ? "Space \(i + 1)" : space.name
+                let title = space.name.isEmpty ? "空间 \(i + 1)" : space.name
                 submenu.addItem(ClosureMenuItem(title: title) { [weak self] in
                     Task { await self?.model.openInSpace(entry.path, space: space.id) } })
             }

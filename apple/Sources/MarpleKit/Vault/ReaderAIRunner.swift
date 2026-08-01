@@ -74,9 +74,9 @@ public enum ReaderAIDispatchError: Error, Equatable, LocalizedError, Sendable {
     public var friendlyMessage: String {
         switch self {
         case .missingWorkspaceID:
-            return "请先在设置里填写 Superset workspace ID。"
+            return "请先在设置里填写 Superset 工作区 ID。"
         case .missingAgent:
-            return "请先在设置里填写 Agent 命令。"
+            return "请先在设置里填写代理命令。"
         case .missingCommandTemplate:
             return "请先在设置里填写分发命令模板。"
         case .launchFailed:
@@ -104,7 +104,7 @@ public enum SupersetWorkspaceListError: Error, Equatable, LocalizedError, Sendab
         case .notAuthenticated:
             return "Superset 未登录，请先在终端运行 superset auth login。"
         case .failed:
-            return "无法获取 Superset workspace，请查看日志。"
+            return "无法获取 Superset 工作区，请查看日志。"
         }
     }
 

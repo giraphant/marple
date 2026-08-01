@@ -61,6 +61,10 @@ let package = Package(
             ],
             resources: [
                 .process("Resources/Assets.xcassets"),   // app icon catalog (from main)
+                // String catalog, source = zh-Hans. SwiftUI string literals double
+                // as localization keys, so display is unchanged today; adding an
+                // English translation later is catalog-only work.
+                .process("Resources/Localizable.xcstrings"),
             ]
         ),
         // Standalone semantic-search CLI (build/query the vector index without the

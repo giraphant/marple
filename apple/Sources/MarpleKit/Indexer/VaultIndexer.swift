@@ -131,6 +131,19 @@ public final class VaultIndexer: @unchecked Sendable {
         try FileManager.default.createDirectory(
             atPath: marpleDir, withIntermediateDirectories: true, attributes: nil)
 
+        // Keep revisions monotonic across full rebuilds. An IndexDatabase may
+        // still be finishing an async entries.cache write for the old DB; if a
+        // rebuilt DB reset to revision 1, that stale cache could look current.
+        let previousRevision: Int64
+        if FileManager.default.fileExists(atPath: indexDBPath) {
+            previousRevision = (try? DatabaseQueue(path: indexDBPath).read {
+                try IndexWriter.entriesRevision($0)
+            }) ?? 0
+        } else {
+            previousRevision = 0
+        }
+        let nextRevision = previousRevision &+ 1
+
         // 4. Write to temp file with journal_mode=OFF + synchronous=OFF for speed.
         //    Mirrors `write_sqlite_index` (:1160-1281).
         let tmpPath = indexDBPath + ".tmp"
@@ -155,10 +168,12 @@ public final class VaultIndexer: @unchecked Sendable {
                 for entry in entries {
                     try IndexWriter.insert(db, entry)
                 }
-                // QUA-104: bump revision in the same transaction so any
-                // surviving entries.cache from before this rebuild is
-                // invalidated on next loadEntries.
-                try IndexWriter.bumpEntriesRevision(db)
+                // QUA-104: publish the next revision in the same transaction so
+                // any entries.cache from before this rebuild is invalidated.
+                try db.execute(
+                    sql: "INSERT OR REPLACE INTO meta(key, value) VALUES ('entries_revision', ?)",
+                    arguments: [String(nextRevision)]
+                )
             }
             // Ensure all writes are flushed before we close the queue.
         }

@@ -12,6 +12,13 @@ struct TabCommands: Commands {
                 .keyboardShortcut("n", modifiers: .command)
         }
 
+        // Global search lives next to 新建笔记 in 文件 (the Ulysses quick-open
+        // spot) — it's a library action, not a page-navigation one.
+        CommandGroup(after: .newItem) {
+            Button("搜索…") { if let m = ActiveModel.current { CommandPalettePresenter.toggle(model: m) } }
+                .keyboardShortcut("t", modifiers: .command)
+        }
+
         // Replace the standard File close group so plain ⌘W closes a tab (not the
         // window); window-close relocates to ⇧⌘W. (Pattern from CodeEdit.)
         CommandGroup(replacing: .saveItem) {
@@ -29,11 +36,6 @@ struct TabCommands: Commands {
         }
 
         CommandMenu("页面") {
-            Button("搜索…") { if let m = ActiveModel.current { CommandPalettePresenter.toggle(model: m) } }
-                .keyboardShortcut("t", modifiers: .command)
-
-            Divider()
-
             Button("后退") { run { await $0.goBack() } }
                 .keyboardShortcut("[", modifiers: .command)
             Button("前进") { run { await $0.goForward() } }
@@ -53,6 +55,7 @@ struct TabCommands: Commands {
                     .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
             }
         }
+
     }
 
     private func run(_ action: @escaping (AppModel) async -> Void) {

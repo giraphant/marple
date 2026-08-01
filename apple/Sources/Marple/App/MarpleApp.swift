@@ -118,7 +118,10 @@ final class AppState: ObservableObject {
         Task { @MainActor [weak self, weak m, indexer] in
             if !canSkip {
                 do { _ = try await Task.detached { try indexer.reconcile() }.value }
-                catch { print("[marple] boot reconcile failed (non-fatal): \(error)") }
+                catch {
+                    m?.recordIndexFailure(error, context: "启动时建立索引失败")
+                    print("[marple] boot reconcile failed (non-fatal): \(error)")
+                }
             }
             await m?.loadIndex()
             // Now safe to expose the CLI surface — entries is published.
@@ -149,6 +152,7 @@ final class AppState: ObservableObject {
                         let stats: ReconcileStats?
                         do { stats = try await Task.detached { try indexer.reconcile() }.value }
                         catch {
+                            m.recordIndexFailure(error, context: "后台更新索引失败")
                             print("[marple] deferred reconcile failed: \(error)")
                             stats = nil
                         }
