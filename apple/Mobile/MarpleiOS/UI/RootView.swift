@@ -25,7 +25,7 @@ struct RootView: View {
                         .monospacedDigit()
                 } else {
                     ProgressView()
-                    Text(model.statusLabel.isEmpty ? "正在建立索引…" : model.statusLabel)
+                    Text(model.statusLabel.isEmpty ? String(localized: "正在建立索引…") : model.statusLabel)
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }

@@ -221,7 +221,7 @@ private struct ReaderFloatingControls: View {
         HStack(spacing: 0) {
             ReaderFloatingControlIconButton(
                 icon: "list.bullet",
-                label: "大纲",
+                label: String(localized: "大纲"),
                 isEnabled: canShowOutline,
                 action: onOutline
             )
@@ -230,7 +230,7 @@ private struct ReaderFloatingControls: View {
                 ReaderFloatingDivider()
                 ReaderFloatingControlIconButton(
                     icon: "book.closed",
-                    label: "目录",
+                    label: String(localized: "目录"),
                     action: onBookContents
                 )
             }
@@ -238,7 +238,7 @@ private struct ReaderFloatingControls: View {
             ReaderFloatingDivider()
             ReaderFloatingControlIconButton(
                 icon: "speedometer",
-                label: "详情",
+                label: String(localized: "详情"),
                 action: onInfo
             )
         }
@@ -352,10 +352,10 @@ private struct InfoSheet: View {
             }
 
             Section {
-                infoRow("类型", entry.type.label)
-                if !entry.author.isEmpty { infoRow("作者", entry.author.joined(separator: ", ")) }
-                if let y = entry.year { infoRow("年份", y) }
-                if !entry.themes.isEmpty { infoRow("主题", entry.themes.joined(separator: " · ")) }
+                infoRow(String(localized: "类型"), AppPresentation.entryTypeLabel(entry.type))
+                if !entry.author.isEmpty { infoRow(String(localized: "作者"), ListFormatter.localizedString(byJoining: entry.author)) }
+                if let y = entry.year { infoRow(String(localized: "年份"), y) }
+                if !entry.themes.isEmpty { infoRow(String(localized: "主题"), entry.themes.joined(separator: " · ")) }
             }
 
             if hasTimestamps {
@@ -376,9 +376,9 @@ private struct InfoSheet: View {
     /// not a three-column dashboard.
     private func statsRows(_ s: DocStats) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            statLine("\(s.chars.formatted())", "字符")
-            statLine("\(s.words.formatted())", "字")
-            statLine("\(s.minutes)", "分钟 阅读时间")
+            statLine("\(s.chars.formatted())", String(localized: "字符"))
+            statLine("\(s.words.formatted())", String(localized: "字"))
+            statLine(s.minutes.formatted(), String(localized: "分钟 阅读时间"))
         }
         .padding(.top, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -515,7 +515,7 @@ private struct BookRow: Identifiable {
 private func bookRows(for book: BookContext?, current entry: Entry) -> [BookRow] {
     guard let b = book else { return [] }
     var rows: [BookRow] = []
-    if let ov = b.overview { rows.append(BookRow(entry: ov, label: "概述")) }
+    if let ov = b.overview { rows.append(BookRow(entry: ov, label: String(localized: "概述"))) }
     rows += b.chapters.map { BookRow(entry: $0, label: chapterLabel($0)) }
     guard rows.contains(where: { $0.entry.path != entry.path }) else { return [] }
     return rows

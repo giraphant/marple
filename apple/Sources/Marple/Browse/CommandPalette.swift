@@ -123,7 +123,7 @@ struct CommandPalette: View {
             // the prompt is just scope + key hints.)
             ZStack(alignment: .leading) {
                 if query.isEmpty {
-                    Text(mode.placeholder)
+                    Text(AppPresentation.searchPlaceholder(mode))
                         .font(Typo.body)
                         .foregroundStyle(Color(nsColor: .placeholderTextColor))
                         .allowsHitTesting(false)
@@ -143,7 +143,7 @@ struct CommandPalette: View {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help("清空")
+                .help(String(localized: "清空"))
             }
         }
         .padding(.horizontal, Space.s5)
@@ -155,7 +155,7 @@ struct CommandPalette: View {
             ForEach(SearchMode.allCases, id: \.self) { m in
                 let disabled = (m == .deep && !model.semanticAvailable)   // 深度 needs the vector index
                 Button { if !disabled { mode = m } } label: {
-                    Text(m.label)
+                    Text(AppPresentation.searchModeLabel(m))
                         .font(Self.modeFont)
                         .padding(.horizontal, Space.s4)
                         .padding(.vertical, Space.s2)
@@ -165,7 +165,9 @@ struct CommandPalette: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(disabled)
-                .help(disabled ? "深度检索需要向量索引和 MLX 运行时" : "Tab 切换模式")
+                .help(disabled
+                    ? String(localized: "深度检索需要向量索引和 MLX 运行时")
+                    : String(localized: "Tab 切换模式"))
             }
         }
         .padding(2)
@@ -181,9 +183,9 @@ struct CommandPalette: View {
 
     @ViewBuilder private var results: some View {
         if mode == .deep && !model.semanticAvailable {
-            placeholder("深度检索需要向量索引和 MLX 运行时")
+            placeholder(String(localized: "深度检索需要向量索引和 MLX 运行时"))
         } else if sections.isEmpty && openMatches.isEmpty {
-            placeholder(loading ? "搜索中…" : "没有匹配的条目")
+            placeholder(loading ? String(localized: "搜索中…") : String(localized: "没有匹配的条目"))
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
@@ -244,7 +246,7 @@ struct CommandPalette: View {
                     onClose()
                     model.paletteViewAll(type: section.type, query: query)
                 } label: {
-                    Text("在「\(section.type.label)」中查看全部 \(section.total) 条 →")
+                    Text(String(localized: "在「\(AppPresentation.entryTypeLabel(section.type))」中查看全部 \(section.total) 条 →"))
                         .font(Typo.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -256,7 +258,7 @@ struct CommandPalette: View {
         } header: {
             HStack(spacing: Space.s3) {
                 TypeBadge(type: section.type, size: 16)
-                Text(section.type.label).font(Typo.caption).foregroundStyle(.primary)
+                Text(AppPresentation.entryTypeLabel(section.type)).font(Typo.caption).foregroundStyle(.primary)
                 Text("(\(section.total))").font(Typo.caption2).foregroundStyle(.secondary)
                     .monospacedDigit()
                 Spacer()
@@ -276,7 +278,7 @@ struct CommandPalette: View {
                     Text(entry.title ?? fileStem(entry.path))
                         .font(Typo.body)
                         .lineLimit(1)
-                    if let badge = searchSourceBadge(sourceByPath[entry.path]) {
+                    if let badge = AppPresentation.searchSourceBadge(sourceByPath[entry.path]) {
                         Text(badge)
                             .font(Typo.caption2)
                             .padding(.horizontal, 5).padding(.vertical, 1)
@@ -422,7 +424,7 @@ struct CommandPalette: View {
     }
 
     private func metaLine(_ entry: Entry) -> String {
-        var parts = [entry.type.label]
+        var parts = [AppPresentation.entryTypeLabel(entry.type)]
         if !entry.author.isEmpty { parts.append(entry.author.joined(separator: ", ")) }
         if let y = entry.year, !y.isEmpty { parts.append(y) }
         return parts.joined(separator: " · ")

@@ -87,7 +87,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch id {
         case .toggleNav:
-            return iconItem(id, "sidebar.leading", "切换边栏", #selector(toggleNav)) { true }
+            return iconItem(id, "sidebar.leading", String(localized: "切换边栏"), #selector(toggleNav)) { true }
         case .readerSeparator:
             guard let splitView, splitView.arrangedSubviews.count >= 3 else { return nil }
             return NSTrackingSeparatorToolbarItem(identifier: .readerSeparator,
@@ -97,33 +97,33 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
             return NSTrackingSeparatorToolbarItem(identifier: .inspectorSeparator,
                                                   splitView: splitView, dividerIndex: 2)
         case .back:
-            return iconItem(id, "chevron.left", "后退", #selector(goBack)) { [weak self] in
+            return iconItem(id, "chevron.left", String(localized: "后退"), #selector(goBack)) { [weak self] in
                 self?.model?.canGoBack ?? false
             }
         case .forward:
-            return iconItem(id, "chevron.right", "前进", #selector(goForward)) { [weak self] in
+            return iconItem(id, "chevron.right", String(localized: "前进"), #selector(goForward)) { [weak self] in
                 self?.model?.canGoForward ?? false
             }
         case .toggleInspector:
-            return iconItem(id, "sidebar.trailing", "检查器", #selector(toggleInspector)) { [weak self] in
+            return iconItem(id, "sidebar.trailing", String(localized: "检查器"), #selector(toggleInspector)) { [weak self] in
                 self?.model?.openPath != nil
             }
         case .citation:
-            return buttonItem(id, "quote.bubble", "复制引用 · 右键选格式",
+            return buttonItem(id, "quote.bubble", String(localized: "复制引用 · 右键选格式"),
                               #selector(citationPrimary(_:)), menu: citationMenu) { [weak self] in
                 self?.model?.openCitationEntry != nil
             }
         case .original:
-            return buttonItem(id, "doc.richtext", "阅读原文 · 右键打开译本",
+            return buttonItem(id, "doc.richtext", String(localized: "阅读原文 · 右键打开译本"),
                               #selector(originalPrimary(_:)), menu: originalMenu) { [weak self] in
                 self?.model?.canOpenPDF ?? false
             }
         case .assistant:
-            return buttonItem(id, "sparkles", "AI 助手", #selector(assistantPrimary(_:)), menu: assistantMenu) { [weak self] in
+            return buttonItem(id, "sparkles", String(localized: "AI 助手"), #selector(assistantPrimary(_:)), menu: assistantMenu) { [weak self] in
                 self?.model?.openPath != nil
             }
         case .openExternal:
-            return buttonItem(id, "arrow.up.forward.square", "用外部编辑器打开",
+            return buttonItem(id, "arrow.up.forward.square", String(localized: "用外部编辑器打开"),
                               #selector(openExternal)) { [weak self] in
                 self?.model?.openPath != nil
             }
@@ -240,7 +240,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
         guard model?.openCitationEntry != nil else { return }
         let def = defaultCitationFormat()
         for f in CitationFormat.allCases {
-            let mi = NSMenuItem(title: f.label, action: #selector(copyCitationFromMenu(_:)), keyEquivalent: "")
+            let mi = NSMenuItem(title: AppPresentation.citationFormatLabel(f), action: #selector(copyCitationFromMenu(_:)), keyEquivalent: "")
             mi.target = self
             mi.representedObject = f.rawValue
             if f == def { mi.state = .on }
@@ -250,39 +250,39 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
 
     private func buildOriginalMenu(_ menu: NSMenu) {
         guard model?.canOpenPDF == true else { return }
-        let read = NSMenuItem(title: "阅读原文", action: #selector(readOriginal), keyEquivalent: "")
+        let read = NSMenuItem(title: String(localized: "阅读原文"), action: #selector(readOriginal), keyEquivalent: "")
         read.target = self
         menu.addItem(read)
         if model?.canOpenTranslation == true {
-            let tr = NSMenuItem(title: "打开译本", action: #selector(readTranslation), keyEquivalent: "")
+            let tr = NSMenuItem(title: String(localized: "打开译本"), action: #selector(readTranslation), keyEquivalent: "")
             tr.target = self
             menu.addItem(tr)
         }
     }
 
     private func buildAssistantMenu(_ menu: NSMenu) {
-        let reanalyze = NSMenuItem(title: ReaderAIAction.reanalyze.label,
+        let reanalyze = NSMenuItem(title: AppPresentation.readerAIActionLabel(.reanalyze),
                                    action: #selector(reanalyzeWithReaderAI),
                                    keyEquivalent: "")
         reanalyze.target = self
         reanalyze.isEnabled = model?.openPath != nil
         menu.addItem(reanalyze)
 
-        let format = NSMenuItem(title: ReaderAIAction.format.label,
+        let format = NSMenuItem(title: AppPresentation.readerAIActionLabel(.format),
                                 action: #selector(formatWithReaderAI),
                                 keyEquivalent: "")
         format.target = self
         format.isEnabled = model?.openPath != nil
         menu.addItem(format)
 
-        let translate = NSMenuItem(title: ReaderAIAction.translate.label,
+        let translate = NSMenuItem(title: AppPresentation.readerAIActionLabel(.translate),
                                    action: #selector(translateWithReaderAI),
                                    keyEquivalent: "")
         translate.target = self
         translate.isEnabled = model?.openPath != nil
         menu.addItem(translate)
 
-        let discuss = NSMenuItem(title: ReaderAIAction.discuss.label,
+        let discuss = NSMenuItem(title: AppPresentation.readerAIActionLabel(.discuss),
                                  action: #selector(discussWithReaderAI),
                                  keyEquivalent: "")
         discuss.target = self
@@ -305,6 +305,6 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
         let text = buildCitation(e, format: format)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        model?.flash("已复制引用 · \(format.label)")
+        model?.flash(String(localized: "已复制引用 · \(AppPresentation.citationFormatLabel(format))"))
     }
 }

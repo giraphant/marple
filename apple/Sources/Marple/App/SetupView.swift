@@ -30,14 +30,14 @@ struct SetupView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "选择"
+        panel.prompt = String(localized: "选择")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             _ = try resolveWorkspace(pickedPath: url.path)
             error = nil
             onPicked(url.path)
         } catch {
-            self.error = "该目录里没有 vault/ 文件夹,请选择你的文库工作区目录。"
+            self.error = String(localized: "该目录里没有 vault/ 文件夹,请选择你的文库工作区目录。")
         }
     }
 }

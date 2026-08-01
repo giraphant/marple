@@ -21,8 +21,8 @@ struct EntryListScreen: View {
                 EntrySummaryRow(entry: entry)
             }
         }
-        .navigationTitle(type.label)
-        .searchable(text: $query, prompt: "在\(type.label)中搜索")
+        .navigationTitle(AppPresentation.entryTypeLabel(type))
+        .searchable(text: $query, prompt: Text(String(localized: "在\(AppPresentation.entryTypeLabel(type))中搜索")))
         .overlay {
             if !query.isEmpty && shown.isEmpty {
                 ContentUnavailableView.search(text: query)

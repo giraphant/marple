@@ -17,9 +17,9 @@ private enum SidebarOutlineSection {
 
     var title: String {
         switch self {
-        case .objects: return "物件"
-        case .views:   return "视图"
-        case .tabs:    return "页面"
+        case .objects: return String(localized: "物件")
+        case .views:   return String(localized: "视图")
+        case .tabs:    return String(localized: "页面")
         }
     }
 
@@ -415,7 +415,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                     SidebarOutlineNode(kind: .section(.objects), title: SidebarOutlineSection.objects.title,
                                        children: visibleTypes.map { type in
                                            SidebarOutlineNode(kind: .pane(.type(type)),
-                                                              title: type.label,
+                                                              title: AppPresentation.entryTypeLabel(type),
                                                               count: model.counts[type] ?? 0,
                                                               iconName: type.symbolName)
                                        }))
@@ -483,11 +483,11 @@ struct SidebarOutlineView: NSViewRepresentable {
                 return (path as NSString).lastPathComponent
             }
             switch loc.pane {
-            case .type(let type): return type.label
+            case .type(let type): return AppPresentation.entryTypeLabel(type)
             case .theme(let name): return "#\(name)"
-            case .themesIndex: return "标签"
-            case .trash: return "回收站"
-            case .savedView(let id): return model.savedView(id)?.name ?? "视图"
+            case .themesIndex: return String(localized: "标签")
+            case .trash: return String(localized: "回收站")
+            case .savedView(let id): return model.savedView(id)?.name ?? String(localized: "视图")
             }
         }
 
@@ -768,16 +768,16 @@ struct SidebarOutlineView: NSViewRepresentable {
             // in 设置 → 外观 → 侧栏物件.
             if clicked >= 0, let clickedNode = outline.item(atRow: clicked) as? SidebarOutlineNode,
                case .pane(.type) = clickedNode.kind {
-                contextMenu.addItem(menuItem("在侧栏中隐藏", action: #selector(hideTypeFromMenu(_:)), node: clickedNode))
+                contextMenu.addItem(menuItem(String(localized: "在侧栏中隐藏"), action: #selector(hideTypeFromMenu(_:)), node: clickedNode))
                 return
             }
             // Saved views: rename in place, delete for good (QUA-127). Deleting
             // is just dropping a stored filter — no confirmation dance.
             if clicked >= 0, let clickedNode = outline.item(atRow: clicked) as? SidebarOutlineNode,
                case .pane(.savedView) = clickedNode.kind {
-                contextMenu.addItem(menuItem("重命名", action: #selector(renameFromMenu(_:)), node: clickedNode))
+                contextMenu.addItem(menuItem(String(localized: "重命名"), action: #selector(renameFromMenu(_:)), node: clickedNode))
                 contextMenu.addItem(.separator())
-                contextMenu.addItem(menuItem("删除视图", action: #selector(deleteSavedViewFromMenu(_:)), node: clickedNode))
+                contextMenu.addItem(menuItem(String(localized: "删除视图"), action: #selector(deleteSavedViewFromMenu(_:)), node: clickedNode))
                 return
             }
             // AppKit auto-collapses selection to the clicked row when the clicked
@@ -807,7 +807,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             let tabIDs = collectTabIDs(in: nodes)
             var items: [NSMenuItem] = []
 
-            let closeItem = NSMenuItem(title: "关闭这 \(n) 个", action: #selector(closeBatchFromMenu(_:)), keyEquivalent: "")
+            let closeItem = NSMenuItem(title: String(localized: "关闭这 \(n) 个"), action: #selector(closeBatchFromMenu(_:)), keyEquivalent: "")
             closeItem.target = self
             closeItem.representedObject = Array(tabIDs) as NSArray
             // Pin-only selection has no actionable closes; reflect that visually.
@@ -816,7 +816,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             items.append(closeItem)
 
             if allTabs {
-                let groupItem = NSMenuItem(title: "把这 \(n) 个合成一个新组",
+                let groupItem = NSMenuItem(title: String(localized: "把这 \(n) 个合成一个新组"),
                                            action: #selector(groupBatchFromMenu(_:)), keyEquivalent: "")
                 groupItem.target = self
                 let pureTabIDs = nodes.compactMap { node -> NavTab.ID? in
@@ -880,27 +880,31 @@ struct SidebarOutlineView: NSViewRepresentable {
         fileprivate func menuItems(for node: SidebarOutlineNode) -> [NSMenuItem] {
             switch node.kind {
             case .group(let id):
-                var items = [menuItem("重命名", action: #selector(renameFromMenu(_:)), node: node)]
+                var items = [menuItem(String(localized: "重命名"), action: #selector(renameFromMenu(_:)), node: node)]
                 if let group = model.tabGroups.first(where: { $0.id == id }) {
-                    items.append(menuItem(group.isCollapsed ? "展开页面组" : "折叠页面组",
-                                          action: #selector(toggleGroupFromMenu(_:)), node: node))
+                    items.append(menuItem(group.isCollapsed
+                        ? String(localized: "展开页面组")
+                        : String(localized: "折叠页面组"),
+                        action: #selector(toggleGroupFromMenu(_:)), node: node))
                 }
                 items.append(.separator())
-                items.append(menuItem("复制分享清单", action: #selector(copyShareManifestFromMenu(_:)), node: node))
+                items.append(menuItem(String(localized: "复制分享清单"), action: #selector(copyShareManifestFromMenu(_:)), node: node))
                 return items
             case .tab(let id):
                 guard let tab = model.tabs.first(where: { $0.id == id }) else { return [] }
-                var items = [menuItem("重命名", action: #selector(renameFromMenu(_:)), node: node)]
+                var items = [menuItem(String(localized: "重命名"), action: #selector(renameFromMenu(_:)), node: node)]
                 items.append(.separator())
-                items.append(menuItem("复制分享清单", action: #selector(copyShareManifestFromMenu(_:)), node: node))
+                items.append(menuItem(String(localized: "复制分享清单"), action: #selector(copyShareManifestFromMenu(_:)), node: node))
                 items.append(.separator())
-                items.append(menuItem(tab.pinned ? "取消固定" : "固定页面",
-                                      action: #selector(togglePinFromMenu(_:)), node: node))
+                items.append(menuItem(tab.pinned
+                    ? String(localized: "取消固定")
+                    : String(localized: "固定页面"),
+                    action: #selector(togglePinFromMenu(_:)), node: node))
                 items.append(.separator())
-                let closeItem = menuItem("关闭页面", action: #selector(closeTabFromMenu(_:)), node: node)
+                let closeItem = menuItem(String(localized: "关闭页面"), action: #selector(closeTabFromMenu(_:)), node: node)
                 closeItem.isEnabled = model.tabs.count > 1
                 items.append(closeItem)
-                items.append(menuItem("关闭其他页面", action: #selector(closeOtherTabsFromMenu(_:)), node: node))
+                items.append(menuItem(String(localized: "关闭其他页面"), action: #selector(closeOtherTabsFromMenu(_:)), node: node))
                 return items
             case .section, .pane:
                 return []
@@ -942,7 +946,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             guard let markdown else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(markdown, forType: .string)
-            model.flash("已复制分享清单")
+            model.flash(String(localized: "已复制分享清单"))
         }
 
         @objc private func toggleGroupFromMenu(_ sender: NSMenuItem) {

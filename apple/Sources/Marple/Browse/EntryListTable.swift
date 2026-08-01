@@ -430,10 +430,10 @@ struct EntryListTable: NSViewRepresentable {
             let row = table.clickedRow
             guard row >= 0 && row < items.count else { return }
             guard case .entryHeader(let entry) = items[row] else { return }
-            menu.addItem(menuItem("在新页面页打开", action: #selector(openInNewTabFromMenu(_:)), path: entry.path))
-            menu.addItem(menuItem("新建批注", action: #selector(newAnnotationFromMenu(_:)), path: entry.path))
+            menu.addItem(menuItem(String(localized: "在新页面页打开"), action: #selector(openInNewTabFromMenu(_:)), path: entry.path))
+            menu.addItem(menuItem(String(localized: "新建批注"), action: #selector(newAnnotationFromMenu(_:)), path: entry.path))
             menu.addItem(.separator())
-            menu.addItem(menuItem("移到回收站", action: #selector(moveToTrashFromMenu(_:)), path: entry.path))
+            menu.addItem(menuItem(String(localized: "移到回收站"), action: #selector(moveToTrashFromMenu(_:)), path: entry.path))
         }
 
         private func menuItem(_ title: String, action: Selector, path: String) -> NSMenuItem {
@@ -689,7 +689,7 @@ private struct ExpandToggleView: View {
 
     var body: some View {
         Button(action: onToggle) {
-            Text(expanded ? "收起" : "再显示 \(hiddenCount) 个匹配项…")
+            Text(expanded ? String(localized: "收起") : String(localized: "再显示 \(hiddenCount) 个匹配项…"))
                 .font(Typo.caption)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -20,7 +20,7 @@ final class BackupBrowserPresenter {
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 460),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
-        w.title = "浏览备份"
+        w.title = String(localized: "浏览备份")
         w.contentViewController = NSHostingController(rootView: BackupBrowserView(scheduler: scheduler))
         w.isReleasedWhenClosed = false
         w.center()
@@ -122,9 +122,9 @@ struct BackupBrowserView: View {
     private func restore(_ snapshot: SnapshotStore.Snapshot, _ rel: String) {
         do {
             let newRel = try store.restoreCopy(snapshot: snapshot, relPath: rel)
-            status = "已恢复为副本：\(newRel)"
+            status = String(localized: "已恢复为副本：\(newRel)")
         } catch {
-            status = "恢复失败：\(error.localizedDescription)"
+            status = String(localized: "恢复失败：\(error.localizedDescription)")
         }
     }
 

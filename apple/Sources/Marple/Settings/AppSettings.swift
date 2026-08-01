@@ -44,8 +44,8 @@ enum CitationClickAction: String, CaseIterable {
     case copyDefault, showMenu
     var label: String {
         switch self {
-        case .copyDefault: return "复制默认格式"
-        case .showMenu:    return "打开格式菜单"
+        case .copyDefault: return String(localized: "复制默认格式")
+        case .showMenu: return String(localized: "打开格式菜单")
         }
     }
 }
@@ -56,8 +56,8 @@ enum OriginalClickAction: String, CaseIterable {
     case openOriginal, showMenu
     var label: String {
         switch self {
-        case .openOriginal: return "打开原始 PDF"
-        case .showMenu:     return "打开菜单（原文 / 译本）"
+        case .openOriginal: return String(localized: "打开原始 PDF")
+        case .showMenu: return String(localized: "打开菜单（原文 / 译本）")
         }
     }
 }
@@ -67,9 +67,9 @@ enum ThemePreference: String, CaseIterable {
     case system, light, dark
     var label: String {
         switch self {
-        case .system: return "跟随系统"
-        case .light:  return "浅色"
-        case .dark:   return "深色"
+        case .system: return String(localized: "跟随系统")
+        case .light: return String(localized: "浅色")
+        case .dark: return String(localized: "深色")
         }
     }
     var colorScheme: ColorScheme? {
@@ -144,11 +144,11 @@ enum ReadingDefaults {
     static let letterSpacingOptions: [Double] = [0.0, 0.02, 0.04, 0.06, 0.08]
     static func letterSpacingLabel(_ value: Double) -> String {
         switch value {
-        case ..<0.01:  return "紧凑"
-        case ..<0.03:  return "偏紧"
-        case ..<0.05:  return "标准"
-        case ..<0.07:  return "舒朗"
-        default:       return "宽松"
+        case ..<0.01: return String(localized: "紧凑")
+        case ..<0.03: return String(localized: "偏紧")
+        case ..<0.05: return String(localized: "标准")
+        case ..<0.07: return String(localized: "舒朗")
+        default: return String(localized: "宽松")
         }
     }
 }

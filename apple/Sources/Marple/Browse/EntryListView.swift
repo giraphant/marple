@@ -21,12 +21,16 @@ struct EntryListView: View {
 
     private var title: String {
         switch model.pane {
-        case .type(let t):   return "\(t.label) (\(model.visibleEntries.count))"
-        case .theme(let n):  return "标签: \(n) (\(model.visibleEntries.count))"
-        case .themesIndex:   return "标签"
-        case .trash:         return "回收站"
+        case .type(let type):
+            return String(localized: "\(AppPresentation.entryTypeLabel(type)) (\(model.visibleEntries.count))")
+        case .theme(let name):
+            return String(localized: "标签：\(name) (\(model.visibleEntries.count))")
+        case .themesIndex:
+            return String(localized: "标签")
+        case .trash:
+            return String(localized: "回收站")
         case .savedView(let id):
-            return "\(model.savedView(id)?.name ?? "视图") (\(model.visibleEntries.count))"
+            return String(localized: "\(model.savedView(id)?.name ?? String(localized: "视图")) (\(model.visibleEntries.count))")
         }
     }
 
@@ -52,7 +56,7 @@ struct EntryListView: View {
         }
         .buttonStyle(.borderless)
         .fixedSize()
-        .help("切换到网格")
+        .help(String(localized: "切换到网格"))
     }
 
     private var sortButton: some View {
@@ -138,7 +142,7 @@ private struct SortClauseRow: View {
         HStack(spacing: 7) {
             Picker("字段", selection: fieldBinding) {
                 ForEach(availableFields, id: \.self) { field in
-                    Text(field.label).tag(field)
+                    Text(AppPresentation.sortFieldLabel(field)).tag(field)
                 }
             }
             .labelsHidden()
@@ -265,7 +269,7 @@ private struct FilterPopover: View {
                     namingView = true
                 }
                 .disabled(!canSaveView)
-                .help("把当前筛选和排序固定为侧栏里的一个视图")
+                .help(String(localized: "把当前筛选和排序固定为侧栏里的一个视图"))
                 Spacer()
                 if !model.activeFilterClauses.isEmpty {
                     Button("清空") { model.setFilters([], match: model.activeFilterMatch) }
@@ -279,7 +283,7 @@ private struct FilterPopover: View {
             TextField("视图名称", text: $newViewName)
             Button("保存") {
                 let name = newViewName.trimmingCharacters(in: .whitespacesAndNewlines)
-                model.createSavedView(named: name.isEmpty ? "新视图" : name)
+                model.createSavedView(named: name.isEmpty ? String(localized: "新视图") : name)
             }
             Button("取消", role: .cancel) {}
         } message: {
@@ -324,7 +328,7 @@ private struct FilterClauseRow: View {
         HStack(spacing: 7) {
             Picker("字段", selection: fieldBinding) {
                 ForEach(FilterField.allCases, id: \.self) { field in
-                    Text(field.label).tag(field)
+                    Text(AppPresentation.filterFieldLabel(field)).tag(field)
                 }
             }
             .labelsHidden()
@@ -351,7 +355,7 @@ private struct FilterClauseRow: View {
             } else if current.field.input == .choice {
                 Picker("类型", selection: valueBinding) {
                     ForEach(filterTypeOptions, id: \.rawValue) { type in
-                        Text(type.label).tag(type.rawValue)
+                        Text(AppPresentation.entryTypeLabel(type)).tag(type.rawValue)
                     }
                 }
                 .labelsHidden()
@@ -365,7 +369,7 @@ private struct FilterClauseRow: View {
             if !clauseReady(current) {
                 Image(systemName: "exclamationmark.circle")
                     .foregroundStyle(.tertiary)
-                    .help("条件未完整，暂不生效")
+                    .help(String(localized: "条件未完整，暂不生效"))
             }
 
             Spacer(minLength: 2)
@@ -449,23 +453,23 @@ private func filterOpLabel(_ op: FilterOp, for field: FilterField) -> String {
     case .gte: return "≥"
     case .lte: return "≤"
     case .eq: return "="
-    case .contains: return "包含"
-    case .is_: return "是"
-    case .yes: return field == .haspdf ? "有" : "是"
-    case .within: return "近"
+    case .contains: return String(localized: "包含")
+    case .is_: return String(localized: "是")
+    case .yes: return field == .haspdf ? String(localized: "有") : String(localized: "是")
+    case .within: return String(localized: "近")
     }
 }
 
 private func filterPlaceholder(for field: FilterField) -> String {
     switch field {
     case .type: return ""
-    case .rating: return "分数"
-    case .year: return "年份"
-    case .author: return "作者"
-    case .theme: return "标签"
-    case .source: return "来源"
+    case .rating: return String(localized: "分数")
+    case .year: return String(localized: "年份")
+    case .author: return String(localized: "作者")
+    case .theme: return String(localized: "标签")
+    case .source: return String(localized: "来源")
     case .haspdf: return ""
-    case .added: return "天数"
+    case .added: return String(localized: "天数")
     }
 }
 

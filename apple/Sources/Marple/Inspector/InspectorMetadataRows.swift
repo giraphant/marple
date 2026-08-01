@@ -233,7 +233,7 @@ private func talkRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRo
         rows.append(.readOnlyScalar(label: "日期", value: date, copyValue: nil))
     }
     if let transcript = containerContext(for: entry, in: entries)?.children.first {
-        rows.append(.linkedScalar(label: "转写", value: displayTitle(for: transcript) ?? "转写",
+        rows.append(.linkedScalar(label: "转写", value: displayTitle(for: transcript) ?? AppPresentation.entryTypeLabel(.transcript),
                                   path: transcript.path, copyValue: nil))
     }
     rows.append(.rating)
@@ -244,7 +244,7 @@ private func transcriptRows(for entry: Entry, in entries: [Entry]) -> [Inspector
     // A transcript's only structured link is back to its talk — the容器②
     // overview of its `talks/<slug>/` folder.
     guard let talk = containerContext(for: entry, in: entries)?.overview else { return [] }
-    return [.linkedScalar(label: "讲座", value: displayTitle(for: talk) ?? "讲座",
+    return [.linkedScalar(label: "讲座", value: displayTitle(for: talk) ?? AppPresentation.entryTypeLabel(.talk),
                           path: talk.path, copyValue: nil)]
 }
 
@@ -269,16 +269,16 @@ private func nonEmpty(_ value: String?) -> String? {
 
 private func categoryDisplayValue(_ category: String) -> String {
     switch category.lowercased() {
-    case "monograph": return "专著"
-    case "edited volume", "edited-volume": return "编著"
+    case "monograph": return String(localized: "专著")
+    case "edited volume", "edited-volume": return String(localized: "编著")
     default: return category
     }
 }
 
 private func kindDisplayValue(_ kind: String) -> String {
     switch kind.lowercased() {
-    case "overview": return "概览"
-    case "resources": return "资源"
+    case "overview": return String(localized: "概览")
+    case "resources": return String(localized: "资源")
     default: return kind
     }
 }
@@ -299,16 +299,16 @@ private func doiDisplayValue(_ doi: String) -> String {
 /// (a newer Quasi schema could add one) so the banner degrades gracefully.
 func conformanceFieldLabel(_ field: String) -> String {
     switch field {
-    case "title":     return "标题"
-    case "name":      return "名称"
-    case "authors", "author": return "作者"
-    case "year":      return "年份"
-    case "journal":   return "期刊"
-    case "themes":    return "标签"
-    case "publisher": return "出版"
-    case "book":      return "书籍"
-    case "kind":      return "类型"
-    case "created":   return "创建"
+    case "title":     return String(localized: "标题")
+    case "name":      return String(localized: "名称")
+    case "authors", "author": return String(localized: "作者")
+    case "year":      return String(localized: "年份")
+    case "journal":   return String(localized: "期刊")
+    case "themes":    return String(localized: "标签")
+    case "publisher": return String(localized: "出版")
+    case "book":      return String(localized: "书籍")
+    case "kind":      return String(localized: "类型")
+    case "created":   return String(localized: "创建")
     default:          return field
     }
 }

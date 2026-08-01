@@ -140,7 +140,7 @@ struct TabStripView: View {
             .strokeBorder(.separator, lineWidth: tab.id == draggingID ? 1 : 0))
         .help(model.tabTitle(tab))
         .contextMenu {
-            Button(tab.pinned ? "取消固定" : "固定页面") { model.togglePin(tab.id) }
+            Button(tab.pinned ? String(localized: "取消固定") : String(localized: "固定页面")) { model.togglePin(tab.id) }
             Divider()
             Button("关闭页面") { Task { await model.closeTab(tab.id) } }
                 .disabled(model.tabs.count <= 1)

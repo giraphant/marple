@@ -50,8 +50,8 @@ struct InspectorView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(label)
-        .accessibilityLabel(label)
+        .help(AppPresentation.inspectorLabel(label))
+        .accessibilityLabel(AppPresentation.inspectorLabel(label))
     }
 }
 
@@ -77,7 +77,7 @@ private struct SectionHeader: View {
     let title: String
     init(_ t: String) { title = t }
     var body: some View {
-        Text(title)
+        Text(AppPresentation.inspectorLabel(title))
             .font(InspectorStyle.sectionTitle)
             .foregroundStyle(InspectorStyle.sectionTitleColor)
     }
@@ -94,7 +94,7 @@ private struct FieldRow<Value: View>: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: Space.s5) {
-            Text(label)
+            Text(AppPresentation.inspectorLabel(label))
                 .font(Typo.callout)
                 .fontWeight(.medium)
                 .foregroundStyle(InspectorStyle.rowLabelColor)
@@ -136,7 +136,7 @@ private struct ConformanceBanner: View {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: InspectorStyle.markerSize, weight: .medium))
                 .foregroundStyle(.orange)
-            Text("缺少必填：" + missing.map(conformanceFieldLabel).joined(separator: "、"))
+            Text(String(localized: "缺少必填：\(missing.map(conformanceFieldLabel).joined(separator: "、"))"))
                 .font(Typo.caption)
                 .foregroundStyle(InspectorStyle.rowLabelColor)
         }
@@ -156,7 +156,7 @@ private struct StatsSection: View {
                     StatRow("字符", "\(s.chars)")
                     StatRow("字", "\(s.words)")
                     StatRow("段落", "\(s.paragraphs)")
-                    StatRow("阅读时间", s.minutes > 0 ? "\(s.minutes) 分钟" : "—")
+                    StatRow("阅读时间", s.minutes > 0 ? String(localized: "\(s.minutes.formatted()) 分钟") : "—")
                 }
             } else {
                 Text("—").foregroundStyle(.secondary).font(.callout)
@@ -207,7 +207,7 @@ private struct BookNavGroup: View {
             SectionHeader("本书")
             VStack(alignment: .leading, spacing: 0) {
                 if let ov = book.overview {
-                    BookNavRow(label: "概述",
+                    BookNavRow(label: String(localized: "概述"),
                                active: model.openPath == ov.path) { navigate(to: ov.path) }
                 }
                 ForEach(book.chapters) { ch in
@@ -240,7 +240,7 @@ private struct TopicNavGroup: View {
             SectionHeader("本专题")
             VStack(alignment: .leading, spacing: 0) {
                 if let ov = topic.overview {
-                    BookNavRow(label: "概述",
+                    BookNavRow(label: String(localized: "概述"),
                                active: model.openPath == ov.path) { navigate(to: ov.path) }
                 }
                 ForEach(topic.pages) { page in
@@ -463,9 +463,10 @@ private struct ScalarRow: View {
     @State private var hovering = false
 
     var body: some View {
-        FieldRow(label) {
+        let displayLabel = AppPresentation.inspectorLabel(label)
+        FieldRow(displayLabel) {
             if editing {
-                TextField(label, text: $draft)
+                TextField(displayLabel, text: $draft)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .onSubmit { Task { await commit(draft); editing = false } }
@@ -666,7 +667,7 @@ private struct AuthorRow: View {
                 Button {
                     editingAll = true
                 } label: {
-                    Label("添加\(noun)", systemImage: "plus")
+                    Label(String(localized: "添加\(AppPresentation.inspectorLabel(noun))"), systemImage: "plus")
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 9)
@@ -1015,7 +1016,7 @@ private struct ThemesEditor: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .help(adding ? "取消" : "添加标签")
+                .help(adding ? String(localized: "取消") : String(localized: "添加标签"))
                 .onHover { hoveringAdd = $0 }
             }
             if themes.isEmpty {
@@ -1077,7 +1078,9 @@ private struct NotesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: InspectorStyle.headerSpacing) {
-            SectionHeader(notes.isEmpty ? "笔记" : "笔记 (\(notes.count))")
+            SectionHeader(notes.isEmpty
+                ? AppPresentation.inspectorLabel("笔记")
+                : AppPresentation.countedInspectorLabel("笔记", count: notes.count))
             if model.openEntry == nil {
                 Text("打开文档后可记录笔记").foregroundStyle(.secondary).font(Typo.callout)
             } else {
@@ -1192,7 +1195,7 @@ private struct RelationsView: View {
     @ViewBuilder private func relGroup(_ title: String, _ list: [Entry]) -> some View {
         if !list.isEmpty {
             VStack(alignment: .leading, spacing: InspectorStyle.headerSpacing) {
-                SectionHeader("\(title) (\(list.count))")
+                SectionHeader(AppPresentation.countedInspectorLabel(title, count: list.count))
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(list.prefix(30)) { e in
                         RelationRow(title: e.title ?? e.path) { Task { await model.open(e.path) } }

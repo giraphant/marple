@@ -119,13 +119,13 @@ private struct IndexSettings: View {
         Task { @MainActor in
             result = switch await model.rebuildGeneralIndex() {
             case .success(let count):
-                ResultMessage(title: "普通索引已重建", detail: "已索引 \(count) 个条目。")
+                ResultMessage(title: String(localized: "普通索引已重建"), detail: String(localized: "已索引 \(count) 个条目。"))
             case .failure(let detail):
-                ResultMessage(title: "普通索引重建失败", detail: detail)
+                ResultMessage(title: String(localized: "普通索引重建失败"), detail: detail)
             case .alreadyRunning:
-                ResultMessage(title: "普通索引正在重建", detail: "请等待当前重建完成。")
+                ResultMessage(title: String(localized: "普通索引正在重建"), detail: String(localized: "请等待当前重建完成。"))
             case .unavailable:
-                ResultMessage(title: "无法重建普通索引", detail: "主窗口的索引器尚未就绪。")
+                ResultMessage(title: String(localized: "无法重建普通索引"), detail: String(localized: "主窗口的索引器尚未就绪。"))
             }
             isRebuilding = false
         }
@@ -241,7 +241,7 @@ private struct SidebarTypeToggles: View {
                     get: { !model.hiddenTypes.contains(type) },
                     set: { model.setTypeHidden(type, hidden: !$0) }
                 )) {
-                    Label(type.label, systemImage: type.symbolName)
+                    Label(AppPresentation.entryTypeLabel(type), systemImage: type.symbolName)
                 }
             }
         } else {
@@ -278,7 +278,7 @@ private struct ReadingSettings: View {
             }
             Section("默认引用格式") {
                 Picker("格式", selection: $format) {
-                    ForEach(CitationFormat.allCases, id: \.self) { Text($0.label).tag($0) }
+                    ForEach(CitationFormat.allCases, id: \.self) { Text(AppPresentation.citationFormatLabel($0)).tag($0) }
                 }
                 .pickerStyle(.inline)
                 Text("示例：\(format.example)")
@@ -308,8 +308,12 @@ private struct EditorPicker: View {
             FlowLayout(spacing: Space.s2, lineSpacing: Space.s2) {
                 ForEach(Self.presets, id: \.app) { preset in
                     let active = preset.app == value
-                    Button(preset.label) { value = preset.app }
-                        .buttonStyle(.plain)
+                    Button {
+                        value = preset.app
+                    } label: {
+                        Text(preset.app.isEmpty ? String(localized: "系统默认") : preset.label)
+                    }
+                    .buttonStyle(.plain)
                         .font(Typo.body)
                         .padding(.horizontal, Space.s4).padding(.vertical, Space.s2)
                         .background(active ? Color.accentColor.opacity(0.15) : Color(.quaternaryLabelColor).opacity(0.4),
@@ -367,7 +371,7 @@ private struct AIBridgeSettings: View {
             switch self {
             case .claude: return "Claude Code (claude)"
             case .codex:  return "Codex (codex)"
-            case .custom: return "自定义"
+            case .custom: return String(localized: "自定义")
             }
         }
     }
@@ -402,7 +406,7 @@ private struct AIBridgeSettings: View {
                         dispatchTemplate = newTarget == .custom ? dispatchTemplate : newTarget.defaultTemplate
                     }
                 )) {
-                    ForEach(AIDispatchTarget.allCases, id: \.self) { Text($0.label).tag($0) }
+                    ForEach(AIDispatchTarget.allCases, id: \.self) { Text(AppPresentation.aiDispatchTargetLabel($0)).tag($0) }
                 }
 
                 // The choice is stored separately from the command text so typing
@@ -431,7 +435,7 @@ private struct AIBridgeSettings: View {
                     HStack {
                         TextField("Superset 工作区 ID", text: $supersetWorkspaceID)
                             .textFieldStyle(.roundedBorder)
-                        Button(isLoadingWorkspaces ? "获取中…" : "获取") {
+                        Button(isLoadingWorkspaces ? String(localized: "获取中…") : String(localized: "获取")) {
                             Task { await refreshSupersetWorkspaces() }
                         }
                         .disabled(isLoadingWorkspaces)
@@ -472,22 +476,22 @@ private struct AIBridgeSettings: View {
 
             Section("提示词模板") {
                 PromptTemplateEditor(
-                    title: ReaderAIAction.reanalyze.label,
+                    title: AppPresentation.readerAIActionLabel(.reanalyze),
                     prompt: $readerAIReanalyzePrompt,
                     defaultPrompt: ReaderAIAction.reanalyze.defaultPromptIntent
                 )
                 PromptTemplateEditor(
-                    title: ReaderAIAction.format.label,
+                    title: AppPresentation.readerAIActionLabel(.format),
                     prompt: $readerAIFormatPrompt,
                     defaultPrompt: ReaderAIAction.format.defaultPromptIntent
                 )
                 PromptTemplateEditor(
-                    title: ReaderAIAction.translate.label,
+                    title: AppPresentation.readerAIActionLabel(.translate),
                     prompt: $readerAITranslatePrompt,
                     defaultPrompt: ReaderAIAction.translate.defaultPromptIntent
                 )
                 PromptTemplateEditor(
-                    title: ReaderAIAction.discuss.label,
+                    title: AppPresentation.readerAIActionLabel(.discuss),
                     prompt: $readerAIDiscussPrompt,
                     defaultPrompt: ReaderAIAction.discuss.defaultPromptIntent
                 )
@@ -528,18 +532,20 @@ private struct AIBridgeSettings: View {
                 if supersetWorkspaceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !ids.contains(supersetWorkspaceID) {
                     supersetWorkspaceID = first.id
                 }
-                workspaceLookupMessage = workspaces.count == 1 ? "已填入工作区 ID：\(first.displayName)" : "找到 \(workspaces.count) 个本机工作区，请选择一个。"
+                workspaceLookupMessage = workspaces.count == 1
+                    ? String(localized: "已填入工作区 ID：\(first.displayName)")
+                    : String(localized: "找到 \(workspaces.count) 个本机工作区，请选择一个。")
             } else {
                 workspaceLookupIsError = true
-                workspaceLookupMessage = "没有找到本机 Superset 工作区。"
+                workspaceLookupMessage = String(localized: "没有找到本机 Superset 工作区。")
             }
         } catch let error as SupersetWorkspaceListError {
             workspaceLookupIsError = true
-            workspaceLookupMessage = error.friendlyMessage
+            workspaceLookupMessage = AppPresentation.supersetWorkspaceListErrorLabel(error)
             print("[marple] Superset workspace lookup FAILED: \(error)")
         } catch {
             workspaceLookupIsError = true
-            workspaceLookupMessage = "无法获取 Superset 工作区，请查看日志。"
+            workspaceLookupMessage = String(localized: "无法获取 Superset 工作区，请查看日志。")
             print("[marple] Superset workspace lookup FAILED: \(error)")
         }
     }
@@ -586,7 +592,7 @@ private struct SemanticIndexRefreshSettings: View {
             Text("尚未建立语义索引。")
                 .foregroundStyle(.secondary)
         }
-        Button(controller.isRunning ? "刷新中…" : "刷新语义索引") {
+        Button(controller.isRunning ? String(localized: "刷新中…") : String(localized: "刷新语义索引")) {
             confirmingRefresh = true
         }
         .disabled(controller.isRunning)
@@ -652,7 +658,7 @@ private struct BackupSettingsContent: View {
             }
 
             Section("最新备份") {
-                Text(scheduler.lastBackup.map(Self.friendly) ?? "尚未备份")
+                Text(scheduler.lastBackup.map(Self.friendly) ?? String(localized: "尚未备份"))
                     .foregroundStyle(.secondary)
                 if let fp = footprint, fp.snapshotCount > 0 {
                     Text("占用磁盘约 \(Self.formatBytes(fp.bytes)) · \(fp.snapshotCount) 份快照")
@@ -697,7 +703,7 @@ private struct BackupSettingsContent: View {
 
     private var displayLocation: String {
         location.isEmpty
-            ? "~/资源库/Application Support/Marple/Backups/"
+            ? String(localized: "~/资源库/Application Support/Marple/Backups/")
             : (location as NSString).abbreviatingWithTildeInPath
     }
 
@@ -706,7 +712,7 @@ private struct BackupSettingsContent: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "选择"
+        panel.prompt = String(localized: "选择")
         if panel.runModal() == .OK, let url = panel.url {
             location = url.path
         }

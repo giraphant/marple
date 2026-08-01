@@ -28,7 +28,7 @@ struct EntryRow: View {
         VStack(alignment: .leading, spacing: Space.s3) {
             VStack(alignment: .leading, spacing: Space.s3) {
                 HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-                    Text(entry.title ?? "(untitled)")
+                    Text(entry.title ?? String(localized: "(untitled)"))
                         .font(Typo.headline)
                         .foregroundStyle(.primary)
                         .lineLimit(2)
@@ -39,7 +39,7 @@ struct EntryRow: View {
                         Image(systemName: "circle.fill")
                             .font(.system(size: 6))
                             .foregroundStyle(.orange)
-                            .help("缺少必填字段")
+                            .help(String(localized: "缺少必填字段"))
                     }
                 }
 

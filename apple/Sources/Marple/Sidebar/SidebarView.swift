@@ -245,11 +245,11 @@ private struct SpaceControlView: NSViewRepresentable {
             lastMenuPoint = convert(event.locationInWindow, from: nil)
             let menu = NSMenu()
             menu.autoenablesItems = false
-            let icon = menu.addItem(withTitle: "选择图标", action: #selector(chooseIconAction), keyEquivalent: "")
-            let rename = menu.addItem(withTitle: "设定名称…", action: #selector(renameAction), keyEquivalent: "")
-            let archive = menu.addItem(withTitle: "封存归档", action: #selector(archiveAction), keyEquivalent: "")
+            let icon = menu.addItem(withTitle: String(localized: "选择图标"), action: #selector(chooseIconAction), keyEquivalent: "")
+            let rename = menu.addItem(withTitle: String(localized: "设定名称…"), action: #selector(renameAction), keyEquivalent: "")
+            let archive = menu.addItem(withTitle: String(localized: "封存归档"), action: #selector(archiveAction), keyEquivalent: "")
             menu.addItem(.separator())
-            let remove = menu.addItem(withTitle: "删除", action: #selector(deleteAction), keyEquivalent: "")
+            let remove = menu.addItem(withTitle: String(localized: "删除"), action: #selector(deleteAction), keyEquivalent: "")
             for item in [icon, rename, archive, remove] { item.target = self }
             // Anchor the menu's corner to the Space dot's center, not the cursor.
             // Near the bottom of the window AppKit flips it up, so the center becomes
@@ -264,12 +264,12 @@ private struct SpaceControlView: NSViewRepresentable {
         @objc private func renameAction() {
             guard let spaceID, let current = model?.spaces.first(where: { $0.id == spaceID }) else { return }
             let alert = NSAlert()
-            alert.messageText = "重命名空间"
-            alert.addButton(withTitle: "确定")
-            alert.addButton(withTitle: "取消")
+            alert.messageText = String(localized: "重命名空间")
+            alert.addButton(withTitle: String(localized: "确定"))
+            alert.addButton(withTitle: String(localized: "取消"))
             let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
             field.stringValue = current.name
-            field.placeholderString = "空间名称"
+            field.placeholderString = String(localized: "空间名称")
             alert.accessoryView = field
             alert.window.initialFirstResponder = field
             if alert.runModal() == .alertFirstButtonReturn {
@@ -285,11 +285,11 @@ private struct SpaceControlView: NSViewRepresentable {
         @objc private func deleteAction() {
             guard let spaceID, let current = model?.spaces.first(where: { $0.id == spaceID }) else { return }
             let alert = NSAlert()
-            alert.messageText = "删除“\(current.name)”？"
-            alert.informativeText = "该空间及其打开的标签页都会被移除，此操作无法撤销。"
+            alert.messageText = String(localized: "删除“\(current.name)”？")
+            alert.informativeText = String(localized: "该空间及其打开的标签页都会被移除，此操作无法撤销。")
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "删除")
-            alert.addButton(withTitle: "取消")
+            alert.addButton(withTitle: String(localized: "删除"))
+            alert.addButton(withTitle: String(localized: "取消"))
             if alert.runModal() == .alertFirstButtonReturn {
                 model?.deleteSpace(spaceID)
             }
