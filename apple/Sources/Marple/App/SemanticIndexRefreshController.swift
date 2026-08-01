@@ -43,12 +43,12 @@ final class SemanticIndexRefreshController: ObservableObject, @unchecked Sendabl
     func refreshNow(model: AppModel?) {
         guard !isRunning else { return }
         guard let model else {
-            lastError = "主窗口尚未就绪。"
+            lastError = String(localized: "主窗口尚未就绪。")
             return
         }
         let entries = model.entries
         guard !entries.isEmpty else {
-            lastError = "索引尚未载入，稍后再试。"
+            lastError = String(localized: "索引尚未载入，稍后再试。")
             model.flash(lastError!, symbol: "exclamationmark.triangle.fill")
             return
         }
@@ -86,10 +86,10 @@ final class SemanticIndexRefreshController: ObservableObject, @unchecked Sendabl
                 done = result.total
                 total = result.total
                 model.installSemanticBackend(MLXSemanticBackend(dir: marpleDir))
-                model.flash("语义索引已刷新：嵌入 \(result.embedded)，复用 \(result.reused)，共 \(result.total)。", symbol: "sparkles")
+                model.flash(String(localized: "语义索引已刷新：嵌入 \(result.embedded)，复用 \(result.reused)，共 \(result.total)。"), symbol: "sparkles")
                 print("[marple] semantic index refreshed: embedded \(result.embedded), reused \(result.reused), total \(result.total)")
             } catch {
-                lastError = "语义索引刷新失败，请查看日志。"
+                lastError = String(localized: "语义索引刷新失败，请查看日志。")
                 model.flash(lastError!, symbol: "exclamationmark.triangle.fill")
                 print("[marple] semantic index refresh FAILED: \(error)")
             }

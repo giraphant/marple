@@ -100,7 +100,7 @@ private struct LibraryTypeRow: View {
 
     var body: some View {
         Label {
-            Text(type.label)
+            Text(AppPresentation.entryTypeLabel(type))
                 .font(.body)
                 .foregroundStyle(.primary)
         } icon: {

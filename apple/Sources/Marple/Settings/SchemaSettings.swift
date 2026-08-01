@@ -30,6 +30,25 @@ struct SchemaSettings: View {
         ("red", .red), ("brown", .brown), ("mint", .mint), ("cyan", .cyan), ("gray", .gray),
     ]
 
+    private static func tintLabel(_ tint: String) -> String {
+        switch tint {
+        case "blue": return String(localized: "蓝色")
+        case "orange": return String(localized: "橙色")
+        case "purple": return String(localized: "紫色")
+        case "teal": return String(localized: "青色")
+        case "green": return String(localized: "绿色")
+        case "indigo": return String(localized: "靛蓝色")
+        case "yellow": return String(localized: "黄色")
+        case "pink": return String(localized: "粉色")
+        case "red": return String(localized: "红色")
+        case "brown": return String(localized: "棕色")
+        case "mint": return String(localized: "薄荷色")
+        case "cyan": return String(localized: "青蓝色")
+        case "gray": return String(localized: "灰色")
+        default: return tint
+        }
+    }
+
     /// Stable display order: the modeled sidebar order, then transcript, then any
     /// extra keys a user added.
     private var displayKeys: [String] {
@@ -80,7 +99,7 @@ struct SchemaSettings: View {
                 let d = schema.displayByType[key] ?? schema.fallbackDisplay
                 HStack(spacing: Space.s4) {
                     SchemaBadge(symbol: d.symbol, tint: Self.color(d.tint))
-                    Text(EntryType(rawValue: key).label)
+                    Text(AppPresentation.entryTypeLabel(EntryType(rawValue: key)))
                         .frame(width: 52, alignment: .leading)
                     TextField("SF Symbol", text: symbolBinding(key), prompt: Text("SF Symbol"))
                         .textFieldStyle(.roundedBorder).labelsHidden()
@@ -99,7 +118,7 @@ struct SchemaSettings: View {
             if let snapshot, !snapshot.requiredByType.isEmpty {
                 ForEach(typeFieldKeys(snapshot), id: \.self) { key in
                     HStack(alignment: .firstTextBaseline, spacing: Space.s4) {
-                        Text(EntryType(rawValue: key).label)
+                        Text(AppPresentation.entryTypeLabel(EntryType(rawValue: key)))
                             .frame(width: 52, alignment: .leading)
                         Text(snapshot.requiredByType[key]?.joined(separator: "、") ?? "—")
                             .font(Typo.callout).foregroundStyle(.secondary)
@@ -235,7 +254,7 @@ struct SchemaSettings: View {
             set: { schema.displayByType[key] = .init(symbol: schema.displayByType[key]?.symbol ?? schema.fallbackDisplay.symbol, tint: $0) }
         )) {
             ForEach(Self.tints, id: \.name) { t in
-                Label(t.name, systemImage: "circle.fill").tint(t.color).tag(t.name)
+                Label(Self.tintLabel(t.name), systemImage: "circle.fill").tint(t.color).tag(t.name)
             }
         }
     }
@@ -322,7 +341,7 @@ struct SchemaSettings: View {
             saveError = nil
             Task { await model.loadIndex() }      // 从磁盘重新合并 + 重绘图标
         } catch {
-            saveError = "保存失败：\(error.localizedDescription)"
+            saveError = String(localized: "保存失败：\(error.localizedDescription)")
         }
     }
 

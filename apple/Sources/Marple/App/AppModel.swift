@@ -100,7 +100,7 @@ final class AppModel {
         let stats: ReconcileStats?
         do { stats = try await Task.detached { try indexer.reconcile() }.value }
         catch {
-            recordIndexFailure(error, context: "增量更新失败")
+            recordIndexFailure(error, context: String(localized: "增量更新失败"))
             print("[marple] reconcile failed: \(error)")
             stats = nil
         }
@@ -117,7 +117,7 @@ final class AppModel {
         guard let indexer = cliIndexer else { return .unavailable }
 
         isRebuildingGeneralIndex = true
-        status = "正在清除并重建普通索引…"
+        status = String(localized: "正在清除并重建普通索引…")
         defer { isRebuildingGeneralIndex = false }
 
         do {
@@ -127,27 +127,29 @@ final class AppModel {
             if let failure = lastIndexFailure { return .failure(failure) }
             return .success(count)
         } catch {
-            recordIndexFailure(error, context: "完整重建失败")
+            recordIndexFailure(error, context: String(localized: "完整重建失败"))
             return .failure(lastIndexFailure ?? String(describing: error))
         }
     }
 
     func recordIndexFailure(_ error: any Error, context: String) {
         let detail = String(describing: error)
-        let message = "\(context)：\(detail)"
+        let message = String(localized: "\(context)：\(detail)")
         lastIndexFailure = message
         status = message
     }
 
     var generalIndexStatusDescription: String {
         var lines = [
-            "普通索引包含 \(entries.count) 个条目。",
-            isRebuildingGeneralIndex ? "状态：正在清除并重建。" : "状态：\(status.isEmpty ? "就绪" : status)"
+            String(localized: "普通索引包含 \(entries.count) 个条目。"),
+            isRebuildingGeneralIndex
+                ? String(localized: "状态：正在清除并重建。")
+                : String(localized: "状态：\(status.isEmpty ? String(localized: "就绪") : status)")
         ]
         if let lastIndexFailure {
-            lines.append("\n最近一次索引障碍：\n\(lastIndexFailure)")
+            lines.append(String(localized: "\n最近一次索引障碍：\n\(lastIndexFailure)"))
         } else {
-            lines.append("\n当前没有已知的索引障碍。重复的 themes 条目会自动去重。")
+            lines.append(String(localized: "\n当前没有已知的索引障碍。重复的 themes 条目会自动去重。"))
         }
         return lines.joined(separator: "\n")
     }
@@ -373,7 +375,7 @@ final class AppModel {
         guard let entry = openEntry,
               entry.type == .talk || entry.type == .transcript,
               let media = client.talkMediaURL(forEntryPath: entry.path) else {
-            flash("录制文件不存在", symbol: "exclamationmark.triangle.fill")
+            flash(String(localized: "录制文件不存在"), symbol: "exclamationmark.triangle.fill")
             return
         }
         let title = entry.title ?? (entry.path as NSString).lastPathComponent
@@ -469,7 +471,7 @@ final class AppModel {
             browseMode = BrowseMode(rawValue: s.browseMode) ?? .grid
         }
         if spaces.isEmpty {
-            let initial = WorkspaceSpace(name: "空间 1", workspace: nil, isBrowsing: true)
+            let initial = WorkspaceSpace(name: String(localized: "空间 1"), workspace: nil, isBrowsing: true)
             spaces = [initial]
             activeSpaceID = initial.id
         }
@@ -633,7 +635,7 @@ final class AppModel {
 
     func addSpace() {
         let nextNumber = spaces.count + 1
-        let space = WorkspaceSpace(name: "空间 \(nextNumber)", workspace: nil, isBrowsing: true)
+        let space = WorkspaceSpace(name: String(localized: "空间 \(nextNumber)"), workspace: nil, isBrowsing: true)
         spaces.append(space)
         activeSpaceID = space.id
         isBrowsing = true
@@ -736,7 +738,7 @@ final class AppModel {
         if let next = spaces.first(where: { !$0.isArchived }) {
             Task { await selectSpace(next.id) }
         } else {
-            let fresh = WorkspaceSpace(name: "空间 \(spaces.count + 1)", workspace: nil, isBrowsing: true)
+            let fresh = WorkspaceSpace(name: String(localized: "空间 \(spaces.count + 1)"), workspace: nil, isBrowsing: true)
             spaces.append(fresh)
             activeSpaceID = fresh.id
             isBrowsing = true
@@ -843,8 +845,8 @@ final class AppModel {
             // Only the latest call publishes failure state — an older stale
             // failure shouldn't clobber a newer call's "n entries" status.
             if !catalog.isStale(myPass) {
-                recordIndexFailure(error, context: "读取索引失败")
-                status = "index failed: \(error)"
+                recordIndexFailure(error, context: String(localized: "读取索引失败"))
+                status = String(localized: "读取索引失败：\(error)")
                 isBootstrapping = false
                 print("[marple] index FAILED: \(error)")
             }
@@ -855,7 +857,7 @@ final class AppModel {
             return
         }
         isBootstrapping = false
-        status = "\(entries.count) entries"
+        status = String(localized: "已索引 \(entries.count) 个条目")
         // Refresh the conformance snapshot on the same cadence as the index. The
         // file is tiny and rarely changes; an absent/stale one simply leaves the
         // feature dark. Loaded here (not watched) since `.quasi/` is a sibling of
@@ -1029,7 +1031,7 @@ final class AppModel {
                     currentSearchText: { [weak self] in self?.searchText ?? "" })
                 print("[marple] search '\(q)' -> \(hits.count) hits")
             } catch {
-                self?.status = "search failed: \(error)"
+                self?.status = String(localized: "搜索失败：\(error)")
                 print("[marple] search FAILED '\(q)': \(error)")
             }
         }
@@ -1142,7 +1144,7 @@ final class AppModel {
 
     func follow(_ target: String) async {
         guard let hit = NameResolver.resolveWikilink(target, in: entries) else {
-            status = "unresolved [[\(target)]]"
+            status = String(localized: "未解析链接：[[\(target)]]")
             print("[marple] follow [[\(target)]] -> UNRESOLVED")
             return
         }
@@ -1439,11 +1441,11 @@ final class AppModel {
             return (p as NSString).lastPathComponent
         }
         switch loc.pane {
-        case .type(let t):     return t.label
+        case .type(let t): return AppPresentation.entryTypeLabel(t)
         case .theme(let name): return "#\(name)"
-        case .themesIndex:     return "标签"
-        case .trash:           return "回收站"
-        case .savedView(let id): return savedView(id)?.name ?? "视图"
+        case .themesIndex: return String(localized: "标签")
+        case .trash: return String(localized: "回收站")
+        case .savedView(let id): return savedView(id)?.name ?? String(localized: "视图")
         }
     }
 
@@ -1492,11 +1494,11 @@ final class AppModel {
             return (p as NSString).lastPathComponent
         }
         switch loc.pane {
-        case .type(let t):     return t.label
+        case .type(let t): return AppPresentation.entryTypeLabel(t)
         case .theme(let name): return "#\(name)"
-        case .themesIndex:     return "标签"
-        case .trash:           return "回收站"
-        case .savedView(let id): return savedView(id)?.name ?? "视图"
+        case .themesIndex: return String(localized: "标签")
+        case .trash: return String(localized: "回收站")
+        case .savedView(let id): return savedView(id)?.name ?? String(localized: "视图")
         }
     }
 
@@ -1516,7 +1518,7 @@ final class AppModel {
             try await client.openInEditor(path: path, app: app)
             print("[marple] openInEditor \(path) app='\(app)'")
         } catch {
-            status = "open-in-editor failed: \(error)"
+            status = String(localized: "无法在外部编辑器中打开：\(error)")
             print("[marple] openInEditor FAILED \(path): \(error)")
         }
     }
@@ -1664,7 +1666,7 @@ final class AppModel {
             inspectorNoteOriginals[entry.path] = body
             inspectorNoteStatuses[entry.path] = .saved
             syncLegacyInspectorNoteState(path: entry.path)
-            flash("已新建笔记")
+            flash(String(localized: "已新建笔记"))
             print("[marple] created inline note \(draft.path)")
         } catch {
             writeError = "\(error)"
@@ -1759,7 +1761,7 @@ final class AppModel {
             try await client.openPDF(slug: slug)
             print("[marple] openPDF \(slug)")
         } catch {
-            status = "open-PDF failed: \(error)"
+            status = String(localized: "打开 PDF 失败：\(error)")
             print("[marple] openPDF FAILED \(slug): \(error)")
         }
     }
@@ -1770,14 +1772,14 @@ final class AppModel {
             try await client.openTranslation(slug: slug)
             print("[marple] openTranslation \(slug)")
         } catch {
-            status = "open-translation failed: \(error)"
+            status = String(localized: "打开译本失败：\(error)")
             print("[marple] openTranslation FAILED \(slug): \(error)")
         }
     }
 
     func runReaderAIAction(_ action: ReaderAIAction) async {
         guard let path = openPath, let entry = openEntry else {
-            flash("请先打开一篇文档。", symbol: "exclamationmark.triangle.fill")
+            flash(String(localized: "请先打开一篇文档。"), symbol: "exclamationmark.triangle.fill")
             return
         }
 
@@ -1806,13 +1808,13 @@ final class AppModel {
                 related: readerAIRelatedContext(for: entry, rawDocumentText: raw)
             )
             try await readerAIRunner.dispatch(action: action, config: config, context: context)
-            flash("已分发：\(action.label)", symbol: "sparkles")
+            flash(String(localized: "已分发：\(AppPresentation.readerAIActionLabel(action))"), symbol: "sparkles")
             print("[marple] dispatch \(action.rawValue) \(path)")
         } catch let error as ReaderAIDispatchError {
-            flash(error.friendlyMessage, symbol: "exclamationmark.triangle.fill")
+            flash(AppPresentation.readerAIDispatchErrorLabel(error), symbol: "exclamationmark.triangle.fill")
             print("[marple] dispatch \(action.rawValue) FAILED \(path): \(error)")
         } catch {
-            flash("AI 分发失败，请查看日志。", symbol: "exclamationmark.triangle.fill")
+            flash(String(localized: "AI 分发失败，请查看日志。"), symbol: "exclamationmark.triangle.fill")
             print("[marple] dispatch \(action.rawValue) FAILED \(path): \(error)")
         }
     }

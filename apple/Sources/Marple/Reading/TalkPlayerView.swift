@@ -128,7 +128,7 @@ struct TalkPlayerView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help(enlarged ? "还原" : "放大")
+            .help(enlarged ? String(localized: "还原") : String(localized: "放大"))
             Button {
                 model.closeTalkPlayback()
             } label: {

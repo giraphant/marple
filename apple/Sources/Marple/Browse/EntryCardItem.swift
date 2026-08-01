@@ -99,7 +99,7 @@ private final class CardCellView: NSView {
         conformanceDot.wantsLayer = true
         conformanceDot.layer?.cornerRadius = dotSize / 2
         conformanceDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
-        conformanceDot.toolTip = "缺少必填字段"
+        conformanceDot.toolTip = String(localized: "缺少必填字段")
 
         for v in [thumbnail, placeholder, titleField, metaField, ratingField,
                   sourceField, previewField, themesField, conformanceDot] {
@@ -180,7 +180,7 @@ private final class CardCellView: NSView {
     /// Meta line: the type label (in its colour) leads, then author · year in
     /// secondary. So the type reads even where the spine colour can't carry it.
     private func metaAttributed(_ entry: Entry) -> NSAttributedString {
-        let s = NSMutableAttributedString(string: entry.type.label, attributes: [
+        let s = NSMutableAttributedString(string: AppPresentation.entryTypeLabel(entry.type), attributes: [
             .foregroundColor: CardLayout.typeColor(entry.type), .font: CardLayout.metaFont])
         let rest = CardLayout.meta(entry)
         if !rest.isEmpty {

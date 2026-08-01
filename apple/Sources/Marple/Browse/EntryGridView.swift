@@ -50,7 +50,7 @@ struct EntryGridView: View {
             }
             .buttonStyle(.borderless)
             .fixedSize()
-            .help("切换到列表")
+            .help(String(localized: "切换到列表"))
 
             Spacer(minLength: Space.s4)
 

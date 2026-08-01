@@ -51,7 +51,7 @@ struct TrashView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.plain)
-            .help("刷新")
+            .help(String(localized: "刷新"))
         }
         .padding(8)
     }

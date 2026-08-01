@@ -126,15 +126,15 @@ struct CollectionGridVariant: NSViewRepresentable {
         func contextMenu(forItem index: Int) -> NSMenu? {
             guard let entry = entries[safe: index] else { return nil }
             let menu = NSMenu()
-            menu.addItem(ClosureMenuItem(title: "打开") { [weak self] in
+            menu.addItem(ClosureMenuItem(title: String(localized: "打开")) { [weak self] in
                 Task { await self?.model.open(entry.path) } })
-            menu.addItem(ClosureMenuItem(title: "新标签打开") { [weak self] in
+            menu.addItem(ClosureMenuItem(title: String(localized: "新标签打开")) { [weak self] in
                 Task { await self?.model.openInNewTab(entry.path) } })
             menu.addItem(.separator())
-            let spacesItem = NSMenuItem(title: "在空间中打开", action: nil, keyEquivalent: "")
+            let spacesItem = NSMenuItem(title: String(localized: "在空间中打开"), action: nil, keyEquivalent: "")
             let submenu = NSMenu()
             for (i, space) in model.spaces.enumerated() {
-                let title = space.name.isEmpty ? "空间 \(i + 1)" : space.name
+                let title = space.name.isEmpty ? String(localized: "空间 \(i + 1)") : space.name
                 submenu.addItem(ClosureMenuItem(title: title) { [weak self] in
                     Task { await self?.model.openInSpace(entry.path, space: space.id) } })
             }

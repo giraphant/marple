@@ -119,7 +119,7 @@ final class AppState: ObservableObject {
             if !canSkip {
                 do { _ = try await Task.detached { try indexer.reconcile() }.value }
                 catch {
-                    m?.recordIndexFailure(error, context: "启动时建立索引失败")
+                    m?.recordIndexFailure(error, context: String(localized: "启动时建立索引失败"))
                     print("[marple] boot reconcile failed (non-fatal): \(error)")
                 }
             }
@@ -152,7 +152,7 @@ final class AppState: ObservableObject {
                         let stats: ReconcileStats?
                         do { stats = try await Task.detached { try indexer.reconcile() }.value }
                         catch {
-                            m.recordIndexFailure(error, context: "后台更新索引失败")
+                            m.recordIndexFailure(error, context: String(localized: "后台更新索引失败"))
                             print("[marple] deferred reconcile failed: \(error)")
                             stats = nil
                         }

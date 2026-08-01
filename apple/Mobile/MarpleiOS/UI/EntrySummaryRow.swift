@@ -11,7 +11,7 @@ struct EntrySummaryRow: View {
 
     private var metaParts: [String] {
         var parts: [String] = []
-        if !entry.author.isEmpty { parts.append(entry.author.joined(separator: ", ")) }
+        if !entry.author.isEmpty { parts.append(ListFormatter.localizedString(byJoining: entry.author)) }
         if let year = entry.year, !year.isEmpty { parts.append(year) }
         return parts
     }
@@ -38,7 +38,7 @@ struct EntrySummaryRow: View {
             if showsType || !metaParts.isEmpty {
                 HStack(spacing: 6) {
                     if showsType {
-                        Text(entry.type.label)
+                        Text(AppPresentation.entryTypeLabel(entry.type))
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 6)

@@ -152,13 +152,13 @@ struct IndexLoadingPresentation {
 
     var title: String? {
         guard isBootstrapping else { return nil }
-        return isFirstRun ? "首次建立索引" : "正在加载索引"
+        return isFirstRun ? String(localized: "首次建立索引") : String(localized: "正在加载索引")
     }
 
     var message: String {
         isFirstRun
-        ? "正在解析您的文库，首次启动可能需要几分钟。完成后会自动加载，无需手动刷新。"
-        : "正在读取本地索引，完成后会自动加载。"
+        ? String(localized: "正在解析您的文库，首次启动可能需要几分钟。完成后会自动加载，无需手动刷新。")
+        : String(localized: "正在读取本地索引，完成后会自动加载。")
     }
 }
 

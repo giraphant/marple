@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Marple",
+    defaultLocalization: "zh-Hans",
     platforms: [.macOS(.v15), .iOS(.v17)],
     products: [
         .library(name: "MarpleKit", targets: ["MarpleKit"]),

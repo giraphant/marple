@@ -79,7 +79,7 @@ final class ReaderModel {
 
         phase = .indexing
         progress = nil
-        statusLabel = "正在准备演示文库…"
+        statusLabel = String(localized: "正在准备演示文库…")
 
         do {
             let rootURL = try DemoVaultWorkspace.prepare()
@@ -87,7 +87,7 @@ final class ReaderModel {
             let dbPath = DemoVaultWorkspace.indexDBPath(workspaceRoot: rootURL).path
             workspaceRoot = root
 
-            statusLabel = "正在建立演示索引…"
+            statusLabel = String(localized: "正在建立演示索引…")
             try await Task.detached(priority: .utility) {
                 _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).buildFull()
             }.value
@@ -97,7 +97,7 @@ final class ReaderModel {
             await updateEntries(try await c.index())
             phase = .ready
         } catch {
-            phase = .failed("载入演示文库失败:\(error.localizedDescription)")
+            phase = .failed(String(localized: "载入演示文库失败：\(error.localizedDescription)"))
         }
     }
     #endif
@@ -108,7 +108,7 @@ final class ReaderModel {
         scopedURL?.stopAccessingSecurityScopedResource()
         scopedURL = nil
         guard url.startAccessingSecurityScopedResource() else {
-            phase = .failed("无法访问所选文件夹"); return
+            phase = .failed(String(localized: "无法访问所选文件夹")); return
         }
         scopedURL = url
         let root = url.path
@@ -118,7 +118,7 @@ final class ReaderModel {
         var isDir: ObjCBool = false
         let vaultDir = url.appendingPathComponent("vault").path
         guard FileManager.default.fileExists(atPath: vaultDir, isDirectory: &isDir), isDir.boolValue else {
-            phase = .failed("这个文件夹里没有 vault 子目录。\n请选择「包含 vault 的」文库根目录,而不是 vault 本身。")
+            phase = .failed(String(localized: "这个文件夹里没有 vault 子目录。\n请选择「包含 vault 的」文库根目录，而不是 vault 本身。"))
             return
         }
         // Persist the bookmark only after access succeeds and the folder validates,
@@ -153,11 +153,11 @@ final class ReaderModel {
         // Cold first run: no usable index yet → show progress while building.
         phase = .indexing
         progress = nil
-        statusLabel = "正在准备…"
+        statusLabel = String(localized: "正在准备…")
         do {
             await materializeMarkdown(under: root, report: true)
             progress = nil
-            statusLabel = "正在建立索引…"
+            statusLabel = String(localized: "正在建立索引…")
             try await Task.detached(priority: .utility) {
                 _ = try VaultIndexer(workspaceRoot: root, indexDBPath: dbPath).buildFull()
             }.value
@@ -168,7 +168,7 @@ final class ReaderModel {
             await updateEntries(try await c.index())
             phase = .ready
         } catch {
-            phase = .failed("建立索引失败:\(error.localizedDescription)")
+            phase = .failed(String(localized: "建立索引失败：\(error.localizedDescription)"))
         }
     }
 
@@ -281,7 +281,7 @@ final class ReaderModel {
         let total = urls.count
         if report {
             progress = (0, total)
-            statusLabel = "正在从 iCloud 下载文库…"
+            statusLabel = String(localized: "正在从 iCloud 下载文库…")
         }
         guard total > 0 else { return }
 

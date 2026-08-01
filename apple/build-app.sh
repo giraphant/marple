@@ -90,6 +90,18 @@ cp "$PKG_ROOT/Marple" "$APP/MacOS/Marple"
 # A symlink under /usr/local/bin (created below) points at this copy.
 cp "$PKG_ROOT/marple-cli" "$APP/MacOS/marple-cli"
 
+# SwiftPM copies catalogs as raw JSON, which Foundation and SwiftUI cannot resolve
+# at runtime. Compile the catalog into main-bundle .strings resources instead of
+# embedding the SwiftPM resource bundle at the app root (which codesign rejects).
+XCODE_DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+if [ ! -x "$XCODE_DEVELOPER_DIR/usr/bin/xcstringstool" ]; then
+    echo "ERROR: a full Xcode installation is required to compile Localizable.xcstrings." >&2
+    exit 1
+fi
+DEVELOPER_DIR="$XCODE_DEVELOPER_DIR" xcrun xcstringstool compile \
+    Sources/Marple/Resources/Localizable.xcstrings \
+    --output-directory "$APP/Resources"
+
 # Ship MLX Metal kernels inside the bundle. `swift run` finds them via the
 # SwiftPM resource bundle that sits next to the .build binary, but once we
 # repackage as a .app that sibling bundle is gone and `open` launches with
@@ -138,6 +150,7 @@ cat > "$APP/Info.plist" <<PLIST
   <key>CFBundleLocalizations</key>
   <array>
     <string>zh-Hans</string>
+    <string>en</string>
   </array>
   <key>CFBundleExecutable</key><string>Marple</string>
   <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
