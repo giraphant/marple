@@ -183,6 +183,31 @@ import Testing
         #expect(c.openRelations?.annotations.map(\.path) == [note.path])
     }
 
+    /// An index refresh must not leave the relations panel backed by the
+    /// previous snapshot while the deferred graph is being rebuilt.
+    @Test func rebuildIndexDerivedRefreshesOpenRelationsImmediately() {
+        let c = Catalog()
+        let current = mk("vault/papers/current.md", "paper", author: "Jane Doe",
+                         themes: ["t1", "t2"])
+        let oldSibling = mk("vault/papers/old.md", "paper", author: "Jane Doe",
+                            themes: ["t1", "t2"], rating: 1)
+        let newSibling = mk("vault/papers/new.md", "paper", author: "Jane Doe",
+                            themes: ["t1", "t2"], rating: 2)
+
+        c.entries = [current, oldSibling]
+        c.relationGraph = RelationGraph.build(c.entries)
+        c.recomputeOpenDerived(openPath: current.path, openBody: "# Current",
+                               openBlocks: MarkdownModel.blocks(from: "# Current"))
+        #expect(c.openRelations?.siblings.map(\.path) == [oldSibling.path])
+        #expect(c.openRelations?.similar.map(\.path) == [oldSibling.path])
+
+        c.entries = [current, newSibling]
+        c.rebuildIndexDerived(savedViews: [])
+
+        #expect(c.openRelations?.siblings.map(\.path) == [newSibling.path])
+        #expect(c.openRelations?.similar.map(\.path) == [newSibling.path])
+    }
+
     /// No open path → entry/relations/book/topic clear; outline/stats reflect body.
     @Test func openDerivedNoOpenClears() {
         let c = Catalog()

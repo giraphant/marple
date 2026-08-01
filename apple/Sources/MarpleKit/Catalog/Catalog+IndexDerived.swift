@@ -9,6 +9,12 @@ extension Catalog {
     /// 旧 AppModel.rebuildIndexDerived 立即段 + recomputeSavedViewCounts
     /// + scheduleDeferredDerivedRebuild。
     public func rebuildIndexDerived(savedViews: [SavedView]) {
+        // The graph is built from a snapshot in the deferred task. Invalidate
+        // the previous snapshot before refreshing open relations, otherwise a
+        // vault change can keep showing the old relation lists until the task
+        // publishes, including entries that no longer belong to the snapshot.
+        relationGraph = .empty
+
         var c: [EntryType: Int] = [:]
         for e in entries { c[e.type, default: 0] += 1 }
         // QUA-189: the 专题 bucket folds to one row per topic (overview), so its
@@ -18,6 +24,9 @@ extension Catalog {
         recomputeSavedViewCounts(savedViews: savedViews)
         themeIndex = themeCounts(entries)
         topicMembership = buildTopicMembership(entries)
+        if hasOpenDerivedInput {
+            recomputeOpenDerivedFromStoredInput()
+        }
         scheduleDeferredDerivedRebuild(entries: entries)
     }
 
