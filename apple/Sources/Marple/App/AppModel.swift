@@ -643,7 +643,22 @@ final class AppModel {
     }
 
     func setTypeOrder(_ order: [EntryType]) {
+        guard order != typeOrder else { return }
+        let old = typeOrder
         typeOrder = order
+        registerTypeOrderUndo(old, actionName: String(localized: "调整物件顺序"))
+    }
+
+    private func registerTypeOrderUndo(_ order: [EntryType], actionName: String) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated {
+                let redo = model.typeOrder
+                model.typeOrder = order
+                model.registerTypeOrderUndo(redo, actionName: actionName)
+            }
+        }
+        undoManager.setActionName(actionName)
     }
 
     // MARK: hidden types persistence (QUA-127)
@@ -662,6 +677,8 @@ final class AppModel {
     }
 
     func setTypeHidden(_ type: EntryType, hidden: Bool) {
+        guard hiddenTypes.contains(type) != hidden else { return }
+        let old = hiddenTypes
         if hidden {
             hiddenTypes.insert(type)
             // Hiding the bucket being browsed: jump to the first visible bucket
@@ -673,6 +690,24 @@ final class AppModel {
         } else {
             hiddenTypes.remove(type)
         }
+        registerHiddenTypesUndo(old, actionName: String(localized: "隐藏或显示物件"))
+    }
+
+    private func registerHiddenTypesUndo(_ types: Set<EntryType>, actionName: String) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated {
+                let redo = model.hiddenTypes
+                model.hiddenTypes = types
+                if case .type(let current) = model.browsePane,
+                   model.hiddenTypes.contains(current),
+                   let first = model.visibleTypeOrder.first {
+                    model.select(pane: .type(first))
+                }
+                model.registerHiddenTypesUndo(redo, actionName: actionName)
+            }
+        }
+        undoManager.setActionName(actionName)
     }
 
     // MARK: derived recompute
@@ -1113,15 +1148,25 @@ final class AppModel {
     func renameSavedView(_ id: UUID, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
-              let index = savedViews.firstIndex(where: { $0.id == id }) else { return }
+              let index = savedViews.firstIndex(where: { $0.id == id }),
+              savedViews[index].name != trimmed else { return }
+        let old = savedViews[index].name
         savedViews[index].name = trimmed
+        registerSavedViewNameUndo(id: id, name: old,
+                                  actionName: String(localized: "重命名"))
     }
 
     func deleteSavedView(_ id: UUID) {
-        savedViews.removeAll { $0.id == id }
+        deleteSavedViewForUndo(id, actionName: String(localized: "删除视图"))
+    }
+
+    private func deleteSavedViewForUndo(_ id: UUID, actionName: String) {
+        guard let index = savedViews.firstIndex(where: { $0.id == id }) else { return }
+        let removed = savedViews.remove(at: index)
         if case .savedView(let current) = browsePane, current == id {
             select(pane: .type(visibleTypeOrder.first ?? .paper))
         }
+        registerDeletedSavedViewUndo(removed, at: index, actionName: actionName)
     }
 
     /// Reorder a saved view to a sidebar drop slot — `index` is the drop
@@ -1130,12 +1175,71 @@ final class AppModel {
     @discardableResult
     func moveSavedView(_ id: UUID, to index: Int) -> Bool {
         guard let from = savedViews.firstIndex(where: { $0.id == id }) else { return false }
+        let oldOrder = savedViews.map(\.id)
         var views = savedViews
         let view = views.remove(at: from)
         let dropAt = min(max(from < index ? index - 1 : index, 0), views.count)
         views.insert(view, at: dropAt)
+        guard views != savedViews else { return true }
         savedViews = views
+        registerSavedViewOrderUndo(oldOrder, actionName: String(localized: "移动视图"))
         return true
+    }
+
+    private func registerSavedViewOrderUndo(_ order: [UUID], actionName: String) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated {
+                let redo = model.savedViews.map(\.id)
+                let byID = Dictionary(uniqueKeysWithValues:
+                    model.savedViews.map { ($0.id, $0) })
+                let ordered = order.compactMap { byID[$0] }
+                let reordered = Set(order)
+                model.savedViews = ordered + model.savedViews.filter {
+                    !reordered.contains($0.id)
+                }
+                model.registerSavedViewOrderUndo(redo, actionName: actionName)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func registerSavedViewNameUndo(id: UUID, name: String,
+                                           actionName: String) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated {
+                guard let index = model.savedViews.firstIndex(where: { $0.id == id }) else { return }
+                let redo = model.savedViews[index].name
+                model.savedViews[index].name = name
+                model.registerSavedViewNameUndo(id: id, name: redo,
+                                                actionName: actionName)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func registerDeletedSavedViewUndo(_ view: SavedView, at index: Int,
+                                              actionName: String) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated {
+                model.restoreDeletedSavedView(view, at: index,
+                                              actionName: actionName)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func restoreDeletedSavedView(_ view: SavedView, at index: Int,
+                                         actionName: String) {
+        savedViews.insert(view, at: min(index, savedViews.count))
+        undoManager?.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated {
+                model.deleteSavedViewForUndo(view.id, actionName: actionName)
+            }
+        }
+        undoManager?.setActionName(actionName)
     }
 
     /// SwiftUI's TextField with a custom Binding can echo the current value

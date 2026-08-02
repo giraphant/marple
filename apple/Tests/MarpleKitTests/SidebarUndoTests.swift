@@ -227,6 +227,70 @@ import Testing
         #expect(model.tabs.map(\.id) == [ids[0], ids[1]])
         #expect(model.activeTabID == ids[1])
     }
+
+    @MainActor
+    @Test func typeOrderAndVisibilityUndoIndependently() throws {
+        let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
+        let originalOrder = model.typeOrder
+        let first = try #require(originalOrder.first)
+        let movedOrder = Array(originalOrder.dropFirst()) + [first]
+        let wasHidden = model.hiddenTypes.contains(first)
+        defer {
+            model.undoManager = nil
+            model.setTypeOrder(originalOrder)
+            model.setTypeHidden(first, hidden: wasHidden)
+        }
+        let manager = attachUndoManager(to: model)
+
+        grouped(manager) { model.setTypeOrder(movedOrder) }
+        #expect(model.typeOrder == movedOrder)
+        manager.undo()
+        #expect(model.typeOrder == originalOrder)
+        manager.redo()
+        #expect(model.typeOrder == movedOrder)
+
+        manager.removeAllActions()
+        grouped(manager) { model.setTypeHidden(first, hidden: !wasHidden) }
+        #expect(model.hiddenTypes.contains(first) == !wasHidden)
+        manager.undo()
+        #expect(model.hiddenTypes.contains(first) == wasHidden)
+    }
+
+    @MainActor
+    @Test func savedViewMoveRenameAndDeleteEachUndoWithoutRewindingDefinition() throws {
+        let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
+        let first = model.createSavedView(named: "First")
+        let second = model.createSavedView(named: "Second")
+        let manager = attachUndoManager(to: model)
+
+        var moved = false
+        grouped(manager) { moved = model.moveSavedView(first.id, to: 2) }
+        #expect(moved)
+        #expect(model.savedViews.map(\.id) == [second.id, first.id])
+        model.select(pane: .savedView(first.id))
+        let latestClause = FilterClause(id: "latest", field: .year, op: .gte, value: "2020")
+        model.setFilters([latestClause])
+        manager.undo()
+        #expect(model.savedViews.map(\.id) == [first.id, second.id])
+        #expect(model.savedView(first.id)?.clauses == [latestClause])
+
+        manager.removeAllActions()
+        grouped(manager) { model.renameSavedView(first.id, to: "Renamed") }
+        manager.undo()
+        #expect(model.savedView(first.id)?.name == "First")
+
+        manager.removeAllActions()
+        grouped(manager) { model.deleteSavedView(first.id) }
+        #expect(model.savedView(first.id) == nil)
+        manager.undo()
+        #expect(model.savedViews.map(\.id) == [first.id, second.id])
+        model.select(pane: .savedView(first.id))
+        manager.redo()
+        #expect(model.savedView(first.id) == nil)
+        if case .savedView = model.pane {
+            Issue.record("Redoing saved-view deletion left a stale selected pane")
+        }
+    }
 }
 
 @MainActor

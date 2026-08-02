@@ -5169,6 +5169,54 @@
         }
       }
     },
+    "移动视图" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move View"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移动视图"
+          }
+        }
+      }
+    },
+    "调整物件顺序" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reorder Objects"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "调整物件顺序"
+          }
+        }
+      }
+    },
+    "隐藏或显示物件" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide or Show Object"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏或显示物件"
+          }
+        }
+      }
+    },
     "空间" : {
       "localizations" : {
         "en" : {
