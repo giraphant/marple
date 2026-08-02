@@ -14,6 +14,7 @@ import MarpleKit
 final class MarpleWindowController: NSWindowController, NSWindowDelegate {
     private let appState = AppState()
     private let toolbarController = MarpleToolbarController()
+    private let sidebarUndoManager = UndoManager()
 
     convenience init() {
         let window = NSWindow(
@@ -36,6 +37,10 @@ final class MarpleWindowController: NSWindowController, NSWindowDelegate {
         }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
+        sidebarUndoManager
     }
 
     private static func defaultFrame(for window: NSWindow) -> NSRect {
@@ -95,6 +100,8 @@ final class MarpleWindowController: NSWindowController, NSWindowDelegate {
             }
             return
         }
+        sidebarUndoManager.removeAllActions()
+        model.undoManager = sidebarUndoManager
         ActiveModel.current = model
         applyTheme()
         window?.titleVisibility = .hidden

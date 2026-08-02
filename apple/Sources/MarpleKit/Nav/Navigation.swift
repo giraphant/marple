@@ -204,6 +204,18 @@ public struct WorkspaceTransferBundle: Sendable, Equatable {
     }
 }
 
+/// The sidebar-owned part of a workspace. Histories and selection deliberately
+/// stay in the live `NavTab` values when this state is restored.
+public struct WorkspaceSidebarState: Sendable, Equatable {
+    public struct TabValue: Sendable, Equatable {
+        public var pinned: Bool
+        public var customTitle: String?
+    }
+
+    fileprivate var root: [TabNode]
+    fileprivate var values: [NavTab.ID: TabValue]
+}
+
 /// The ordered set of tabs plus which one is active. A pure value type — `AppModel`
 /// holds one and `@Observable` tracks mutations through the stored property.
 ///
@@ -284,6 +296,45 @@ public struct Workspace: Sendable {
 
     /// All groups at any depth (pre-order). Lookups by id work at any depth.
     public var tabGroups: [TabGroup] { Self.allGroups(in: root) }
+
+    public var sidebarState: WorkspaceSidebarState {
+        WorkspaceSidebarState(
+            root: root,
+            values: Dictionary(uniqueKeysWithValues: tabs.map {
+                ($0.id, .init(pinned: $0.pinned, customTitle: $0.customTitle))
+            }))
+    }
+
+    public mutating func restoreSidebarState(_ state: WorkspaceSidebarState) {
+        let collapsed = Dictionary(uniqueKeysWithValues: tabGroups.map { ($0.id, $0.isCollapsed) })
+        func preservingCollapse(_ nodes: [TabNode]) -> [TabNode] {
+            nodes.map { node in
+                guard case .group(var group) = node else { return node }
+                group.isCollapsed = collapsed[group.id] ?? group.isCollapsed
+                group.children = preservingCollapse(group.children)
+                return .group(group)
+            }
+        }
+
+        root = preservingCollapse(state.root)
+        for index in tabs.indices {
+            guard let value = state.values[tabs[index].id] else { continue }
+            tabs[index].pinned = value.pinned
+            tabs[index].customTitle = value.customTitle
+        }
+        normalize()
+    }
+
+    /// Keep the captured structure but use the latest live values for matching
+    /// tabs, chiefly so cross-Space undo never rewinds reading history.
+    public func replacingTabValues(from liveTabs: [NavTab.ID: NavTab]) -> Workspace {
+        var copy = self
+        for index in copy.tabs.indices {
+            if let live = liveTabs[copy.tabs[index].id] { copy.tabs[index] = live }
+        }
+        copy.normalize()
+        return copy
+    }
 
     /// Recursive snapshot for persistence. Tab leaves reference `tabs` by index.
     public var treeSnapshot: WorkspaceTreeSnapshot {

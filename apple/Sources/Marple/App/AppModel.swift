@@ -220,12 +220,47 @@ final class AppModel {
     var canGoForward: Bool { !isBrowsing && (workspace?.activeTab.history.canGoForward ?? false) }
     var isPinnedListContext: Bool { !isBrowsing && (workspace?.activeTab.pinned ?? false) }
 
+    @ObservationIgnored weak var undoManager: UndoManager?
+
     /// Mutate the active Space's optional doc-tab workspace in place (struct value semantics).
     private func mutateWorkspace(_ f: (inout Workspace) -> Void) {
         guard var ws = workspace else { return }
         f(&ws)
         ws.flattenTemporaryTabs()
         workspace = ws.isEmpty ? nil : ws
+    }
+
+    private func mutateSidebarWorkspace(actionName: String,
+                                        _ body: (inout Workspace) -> Void) {
+        guard var workspace else { return }
+        let before = workspace.sidebarState
+        body(&workspace)
+        workspace.flattenTemporaryTabs()
+        guard workspace.sidebarState != before else { return }
+        self.workspace = workspace.isEmpty ? nil : workspace
+        registerSidebarUndo(before, actionName: actionName)
+    }
+
+    private func registerSidebarUndo(_ state: WorkspaceSidebarState, actionName: String) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated {
+                model.restoreSidebarState(state, actionName: actionName)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func restoreSidebarState(_ state: WorkspaceSidebarState, actionName: String) {
+        guard var workspace else { return }
+        let redo = workspace.sidebarState
+        let previousPinnedContext = isPinnedListContext
+        workspace.restoreSidebarState(state)
+        self.workspace = workspace
+        registerSidebarUndo(redo, actionName: actionName)
+        if previousPinnedContext != isPinnedListContext {
+            applyActiveListContext(from: previousPinnedContext)
+        }
     }
 
     // The doc whose body/blocks/derived caches are currently loaded — lets tab and
@@ -810,6 +845,48 @@ final class AppModel {
         spaces[index] = space
     }
 
+    private struct SpaceSidebarState {
+        let id: WorkspaceSpace.ID
+        let workspace: Workspace?
+    }
+
+    private func captureSpaceSidebarStates(_ ids: Set<WorkspaceSpace.ID>) -> [SpaceSidebarState] {
+        spaces.filter { ids.contains($0.id) }
+            .map { SpaceSidebarState(id: $0.id, workspace: $0.workspace) }
+    }
+
+    private func registerSpaceSidebarUndo(_ states: [SpaceSidebarState], actionName: String) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated {
+                model.restoreSpaceSidebarStates(states, actionName: actionName)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func restoreSpaceSidebarStates(_ old: [SpaceSidebarState], actionName: String) {
+        let affected = Set(old.map(\.id))
+        let redo = captureSpaceSidebarStates(affected)
+        let liveTabs = Dictionary(
+            spaces.filter { affected.contains($0.id) }
+                .flatMap { $0.workspace?.tabs ?? [] }
+                .map { ($0.id, $0) },
+            uniquingKeysWith: { current, _ in current })
+        let previousActiveID = activeTabID
+        let previousPinnedContext = isPinnedListContext
+
+        for state in old {
+            guard let index = spaces.firstIndex(where: { $0.id == state.id }) else { continue }
+            spaces[index].workspace = state.workspace?.replacingTabValues(from: liveTabs)
+            if spaces[index].workspace == nil { spaces[index].isBrowsing = true }
+        }
+        registerSpaceSidebarUndo(redo, actionName: actionName)
+        if activeTabID != previousActiveID || previousPinnedContext != isPinnedListContext {
+            Task { await syncToActiveLocation(from: previousPinnedContext) }
+        }
+    }
+
     private func firstMovedTabID(in bundle: WorkspaceTransferBundle) -> NavTab.ID? {
         for node in bundle.nodes {
             switch node {
@@ -833,7 +910,8 @@ final class AppModel {
     }
 
     func moveItems(_ items: [WorkspaceItem], from sourceSpaceID: WorkspaceSpace.ID, toRootAt index: Int? = nil) {
-        guard activeSpaceID != nil else { return }
+        guard let destinationID = activeSpaceID else { return }
+        let before = captureSpaceSidebarStates([sourceSpaceID, destinationID])
         let previousPinnedContext = isPinnedListContext
         var bundle = WorkspaceTransferBundle(tabs: [], nodes: [])
         mutateSpace(sourceSpaceID) { source in
@@ -842,7 +920,7 @@ final class AppModel {
             source.workspace = ws.isEmpty ? nil : ws
             if source.workspace == nil { source.isBrowsing = true }
         }
-        guard !bundle.tabs.isEmpty, let destinationID = activeSpaceID else { return }
+        guard !bundle.tabs.isEmpty else { return }
         mutateSpace(destinationID) { destination in
             if destination.workspace == nil, let first = bundle.tabs.first {
                 var ws = Workspace(initial: first.location)
@@ -855,6 +933,7 @@ final class AppModel {
             if let moved = firstMovedTabID(in: bundle) { destination.workspace?.select(moved) }
             destination.isBrowsing = false
         }
+        registerSpaceSidebarUndo(before, actionName: String(localized: "移动页面"))
         Task { await syncToActiveLocation(from: previousPinnedContext) }
     }
 
@@ -862,6 +941,7 @@ final class AppModel {
                    toGroup groupID: TabGroup.ID, at childIndex: Int? = nil) {
         guard let destinationID = activeSpaceID,
               spaces.first(where: { $0.id == destinationID })?.workspace?.tabGroups.contains(where: { $0.id == groupID }) == true else { return }
+        let before = captureSpaceSidebarStates([sourceSpaceID, destinationID])
         let previousPinnedContext = isPinnedListContext
         var bundle = WorkspaceTransferBundle(tabs: [], nodes: [])
         mutateSpace(sourceSpaceID) { source in
@@ -876,6 +956,7 @@ final class AppModel {
             if let moved = firstMovedTabID(in: bundle) { destination.workspace?.select(moved) }
             destination.isBrowsing = false
         }
+        registerSpaceSidebarUndo(before, actionName: String(localized: "移动页面"))
         Task { await syncToActiveLocation(from: previousPinnedContext) }
     }
 
@@ -1501,7 +1582,7 @@ final class AppModel {
         let selected = Set(ids)
         let valid = tabs.filter { selected.contains($0.id) }.map(\.id)
         guard valid.count >= 2 else { return }
-        mutateWorkspace { workspace in
+        mutateSidebarWorkspace(actionName: String(localized: "创建页面组")) { workspace in
             for id in valid where workspace.tabs.first(where: { $0.id == id })?.pinned == false {
                 workspace.togglePin(id)
             }
@@ -1511,25 +1592,35 @@ final class AppModel {
 
     /// Bulk move `ids` into `groupID` at `childIndex` (or append) preserving order.
     func moveTabs(_ ids: [NavTab.ID], toGroup groupID: TabGroup.ID, at childIndex: Int? = nil) {
-        mutateWorkspace { $0.moveTabs(ids, toGroup: groupID, at: childIndex) }
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) {
+            $0.moveTabs(ids, toGroup: groupID, at: childIndex)
+        }
     }
 
     func moveTabsToRoot(_ ids: [NavTab.ID], at index: Int? = nil) {
-        mutateWorkspace { $0.moveTabsToRoot(ids, at: index) }
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) {
+            $0.moveTabsToRoot(ids, at: index)
+        }
     }
 
     func moveGroupsToRoot(_ ids: [TabGroup.ID], at index: Int? = nil) {
-        mutateWorkspace { $0.moveGroupsToRoot(ids, at: index) }
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) {
+            $0.moveGroupsToRoot(ids, at: index)
+        }
     }
 
     /// Interleaved bulk move (tabs + groups together). Used by multi-drag to
     /// preserve the source/visual order of a mixed selection.
     func moveItems(_ items: [WorkspaceItem], toGroup groupID: TabGroup.ID, at childIndex: Int? = nil) {
-        mutateWorkspace { $0.moveItems(items, toGroup: groupID, at: childIndex) }
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) {
+            $0.moveItems(items, toGroup: groupID, at: childIndex)
+        }
     }
 
     func moveItemsToRoot(_ items: [WorkspaceItem], at index: Int? = nil) {
-        mutateWorkspace { $0.moveItemsToRoot(items, at: index) }
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) {
+            $0.moveItemsToRoot(items, at: index)
+        }
     }
 
     /// "上级胜出": filter a payload set so descendants of selected ancestors fall
@@ -1552,7 +1643,8 @@ final class AppModel {
         guard !changed.isEmpty else { return }
         let previousPinnedContext = isPinnedListContext
         let activeChanged = activeTabID.map(changed.contains) ?? false
-        mutateWorkspace { workspace in
+        let actionName = pinned ? String(localized: "固定页面") : String(localized: "取消固定")
+        mutateSidebarWorkspace(actionName: actionName) { workspace in
             for id in ids where changed.contains(id) {
                 workspace.togglePin(id)
                 if !pinned { workspace.moveTabToRoot(id, beforeTab: nil) }
@@ -1564,14 +1656,20 @@ final class AppModel {
     }
 
     func renameTab(_ id: NavTab.ID, to title: String?) {
-        mutateWorkspace { $0.renameTab(id, to: title) }
+        mutateSidebarWorkspace(actionName: String(localized: "重命名")) {
+            $0.renameTab(id, to: title)
+        }
     }
 
     func renameTabGroup(_ id: TabGroup.ID, to name: String) {
-        mutateWorkspace { $0.renameGroup(id, to: name) }
+        mutateSidebarWorkspace(actionName: String(localized: "重命名")) {
+            $0.renameGroup(id, to: name)
+        }
     }
 
-    func setTabOrder(_ ids: [NavTab.ID]) { mutateWorkspace { $0.reorder(ids) } }
+    func setTabOrder(_ ids: [NavTab.ID]) {
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) { $0.reorder(ids) }
+    }
 
     func tabGroup(containing tabID: NavTab.ID) -> TabGroup? {
         workspace?.group(containing: tabID)
@@ -1582,31 +1680,45 @@ final class AppModel {
     }
 
     func groupTab(_ sourceID: NavTab.ID, onto targetID: NavTab.ID) {
-        mutateWorkspace { $0.groupTab(sourceID, onto: targetID) }
+        mutateSidebarWorkspace(actionName: String(localized: "创建页面组")) {
+            $0.groupTab(sourceID, onto: targetID)
+        }
     }
 
     func moveTab(_ tabID: NavTab.ID, toGroup groupID: TabGroup.ID, at childIndex: Int? = nil) {
-        mutateWorkspace { $0.moveTab(tabID, toGroup: groupID, at: childIndex) }
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) {
+            $0.moveTab(tabID, toGroup: groupID, at: childIndex)
+        }
     }
 
     func moveTabToRoot(_ tabID: NavTab.ID, beforeTab targetID: NavTab.ID?) {
-        mutateWorkspace { $0.moveTabToRoot(tabID, beforeTab: targetID) }
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) {
+            $0.moveTabToRoot(tabID, beforeTab: targetID)
+        }
     }
 
     func moveGroup(_ groupID: TabGroup.ID, beforeTab targetID: NavTab.ID?) {
-        mutateWorkspace { $0.moveGroup(groupID, beforeTab: targetID) }
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) {
+            $0.moveGroup(groupID, beforeTab: targetID)
+        }
     }
 
     func moveGroup(_ sourceGroupID: TabGroup.ID, beforeGroup targetGroupID: TabGroup.ID) {
-        mutateWorkspace { $0.moveGroup(sourceGroupID, beforeGroup: targetGroupID) }
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) {
+            $0.moveGroup(sourceGroupID, beforeGroup: targetGroupID)
+        }
     }
 
     func moveGroup(_ groupID: TabGroup.ID, intoGroup parentID: TabGroup.ID, at childIndex: Int? = nil) {
-        mutateWorkspace { $0.moveGroup(groupID, intoGroup: parentID, at: childIndex) }
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) {
+            $0.moveGroup(groupID, intoGroup: parentID, at: childIndex)
+        }
     }
 
     func moveGroupToRoot(_ groupID: TabGroup.ID, at index: Int? = nil) {
-        mutateWorkspace { $0.moveGroupToRoot(groupID, at: index) }
+        mutateSidebarWorkspace(actionName: String(localized: "移动页面")) {
+            $0.moveGroupToRoot(groupID, at: index)
+        }
     }
 
     /// False if nesting `source` into `target` would create a cycle (self or descendant).
