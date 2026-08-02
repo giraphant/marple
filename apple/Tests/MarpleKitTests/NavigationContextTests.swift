@@ -387,6 +387,26 @@ import Testing
         #expect(model.openEntry?.path == fast.path)
     }
 
+    @MainActor
+    @Test func pinnedTabNavigationKeepsItsAnchorInThePinnedListAndTitle() async throws {
+        let book = entry("books/freedom.md", type: .book, year: "1999")
+        let chapter = entry("books/freedom/ch04.md", type: .chapter, year: "1999")
+        let model = AppModel(client: StubVaultClient(
+            entries: [book, chapter],
+            texts: [book.path: "# Freedom", chapter.path: "# Chapter 4"]))
+        await model.loadIndex()
+        await model.open(book.path)
+        let id = try #require(model.activeTabID)
+        model.togglePin(id)
+
+        await model.open(chapter.path)
+
+        let tab = try #require(model.tabs.first { $0.id == id })
+        #expect(model.openPath == chapter.path)
+        #expect(model.tabTitle(tab) == book.title)
+        #expect(model.visibleEntries.map(\.path) == [book.path])
+    }
+
     private func entry(_ path: String, type: EntryType,
                        year: String? = nil, hasPDF: Bool = false) -> Entry {
         Entry(path: path, type: type, title: path, author: [], year: year,

@@ -60,6 +60,8 @@ private struct LegacyNavLocation: Encodable {
         #expect(ws.tabs.count == 2)
         #expect(ws.tabs[1].pinned)
         #expect(ws.activeTab.location.openPath == "v/a.md")
+        #expect(ws.tabs[1].pinnedLocation?.openPath == "v/a.md")
+        #expect(ws.tabs[1].identityLocation.openPath == "v/a.md")
     }
 
     @Test func restoringEmptyReturnsNil() {

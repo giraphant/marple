@@ -335,7 +335,7 @@ final class AppModel {
         guard isPinnedListContext else { return catalog.visibleEntries }
         var order: [String: Int] = [:]
         for tab in tabs where tab.pinned {
-            if let path = tab.location.openPath, order[path] == nil { order[path] = order.count }
+            if let path = tab.identityLocation.openPath, order[path] == nil { order[path] = order.count }
         }
         let source = searchText.trimmingCharacters(in: .whitespaces).isEmpty
             ? entries : searchHits.map(\.entry)
@@ -577,10 +577,11 @@ final class AppModel {
             // was deleted), carry over whatever we previously cached so the
             // next launch's sidebar still shows the right title AND the right
             // type icon. Falls to nil only if no source has ever produced one.
-            let liveEntry = tab.location.openPath.flatMap { liveByPath[$0] }
+            let location = tab.identityLocation
+            let liveEntry = location.openPath.flatMap { liveByPath[$0] }
             let cachedTitle = liveEntry?.title ?? tab.cachedTitle
             let cachedType = liveEntry?.type ?? tab.cachedType
-            return PersistedTab(location: tab.location, pinned: tab.pinned,
+            return PersistedTab(location: location, pinned: tab.pinned,
                                 customTitle: tab.customTitle,
                                 cachedTitle: cachedTitle,
                                 cachedType: cachedType)
@@ -1618,7 +1619,7 @@ final class AppModel {
     /// browser-style open behavior.
     func activateVisibleEntry(_ path: String) async {
         guard isPinnedListContext,
-              let id = tabs.first(where: { $0.pinned && $0.location.openPath == path })?.id
+              let id = tabs.first(where: { $0.pinned && $0.identityLocation.openPath == path })?.id
         else {
             await open(path)
             return
@@ -1921,7 +1922,7 @@ final class AppModel {
     /// the bootstrap window before `entries` has loaded (QUA-105).
     func tabTitle(_ tab: NavTab) -> String {
         if let customTitle = tab.customTitle { return customTitle }
-        let loc = tab.location
+        let loc = tab.identityLocation
         if let p = loc.openPath {
             if let live = entries.first(where: { $0.path == p })?.title { return live }
             if let cached = tab.cachedTitle, !cached.isEmpty { return cached }
@@ -1974,7 +1975,7 @@ final class AppModel {
     /// `tabTitle` minus the user-rename override, so the manifest keeps the document's
     /// own title even when the tab was renamed.
     private func originalTabTitle(_ tab: NavTab) -> String {
-        let loc = tab.location
+        let loc = tab.identityLocation
         if let p = loc.openPath {
             if let live = entries.first(where: { $0.path == p })?.title { return live }
             if let cached = tab.cachedTitle, !cached.isEmpty { return cached }
@@ -1990,7 +1991,7 @@ final class AppModel {
     }
 
     private func absolutePath(of tab: NavTab) -> String? {
-        guard let p = tab.location.openPath else { return nil }
+        guard let p = tab.identityLocation.openPath else { return nil }
         return URL(fileURLWithPath: workspaceRoot).appendingPathComponent(p).path
     }
 

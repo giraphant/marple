@@ -320,6 +320,40 @@ import Testing
     }
 
     @MainActor
+    @Test func pinnedTabPersistsItsAnchorInsteadOfCurrentExcursion() async throws {
+        let book = Entry(
+            path: "books/freedom.md", type: .book, title: "Development as Freedom",
+            author: [], year: "1999", ratingScore: 0, themes: [], preview: "",
+            hasPDF: false)
+        let chapter = Entry(
+            path: "books/freedom/ch04.md", type: .chapter, title: "Chapter 4",
+            author: [], year: "1999", ratingScore: 0, themes: [], preview: "",
+            hasPDF: false)
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        let model = AppModel(
+            client: StubVaultClient(
+                entries: [book, chapter],
+                texts: [book.path: "# Freedom", chapter.path: "# Chapter 4"]),
+            stateStore: store)
+        await model.loadIndex()
+        await model.open(book.path)
+        let id = try #require(model.activeTabID)
+        model.togglePin(id)
+
+        await model.open(chapter.path)
+
+        let state = try #require(store.load())
+        let saved = try #require(state.spaces?.flatMap(\.tabs).first { $0.pinned })
+        #expect(saved.location.openPath == book.path)
+        let restored = try #require(state.makeWorkspace())
+        #expect(restored.activeTab.location.openPath == book.path)
+        #expect(restored.activeTab.pinnedLocation?.openPath == book.path)
+    }
+
+    @MainActor
     @Test func appModelInitDoesNotWipeStoredCountsBeforeLoadIndex() throws {
         // Regression: persist() fires via didSet on browsePane/workspace/etc.
         // during AppModel.init, BEFORE loadIndex runs. Without loadedCountsSnapshot

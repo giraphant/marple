@@ -480,7 +480,8 @@ struct SidebarOutlineView: NSViewRepresentable {
         }
 
         private func tabNode(_ tab: NavTab, entryByPath: [String: Entry], sourceSpaceID: WorkspaceSpace.ID?) -> SidebarOutlineNode {
-            let entry = tab.location.openPath.flatMap { entryByPath[$0] }
+            let location = tab.identityLocation
+            let entry = location.openPath.flatMap { entryByPath[$0] }
             // QUA-105: during bootstrap entries is empty so `entry?.type` is
             // nil, which would drop the row to the generic list.bullet icon.
             // Fall through to the persisted cachedType so the right type icon
@@ -497,7 +498,7 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         private func tabTitle(_ tab: NavTab, entry: Entry?) -> String {
             if let customTitle = tab.customTitle { return customTitle }
-            let loc = tab.location
+            let loc = tab.identityLocation
             if let path = loc.openPath {
                 if let live = entry?.title { return live }
                 if let cached = tab.cachedTitle, !cached.isEmpty { return cached }
