@@ -20,6 +20,9 @@ struct EntryListView: View {
     }
 
     private var title: String {
+        if model.isPinnedListContext {
+            return String(localized: "固定页面 (\(model.visibleEntries.count))")
+        }
         switch model.pane {
         case .type(let type):
             return String(localized: "\(AppPresentation.entryTypeLabel(type)) (\(model.visibleEntries.count))")
@@ -37,9 +40,11 @@ struct EntryListView: View {
     private var header: some View {
         HStack(spacing: 8) {
             SearchField(model: model)
-            sortButton
-            filterButton
-            gridToggle
+            if !model.isPinnedListContext {
+                sortButton
+                filterButton
+                gridToggle
+            }
         }
         .padding(8)
         .disabled(isThemesIndex)   // header is meaningless on the themes index pane

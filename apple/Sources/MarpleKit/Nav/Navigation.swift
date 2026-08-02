@@ -391,6 +391,17 @@ public struct Workspace: Sendable {
         tabs[i].pinned.toggle()
     }
 
+    /// Sidebar policy helper: fixed pages keep the tree; temporary pages are a
+    /// flat run at the end. Moving every unpinned leaf out also dissolves folders
+    /// that no longer have enough fixed children through the normal normalize path.
+    public mutating func flattenTemporaryTabs() {
+        let temporary = tabs.filter { !$0.pinned }.map(\.id)
+        guard !temporary.isEmpty else { return }
+        for id in temporary { _ = Self.removeTab(id, from: &root) }
+        root.append(contentsOf: temporary.map(TabNode.tab))
+        normalize()
+    }
+
     public mutating func renameTab(_ id: NavTab.ID, to title: String?) {
         guard let i = tabs.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)

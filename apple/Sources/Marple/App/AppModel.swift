@@ -202,20 +202,36 @@ final class AppModel {
     var tabs: [NavTab] { workspace?.tabs ?? [] }
     var tabGroups: [TabGroup] { workspace?.tabGroups ?? [] }
     var tabRootNodes: [TabNode] { workspace?.rootNodes ?? [] }
+    var temporaryTabs: [NavTab] { tabs.filter { !$0.pinned } }
+    var pinnedTabRootNodes: [TabNode] {
+        func pinnedOnly(_ node: TabNode) -> TabNode? {
+            switch node {
+            case .tab(let id):
+                return tabs.first(where: { $0.id == id })?.pinned == true ? node : nil
+            case .group(var group):
+                group.children = group.children.compactMap(pinnedOnly)
+                return group.children.isEmpty ? nil : .group(group)
+            }
+        }
+        return tabRootNodes.compactMap(pinnedOnly)
+    }
     var activeTabID: NavTab.ID? { isBrowsing ? nil : workspace?.activeID }
     var canGoBack: Bool { !isBrowsing && (workspace?.activeTab.history.canGoBack ?? false) }
     var canGoForward: Bool { !isBrowsing && (workspace?.activeTab.history.canGoForward ?? false) }
+    var isPinnedListContext: Bool { !isBrowsing && (workspace?.activeTab.pinned ?? false) }
 
     /// Mutate the active Space's optional doc-tab workspace in place (struct value semantics).
     private func mutateWorkspace(_ f: (inout Workspace) -> Void) {
         guard var ws = workspace else { return }
         f(&ws)
+        ws.flattenTemporaryTabs()
         workspace = ws.isEmpty ? nil : ws
     }
 
     // The doc whose body/blocks/derived caches are currently loaded — lets tab and
     // history switches skip a re-fetch when the doc hasn't actually changed.
     private var loadedDocPath: String?
+    @ObservationIgnored private var docLoadGeneration = 0
 
     // Browse state (mutate via the intent methods below so derived caches refresh)
     private(set) var sortClauses: [SortClause] = [] { didSet { persist() } }
@@ -253,6 +269,8 @@ final class AppModel {
         return sortClauses
     }
     private(set) var searchText: String = ""
+    private var browseSearchText = ""
+    private var pinnedSearchText = ""
     private var searchHits: [SearchHit] = []
     private var searchTask: Task<Void, Never>?
 
@@ -270,7 +288,18 @@ final class AppModel {
     var counts: [EntryType: Int] { catalog.counts }
     var themeIndex: [ThemeCount] { catalog.themeIndex }
     var topicMembership: TopicMembership { catalog.topicMembership }
-    var visibleEntries: [Entry] { catalog.visibleEntries }
+    var visibleEntries: [Entry] {
+        guard isPinnedListContext else { return catalog.visibleEntries }
+        var order: [String: Int] = [:]
+        for tab in tabs where tab.pinned {
+            if let path = tab.location.openPath, order[path] == nil { order[path] = order.count }
+        }
+        let source = searchText.trimmingCharacters(in: .whitespaces).isEmpty
+            ? entries : searchHits.map(\.entry)
+        return source.compactMap { entry in order[entry.path].map { ($0, entry) } }
+            .sorted { $0.0 < $1.0 }
+            .map { $0.1 }
+    }
     var relationGraph: RelationGraph { catalog.relationGraph }
     /// Prebuilt field-weighted index for the command palette's 快速 mode (rebuilt
     /// whenever `entries` changes, like the other derived caches). Carries a
@@ -461,7 +490,12 @@ final class AppModel {
             if case .savedView(let id) = browsePane, savedView(id) == nil {
                 browsePane = .type(.paper)
             }
-            let restoredSpaces = s.makeSpaces()
+            var restoredSpaces = s.makeSpaces()
+            for index in restoredSpaces.spaces.indices {
+                guard var restored = restoredSpaces.spaces[index].workspace else { continue }
+                restored.flattenTemporaryTabs()
+                restoredSpaces.spaces[index].workspace = restored
+            }
             spaces = restoredSpaces.spaces
             activeSpaceID = restoredSpaces.activeID
             if workspace == nil { isBrowsing = true }
@@ -625,6 +659,7 @@ final class AppModel {
     /// blocks — mirrors NetNewsWire/FSNotes/CodeEdit list-search discipline (don't
     /// re-filter synchronously in the input handler).
     private func recomputeVisible() {
+        guard !isPinnedListContext else { return }
         catalog.recomputeVisible(searchText: searchText, searchHits: searchHits,
                                  pane: pane, entries: entries,
                                  filters: activeFilterClauses, match: activeFilterMatch,
@@ -639,6 +674,10 @@ final class AppModel {
         spaces.append(space)
         activeSpaceID = space.id
         isBrowsing = true
+        browseSearchText = ""
+        pinnedSearchText = ""
+        resetSearch(to: "")
+        clearReaderHighlight()
         Task { await loadDoc(nil) }
     }
 
@@ -646,10 +685,12 @@ final class AppModel {
         guard spaces.contains(where: { $0.id == id }) else { return }
         guard activeSpaceID != id else { return }
         activeSpaceID = id
-        if workspace == nil {
+        browseSearchText = ""
+        pinnedSearchText = ""
+        if workspace == nil || isBrowsing {
             isBrowsing = true
-            await loadDoc(nil)
-        } else if isBrowsing {
+            resetSearch(to: "")
+            clearReaderHighlight()
             await loadDoc(nil)
         } else {
             await syncToActiveLocation()
@@ -664,7 +705,7 @@ final class AppModel {
             await openNewTab(path)
             return
         }
-        let loc = NavLocation(pane: browsePane, openPath: path)
+        let loc = sourceLocation(for: path)
         mutateSpace(id) { space in
             if space.workspace == nil {
                 space.workspace = Workspace(initial: loc)
@@ -742,6 +783,10 @@ final class AppModel {
             spaces.append(fresh)
             activeSpaceID = fresh.id
             isBrowsing = true
+            browseSearchText = ""
+            pinnedSearchText = ""
+            resetSearch(to: "")
+            clearReaderHighlight()
             Task { await loadDoc(nil) }
         }
     }
@@ -781,6 +826,7 @@ final class AppModel {
 
     func moveItems(_ items: [WorkspaceItem], from sourceSpaceID: WorkspaceSpace.ID, toRootAt index: Int? = nil) {
         guard activeSpaceID != nil else { return }
+        let previousPinnedContext = isPinnedListContext
         var bundle = WorkspaceTransferBundle(tabs: [], nodes: [])
         mutateSpace(sourceSpaceID) { source in
             guard var ws = source.workspace else { return }
@@ -801,12 +847,14 @@ final class AppModel {
             if let moved = firstMovedTabID(in: bundle) { destination.workspace?.select(moved) }
             destination.isBrowsing = false
         }
+        Task { await syncToActiveLocation(from: previousPinnedContext) }
     }
 
     func moveItems(_ items: [WorkspaceItem], from sourceSpaceID: WorkspaceSpace.ID,
                    toGroup groupID: TabGroup.ID, at childIndex: Int? = nil) {
         guard let destinationID = activeSpaceID,
               spaces.first(where: { $0.id == destinationID })?.workspace?.tabGroups.contains(where: { $0.id == groupID }) == true else { return }
+        let previousPinnedContext = isPinnedListContext
         var bundle = WorkspaceTransferBundle(tabs: [], nodes: [])
         mutateSpace(sourceSpaceID) { source in
             guard var ws = source.workspace else { return }
@@ -820,6 +868,7 @@ final class AppModel {
             if let moved = firstMovedTabID(in: bundle) { destination.workspace?.select(moved) }
             destination.isBrowsing = false
         }
+        Task { await syncToActiveLocation(from: previousPinnedContext) }
     }
 
     /// `loadIndex()` runs concurrently with itself in practice: the fast-path boot
@@ -909,6 +958,7 @@ final class AppModel {
         // open document tabs (browser-style: the top is navigation, tabs are pages).
         browsePane = newPane
         isBrowsing = true
+        browseSearchText = ""
         searchText = ""; searchHits = []; searchTask?.cancel()
         clearSearchMatches(); clearReaderHighlight()
         recomputeVisible()
@@ -1008,6 +1058,8 @@ final class AppModel {
     func setSearchText(_ text: String) {
         guard text != searchText else { return }
         searchText = text
+        if isPinnedListContext { pinnedSearchText = text }
+        else { browseSearchText = text }
         runSearch()
     }
 
@@ -1016,7 +1068,10 @@ final class AppModel {
         searchTask?.cancel()
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { searchHits = []; clearSearchMatches(); recomputeVisible(); return }
-        let type: EntryType? = { if case .type(let t) = pane { return t } else { return nil } }()
+        let type: EntryType? = {
+            if !isPinnedListContext, case .type(let t) = pane { return t }
+            return nil
+        }()
         searchTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 200_000_000)
             if Task.isCancelled { return }
@@ -1027,7 +1082,7 @@ final class AppModel {
                 self?.recomputeVisible()
                 guard let self else { return }
                 self.catalog.computeSearchMatches(
-                    query: q, paths: hits.map(\.entry.path), client: self.client,
+                    query: q, paths: self.visibleEntries.map(\.path), client: self.client,
                     currentSearchText: { [weak self] in self?.searchText ?? "" })
                 print("[marple] search '\(q)' -> \(hits.count) hits")
             } catch {
@@ -1050,7 +1105,7 @@ final class AppModel {
     /// while reading, new tab while browsing) and tells the reader to highlight the
     /// query + scroll to the clicked line.
     func openMatchedLine(path: String, query: String, ordinal: Int, anchor: String) async {
-        await open(path)
+        await activateVisibleEntry(path)
         openSearchQuery = query
         matchJump = MatchJump(query: query, anchor: anchor, ordinal: ordinal)
     }
@@ -1072,29 +1127,35 @@ final class AppModel {
         if isBrowsing || workspace == nil {
             await openNewTab(path)
         } else {
-            mutateWorkspace { $0.navigateActive(to: NavLocation(pane: browsePane, openPath: path)) }
+            let location = sourceLocation(for: path)
+            mutateWorkspace { $0.navigateActive(to: location) }
             isBrowsing = false
             await loadDoc(path)
         }
     }
 
     private func openNewTab(_ path: String) async {
-        let loc = NavLocation(pane: browsePane, openPath: path)
+        let restoreSourceContext = isPinnedListContext
+        let loc = sourceLocation(for: path)
         if workspace == nil {
             workspace = Workspace(initial: loc)
         } else {
             mutateWorkspace { $0.newTab(loc) }
         }
         isBrowsing = false
+        if restoreSourceContext { resetSearch(to: browseSearchText) }
         await loadDoc(path)
     }
 
     /// Fetch + render the doc at `path` into the open-doc caches. `nil` clears them.
     /// Always loads (no `loadedDocPath` guard) so it doubles as the FSEvents refresh.
     private func loadDoc(_ path: String?) async {
+        docLoadGeneration += 1
+        let generation = docLoadGeneration
         writeError = nil
         if path != loadedDocPath {
             await flushAllInspectorNoteSaves()
+            guard generation == docLoadGeneration else { return }
             let nextTargetPath = entries.first(where: { $0.path == path })
                 .map { annotationTarget(for: $0, in: entries).path }
             if inspectorSelectedNoteEntry?.annotates != nextTargetPath { clearInspectorNoteSelection() }
@@ -1106,6 +1167,7 @@ final class AppModel {
         }
         do {
             let raw = try await client.entryText(path: path)
+            guard generation == docLoadGeneration else { return }
             let body = Frontmatter.split(raw).body
             // Watcher refreshes land here for ANY vault change (e.g. inline-note
             // autosaves, issue #87). When the doc text didn't change, skip the
@@ -1121,6 +1183,7 @@ final class AppModel {
             recomputeOpenDerived()
             print("[marple] open \(path) -> \(openBlocks.count) blocks (\(raw.count) chars)")
         } catch {
+            guard generation == docLoadGeneration else { return }
             openBlocks = [.paragraph([.text("load failed: \(error)")])]
             openBody = ""; loadedDocPath = path
             recomputeOpenDerived()
@@ -1131,11 +1194,25 @@ final class AppModel {
     /// Bring the visible list + open doc in line with the active tab's location.
     /// Used after history nav, tab switch, new/close tab. Reloads the doc only when
     /// it differs from what's already loaded.
-    private func syncToActiveLocation() async {
-        searchText = ""; searchHits = []; searchTask?.cancel()
-        clearSearchMatches(); clearReaderHighlight()
-        recomputeVisible()
+    private func syncToActiveLocation(from previousPinnedContext: Bool? = nil) async {
+        if previousPinnedContext == nil || previousPinnedContext != isPinnedListContext {
+            resetSearch(to: isPinnedListContext ? pinnedSearchText : browseSearchText)
+        }
+        clearReaderHighlight()
         if openPath != loadedDocPath { await loadDoc(openPath) }
+    }
+
+    private func resetSearch(to text: String) {
+        searchTask?.cancel()
+        searchText = text
+        searchHits = []
+        clearSearchMatches()
+        recomputeVisible()
+        if !text.trimmingCharacters(in: .whitespaces).isEmpty { runSearch() }
+    }
+
+    private func sourceLocation(for path: String) -> NavLocation {
+        NavLocation(pane: browsePane, openPath: path)
     }
 
     func reloadOpen() async {
@@ -1153,7 +1230,8 @@ final class AppModel {
         // Wikilink follow stays WITHIN the current tab (per-tab history); if we're
         // browsing (no active tab), open it as a new tab instead.
         if !isBrowsing, workspace != nil {
-            mutateWorkspace { $0.navigateActive(to: NavLocation(pane: browsePane, openPath: hit.path)) }
+            let location = sourceLocation(for: hit.path)
+            mutateWorkspace { $0.navigateActive(to: location) }
             await loadDoc(hit.path)
         } else {
             await open(hit.path)
@@ -1164,16 +1242,18 @@ final class AppModel {
 
     func goBack() async {
         guard canGoBack else { return }
+        let previousPinnedContext = isPinnedListContext
         mutateWorkspace { $0.backActive() }
         print("[marple] back -> \(openPath ?? "browse")")
-        await syncToActiveLocation()
+        await syncToActiveLocation(from: previousPinnedContext)
     }
 
     func goForward() async {
         guard canGoForward else { return }
+        let previousPinnedContext = isPinnedListContext
         mutateWorkspace { $0.forwardActive() }
         print("[marple] forward -> \(openPath ?? "browse")")
-        await syncToActiveLocation()
+        await syncToActiveLocation(from: previousPinnedContext)
     }
 
     /// "New tab" in a documents-only tab model = a fresh note (a new page).
@@ -1263,22 +1343,56 @@ final class AppModel {
     }
 
     func selectTab(_ id: NavTab.ID) async {
+        let previousPinnedContext = isPinnedListContext
         mutateWorkspace { $0.select(id) }
         isBrowsing = false
-        await syncToActiveLocation()
+        await syncToActiveLocation(from: previousPinnedContext)
+    }
+
+    /// The pinned middle list switches existing tabs; object lists keep their
+    /// browser-style open behavior.
+    func activateVisibleEntry(_ path: String) async {
+        guard isPinnedListContext,
+              let id = tabs.first(where: { $0.pinned && $0.location.openPath == path })?.id
+        else {
+            await open(path)
+            return
+        }
+        guard id != activeTabID else { return }
+        await selectTab(id)
     }
 
     func selectTab(index: Int) async {
+        let previousPinnedContext = isPinnedListContext
         mutateWorkspace { $0.selectIndex(index) }
         isBrowsing = false
-        await syncToActiveLocation()
+        await syncToActiveLocation(from: previousPinnedContext)
     }
 
-    func selectNextTab() async { mutateWorkspace { $0.selectRelative(1) }; isBrowsing = false; await syncToActiveLocation() }
-    func selectPrevTab() async { mutateWorkspace { $0.selectRelative(-1) }; isBrowsing = false; await syncToActiveLocation() }
+    func selectNextTab() async {
+        let previousActiveID = activeTabID
+        let previousPinnedContext = isPinnedListContext
+        mutateWorkspace { $0.selectRelative(1) }
+        isBrowsing = false
+        if activeTabID != previousActiveID {
+            await syncToActiveLocation(from: previousPinnedContext)
+        }
+    }
+
+    func selectPrevTab() async {
+        let previousActiveID = activeTabID
+        let previousPinnedContext = isPinnedListContext
+        mutateWorkspace { $0.selectRelative(-1) }
+        isBrowsing = false
+        if activeTabID != previousActiveID {
+            await syncToActiveLocation(from: previousPinnedContext)
+        }
+    }
 
     /// Close a document tab. Closing the last one drops back to the browse list.
     func closeTab(_ id: NavTab.ID) async {
+        let previousActiveID = activeTabID
+        let previousPinnedContext = isPinnedListContext
         guard var ws = workspace else { return }
         ws.closeTab(id)
         if ws.tabs.isEmpty {
@@ -1287,7 +1401,9 @@ final class AppModel {
         } else {
             workspace = ws
         }
-        await syncToActiveLocation()
+        if activeTabID != previousActiveID {
+            await syncToActiveLocation(from: previousPinnedContext)
+        }
     }
 
     /// Close the active tab (⌘W). Skips a pinned tab.
@@ -1298,18 +1414,24 @@ final class AppModel {
 
     /// Close every tab except `keep` and any pinned tabs.
     func closeOtherTabs(_ keep: NavTab.ID) async {
+        let previousActiveID = activeTabID
+        let previousPinnedContext = isPinnedListContext
         guard var ws = workspace else { return }
         let toClose = ws.tabs.filter { $0.id != keep && !$0.pinned }.map(\.id)
         guard !toClose.isEmpty else { return }
         for id in toClose { ws.closeTab(id) }
         ws.select(keep)
         workspace = ws
-        await syncToActiveLocation()
+        if activeTabID != previousActiveID {
+            await syncToActiveLocation(from: previousPinnedContext)
+        }
     }
 
     /// Close every tab in `ids` skipping pinned. Empties drop back to browse mode
     /// the same way the single-tab close does.
     func closeTabs(_ ids: Set<NavTab.ID>) async {
+        let previousActiveID = activeTabID
+        let previousPinnedContext = isPinnedListContext
         guard var ws = workspace else { return }
         ws.closeTabs(ids)
         if ws.tabs.isEmpty {
@@ -1318,7 +1440,9 @@ final class AppModel {
         } else {
             workspace = ws
         }
-        await syncToActiveLocation()
+        if activeTabID != previousActiveID {
+            await syncToActiveLocation(from: previousPinnedContext)
+        }
     }
 
     /// Form one new group at the earliest selected tab's position, containing all
@@ -1355,7 +1479,29 @@ final class AppModel {
         workspace?.payloadAncestorFilter(tabIDs: tabIDs, groupIDs: groupIDs) ?? (tabIDs, groupIDs)
     }
 
-    func togglePin(_ id: NavTab.ID) { mutateWorkspace { $0.togglePin(id) } }
+    func togglePin(_ id: NavTab.ID) {
+        guard let tab = tabs.first(where: { $0.id == id }) else { return }
+        setPinned([id], to: !tab.pinned)
+    }
+
+    func setPinned(_ ids: [NavTab.ID], to pinned: Bool) {
+        let changed = Set(ids.filter { id in
+            guard let tab = tabs.first(where: { $0.id == id }) else { return false }
+            return tab.pinned != pinned
+        })
+        guard !changed.isEmpty else { return }
+        let previousPinnedContext = isPinnedListContext
+        let activeChanged = activeTabID.map(changed.contains) ?? false
+        mutateWorkspace { workspace in
+            for id in ids where changed.contains(id) {
+                workspace.togglePin(id)
+                if !pinned { workspace.moveTabToRoot(id, beforeTab: nil) }
+            }
+        }
+        if activeChanged, previousPinnedContext != isPinnedListContext {
+            resetSearch(to: isPinnedListContext ? pinnedSearchText : browseSearchText)
+        }
+    }
 
     func renameTab(_ id: NavTab.ID, to title: String?) {
         mutateWorkspace { $0.renameTab(id, to: title) }

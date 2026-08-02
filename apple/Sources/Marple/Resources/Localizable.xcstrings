@@ -1841,6 +1841,22 @@
         }
       }
     },
+    "固定/取消固定页面" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pin/Unpin Page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定/取消固定页面"
+          }
+        }
+      }
+    },
     "固定页面" : {
       "localizations" : {
         "en" : {
@@ -1853,6 +1869,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "固定页面"
+          }
+        }
+      }
+    },
+    "固定页面 (%arg)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pinned Pages (%1$arg)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定页面 (%1$arg)"
           }
         }
       }
@@ -5521,18 +5553,18 @@
         }
       }
     },
-    "翻译" : {
+    "制作译本" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Translate"
+            "value" : "Create Translation"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "翻译"
+            "value" : "制作译本"
           }
         }
       }
@@ -5713,7 +5745,7 @@
         }
       }
     },
-    "讨论" : {
+    "对话讨论" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5724,7 +5756,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "讨论"
+            "value" : "对话讨论"
           }
         }
       }
