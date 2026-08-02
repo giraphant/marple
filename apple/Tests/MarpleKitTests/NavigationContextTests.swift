@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Testing
 @testable import Marple
 @testable import MarpleKit
@@ -407,6 +408,55 @@ import Testing
         #expect(model.visibleEntries.map(\.path) == [book.path])
     }
 
+    @MainActor
+    @Test func pinnedTabExcursionDoesNotReloadItsAnchoredSidebarRow() async throws {
+        let book = entry("books/freedom.md", type: .book)
+        let chapter = entry("books/freedom/ch04.md", type: .chapter)
+        let model = AppModel(client: StubVaultClient(
+            entries: [book, chapter],
+            texts: [book.path: "# Freedom", chapter.path: "# Chapter 4"]))
+        await model.loadIndex()
+        await model.open(book.path)
+        model.togglePin(try #require(model.activeTabID))
+
+        let coordinator = SidebarOutlineView.Coordinator(model: model)
+        let outline = ReloadCountingOutlineView()
+        outline.dataSource = coordinator
+        outline.delegate = coordinator
+        coordinator.reload(outline)
+        let reloads = outline.reloadDataCount
+
+        await model.open(chapter.path)
+        coordinator.reload(outline)
+
+        #expect(outline.reloadDataCount == reloads)
+    }
+
+    @MainActor
+    @Test func activatingPinnedAnchorSelectsItsLiveExcursion() async throws {
+        let bookA = entry("books/a.md", type: .book)
+        let chapterA = entry("books/a/ch04.md", type: .chapter)
+        let bookB = entry("books/b.md", type: .book)
+        let model = AppModel(client: StubVaultClient(
+            entries: [bookA, chapterA, bookB],
+            texts: [bookA.path: "# A", chapterA.path: "# A4", bookB.path: "# B"]))
+        await model.loadIndex()
+        await model.open(bookA.path)
+        let tabA = try #require(model.activeTabID)
+        model.togglePin(tabA)
+        await model.open(chapterA.path)
+
+        model.select(pane: .type(.book))
+        await model.open(bookB.path)
+        let tabB = try #require(model.activeTabID)
+        model.togglePin(tabB)
+
+        await model.activateVisibleEntry(bookA.path)
+
+        #expect(model.activeTabID == tabA)
+        #expect(model.openPath == chapterA.path)
+    }
+
     private func entry(_ path: String, type: EntryType,
                        year: String? = nil, hasPDF: Bool = false) -> Entry {
         Entry(path: path, type: type, title: path, author: [], year: year,
@@ -474,4 +524,13 @@ private struct GatedVaultClient: VaultClient {
     func listTrash() async throws -> [TrashItem] { try await base.listTrash() }
     func restoreTrash(name: String) async throws -> String { try await base.restoreTrash(name: name) }
     func purgeTrash(name: String) async throws { try await base.purgeTrash(name: name) }
+}
+
+private final class ReloadCountingOutlineView: NSOutlineView {
+    private(set) var reloadDataCount = 0
+
+    override func reloadData() {
+        reloadDataCount += 1
+        super.reloadData()
+    }
 }

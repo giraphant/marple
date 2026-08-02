@@ -393,7 +393,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             parts.append("types:\(model.visibleTypeOrder.map(String.init(describing:)).joined(separator: ","))")
             parts.append("counts:\(model.visibleTypeOrder.map { "\($0)=\(model.counts[$0] ?? 0)" }.joined(separator: ","))")
             parts.append("views:\(model.savedViews.map { "\($0.id.uuidString):\($0.name)=\(model.savedViewCounts[$0.id] ?? 0)" }.joined(separator: ","))")
-            parts.append("tabs:\(model.tabs.map { "\($0.id.uuidString):\($0.location):\($0.pinned):\($0.customTitle ?? "")" }.joined(separator: ","))")
+            parts.append("tabs:\(model.tabs.map { "\($0.id.uuidString):\($0.identityLocation):\($0.pinned):\($0.customTitle ?? "")" }.joined(separator: ","))")
             parts.append("tree:\(Self.treeSignature(model.tabRootNodes))")
             parts.append("spaces:\(model.activeSpaceID?.uuidString ?? "nil"):\(model.spaces.map(\.id.uuidString).joined(separator: ","))")
             return parts.joined(separator: "|")
