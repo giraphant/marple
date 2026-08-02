@@ -1520,20 +1520,68 @@ final class AppModel {
         }
     }
 
-    /// Close a document tab. Closing the last one drops back to the browse list.
-    func closeTab(_ id: NavTab.ID) async {
+    private func registerCloseUndo(_ record: WorkspaceCloseRecord, actionName: String,
+                                   selectAfterClose: NavTab.ID?) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated {
+                model.restoreClosedTabs(record, actionName: actionName,
+                                        selectAfterClose: selectAfterClose)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func restoreClosedTabs(_ record: WorkspaceCloseRecord, actionName: String,
+                                   selectAfterClose: NavTab.ID?) {
+        let previousPinnedContext = isPinnedListContext
+        if var workspace {
+            workspace.restoreClosedTabs(from: record)
+            self.workspace = workspace
+        } else {
+            self.workspace = Workspace(restoringClosedTabs: record)
+        }
+        if record.restoresActiveTab { isBrowsing = false }
+
+        undoManager?.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated {
+                let sync = model.closeTabsNow(record.tabIDs, actionName: actionName,
+                                              selectAfterClose: selectAfterClose)
+                if let sync, sync.activeChanged {
+                    Task { await model.syncToActiveLocation(from: sync.previousPinnedContext) }
+                }
+            }
+        }
+        undoManager?.setActionName(actionName)
+        if !isBrowsing {
+            applyActiveListContext(from: previousPinnedContext)
+            Task { await syncToActiveLocation(from: previousPinnedContext) }
+        }
+    }
+
+    private func closeTabsNow(_ ids: Set<NavTab.ID>, actionName: String,
+                              selectAfterClose: NavTab.ID? = nil)
+        -> (previousPinnedContext: Bool, activeChanged: Bool)? {
+        guard var workspace,
+              let record = workspace.closeRecord(for: ids, reactivateActive: !isBrowsing)
+        else { return nil }
         let previousActiveID = activeTabID
         let previousPinnedContext = isPinnedListContext
-        guard var ws = workspace else { return }
-        ws.closeTab(id)
-        if ws.tabs.isEmpty {
-            workspace = nil
-            isBrowsing = true
-        } else {
-            workspace = ws
-        }
-        if activeTabID != previousActiveID {
-            await syncToActiveLocation(from: previousPinnedContext)
+        let ordered = workspace.tabs.filter { ids.contains($0.id) }.map(\.id)
+        for id in ordered { workspace.closeTab(id) }
+        if let selectAfterClose { workspace.select(selectAfterClose) }
+        self.workspace = workspace.isEmpty ? nil : workspace
+        if self.workspace == nil { isBrowsing = true }
+        registerCloseUndo(record, actionName: actionName,
+                          selectAfterClose: selectAfterClose)
+        return (previousPinnedContext, activeTabID != previousActiveID)
+    }
+
+    /// Close a document tab. Closing the last one drops back to the browse list.
+    func closeTab(_ id: NavTab.ID) async {
+        guard let sync = closeTabsNow([id], actionName: String(localized: "关闭页面")) else { return }
+        if sync.activeChanged {
+            await syncToActiveLocation(from: sync.previousPinnedContext)
         }
     }
 
@@ -1545,34 +1593,21 @@ final class AppModel {
 
     /// Close every tab except `keep` and any pinned tabs.
     func closeOtherTabs(_ keep: NavTab.ID) async {
-        let previousActiveID = activeTabID
-        let previousPinnedContext = isPinnedListContext
-        guard var ws = workspace else { return }
-        let toClose = ws.tabs.filter { $0.id != keep && !$0.pinned }.map(\.id)
-        guard !toClose.isEmpty else { return }
-        for id in toClose { ws.closeTab(id) }
-        ws.select(keep)
-        workspace = ws
-        if activeTabID != previousActiveID {
-            await syncToActiveLocation(from: previousPinnedContext)
+        let toClose = Set(tabs.filter { $0.id != keep && !$0.pinned }.map(\.id))
+        guard let sync = closeTabsNow(toClose, actionName: String(localized: "关闭其他页面"),
+                                      selectAfterClose: keep) else { return }
+        if sync.activeChanged {
+            await syncToActiveLocation(from: sync.previousPinnedContext)
         }
     }
 
     /// Close every tab in `ids` skipping pinned. Empties drop back to browse mode
     /// the same way the single-tab close does.
     func closeTabs(_ ids: Set<NavTab.ID>) async {
-        let previousActiveID = activeTabID
-        let previousPinnedContext = isPinnedListContext
-        guard var ws = workspace else { return }
-        ws.closeTabs(ids)
-        if ws.tabs.isEmpty {
-            workspace = nil
-            isBrowsing = true
-        } else {
-            workspace = ws
-        }
-        if activeTabID != previousActiveID {
-            await syncToActiveLocation(from: previousPinnedContext)
+        let toClose = Set(tabs.filter { ids.contains($0.id) && !$0.pinned }.map(\.id))
+        guard let sync = closeTabsNow(toClose, actionName: String(localized: "关闭页面")) else { return }
+        if sync.activeChanged {
+            await syncToActiveLocation(from: sync.previousPinnedContext)
         }
     }
 

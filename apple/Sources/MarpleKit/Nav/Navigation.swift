@@ -216,6 +216,17 @@ public struct WorkspaceSidebarState: Sendable, Equatable {
     fileprivate var values: [NavTab.ID: TabValue]
 }
 
+/// The one sidebar operation that needs full tab values: closed pages leave the
+/// live workspace, so their histories and list contexts must be carried here.
+public struct WorkspaceCloseRecord: Sendable {
+    fileprivate var closedTabs: [NavTab]
+    fileprivate var formerRoot: [TabNode]
+    fileprivate var reactivateID: NavTab.ID?
+
+    public var tabIDs: Set<NavTab.ID> { Set(closedTabs.map(\.id)) }
+    public var restoresActiveTab: Bool { reactivateID != nil }
+}
+
 /// The ordered set of tabs plus which one is active. A pure value type — `AppModel`
 /// holds one and `@Observable` tracks mutations through the stored property.
 ///
@@ -236,6 +247,14 @@ public struct Workspace: Sendable {
         tabs = [t]
         activeID = t.id
         root = [.tab(t.id)]
+    }
+
+    public init?(restoringClosedTabs record: WorkspaceCloseRecord) {
+        guard let first = record.closedTabs.first else { return nil }
+        tabs = record.closedTabs
+        activeID = record.reactivateID ?? first.id
+        root = Self.filterNodes(record.formerRoot, keeping: record.tabIDs.contains)
+        normalize()
     }
 
     /// Rebuild a workspace from persisted tab snapshots + legacy (v1) flat groups.
@@ -444,6 +463,40 @@ public struct Workspace: Sendable {
         if wasActive {
             activeID = tabs[min(i, tabs.count - 1)].id
         }
+    }
+
+    public func closeRecord(for ids: Set<NavTab.ID>, reactivateActive: Bool) -> WorkspaceCloseRecord? {
+        let closed = tabs.filter { ids.contains($0.id) }
+        guard !closed.isEmpty else { return nil }
+        let activeWasClosed = reactivateActive && closed.contains { $0.id == activeID }
+        return WorkspaceCloseRecord(closedTabs: closed, formerRoot: root,
+                                    reactivateID: activeWasClosed ? activeID : nil)
+    }
+
+    public mutating func restoreClosedTabs(from record: WorkspaceCloseRecord) {
+        let currentByID = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
+        let closedByID = Dictionary(uniqueKeysWithValues: record.closedTabs.map { ($0.id, $0) })
+        let formerIDs = Set(Self.leafIDs(record.formerRoot))
+        let collapsed = Dictionary(uniqueKeysWithValues: tabGroups.map { ($0.id, $0.isCollapsed) })
+
+        func preservingCollapse(_ nodes: [TabNode]) -> [TabNode] {
+            nodes.map { node in
+                guard case .group(var group) = node else { return node }
+                group.isCollapsed = collapsed[group.id] ?? group.isCollapsed
+                group.children = preservingCollapse(group.children)
+                return .group(group)
+            }
+        }
+
+        let extraRoot = Self.filterNodes(root, keeping: { !formerIDs.contains($0) })
+        root = preservingCollapse(record.formerRoot) + extraRoot
+        tabs = Self.leafIDs(root).compactMap { currentByID[$0] ?? closedByID[$0] }
+        if let reactivateID = record.reactivateID {
+            activeID = reactivateID
+        } else if !tabs.contains(where: { $0.id == activeID }), let first = tabs.first {
+            activeID = first.id
+        }
+        normalize()
     }
 
     public mutating func select(_ id: NavTab.ID) {
@@ -1015,6 +1068,19 @@ public struct Workspace: Sendable {
             }
         }
         return out
+    }
+
+    private static func filterNodes(_ nodes: [TabNode],
+                                    keeping keep: (NavTab.ID) -> Bool) -> [TabNode] {
+        nodes.compactMap { node in
+            switch node {
+            case .tab(let id):
+                return keep(id) ? node : nil
+            case .group(var group):
+                group.children = filterNodes(group.children, keeping: keep)
+                return group.children.isEmpty ? nil : .group(group)
+            }
+        }
     }
 
     @discardableResult

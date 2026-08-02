@@ -134,6 +134,99 @@ import Testing
         #expect(model.spaces.first { $0.id == destinationSpaceID }?
             .workspace?.tabs.map(\.id) == [destinationTabID])
     }
+
+    @MainActor
+    @Test func undoCloseRestoresPlacementHistoryContextAndActiveTab() async throws {
+        let (model, ids) = try await modelWithThreeTabs()
+        model.groupTabs([ids[0], ids[1]])
+        await model.selectTab(ids[1])
+        await model.open("papers/later.md")
+        let closed = try #require(model.tabs.first { $0.id == ids[1] })
+        let groupID = try #require(model.tabGroup(containing: ids[1])?.id)
+        let manager = attachUndoManager(to: model)
+
+        await grouped(manager) { await model.closeTab(ids[1]) }
+        #expect(!model.tabs.contains { $0.id == ids[1] })
+        manager.undo()
+
+        let restored = try #require(model.tabs.first { $0.id == ids[1] })
+        #expect(restored.history == closed.history)
+        #expect(restored.location.listContext == closed.location.listContext)
+        #expect(model.tabGroup(containing: ids[1])?.id == groupID)
+        #expect(model.activeTabID == ids[1])
+
+        manager.redo()
+        #expect(!model.tabs.contains { $0.id == ids[1] })
+    }
+
+    @MainActor
+    @Test func undoBatchCloseIsOneStepAndPreservesSurvivingHistory() async throws {
+        let (model, ids) = try await modelWithThreeTabs()
+        let manager = attachUndoManager(to: model)
+        await grouped(manager) { await model.closeTabs(Set([ids[0], ids[1]])) }
+        #expect(model.tabs.map(\.id) == [ids[2]])
+
+        await model.open("papers/later.md")
+        let survivor = try #require(model.tabs.first { $0.id == ids[2] }?.history)
+        manager.undo()
+
+        #expect(model.tabs.map(\.id) == ids)
+        #expect(model.tabs.first { $0.id == ids[2] }?.history == survivor)
+        #expect(!manager.canUndo)
+        #expect(manager.canRedo)
+    }
+
+    @MainActor
+    @Test func undoClosePreservesAPageOpenedAfterward() async throws {
+        let (model, ids) = try await modelWithThreeTabs()
+        let manager = attachUndoManager(to: model)
+        await grouped(manager) { await model.closeTab(ids[0]) }
+
+        await model.openInNewTab("papers/later.md")
+        let laterID = try #require(model.activeTabID)
+        manager.undo()
+
+        #expect(model.tabs.map(\.id) == ids + [laterID])
+        #expect(model.activeTabID == laterID)
+    }
+
+    @MainActor
+    @Test func undoClosingLastPageRecreatesTheWorkspace() async throws {
+        let only = sidebarEntry("papers/only.md")
+        let model = AppModel(client: StubVaultClient(
+            entries: [only], texts: [only.path: "# Only"]))
+        await model.loadIndex()
+        await model.open(only.path)
+        let id = try #require(model.activeTabID)
+        let manager = attachUndoManager(to: model)
+
+        await grouped(manager) { await model.closeTab(id) }
+        #expect(model.tabs.isEmpty)
+        manager.undo()
+
+        #expect(model.tabs.map(\.id) == [id])
+        #expect(model.activeTabID == id)
+        #expect(model.openPath == only.path)
+    }
+
+    @MainActor
+    @Test func undoCloseOthersRestoresClosedActiveAndRedoKeepsRequestedPage() async throws {
+        let (model, ids) = try await modelWithThreeTabs()
+        model.setPinned([ids[0]], to: true)
+        let manager = attachUndoManager(to: model)
+
+        await grouped(manager) { await model.closeOtherTabs(ids[1]) }
+        #expect(model.tabs.map(\.id) == [ids[0], ids[1]])
+        #expect(model.activeTabID == ids[1])
+
+        manager.undo()
+        #expect(model.tabs.map(\.id) == ids)
+        #expect(model.activeTabID == ids[2])
+
+        manager.redo()
+        #expect(model.tabs.map(\.id) == [ids[0], ids[1]])
+        #expect(model.activeTabID == ids[1])
+    }
 }
 
 @MainActor
