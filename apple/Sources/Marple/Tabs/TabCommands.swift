@@ -23,7 +23,7 @@ struct TabCommands: Commands {
         // window); window-close relocates to ⇧⌘W. (Pattern from CodeEdit.)
         CommandGroup(replacing: .saveItem) {
             Button("关闭页面") {
-                if let m = ActiveModel.current, m.tabs.count > 1 {
+                if let m = ActiveModel.current, m.isPinnedListContext || m.tabs.count > 1 {
                     Task { await m.closeActiveTab() }
                 } else {
                     NSApp.keyWindow?.performClose(nil)

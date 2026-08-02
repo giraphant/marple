@@ -409,6 +409,31 @@ import Testing
     }
 
     @MainActor
+    @Test func closeActiveTabWithdrawsPinnedExcursionWithoutClosingPage() async throws {
+        let book = entry("books/freedom.md", type: .book, year: "1999")
+        let chapter = entry("books/freedom/ch04.md", type: .chapter, year: "1999")
+        let model = AppModel(client: StubVaultClient(
+            entries: [book, chapter],
+            texts: [book.path: "# Freedom", chapter.path: "# Chapter 4"]))
+        await model.loadIndex()
+        await model.open(book.path)
+        let id = try #require(model.activeTabID)
+        model.togglePin(id)
+        await model.open(chapter.path)
+
+        await model.closeActiveTab()
+
+        #expect(model.tabs.map(\.id) == [id])
+        #expect(model.tabs.first?.pinned == true)
+        #expect(model.openPath == book.path)
+        #expect(model.tabs.first?.history.entries.map(\.openPath) == [book.path])
+
+        let history = try #require(model.tabs.first?.history)
+        await model.closeActiveTab()
+        #expect(model.tabs.first?.history == history)
+    }
+
+    @MainActor
     @Test func pinnedTabExcursionDoesNotReloadItsAnchoredSidebarRow() async throws {
         let book = entry("books/freedom.md", type: .book)
         let chapter = entry("books/freedom/ch04.md", type: .chapter)

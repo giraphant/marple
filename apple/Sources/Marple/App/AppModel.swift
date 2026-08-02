@@ -1720,9 +1720,16 @@ final class AppModel {
         }
     }
 
-    /// Close the active tab (⌘W). Skips a pinned tab.
+    /// Close the active tab (⌘W). A pinned tab withdraws to its anchor.
     func closeActiveTab() async {
-        guard !isBrowsing, let ws = workspace, !ws.activeTab.pinned, let id = activeTabID else { return }
+        guard !isBrowsing, var workspace else { return }
+        if workspace.activeTab.pinned {
+            guard workspace.withdrawActivePinnedNavigation() else { return }
+            self.workspace = workspace
+            await syncToActiveLocation(from: true)
+            return
+        }
+        guard let id = activeTabID else { return }
         await closeTab(id)
     }
 
