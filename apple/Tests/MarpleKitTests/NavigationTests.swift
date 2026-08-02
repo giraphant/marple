@@ -165,6 +165,67 @@ import Foundation
         #expect(w.tabs.first { $0.id == id }?.pinned == false)
     }
 
+    @Test func pinnedTabKeepsItsAnchorWhileNavigationMoves() {
+        var w = Workspace(initial: a)
+
+        w.togglePin(w.activeID)
+        w.navigateActive(to: b)
+        w.navigateActive(to: c)
+
+        #expect(w.activeTab.pinned)
+        #expect(w.activeTab.pinnedLocation == a)
+        #expect(w.activeTab.identityLocation == a)
+        #expect(w.activeTab.location == c)
+        #expect(w.activeTab.history.canGoBack)
+
+        w.backActive()
+        #expect(w.activeTab.location == b)
+        #expect(w.activeTab.identityLocation == a)
+        w.forwardActive()
+        #expect(w.activeTab.location == c)
+    }
+
+    @Test func withdrawingPinnedNavigationReturnsToAnchorAndClearsExcursion() {
+        var w = Workspace(initial: a)
+        w.togglePin(w.activeID)
+        w.navigateActive(to: b)
+        w.navigateActive(to: c)
+
+        let didWithdraw = w.withdrawActivePinnedNavigation()
+        #expect(didWithdraw)
+        #expect(w.activeTab.location == a)
+        #expect(w.activeTab.history.entries == [a])
+        #expect(!w.activeTab.history.canGoBack)
+        let didNotWithdraw = w.withdrawActivePinnedNavigation()
+        #expect(!didNotWithdraw)
+    }
+
+    @Test func unpinningKeepsCurrentNavigationAndClearsAnchor() {
+        var w = Workspace(initial: a)
+        w.togglePin(w.activeID)
+        w.navigateActive(to: b)
+
+        w.togglePin(w.activeID)
+
+        #expect(!w.activeTab.pinned)
+        #expect(w.activeTab.pinnedLocation == nil)
+        #expect(w.activeTab.identityLocation == b)
+        #expect(w.activeTab.location == b)
+    }
+
+    @Test func pruningADeletedPinnedPageAlsoPrunesItsAnchor() {
+        let gone = NavLocation(pane: .type(.book), openPath: "gone.md")
+        let keep = NavLocation(pane: .type(.chapter), openPath: "keep.md")
+        var w = Workspace(initial: gone)
+        w.togglePin(w.activeID)
+        w.navigateActive(to: keep)
+
+        w.pruneOpenPaths(validPaths: ["keep.md"])
+
+        #expect(w.activeTab.location == keep)
+        #expect(w.activeTab.pinnedLocation?.openPath == nil)
+    }
+
     @Test func testReorderAppliesIdOrder() {
         var w = Workspace(initial: a)
         w.newTab(b); w.newTab(c)    // [a, b, c]

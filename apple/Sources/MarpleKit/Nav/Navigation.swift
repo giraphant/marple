@@ -71,23 +71,27 @@ public struct NavTab: Identifiable, Hashable, Sendable {
     public let id: UUID
     public var history: NavHistory
     public var pinned: Bool
+    public var pinnedLocation: NavLocation?
     public var customTitle: String?
     public var cachedTitle: String?
     public var cachedType: EntryType?
 
     public init(id: UUID = UUID(), location: NavLocation, pinned: Bool = false,
+                pinnedLocation: NavLocation? = nil,
                 customTitle: String? = nil,
                 cachedTitle: String? = nil,
                 cachedType: EntryType? = nil) {
         self.id = id
         self.history = NavHistory(location)
         self.pinned = pinned
+        self.pinnedLocation = pinned ? (pinnedLocation ?? location) : nil
         self.customTitle = customTitle
         self.cachedTitle = cachedTitle
         self.cachedType = cachedType
     }
 
     public var location: NavLocation { history.current }
+    public var identityLocation: NavLocation { pinnedLocation ?? location }
 }
 
 /// One node in the sidebar's 页面 forest: either a tab leaf or a (recursive) group.
@@ -209,6 +213,7 @@ public struct WorkspaceTransferBundle: Sendable, Equatable {
 public struct WorkspaceSidebarState: Sendable, Equatable {
     public struct TabValue: Sendable, Equatable {
         public var pinned: Bool
+        public var pinnedLocation: NavLocation?
         public var customTitle: String?
     }
 
@@ -320,7 +325,9 @@ public struct Workspace: Sendable {
         WorkspaceSidebarState(
             root: root,
             values: Dictionary(uniqueKeysWithValues: tabs.map {
-                ($0.id, .init(pinned: $0.pinned, customTitle: $0.customTitle))
+                ($0.id, .init(pinned: $0.pinned,
+                              pinnedLocation: $0.pinnedLocation,
+                              customTitle: $0.customTitle))
             }))
     }
 
@@ -339,6 +346,7 @@ public struct Workspace: Sendable {
         for index in tabs.indices {
             guard let value = state.values[tabs[index].id] else { continue }
             tabs[index].pinned = value.pinned
+            tabs[index].pinnedLocation = value.pinnedLocation
             tabs[index].customTitle = value.customTitle
         }
         normalize()
@@ -436,6 +444,14 @@ public struct Workspace: Sendable {
     public mutating func backActive() { tabs[activeIndex].history.back() }
     public mutating func forwardActive() { tabs[activeIndex].history.forward() }
 
+    public mutating func withdrawActivePinnedNavigation() -> Bool {
+        guard tabs[activeIndex].pinned,
+              let anchor = tabs[activeIndex].pinnedLocation,
+              tabs[activeIndex].location != anchor else { return false }
+        tabs[activeIndex].history = NavHistory(anchor)
+        return true
+    }
+
     // MARK: tab management
 
     @discardableResult
@@ -516,7 +532,14 @@ public struct Workspace: Sendable {
 
     public mutating func togglePin(_ id: NavTab.ID) {
         guard let i = tabs.firstIndex(where: { $0.id == id }) else { return }
-        tabs[i].pinned.toggle()
+        if tabs[i].pinned {
+            tabs[i].pinned = false
+            tabs[i].pinnedLocation = nil
+        } else {
+            tabs[i].pinned = true
+            tabs[i].pinnedLocation = tabs[i].location
+        }
+        normalize()
     }
 
     /// Sidebar policy helper: fixed pages keep the tree; temporary pages are a
@@ -956,6 +979,10 @@ public struct Workspace: Sendable {
             let loc = tabs[i].history.current
             if let p = loc.openPath, !validPaths.contains(p) {
                 tabs[i].history.replaceCurrent(with: NavLocation(pane: loc.pane, openPath: nil))
+            }
+            if let anchor = tabs[i].pinnedLocation,
+               let path = anchor.openPath, !validPaths.contains(path) {
+                tabs[i].pinnedLocation = NavLocation(pane: anchor.pane, openPath: nil)
             }
         }
     }

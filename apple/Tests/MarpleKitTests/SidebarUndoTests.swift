@@ -32,16 +32,24 @@ import Testing
     @Test func pinUndoAndRedoRestoreThePinnedState() async throws {
         let (model, ids) = try await modelWithThreeTabs()
         let manager = attachUndoManager(to: model)
+        let anchor = try #require(model.tabs.first { $0.id == ids[0] }?.location)
 
         grouped(manager) { model.setPinned([ids[0]], to: true) }
-        #expect(model.tabs.first { $0.id == ids[0] }?.pinned == true)
+        await model.selectTab(ids[0])
+        await model.open("papers/later.md")
 
         manager.undo()
-        #expect(model.tabs.first { $0.id == ids[0] }?.pinned == false)
+        let unpinned = try #require(model.tabs.first { $0.id == ids[0] })
+        #expect(!unpinned.pinned)
+        #expect(unpinned.pinnedLocation == nil)
+        #expect(unpinned.location.openPath == "papers/later.md")
         #expect(manager.canRedo)
 
         manager.redo()
-        #expect(model.tabs.first { $0.id == ids[0] }?.pinned == true)
+        let repinned = try #require(model.tabs.first { $0.id == ids[0] })
+        #expect(repinned.pinned)
+        #expect(repinned.pinnedLocation == anchor)
+        #expect(repinned.location.openPath == "papers/later.md")
     }
 
     @MainActor
