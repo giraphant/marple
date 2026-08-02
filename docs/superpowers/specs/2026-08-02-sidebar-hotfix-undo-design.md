@@ -55,15 +55,17 @@ a tab does not roll the shared saved-view definition back to an older version.
 The design does not preserve arbitrary pixel scroll offsets or list/grid display
 mode. It restores the semantic list context and reveals the open entry.
 
-Navigation-location persistence uses optional fields so state written before
-this change continues to decode. Missing fields fall back to the current global
+`NavLocation` stores one optional `ListContext` value containing search, filter,
+matching, and sort state. This keeps the navigation model cohesive instead of
+adding several parallel optional properties. State written before this change
+continues to decode with a missing context and falls back to the current global
 browse settings.
 
 ### 4. A temporary multi-selection can create a group
 
 The context menu offers `把这 N 个合成一个新组` for every pure page selection of
 two or more rows, including temporary pages and a mixed fixed/temporary
-selection. The action is one transaction:
+selection. One high-level model intent performs the action synchronously:
 
 1. pin every selected page;
 2. group the pages in visual order using the existing group-creation policy;
@@ -111,41 +113,53 @@ is replaced with a different vault/workspace.
 
 ## Architecture
 
-`NavLocation` regains per-location search state and adds optional filter and sort
-state. `AppModel` has one path for capturing the effective temporary-page list
-context and one path for applying it. Existing browse and pinned shared contexts
-remain separate.
+`NavLocation` gains one optional `ListContext` containing search text, filters,
+matching mode, and sorting. `AppModel` has one path for capturing the effective
+temporary-page context and one path for applying it. Existing browse and pinned
+shared contexts remain separate.
 
-Sidebar mutations run through a small `AppModel` transaction boundary that
-captures narrowly scoped before/after sidebar state and registers the inverse
-with the window's `UndoManager`. Nested model calls within one gesture are
-coalesced into the outer transaction. Restoring a transaction registers its
-opposite, which gives native redo without a second custom stack.
+The window delegate exposes one `UndoManager`. Each high-level user intent owns
+its undo registration and captures only the old value it changes. Its undo
+handler captures the current value before applying the old one, then registers
+that inverse; this is sufficient for redo and needs no custom history stack.
 
-Workspace structural snapshots contain topology, ordering, pin state, names,
-and the payload needed to reinsert closed tabs. Restoration merges that
-structure with still-open tabs so their later navigation histories are not
-replaced. Object-type and saved-view edits snapshot only their respective
-configuration.
+Page moves, pinning, grouping, and renaming save only the affected workspace
+topology, pin values, or names. Cross-Space moves save the structural state of
+the two affected workspaces. Type and saved-view edits save their old arrays.
+There is no generic before/after transaction object, nested-transaction counter,
+or universal workspace merge algorithm.
+
+Closing is the one operation that needs a dedicated record: the removed
+`NavTab` values, the former root topology, and the formerly active tab ID.
+Restoration keeps the current history of tabs that never closed and reinserts
+the captured closed tabs with their own history and list context. This narrowly
+implements exact close restoration without making every sidebar operation use
+a defensive merge layer.
 
 ## Verification
 
-Automated regression tests must demonstrate red before implementation and green
-after it for:
+Automated model tests must demonstrate red before implementation and green after
+it for:
 
-1. an empty fixed-pages section remains a valid container/drop destination;
-2. fixed page and group rows have no trailing pin accessory;
-3. switching temporary pages restores pane, search, filters, matching mode, and
-   sort, after which the open entry is present for list selection;
-4. grouping temporary pages pins them, preserves order, and creates one fixed
-   group;
-5. undo and redo restore/reapply pinning, drag topology, grouping, and renaming;
-6. undoing single and batch closes restores exact placement, group membership,
-   active selection, history, and list context;
-7. one compound gesture creates one undo action;
-8. expand/collapse does not create an undo action;
-9. legacy persisted navigation locations still decode.
+1. switching temporary pages restores pane and `ListContext`, while a saved
+   view continues to use its latest shared definition;
+2. grouping temporary and mixed fixed/temporary selections pins the pages,
+   preserves visual order, creates one fixed group, and consumes one undo step;
+3. undo and redo restore/reapply representative pin, move, group, and rename
+   mutations;
+4. undoing single and batch closes restores exact placement, group membership,
+   active selection, history, and list context while preserving the later
+   histories of tabs that never closed;
+5. type and saved-view configuration edits restore their previous values;
+6. legacy persisted navigation locations still decode.
 
-Run the focused tests first, then the complete Swift test suite, then build and
-ad-hoc-sign the development app. Finally, manually exercise the five reported
-flows in the built app.
+Private AppKit view hierarchy, drag hit-testing, and menu wiring are not exposed
+or abstracted solely for tests. After the focused tests and complete Swift test
+suite pass, build and ad-hoc-sign the development app, then manually verify:
+
+- single and batch drops into an empty fixed-pages section;
+- the absence of trailing pin icons;
+- the temporary-page group command appearing and moving the new group above;
+- list restoration selecting and revealing the open entry;
+- standard undo/redo menu routing and shortcuts;
+- expand/collapse creating no undo entry.
