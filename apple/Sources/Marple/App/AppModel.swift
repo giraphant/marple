@@ -268,6 +268,14 @@ final class AppModel {
         if case .savedView(let id) = pane, let v = savedView(id) { return v.sorts }
         return sortClauses
     }
+
+    private var currentBrowseListContext: ListContext {
+        ListContext(searchText: searchText,
+                    filters: activeFilterClauses,
+                    filterMatch: activeFilterMatch,
+                    sorts: activeSortClauses)
+    }
+
     private(set) var searchText: String = ""
     private var browseSearchText = ""
     private var pinnedSearchText = ""
@@ -977,6 +985,7 @@ final class AppModel {
             sortClauses = clauses
         }
         recomputeVisible()
+        updateActiveTemporaryListContext()
     }
 
     func setFilters(_ clauses: [FilterClause], match: FilterMatch = .all) {
@@ -989,6 +998,7 @@ final class AppModel {
             filterMatch = match
         }
         recomputeVisible()
+        updateActiveTemporaryListContext()
     }
 
     // MARK: saved views (QUA-127)
@@ -1061,6 +1071,7 @@ final class AppModel {
         if isPinnedListContext { pinnedSearchText = text }
         else { browseSearchText = text }
         runSearch()
+        updateActiveTemporaryListContext()
     }
 
     /// Debounced server search scoped to the current type pane (nil type → all).
@@ -1143,7 +1154,7 @@ final class AppModel {
             mutateWorkspace { $0.newTab(loc) }
         }
         isBrowsing = false
-        if restoreSourceContext { resetSearch(to: browseSearchText) }
+        if restoreSourceContext { applyActiveListContext(from: true) }
         await loadDoc(path)
     }
 
@@ -1195,11 +1206,45 @@ final class AppModel {
     /// Used after history nav, tab switch, new/close tab. Reloads the doc only when
     /// it differs from what's already loaded.
     private func syncToActiveLocation(from previousPinnedContext: Bool? = nil) async {
-        if previousPinnedContext == nil || previousPinnedContext != isPinnedListContext {
-            resetSearch(to: isPinnedListContext ? pinnedSearchText : browseSearchText)
-        }
+        applyActiveListContext(from: previousPinnedContext)
         clearReaderHighlight()
         if openPath != loadedDocPath { await loadDoc(openPath) }
+    }
+
+    private func applyActiveListContext(from previousPinnedContext: Bool? = nil) {
+        guard !isBrowsing, let active = workspace?.activeTab else { return }
+        if active.pinned {
+            if previousPinnedContext != true || searchText != pinnedSearchText {
+                resetSearch(to: pinnedSearchText)
+            }
+            return
+        }
+
+        let location = active.location
+        browsePane = location.pane
+        if let context = location.listContext {
+            if case .savedView = location.pane {
+                // A named view's current shared definition remains authoritative.
+            } else {
+                filterClauses = context.filters
+                filterMatch = context.filterMatch
+                sortClauses = context.sorts
+            }
+            browseSearchText = context.searchText
+            resetSearch(to: context.searchText)
+        } else if previousPinnedContext == true {
+            resetSearch(to: browseSearchText)
+        } else {
+            recomputeVisible()
+        }
+    }
+
+    private func updateActiveTemporaryListContext() {
+        guard !isBrowsing, let active = workspace?.activeTab, !active.pinned else { return }
+        var location = active.location
+        location.pane = browsePane
+        location.listContext = currentBrowseListContext
+        mutateWorkspace { $0.replaceActiveLocation(with: location) }
     }
 
     private func resetSearch(to text: String) {
@@ -1212,7 +1257,12 @@ final class AppModel {
     }
 
     private func sourceLocation(for path: String) -> NavLocation {
-        NavLocation(pane: browsePane, openPath: path)
+        if isPinnedListContext, let location = workspace?.activeTab.location {
+            return NavLocation(pane: location.pane, openPath: path,
+                               listContext: location.listContext)
+        }
+        return NavLocation(pane: browsePane, openPath: path,
+                           listContext: currentBrowseListContext)
     }
 
     func reloadOpen() async {
@@ -1499,7 +1549,7 @@ final class AppModel {
             }
         }
         if activeChanged, previousPinnedContext != isPinnedListContext {
-            resetSearch(to: isPinnedListContext ? pinnedSearchText : browseSearchText)
+            applyActiveListContext(from: previousPinnedContext)
         }
     }
 

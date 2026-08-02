@@ -1,14 +1,34 @@
 import Foundation
 
+/// The semantic list state from which a temporary page was opened. Pixel scroll
+/// position and presentation mode deliberately remain view-owned.
+public struct ListContext: Hashable, Sendable, Codable {
+    public var searchText: String
+    public var filters: [FilterClause]
+    public var filterMatch: FilterMatch
+    public var sorts: [SortClause]
+
+    public init(searchText: String, filters: [FilterClause],
+                filterMatch: FilterMatch, sorts: [SortClause]) {
+        self.searchText = searchText
+        self.filters = filters
+        self.filterMatch = filterMatch
+        self.sorts = sorts
+    }
+}
+
 /// A restorable place in the app: which list/themes pane is shown plus which doc
 /// (if any) is open. Both columns restore together when a tab/history entry is
 /// activated.
 public struct NavLocation: Hashable, Sendable, Codable {
     public var pane: Pane
     public var openPath: String?
-    public init(pane: Pane, openPath: String? = nil) {
+    public var listContext: ListContext?
+
+    public init(pane: Pane, openPath: String? = nil, listContext: ListContext? = nil) {
         self.pane = pane
         self.openPath = openPath
+        self.listContext = listContext
     }
 }
 
@@ -337,6 +357,10 @@ public struct Workspace: Sendable {
 
     public mutating func navigateActive(to loc: NavLocation) {
         tabs[activeIndex].history.push(loc)
+    }
+
+    public mutating func replaceActiveLocation(with location: NavLocation) {
+        tabs[activeIndex].history.replaceCurrent(with: location)
     }
 
     public mutating func backActive() { tabs[activeIndex].history.back() }

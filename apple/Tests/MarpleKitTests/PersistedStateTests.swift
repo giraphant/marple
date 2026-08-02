@@ -24,11 +24,31 @@ import Foundation
                 from: JSONEncoder().encode(FilterMatch.any)) == .any)
     }
 
-    @Test func navLocationRoundTrips() throws {
-        let loc = NavLocation(pane: .theme("X"), openPath: "vault/a.md")
+    @Test func navLocationRoundTripsWithListContext() throws {
+        let context = ListContext(
+            searchText: "agency",
+            filters: [FilterClause(id: "year", field: .year, op: .gte, value: "2020")],
+            filterMatch: .any,
+            sorts: [SortClause(field: .title, dir: .asc)])
+        let loc = NavLocation(pane: .theme("X"), openPath: "vault/a.md",
+                              listContext: context)
         let data = try JSONEncoder().encode(loc)
         #expect(try JSONDecoder().decode(NavLocation.self, from: data) == loc)
     }
+
+    @Test func legacyNavLocationDecodesWithoutListContext() throws {
+        let data = try JSONEncoder().encode(
+            LegacyNavLocation(pane: .type(.paper), openPath: "vault/a.md"))
+        let decoded = try JSONDecoder().decode(NavLocation.self, from: data)
+        #expect(decoded.pane == .type(.paper))
+        #expect(decoded.openPath == "vault/a.md")
+        #expect(decoded.listContext == nil)
+    }
+}
+
+private struct LegacyNavLocation: Encodable {
+    let pane: Pane
+    let openPath: String?
 }
 
 @Suite struct WorkspaceRestoreTests {

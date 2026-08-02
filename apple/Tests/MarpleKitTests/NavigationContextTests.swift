@@ -5,30 +5,78 @@ import Testing
 
 @Suite struct NavigationContextTests {
     @MainActor
-    @Test func temporaryTabsShareTheCurrentBrowseContext() async throws {
-        let author = entry("authors/clare.md", type: .author)
-        let book = entry("books/habit.md", type: .book)
+    @Test func temporaryTabRestoresCompleteListContext() async throws {
+        let author = entry("authors/clare.md", type: .author, year: "2024")
+        let book = entry("books/habit.md", type: .book, year: "2018")
+        let authorFilter = FilterClause(
+            id: "recent", field: .year, op: .gte, value: "2020")
+        let authorSort = [SortClause(field: .title, dir: .desc)]
         let client = StubVaultClient(
             entries: [author, book],
             texts: [author.path: "# Clare", book.path: "# Habit"],
-            hits: [SearchHit(entry: book, score: 1, snippet: nil, source: "test")])
+            hits: [SearchHit(entry: author, score: 1, snippet: nil, source: "test")])
         let model = AppModel(client: client)
         await model.loadIndex()
 
         model.select(pane: .type(.author))
         await model.open(author.path)
         let authorTab = try #require(model.activeTabID)
+        model.setFilters([authorFilter], match: .any)
+        model.setSort(authorSort)
+        model.setSearchText("clare")
+        await waitForEntries([author.path], in: model)
 
         model.select(pane: .type(.book))
-        model.setSearchText("habit")
-        await waitForEntries([book.path], in: model)
+        model.setFilters([], match: .all)
+        model.setSort([SortClause(field: .year, dir: .asc)])
+        model.setSearchText("")
         await model.open(book.path)
         await model.selectTab(authorTab)
+        await waitForEntries([author.path], in: model)
 
-        #expect(model.pane == .type(.book))
-        #expect(model.searchText == "habit")
+        #expect(model.pane == .type(.author))
+        #expect(model.searchText == "clare")
+        #expect(model.activeFilterClauses == [authorFilter])
+        #expect(model.activeFilterMatch == .any)
+        #expect(model.activeSortClauses == authorSort)
         #expect(model.openPath == author.path)
-        #expect(model.visibleEntries.map(\.path) == [book.path])
+        #expect(model.visibleEntries.map(\.path) == [author.path])
+    }
+
+    @MainActor
+    @Test func savedViewTabUsesTheLatestSharedDefinition() async throws {
+        let oldPaper = entry("papers/old.md", type: .paper, year: "1999")
+        let newPaper = entry("papers/new.md", type: .paper, year: "2025")
+        let book = entry("books/context.md", type: .book, year: "2022")
+        let model = AppModel(client: StubVaultClient(
+            entries: [oldPaper, newPaper, book],
+            texts: [oldPaper.path: "# Old", newPaper.path: "# New",
+                    book.path: "# Context"]))
+        await model.loadIndex()
+
+        model.select(pane: .type(.paper))
+        model.setFilters([FilterClause(id: "old", field: .year, op: .lte, value: "2000")])
+        let viewID = model.createSavedView(named: "论文视图").id
+        await model.open(oldPaper.path)
+        let viewTab = try #require(model.activeTabID)
+
+        model.select(pane: .savedView(viewID))
+        let latest = [
+            FilterClause(id: "paper", field: .type, op: .is_, value: EntryType.paper.rawValue),
+            FilterClause(id: "new", field: .year, op: .gte, value: "2020"),
+        ]
+        let latestSort = [SortClause(field: .year, dir: .desc)]
+        model.setFilters(latest, match: .all)
+        model.setSort(latestSort)
+        model.select(pane: .type(.book))
+        await model.open(book.path)
+        await model.selectTab(viewTab)
+        await waitForEntries([newPaper.path], in: model)
+
+        #expect(model.pane == .savedView(viewID))
+        #expect(model.activeFilterClauses == latest)
+        #expect(model.activeSortClauses == latestSort)
+        #expect(model.visibleEntries.map(\.path) == [newPaper.path])
     }
 
     @MainActor
@@ -189,9 +237,10 @@ import Testing
         #expect(model.openEntry?.path == fast.path)
     }
 
-    private func entry(_ path: String, type: EntryType) -> Entry {
-        Entry(path: path, type: type, title: path, author: [], year: nil,
-              ratingScore: 0, themes: [], preview: "", hasPDF: false)
+    private func entry(_ path: String, type: EntryType,
+                       year: String? = nil, hasPDF: Bool = false) -> Entry {
+        Entry(path: path, type: type, title: path, author: [], year: year,
+              ratingScore: 0, themes: [], preview: "", hasPDF: hasPDF)
     }
 
     @MainActor
