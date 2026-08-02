@@ -25,9 +25,20 @@ import Foundation
     }
 
     @Test func navLocationRoundTrips() throws {
-        let loc = NavLocation(pane: .theme("X"), openPath: "vault/a.md")
+        let loc = NavLocation(pane: .theme("X"), openPath: "vault/a.md", searchText: "agency")
         let data = try JSONEncoder().encode(loc)
         #expect(try JSONDecoder().decode(NavLocation.self, from: data) == loc)
+    }
+
+    @Test func legacyNavLocationDecodesWithoutSearchText() throws {
+        let current = NavLocation(pane: .type(.paper), openPath: "vault/a.md", searchText: "agency")
+        var json = try #require(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(current)) as? [String: Any])
+        json.removeValue(forKey: "searchText")
+        let decoded = try JSONDecoder().decode(
+            NavLocation.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded.searchText == nil)
+        #expect(decoded.openPath == "vault/a.md")
     }
 }
 
@@ -56,11 +67,12 @@ import Foundation
 
     @Test func pruneNullsMissingOpenPaths() throws {
         var ws = try #require(Workspace(restoring: [
-            (NavLocation(pane: .type(.book), openPath: "gone.md"), false),
+            (NavLocation(pane: .type(.book), openPath: "gone.md", searchText: "agency"), false),
             (NavLocation(pane: .type(.book), openPath: "keep.md"), false),
         ], activeIndex: 0))
         ws.pruneOpenPaths(validPaths: ["keep.md"])
         #expect(ws.tabs[0].location.openPath == nil)
+        #expect(ws.tabs[0].location.searchText == "agency")
         #expect(ws.tabs[1].location.openPath == "keep.md")
     }
 

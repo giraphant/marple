@@ -6,9 +6,11 @@ import Foundation
 public struct NavLocation: Hashable, Sendable, Codable {
     public var pane: Pane
     public var openPath: String?
-    public init(pane: Pane, openPath: String? = nil) {
+    public var searchText: String?
+    public init(pane: Pane, openPath: String? = nil, searchText: String? = nil) {
         self.pane = pane
         self.openPath = openPath
+        self.searchText = searchText?.isEmpty == false ? searchText : nil
     }
 }
 
@@ -337,6 +339,10 @@ public struct Workspace: Sendable {
 
     public mutating func navigateActive(to loc: NavLocation) {
         tabs[activeIndex].history.push(loc)
+    }
+
+    public mutating func replaceActiveLocation(with loc: NavLocation) {
+        tabs[activeIndex].history.replaceCurrent(with: loc)
     }
 
     public mutating func backActive() { tabs[activeIndex].history.back() }
@@ -816,7 +822,8 @@ public struct Workspace: Sendable {
         for i in tabs.indices {
             let loc = tabs[i].history.current
             if let p = loc.openPath, !validPaths.contains(p) {
-                tabs[i].history.replaceCurrent(with: NavLocation(pane: loc.pane, openPath: nil))
+                tabs[i].history.replaceCurrent(with: NavLocation(
+                    pane: loc.pane, openPath: nil, searchText: loc.searchText))
             }
         }
     }

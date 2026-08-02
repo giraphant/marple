@@ -92,6 +92,8 @@ struct EntryListTable: NSViewRepresentable {
         private var items: [RowItem] = []
         private var lastSearchMode = false
         private var lastSnapshot: SchemaSnapshot?
+        private var lastActiveTabID: NavTab.ID?
+        private var lastPinnedListContext = false
         private var isUpdatingSelection = false
         private var pendingReload = false
 
@@ -122,6 +124,8 @@ struct EntryListTable: NSViewRepresentable {
             withObservationTracking {
                 _ = model.visibleEntries.count
                 _ = model.openPath
+                _ = model.activeTabID
+                _ = model.isPinnedListContext
                 _ = model.searchMatchQuery
                 _ = model.matchExpanded
                 _ = model.matchJump
@@ -151,6 +155,10 @@ struct EntryListTable: NSViewRepresentable {
         func reload(_ table: NSTableView) {
             let newItems = buildItems()
             let newSearchMode = isInSearchMode
+            let contextChanged = model.activeTabID != lastActiveTabID
+                || model.isPinnedListContext != lastPinnedListContext
+            lastActiveTabID = model.activeTabID
+            lastPinnedListContext = model.isPinnedListContext
 
             let itemsChanged = items != newItems
             // search-mode flip swaps row-view classes (default ↔ group),
@@ -170,8 +178,8 @@ struct EntryListTable: NSViewRepresentable {
                 NSAnimationContext.current.duration = 0
                 table.reloadData()
                 NSAnimationContext.endGrouping()
-                syncSelection(in: table)
-                if newSearchMode && !wasSearchMode {
+                let restoredSelection = syncSelection(in: table, reveal: contextChanged || searchModeFlipped)
+                if newSearchMode && !wasSearchMode && !restoredSelection && table.numberOfRows > 0 {
                     table.scrollRowToVisible(0)
                 }
                 return
@@ -180,7 +188,7 @@ struct EntryListTable: NSViewRepresentable {
             // Items unchanged. Just sync selection — that triggers
             // tableViewSelectionDidChange → refreshGroupHighlight if the
             // selection target actually moves.
-            syncSelection(in: table)
+            syncSelection(in: table, reveal: contextChanged)
         }
 
         private var isInSearchMode: Bool {
@@ -250,7 +258,8 @@ struct EntryListTable: NSViewRepresentable {
             }
         }
 
-        private func syncSelection(in table: NSTableView) {
+        @discardableResult
+        private func syncSelection(in table: NSTableView, reveal: Bool = false) -> Bool {
             let target: Int = {
                 guard let path = model.openPath else { return -1 }
                 // Prefer the match row whose ordinal == matchJump.ordinal, if
@@ -277,10 +286,13 @@ struct EntryListTable: NSViewRepresentable {
                 if table.selectedRow != target {
                     table.selectRowIndexes(IndexSet(integer: target), byExtendingSelection: false)
                     table.scrollRowToVisible(target)
+                } else if reveal {
+                    table.scrollRowToVisible(target)
                 }
             } else if table.selectedRow >= 0 {
                 table.deselectAll(nil)
             }
+            return target >= 0
         }
 
         // MARK: NSTableViewDataSource
@@ -399,7 +411,7 @@ struct EntryListTable: NSViewRepresentable {
             switch items[row] {
             case .entryHeader(let entry):
                 if model.openPath != entry.path {
-                    Task { await model.open(entry.path) }
+                    Task { await model.activateVisibleEntry(entry.path) }
                 }
             case .match(let path, let line):
                 Task {

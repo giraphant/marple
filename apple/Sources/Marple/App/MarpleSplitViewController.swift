@@ -168,14 +168,18 @@ struct BrowseColumn: View {
     @Bindable var model: AppModel
     var body: some View {
         Group {
-            switch model.pane {
-            case .themesIndex: ThemesView(model: model)
-            case .trash:       TrashView(model: model)
-            default:
-                if model.browseMode == .grid {
-                    EntryGridView(model: model)
-                } else {
-                    EntryListView(model: model)
+            if model.isPinnedListContext {
+                EntryListView(model: model)
+            } else {
+                switch model.pane {
+                case .themesIndex: ThemesView(model: model)
+                case .trash:       TrashView(model: model)
+                default:
+                    if model.browseMode == .grid {
+                        EntryGridView(model: model)
+                    } else {
+                        EntryListView(model: model)
+                    }
                 }
             }
         }
