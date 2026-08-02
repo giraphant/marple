@@ -434,6 +434,45 @@ import Testing
     }
 
     @MainActor
+    @Test func lonePinnedTabContextMenuCanClosePageAndReturnToBrowse() async throws {
+        let book = entry("books/freedom.md", type: .book)
+        let model = AppModel(client: StubVaultClient(
+            entries: [book], texts: [book.path: "# Freedom"]))
+        await model.loadIndex()
+        await model.open(book.path)
+        let id = try #require(model.activeTabID)
+        model.togglePin(id)
+
+        let coordinator = SidebarOutlineView.Coordinator(model: model)
+        let outline = NSOutlineView()
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("sidebar"))
+        outline.addTableColumn(column)
+        outline.outlineTableColumn = column
+        outline.dataSource = coordinator
+        outline.delegate = coordinator
+        coordinator.outlineView = outline
+        coordinator.reload(outline)
+
+        let menu = NSMenu()
+        var closeItem: NSMenuItem?
+        for row in 0..<outline.numberOfRows {
+            outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            coordinator.menuNeedsUpdate(menu)
+            if let item = menu.items.first(where: { $0.title == "关闭页面" }) {
+                closeItem = item
+                break
+            }
+        }
+
+        let foundCloseItem = try #require(closeItem)
+        #expect(foundCloseItem.isEnabled)
+
+        await model.closeTab(id)
+        #expect(model.tabs.isEmpty)
+        #expect(model.isBrowsing)
+    }
+
+    @MainActor
     @Test func pinnedTabExcursionDoesNotReloadItsAnchoredSidebarRow() async throws {
         let book = entry("books/freedom.md", type: .book)
         let chapter = entry("books/freedom/ch04.md", type: .chapter)

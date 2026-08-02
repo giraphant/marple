@@ -933,7 +933,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                     action: #selector(togglePinFromMenu(_:)), node: node))
                 items.append(.separator())
                 let closeItem = menuItem(String(localized: "关闭页面"), action: #selector(closeTabFromMenu(_:)), node: node)
-                closeItem.isEnabled = model.tabs.count > 1
+                closeItem.isEnabled = tab.pinned || model.tabs.count > 1
                 items.append(closeItem)
                 items.append(menuItem(String(localized: "关闭其他页面"), action: #selector(closeOtherTabsFromMenu(_:)), node: node))
                 return items
