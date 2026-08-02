@@ -1497,7 +1497,17 @@ final class AppModel {
 
     /// Form one new group at the earliest selected tab's position, containing all
     /// `ids` in DFS order. No-op if fewer than two valid tabs.
-    func groupTabs(_ ids: [NavTab.ID]) { mutateWorkspace { $0.groupTabs(ids) } }
+    func groupTabs(_ ids: [NavTab.ID]) {
+        let selected = Set(ids)
+        let valid = tabs.filter { selected.contains($0.id) }.map(\.id)
+        guard valid.count >= 2 else { return }
+        mutateWorkspace { workspace in
+            for id in valid where workspace.tabs.first(where: { $0.id == id })?.pinned == false {
+                workspace.togglePin(id)
+            }
+            workspace.groupTabs(valid)
+        }
+    }
 
     /// Bulk move `ids` into `groupID` at `childIndex` (or append) preserving order.
     func moveTabs(_ ids: [NavTab.ID], toGroup groupID: TabGroup.ID, at childIndex: Int? = nil) {

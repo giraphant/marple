@@ -664,7 +664,7 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
             guard let node = item as? SidebarOutlineNode else { return false }
-            return !node.children.isEmpty
+            return node.isPinnedSection || !node.children.isEmpty
         }
 
         func outlineView(_ outlineView: NSOutlineView, isGroupItem item: Any) -> Bool {
@@ -834,7 +834,6 @@ struct SidebarOutlineView: NSViewRepresentable {
         fileprivate func batchMenuItems(for nodes: [SidebarOutlineNode]) -> [NSMenuItem] {
             let n = nodes.count
             let allTabs = nodes.allSatisfy { if case .tab = $0.kind { return true } else { return false } }
-            let allPinnedTabs = allTabs && nodes.allSatisfy(\.pinned)
             let tabIDs = collectTabIDs(in: nodes)
             var items: [NSMenuItem] = []
 
@@ -846,7 +845,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             closeItem.isEnabled = !tabIDs.allSatisfy { pinned.contains($0) }
             items.append(closeItem)
 
-            if allPinnedTabs {
+            if allTabs {
                 let groupItem = NSMenuItem(title: String(localized: "把这 \(n) 个合成一个新组"),
                                            action: #selector(groupBatchFromMenu(_:)), keyEquivalent: "")
                 groupItem.target = self
@@ -1832,7 +1831,6 @@ private final class SidebarOutlineCellView: NSTableCellView {
     private let symbolImageView = NSImageView()
     let titleField = NSTextField()
     private let countField = NSTextField(labelWithString: "")
-    private let pinImageView = NSImageView()
     private var badgeView: NSView?
     private var iconCenterYConstraint: NSLayoutConstraint!
     private weak var coordinator: SidebarOutlineView.Coordinator?
@@ -1874,7 +1872,6 @@ private final class SidebarOutlineCellView: NSTableCellView {
             countField.isHidden = true
         }
 
-        pinImageView.isHidden = !node.pinned
         clearMenus()
     }
 
@@ -1896,7 +1893,6 @@ private final class SidebarOutlineCellView: NSTableCellView {
         symbolImageView.menu = nil
         titleField.menu = nil
         countField.menu = nil
-        pinImageView.menu = nil
         badgeView?.menu = nil
     }
 
@@ -1927,16 +1923,9 @@ private final class SidebarOutlineCellView: NSTableCellView {
         countField.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         countField.setContentHuggingPriority(.required, for: .horizontal)
 
-        pinImageView.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: nil)
-        pinImageView.symbolConfiguration = .init(pointSize: 9, weight: .regular)
-        pinImageView.contentTintColor = .secondaryLabelColor
-        pinImageView.imageScaling = .scaleProportionallyDown
-        pinImageView.setContentHuggingPriority(.required, for: .horizontal)
-
         stack.addArrangedSubview(iconContainer)
         stack.addArrangedSubview(titleField)
         stack.addArrangedSubview(countField)
-        stack.addArrangedSubview(pinImageView)
 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -1948,8 +1937,6 @@ private final class SidebarOutlineCellView: NSTableCellView {
             iconCenterYConstraint,
             symbolImageView.widthAnchor.constraint(equalToConstant: 18),
             symbolImageView.heightAnchor.constraint(equalToConstant: 18),
-            pinImageView.widthAnchor.constraint(equalToConstant: 12),
-            pinImageView.heightAnchor.constraint(equalToConstant: 12),
         ])
     }
 
