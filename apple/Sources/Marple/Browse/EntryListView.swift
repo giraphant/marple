@@ -21,7 +21,7 @@ struct EntryListView: View {
 
     private var title: String {
         if model.isPinnedListContext {
-            return "固定页面 (\(model.visibleEntries.count))"
+            return String(localized: "固定页面 (\(model.visibleEntries.count))")
         }
         switch model.pane {
         case .type(let type):

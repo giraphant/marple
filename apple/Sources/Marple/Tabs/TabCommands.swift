@@ -43,6 +43,14 @@ struct TabCommands: Commands {
 
             Divider()
 
+            Button("固定/取消固定页面") {
+                guard let model = ActiveModel.current, let id = model.activeTabID else { return }
+                model.togglePin(id)
+            }
+            .keyboardShortcut("d", modifiers: .command)
+
+            Divider()
+
             Button("下一个页面") { run { await $0.selectNextTab() } }
                 .keyboardShortcut(.tab, modifiers: .control)
             Button("上一个页面") { run { await $0.selectPrevTab() } }

@@ -6,11 +6,9 @@ import Foundation
 public struct NavLocation: Hashable, Sendable, Codable {
     public var pane: Pane
     public var openPath: String?
-    public var searchText: String?
-    public init(pane: Pane, openPath: String? = nil, searchText: String? = nil) {
+    public init(pane: Pane, openPath: String? = nil) {
         self.pane = pane
         self.openPath = openPath
-        self.searchText = searchText?.isEmpty == false ? searchText : nil
     }
 }
 
@@ -341,10 +339,6 @@ public struct Workspace: Sendable {
         tabs[activeIndex].history.push(loc)
     }
 
-    public mutating func replaceActiveLocation(with loc: NavLocation) {
-        tabs[activeIndex].history.replaceCurrent(with: loc)
-    }
-
     public mutating func backActive() { tabs[activeIndex].history.back() }
     public mutating func forwardActive() { tabs[activeIndex].history.forward() }
 
@@ -395,6 +389,17 @@ public struct Workspace: Sendable {
     public mutating func togglePin(_ id: NavTab.ID) {
         guard let i = tabs.firstIndex(where: { $0.id == id }) else { return }
         tabs[i].pinned.toggle()
+    }
+
+    /// Sidebar policy helper: fixed pages keep the tree; temporary pages are a
+    /// flat run at the end. Moving every unpinned leaf out also dissolves folders
+    /// that no longer have enough fixed children through the normal normalize path.
+    public mutating func flattenTemporaryTabs() {
+        let temporary = tabs.filter { !$0.pinned }.map(\.id)
+        guard !temporary.isEmpty else { return }
+        for id in temporary { _ = Self.removeTab(id, from: &root) }
+        root.append(contentsOf: temporary.map(TabNode.tab))
+        normalize()
     }
 
     public mutating func renameTab(_ id: NavTab.ID, to title: String?) {
@@ -822,8 +827,7 @@ public struct Workspace: Sendable {
         for i in tabs.indices {
             let loc = tabs[i].history.current
             if let p = loc.openPath, !validPaths.contains(p) {
-                tabs[i].history.replaceCurrent(with: NavLocation(
-                    pane: loc.pane, openPath: nil, searchText: loc.searchText))
+                tabs[i].history.replaceCurrent(with: NavLocation(pane: loc.pane, openPath: nil))
             }
         }
     }

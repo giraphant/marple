@@ -123,8 +123,8 @@ enum AppPresentation {
         switch action {
         case .reanalyze: return String(localized: "重新分析")
         case .format: return String(localized: "格式整理")
-        case .translate: return String(localized: "翻译")
-        case .discuss: return String(localized: "讨论")
+        case .translate: return String(localized: "制作译本")
+        case .discuss: return String(localized: "对话讨论")
         }
     }
 

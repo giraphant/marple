@@ -484,12 +484,18 @@ import Testing
         let tabID = try #require(model.tabs.first?.id)
         model.addSpace()
         let destinationID = try #require(model.activeSpaceID)
+        await model.open("beta.md")
 
         model.moveItems([.tab(tabID)], from: sourceID, toRootAt: nil)
+        for _ in 0..<20 {
+            if model.openBody == "alpha.md" { break }
+            await Task.yield()
+        }
 
         #expect(model.activeSpaceID == destinationID)
-        #expect(model.tabs.map(\.location.openPath) == ["alpha.md"])
+        #expect(model.tabs.map(\.location.openPath) == ["beta.md", "alpha.md"])
         #expect(model.activeTabID == tabID)
+        #expect(model.openBody == "alpha.md")
 
         await model.selectSpace(sourceID)
 
@@ -624,7 +630,7 @@ import Testing
         }
 
         func search(_ query: SearchQuery) async throws -> [SearchHit] { [] }
-        func entryText(path: String) async throws -> String { "" }
+        func entryText(path: String) async throws -> String { path }
         func openInEditor(path: String, app: String) async throws {}
         func openPDF(slug: String) async throws {}
         func openTranslation(slug: String) async throws {}
