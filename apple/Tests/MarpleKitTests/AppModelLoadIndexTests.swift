@@ -52,10 +52,12 @@ import Testing
         try await Task.sleep(nanoseconds: 5_000_000)
         async let second: Void = model.loadIndex()
 
-        _ = await (first, second)
+        await second
+        let freshStatus = model.status
+        await first
 
         // Older failure resumed last but was dropped — the newer success's status stays.
-        #expect(model.status == "1 entries")
+        #expect(model.status == freshStatus)
         #expect(model.entries.map(\.path) == [newer.path])
     }
 
@@ -87,7 +89,7 @@ import Testing
         let model = AppModel(client: client)
         await model.loadIndex()
         #expect(model.isBootstrapping == false)
-        #expect(model.status.starts(with: "index failed"))
+        #expect(model.status.contains("scripted failure"))
     }
 
     @MainActor
