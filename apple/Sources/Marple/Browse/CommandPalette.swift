@@ -414,7 +414,7 @@ struct CommandPalette: View {
         if index < openMatches.count {
             Task { await model.switchToOpenTab(path: entry.path) }
         } else {
-            Task { await model.openFromPalette(entry.path, newTab: true) }
+            Task { await model.openFromPalette(entry) }
         }
     }
 

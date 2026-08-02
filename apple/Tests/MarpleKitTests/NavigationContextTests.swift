@@ -44,6 +44,156 @@ import Testing
     }
 
     @MainActor
+    @Test func legacyTemporaryTabReconstructsRevealableListContext() async throws {
+        let book = entry("books/context.md", type: .book, year: "2025")
+        let chapter = entry("books/context/ch01.md", type: .chapter, year: "1997")
+        let sort = [SortClause(field: .title, dir: .desc)]
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        store.save(PersistedState(
+            browsePane: .type(.book),
+            isBrowsing: false,
+            tabs: [
+                PersistedTab(
+                    location: NavLocation(pane: .type(.book), openPath: book.path),
+                    pinned: false,
+                    cachedType: .book),
+                PersistedTab(
+                    location: NavLocation(pane: .type(.book), openPath: chapter.path),
+                    pinned: false,
+                    cachedType: .chapter),
+            ],
+            activeIndex: 0,
+            sortClauses: sort,
+            filterClauses: [FilterClause(field: .year, op: .gte, value: "2020")],
+            filterMatch: .all,
+            browseMode: "list"))
+        let model = AppModel(
+            client: StubVaultClient(
+                entries: [book, chapter],
+                texts: [book.path: "# Context", chapter.path: "# Chapter"]),
+            stateStore: store)
+        await model.loadIndex()
+
+        let chapterTab = try #require(model.tabs.first {
+            $0.location.openPath == chapter.path
+        })
+        await model.selectTab(chapterTab.id)
+        await waitForEntries([chapter.path], in: model)
+
+        #expect(model.pane == .type(.chapter))
+        #expect(model.searchText.isEmpty)
+        #expect(model.activeFilterClauses.isEmpty)
+        #expect(model.activeSortClauses == sort)
+        #expect(model.tabs.first { $0.id == chapterTab.id }?.location.listContext
+            == ListContext(searchText: "", filters: [], filterMatch: .all, sorts: sort))
+    }
+
+    @MainActor
+    @Test func activeLegacyTemporaryTabReconstructsContextAfterIndexLoad() async throws {
+        let chapter = entry("books/context/ch01.md", type: .chapter, year: "1997")
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        store.save(PersistedState(
+            browsePane: .type(.book),
+            isBrowsing: false,
+            tabs: [PersistedTab(
+                location: NavLocation(pane: .type(.book), openPath: chapter.path),
+                pinned: false)],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [FilterClause(field: .year, op: .gte, value: "2020")],
+            filterMatch: .all,
+            browseMode: "list"))
+        let model = AppModel(
+            client: StubVaultClient(
+                entries: [chapter], texts: [chapter.path: "# Chapter"]),
+            stateStore: store)
+
+        await model.loadIndex()
+        await waitForEntries([chapter.path], in: model)
+
+        #expect(model.pane == .type(.chapter))
+        #expect(model.activeFilterClauses.isEmpty)
+        #expect(model.tabs.first?.location.listContext
+            == ListContext(searchText: "", filters: [], filterMatch: .all, sorts: []))
+    }
+
+    @MainActor
+    @Test func legacySavedViewTabKeepsSavedViewIdentity() async throws {
+        let paper = entry("papers/context.md", type: .paper, year: "2025")
+        let view = SavedView(
+            name: "Recent papers",
+            clauses: [FilterClause(field: .year, op: .gte, value: "2020")],
+            match: .all,
+            sorts: [SortClause(field: .year, dir: .desc)])
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        var state = PersistedState(
+            browsePane: .savedView(view.id),
+            isBrowsing: false,
+            tabs: [PersistedTab(
+                location: NavLocation(pane: .savedView(view.id), openPath: paper.path),
+                pinned: false,
+                cachedType: .paper)],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "list")
+        state.savedViews = [view]
+        store.save(state)
+        let model = AppModel(
+            client: StubVaultClient(
+                entries: [paper], texts: [paper.path: "# Context"]),
+            stateStore: store)
+
+        await model.loadIndex()
+        await waitForEntries([paper.path], in: model)
+
+        #expect(model.pane == .savedView(view.id))
+        #expect(model.activeFilterClauses == view.clauses)
+        #expect(model.activeSortClauses == view.sorts)
+        #expect(model.tabs.first?.location.listContext != nil)
+    }
+
+    @MainActor
+    @Test func commandPaletteResultUsesCleanObjectTypeContext() async throws {
+        let book = entry("books/context.md", type: .book, year: "2025")
+        let author = entry("authors/agre.md", type: .author, year: "1997")
+        let sort = [SortClause(field: .title, dir: .desc)]
+        let model = AppModel(client: StubVaultClient(
+            entries: [book, author],
+            texts: [book.path: "# Context", author.path: "# Agre"],
+            hits: [SearchHit(entry: book, score: 1, snippet: nil, source: "test")]))
+        await model.loadIndex()
+
+        model.select(pane: .type(.book))
+        model.setFilters([FilterClause(field: .year, op: .gte, value: "2020")])
+        model.setSort(sort)
+        model.setSearchText("context")
+        await waitForEntries([book.path], in: model)
+        await model.open(book.path)
+
+        await model.openFromPalette(author)
+
+        #expect(model.pane == .type(.author))
+        #expect(model.searchText.isEmpty)
+        #expect(model.activeFilterClauses.isEmpty)
+        #expect(model.activeSortClauses == sort)
+        #expect(model.openPath == author.path)
+        await waitForEntries([author.path], in: model)
+        #expect(model.tabs.first { $0.location.openPath == author.path }?.location.listContext
+            == ListContext(searchText: "", filters: [], filterMatch: .all, sorts: sort))
+    }
+
+    @MainActor
     @Test func savedViewTabUsesTheLatestSharedDefinition() async throws {
         let oldPaper = entry("papers/old.md", type: .paper, year: "1999")
         let newPaper = entry("papers/new.md", type: .paper, year: "2025")

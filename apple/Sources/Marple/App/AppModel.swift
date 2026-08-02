@@ -1042,7 +1042,10 @@ final class AppModel {
         // the watched `vault/` dir and maintained by `quasi-helpers localise`.
         localisation = CnDoubanIndex.load(workspaceRoot: workspaceRoot)
         rebuildIndexDerived()
-        if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+        if !isBrowsing, let active = workspace?.activeTab,
+           !active.pinned, active.location.listContext == nil {
+            applyActiveListContext()
+        } else if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
             recomputeVisible()
         } else {
             runSearch()
@@ -1330,16 +1333,18 @@ final class AppModel {
         }
     }
 
-    private func openNewTab(_ path: String) async {
+    private func openNewTab(_ path: String, location: NavLocation? = nil) async {
         let restoreSourceContext = isPinnedListContext
-        let loc = sourceLocation(for: path)
+        let loc = location ?? sourceLocation(for: path)
         if workspace == nil {
             workspace = Workspace(initial: loc)
         } else {
             mutateWorkspace { $0.newTab(loc) }
         }
         isBrowsing = false
-        if restoreSourceContext { applyActiveListContext(from: true) }
+        if restoreSourceContext || location != nil {
+            applyActiveListContext(from: restoreSourceContext)
+        }
         await loadDoc(path)
     }
 
@@ -1417,10 +1422,30 @@ final class AppModel {
             }
             browseSearchText = context.searchText
             resetSearch(to: context.searchText)
-        } else if previousPinnedContext == true {
-            resetSearch(to: browseSearchText)
         } else {
-            recomputeVisible()
+            if case .savedView(let id) = location.pane, savedView(id) != nil {
+                browseSearchText = ""
+                resetSearch(to: "")
+            } else {
+                let entryType = location.openPath.flatMap { path in
+                    entries.first { $0.path == path }?.type
+                } ?? active.cachedType
+                guard let entryType else {
+                    if previousPinnedContext == true { resetSearch(to: browseSearchText) }
+                    else { recomputeVisible() }
+                    return
+                }
+                browsePane = .type(entryType)
+                filterClauses = []
+                filterMatch = .all
+                browseSearchText = ""
+                resetSearch(to: "")
+            }
+
+            var migrated = location
+            migrated.pane = browsePane
+            migrated.listContext = currentBrowseListContext
+            mutateWorkspace { $0.replaceActiveLocation(with: migrated) }
         }
     }
 
@@ -1549,10 +1574,15 @@ final class AppModel {
         }
     }
 
-    /// Pick a result: open in-place (browser-style) or in a new tab when ⌘ was held.
-    /// (The panel closes itself via its `onClose`.)
-    func openFromPalette(_ path: String, newTab: Bool) async {
-        if newTab { await openInNewTab(path) } else { await open(path) }
+    /// A command-palette result opens in a new temporary page and immediately
+    /// aligns the middle column with the entry's object-type list.
+    func openFromPalette(_ entry: Entry) async {
+        let location = NavLocation(
+            pane: .type(entry.type),
+            openPath: entry.path,
+            listContext: ListContext(
+                searchText: "", filters: [], filterMatch: .all, sorts: sortClauses))
+        await openNewTab(entry.path, location: location)
     }
 
     /// "查看全部 N 条 →": jump to that type's browse list, seed its search box.

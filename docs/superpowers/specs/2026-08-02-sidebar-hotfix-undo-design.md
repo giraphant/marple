@@ -46,6 +46,12 @@ entry. Changing search, filters, or sorting while a temporary page is active
 updates that page's current navigation location, so returning to it restores
 the latest state rather than only the state at creation time.
 
+A command-palette result has no originating object list. Opening one therefore
+switches the middle column immediately to a clean list for the entry's real
+type, selects and reveals the entry, and saves that generated context on the
+new temporary page. Opening from an object list continues to preserve that
+list's search, filters, matching mode, and sorting instead.
+
 Pinned pages remain different: they share the aggregate pinned-pages list.
 Changes made in that shared list do not overwrite a page's saved object-list
 context. Unpinning a page restores its saved context.
@@ -58,8 +64,10 @@ mode. It restores the semantic list context and reveals the open entry.
 `NavLocation` stores one optional `ListContext` value containing search, filter,
 matching, and sort state. This keeps the navigation model cohesive instead of
 adding several parallel optional properties. State written before this change
-continues to decode with a missing context and falls back to the current global
-browse settings.
+continues to decode with a missing context. Its first activation reconstructs
+and saves a clean object-type context for the open entry so the list can reveal
+it instead of inheriting unrelated global browse settings. A valid saved-view
+location keeps its saved-view identity and current shared definition.
 
 ### 4. A temporary multi-selection can create a group
 
