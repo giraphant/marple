@@ -55,6 +55,32 @@ struct SidebarPageSectionTests {
             }
         }
     }
+
+    @MainActor
+    @Test func fixedDividerAndTemporaryRowsShareHorizontalBounds() async throws {
+        let harness = try await makeHarness(hasFixed: true, hasTemporary: true)
+        let outline = harness.outline
+        let fixedRow = try #require(row(containing: "Fixed", in: outline))
+        let temporaryRow = try #require(row(containing: "Temporary", in: outline))
+        let dividerRow = temporaryRow - 1
+        let fixedCell = try #require(outline.view(
+            atColumn: 0, row: fixedRow, makeIfNecessary: true))
+        let dividerCell = try #require(outline.view(
+            atColumn: 0, row: dividerRow, makeIfNecessary: true))
+        let temporaryCell = try #require(outline.view(
+            atColumn: 0, row: temporaryRow, makeIfNecessary: true))
+        let divider = try #require(descendants(of: NSBox.self, in: dividerCell)
+            .first { $0.boxType == .separator })
+        outline.layoutSubtreeIfNeeded()
+        dividerCell.layoutSubtreeIfNeeded()
+
+        #expect(fixedCell.frame.minX == dividerCell.frame.minX)
+        #expect(fixedCell.frame.maxX == dividerCell.frame.maxX)
+        #expect(temporaryCell.frame.minX == fixedCell.frame.minX)
+        #expect(temporaryCell.frame.maxX == fixedCell.frame.maxX)
+        #expect(divider.frame.minX == dividerCell.bounds.minX)
+        #expect(divider.frame.maxX == dividerCell.bounds.maxX)
+    }
 }
 
 extension SidebarPageSectionTests {
@@ -178,6 +204,16 @@ extension SidebarPageSectionTests {
             result.append(contentsOf: descendants(of: type, in: child))
         }
         return result
+    }
+
+    @MainActor
+    private func row(containing title: String, in outline: NSOutlineView) -> Int? {
+        (0..<outline.numberOfRows).first { row in
+            guard let view = outline.view(
+                atColumn: 0, row: row, makeIfNecessary: true) else { return false }
+            return descendants(of: NSTextField.self, in: view)
+                .contains { $0.stringValue == title }
+        }
     }
 
     private func entry(path: String, title: String) -> Entry {

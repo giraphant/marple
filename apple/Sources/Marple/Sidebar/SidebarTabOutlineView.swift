@@ -659,12 +659,21 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         // MARK: - NSOutlineView data source & delegate
 
+        private func visibleChildren(of item: SidebarOutlineNode?) -> [SidebarOutlineNode] {
+            guard let item else {
+                return rootItems.flatMap { node in
+                    node.isTabsSection ? [node] + node.children : [node]
+                }
+            }
+            return item.isTabsSection ? [] : item.children
+        }
+
         func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-            (item as? SidebarOutlineNode)?.children.count ?? rootItems.count
+            visibleChildren(of: item as? SidebarOutlineNode).count
         }
 
         func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-            ((item as? SidebarOutlineNode)?.children ?? rootItems)[index]
+            visibleChildren(of: item as? SidebarOutlineNode)[index]
         }
 
         func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
@@ -1863,8 +1872,8 @@ private final class SidebarPageDividerCellView: NSTableCellView {
 
         addSubview(divider)
         NSLayoutConstraint.activate([
-            divider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            divider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            divider.leadingAnchor.constraint(equalTo: leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: trailingAnchor),
             divider.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
