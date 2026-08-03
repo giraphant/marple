@@ -399,13 +399,14 @@ import Testing
         let secondID = try #require(model.activeTabID)
         model.togglePin(secondID)
         model.groupTab(secondID, onto: firstID)
-        #expect(model.tabGroups.count == 1)
+        let folderID = try #require(model.tabGroups.first?.id)
 
         model.togglePin(secondID)
 
-        #expect(model.tabGroups.isEmpty)
+        let folder = try #require(model.tabGroups.first { $0.id == folderID })
+        #expect(folder.tabIDs == [firstID])
         #expect(model.tabGroup(containing: secondID) == nil)
-        #expect(model.pinnedTabRootNodes == [.tab(firstID)])
+        #expect(model.pinnedTabRootNodes == [.group(folder)])
         #expect(model.temporaryTabs.map(\.id) == [secondID])
         #expect(model.tabs.filter(\.pinned).map(\.id) == [firstID])
         #expect(model.tabs.filter { !$0.pinned }.map(\.id) == [secondID])
