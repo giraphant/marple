@@ -16,6 +16,7 @@
 - Show the divider only when fixed and temporary pages are both present; otherwise the `.tabs` section returns no cell and adds no visible geometry. AppKit rejects literal zero table-row heights, so retain the structural row at `CGFloat.leastNormalMagnitude`.
 - Never report `.tabs` as an AppKit group item and never show its outline disclosure cell. Its row rectangle must directly follow the preceding visible row; when shown, its 13-point divider cell sits between the two page lists with 6.5 points on each side of the line.
 - Present the `.tabs` divider and temporary pages as root-level visual peers. Their cell bounds must match the fixed-page cell bounds, and the divider line must not add another horizontal inset.
+- Translate root-level between-row drop indices in the flattened temporary area into `.tabs`-local indices before both validation and acceptance; keep model-level drop/order APIs unchanged.
 - Remove the sidebar New Tab button, its action, and its `新建页面` / `New Tab` localization. Do not change the existing Command-T command.
 - Remove `关闭其他页面` from both the AppKit sidebar and `TabStripView`, then remove the unreferenced `AppModel.closeOtherTabs(_:)`, its dedicated undo test, and its localization. Keep ordinary close, Command-W withdrawal, and explicit multi-selection close unchanged.
 - Do not change `Workspace`, `NavTab`, `PersistedState`, undo/redo for remaining actions, pinning, grouping, ordering, page activation, or fixed-anchor behavior.
@@ -653,8 +654,8 @@ func outlineView(_ outlineView: NSOutlineView,
 ```
 
 Do not move temporary nodes out of `tabsSection.children`, create proxy nodes,
-change persisted state, or change drop handlers. The same node instances are
-merely exposed as root-level visual rows.
+or change persisted state. The same node instances are merely exposed as
+root-level visual rows.
 
 - [ ] **Step 4: Remove the divider's extra horizontal inset**
 
@@ -712,3 +713,46 @@ git commit -m "fix: align sidebar page rows"
 ```
 
 Expected: only the two Task 2 code/test files are included in this commit.
+
+#### Final-review fix: preserve temporary drop indices after visual flattening
+
+Add a failing real-delegate regression that makes at least three temporary
+rows, proposes root-level drops before the first, between middle rows, and
+after the last, and verifies that single and batch payloads retain those local
+slots. Configure the test dragging info with the actual insertion-point y
+coordinate; do not test a standalone arithmetic helper.
+
+After verifying RED, add one outline-boundary normalizer with this contract:
+
+```swift
+private func temporaryRootDrop(
+    _ outlineView: NSOutlineView,
+    info: NSDraggingInfo,
+    item: Any?,
+    childIndex: Int
+) -> (section: SidebarOutlineNode, childIndex: Int)?
+```
+
+It returns `nil` unless `item == nil` and the pointer is at or below the
+visible `.tabs` row. For a matching root proposal, locate the `.tabs` row in
+`visibleChildren(of: nil)` and translate the proposed index with:
+
+```swift
+let localIndex = min(
+    max(childIndex - sectionIndex - 1, 0),
+    temporaryItems.count)
+```
+
+Use the normalized section/index before dispatching multi-payload validation
+or acceptance. Use the same normalized pair in the existing single-payload
+root fallback. Continue calling the existing `validateMultiDrop`,
+`acceptMultiDrop`, and `accept` functions; do not duplicate their ordering
+logic or add model APIs.
+
+Run the focused sidebar suite to GREEN, then `NavigationContextTests` and the
+full suite with the existing cache/framework command. Commit only
+`SidebarTabOutlineView.swift` and `SidebarPageSectionTests.swift` as:
+
+```bash
+git commit -m "fix: preserve temporary drop positions"
+```

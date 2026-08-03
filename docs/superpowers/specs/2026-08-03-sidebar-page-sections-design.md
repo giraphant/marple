@@ -57,7 +57,11 @@ Only their presentation changes:
   visual rows because its children are already present in the flattened list;
 - the divider line has no additional horizontal inset inside its cell. The
   fixed-page cell, divider cell and temporary-page cell therefore share the
-  same leading and trailing bounds.
+  same leading and trailing bounds;
+- between-row drops in the flattened temporary area arrive from AppKit with a
+  root-list child index. The outline delegate translates that index once into
+  the existing `.tabs`-local insertion index before validation or acceptance;
+  model-level ordering and drop operations remain unchanged.
 
 Using the existing `.tabs` section header avoids a synthetic outline node and
 keeps selection, remaining context menus, drag payloads, and persistence
@@ -111,7 +115,9 @@ Automated coverage should verify:
 7. the empty `.pinned` section remains expandable and accepts single and batch
    drops;
 8. existing temporary-page activation, fixed-page grouping, ordinary close,
-   and multi-selection close tests remain green.
+   and multi-selection close tests remain green;
+9. single and batch drops before, between, and after visually flattened
+   temporary rows preserve their requested local insertion position.
 
 Manual verification should compare all four states in both light and dark
 appearance and confirm that the divider appears only between non-empty fixed
