@@ -38,9 +38,11 @@ Only their presentation changes:
 - the `.pinned` section's visible title becomes `页面`;
 - the `.tabs` section no longer renders a second text title;
 - the `.tabs` section header renders only the divider when both sections have
-  children, and otherwise has zero visible height. AppKit requires table-row
-  heights to be greater than zero, so the implementation uses a visually
-  collapsed 0.01-point row rather than returning an invalid literal zero.
+  children;
+- otherwise the `.tabs` section returns no cell and occupies no visible
+  geometry. AppKit rejects a literal zero row height, so the structural row
+  uses `CGFloat.leastNormalMagnitude`; an AppKit probe confirms the following
+  visible row has exactly the same y-coordinate as if no row intervened.
 
 Using the existing `.tabs` section header avoids a synthetic outline node and
 keeps selection, context menus, drag payloads, undo, and persistence unchanged.
@@ -68,9 +70,11 @@ Automated coverage should verify:
 1. the four fixed/temporary combinations produce the specified single header,
    divider, and page-row order;
 2. no New Tab button or second section title is rendered;
-3. the empty `.pinned` section remains expandable and accepts single and batch
+3. a hidden `.tabs` structural row has no cell and adds zero y-coordinate
+   delta before its first child;
+4. the empty `.pinned` section remains expandable and accepts single and batch
    drops;
-4. existing temporary-page activation and fixed-page grouping tests remain
+5. existing temporary-page activation and fixed-page grouping tests remain
    green.
 
 Manual verification should compare all four states in both light and dark
