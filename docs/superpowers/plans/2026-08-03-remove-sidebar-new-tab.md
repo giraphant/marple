@@ -4,7 +4,7 @@
 
 **Goal:** Remove the sidebar New Tab control while retaining one visible `页面` heading and a divider only when fixed and temporary page lists are both non-empty.
 
-**Architecture:** Keep the existing `.pinned` and `.tabs` outline sections and all model behavior unchanged. Replace the current `.tabs` New Tab cell with a separator-only cell. Its hidden state is a visually collapsed 0.01-point row because AppKit rejects literal zero table-row heights; Command-T remains the sole global-search entry point.
+**Architecture:** Keep the existing `.pinned` and `.tabs` outline sections and all model behavior unchanged. Render a divider cell for `.tabs` only when both page lists contain items; otherwise return no cell and use `CGFloat.leastNormalMagnitude`, which AppKit accepts without changing the following visible row's coordinate. Command-T remains the sole global-search entry point.
 
 **Tech Stack:** Swift 6, AppKit `NSOutlineView` and `NSBox`, Swift Testing, Swift Package Manager.
 
@@ -13,7 +13,7 @@
 - Work directly on `main`; do not create a branch or worktree.
 - Keep `.pinned` and `.tabs` as separate root sections with their existing stable keys, expansion state, children, and drag/drop routing.
 - Keep the `.pinned` section's sole visible title as `页面`; never render the `.tabs` text title.
-- Show the divider only when fixed and temporary pages are both present; otherwise the `.tabs` section header is visually collapsed to 0.01 point, the smallest practical positive height accepted by AppKit.
+- Show the divider only when fixed and temporary pages are both present; otherwise the `.tabs` section returns no cell and adds no visible geometry. AppKit rejects literal zero table-row heights, so retain the structural row at `CGFloat.leastNormalMagnitude`.
 - Remove the sidebar New Tab button, its action, and its `新建页面` / `New Tab` localization. Do not change the existing Command-T command.
 - Do not change `Workspace`, `NavTab`, `PersistedState`, undo/redo, pinning, grouping, ordering, page activation, or fixed-anchor behavior.
 - Do not add `Clear`, Peek, hover-close, a synthetic outline node, new state, or defensive fallbacks.
@@ -41,7 +41,7 @@
 **Interfaces:**
 - Keeps: `SidebarOutlineNode.Kind.section(.pinned/.tabs)` and both sections' existing children, selection, expansion, payload, and drop semantics.
 - Produces: private `Coordinator.showsPageDivider: Bool`.
-- Produces: private `SidebarPageDividerCellView` with `height(showsDivider:)` and `configure(showsDivider:)`.
+- Produces: private `SidebarPageDividerCellView` with constant `height: CGFloat`.
 - Removes: private `SidebarNewTabCellView` button/coordinator action and localization key `新建页面`.
 
 - [ ] **Step 1: Change the layout test first**
@@ -78,32 +78,42 @@ Change the assertions so the same integration test rejects both an orphan divide
 ```swift
 #expect(rendered.rows == item.expectedRows, Comment(rawValue: item.name))
 #expect(rendered.dividerVisible == item.expectedDivider, Comment(rawValue: item.name))
+#expect(rendered.dividerCellExists == item.expectedDivider, Comment(rawValue: item.name))
 #expect(rendered.newTabButtonCount == 0, Comment(rawValue: item.name))
 if item.expectedDivider {
     #expect(rendered.dividerRowHeight == 13, Comment(rawValue: item.name))
 } else {
-    #expect(rendered.dividerRowHeight < 0.5, Comment(rawValue: item.name))
+    #expect(rendered.dividerRowHeight == CGFloat.leastNormalMagnitude,
+            Comment(rawValue: item.name))
+}
+if item.hasTemporary {
+    let expectedOffset: CGFloat = item.expectedDivider ? 13 : 0
+    #expect(rendered.temporaryRowOffset == expectedOffset,
+            Comment(rawValue: item.name))
+} else {
+    #expect(rendered.temporaryRowOffset == nil, Comment(rawValue: item.name))
 }
 ```
 
-Change the rendered snapshot to keep only values relevant to the final UI:
+Remove `try` from the `renderedPageArea` call, then change the rendered snapshot to keep only values relevant to the final UI:
 
 ```swift
 @MainActor
 private struct RenderedPageArea {
     let rows: [String]
     let dividerVisible: Bool
+    let dividerCellExists: Bool
     let dividerRowHeight: CGFloat
+    let temporaryRowOffset: CGFloat?
     let newTabButtonCount: Int
 }
 
 @MainActor
-private func renderedPageArea(in outline: NSOutlineView) throws -> RenderedPageArea {
+private func renderedPageArea(in outline: NSOutlineView) -> RenderedPageArea {
     let pageTitle = String(localized: "页面")
     let newTabTitle = String(localized: "新建页面")
     var rows: [String] = []
-    var dividerVisible = false
-    var dividerRowHeight: CGFloat?
+    var temporaryRow: Int?
     var newTabButtonCount = 0
 
     for row in 0..<outline.numberOfRows {
@@ -112,21 +122,30 @@ private func renderedPageArea(in outline: NSOutlineView) throws -> RenderedPageA
         let text = descendants(of: NSTextField.self, in: view).map(\.stringValue)
         if text.contains(pageTitle) { rows.append(pageTitle) }
         if text.contains("Fixed") { rows.append("Fixed") }
-        if text.contains("Temporary") { rows.append("Temporary") }
-        let dividers = descendants(of: NSBox.self, in: view)
-            .filter { $0.boxType == .separator }
-        if !dividers.isEmpty {
-            dividerVisible = dividers.contains { !$0.isHidden }
-            dividerRowHeight = outline.rect(ofRow: row).height
+        if text.contains("Temporary") {
+            rows.append("Temporary")
+            temporaryRow = row
         }
         newTabButtonCount += descendants(of: NSButton.self, in: view)
             .filter { $0.title == newTabTitle }.count
     }
 
+    let dividerRow = temporaryRow.map { $0 - 1 } ?? outline.numberOfRows - 1
+    let dividerView = outline.view(
+        atColumn: 0, row: dividerRow, makeIfNecessary: true)
+    let dividers = dividerView.map { descendants(of: NSBox.self, in: $0) } ?? []
+    let dividerRect = outline.rect(ofRow: dividerRow)
+
     return RenderedPageArea(
         rows: rows,
-        dividerVisible: dividerVisible,
-        dividerRowHeight: try #require(dividerRowHeight),
+        dividerVisible: dividers.contains {
+            $0.boxType == .separator && !$0.isHidden
+        },
+        dividerCellExists: dividerView != nil,
+        dividerRowHeight: dividerRect.height,
+        temporaryRowOffset: temporaryRow.map {
+            outline.rect(ofRow: $0).minY - dividerRect.minY
+        },
         newTabButtonCount: newTabButtonCount)
 }
 ```
@@ -145,7 +164,7 @@ xcrun swift test --filter SidebarPageSectionTests --quiet \
   -Xswiftc -F -Xswiftc /Applications/Xcode.app/Contents/Developer/Library/Developer/Frameworks
 ```
 
-Expected RED: `pageAreaRendersTheFourApprovedStates` reports the extra `新建页面` row/button in every case, an unexpected divider for `temporary-only`, and the old 30/46-point section-row height instead of the collapsed/13-point geometry. The existing New Tab action test still passes, proving the failure comes from the newly specified removal rather than broken test setup.
+Expected RED: `pageAreaRendersTheFourApprovedStates` reports the extra `新建页面` row/button, a cell in every state, an unexpected divider for `temporary-only`, and the old 30/46-point section geometry instead of no geometry/13 points. The existing New Tab action test still passes, proving the failure comes from the newly specified removal rather than broken test setup.
 
 - [ ] **Step 3: Add one shared divider condition**
 
@@ -168,7 +187,9 @@ func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> C
     guard let node = item as? SidebarOutlineNode else { return 30 }
     switch node.kind {
     case .section(.tabs):
-        return SidebarPageDividerCellView.height(showsDivider: showsPageDivider)
+        return showsPageDivider
+            ? SidebarPageDividerCellView.height
+            : CGFloat.leastNormalMagnitude
     case .section:
         return 22
     case .pane:
@@ -182,10 +203,10 @@ func outlineView(_ outlineView: NSOutlineView,
                  viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
     guard let node = item as? SidebarOutlineNode else { return nil }
     if node.isTabsSection {
+        guard showsPageDivider else { return nil }
         let view = outlineView.makeView(
             withIdentifier: SidebarPageDividerCellView.identifier,
             owner: self) as? SidebarPageDividerCellView ?? SidebarPageDividerCellView()
-        view.configure(showsDivider: showsPageDivider)
         return view
     }
     let view = outlineView.makeView(
@@ -202,13 +223,9 @@ Replace `SidebarNewTabCellView` with the separator-only cell:
 @MainActor
 private final class SidebarPageDividerCellView: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("sidebar-page-divider-cell")
+    static let height: CGFloat = 13
 
     private let divider = NSBox()
-
-    static func height(showsDivider: Bool) -> CGFloat {
-        // NSTableView rejects zero row heights; 0.01 pt is visually collapsed.
-        showsDivider ? 13 : 0.01
-    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -220,10 +237,6 @@ private final class SidebarPageDividerCellView: NSTableCellView {
         super.init(coder: coder)
         identifier = Self.identifier
         setup()
-    }
-
-    func configure(showsDivider: Bool) {
-        divider.isHidden = !showsDivider
     }
 
     private func setup() {
@@ -239,7 +252,7 @@ private final class SidebarPageDividerCellView: NSTableCellView {
 }
 ```
 
-Do not add a target/action or retain the coordinator in this cell.
+Do not add hidden-state configuration, a target/action, or a coordinator reference to this cell. The coordinator returns no cell when the divider is absent.
 
 - [ ] **Step 5: Remove obsolete button artifacts**
 
