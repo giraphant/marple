@@ -473,7 +473,9 @@ struct SidebarOutlineView: NSViewRepresentable {
                 return SidebarOutlineNode(kind: .group(group.id),
                                           title: group.name,
                                           count: nil,
-                                          iconName: group.isCollapsed ? "folder" : "folder.fill",
+                                          iconName: group.isCollapsed
+                                              ? "folder"
+                                              : SidebarFolderIcon.openName,
                                           pinned: true,
                                           sourceSpaceID: sourceSpaceID,
                                           children: group.children.compactMap { outlineNode($0, entryByPath: entryByPath, sourceSpaceID: sourceSpaceID) })
@@ -1929,6 +1931,23 @@ private final class SidebarPageDividerCellView: NSTableCellView {
     }
 }
 
+private enum SidebarFolderIcon {
+    static let openName = "marple.folder.open"
+
+    static let openImage: NSImage = {
+        let svg = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+             fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 10V5a2 2 0 0 1 2-2h4a2.6 2.6 0 0 1 2.1 1.2l.8 1A2 2 0 0 0 12.5 6H18a2 2 0 0 1 2 2v1"/>
+          <path d="M4 10h17a1.7 1.7 0 0 1 1 2.5l-1.7 6a2 2 0 0 1-1.9 1.5H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2Z"/>
+        </svg>
+        """
+        let image = NSImage(data: Data(svg.utf8))!
+        image.isTemplate = true
+        return image
+    }()
+}
+
 @MainActor
 private final class SidebarOutlineCellView: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("sidebar-outline-cell")
@@ -2068,8 +2087,14 @@ private final class SidebarOutlineCellView: NSTableCellView {
         } else if let iconName = node.iconName {
             let isGroup: Bool
             if case .group = node.kind { isGroup = true } else { isGroup = false }
-            symbolImageView.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
-            symbolImageView.symbolConfiguration = .init(pointSize: 16, weight: .regular)
+            if iconName == SidebarFolderIcon.openName {
+                symbolImageView.image = SidebarFolderIcon.openImage
+                symbolImageView.symbolConfiguration = nil
+            } else {
+                symbolImageView.image = NSImage(
+                    systemSymbolName: iconName, accessibilityDescription: nil)
+                symbolImageView.symbolConfiguration = .init(pointSize: 16, weight: .regular)
+            }
             symbolImageView.contentTintColor = .labelColor
             iconCenterYConstraint.constant = isGroup ? 1.5 : 0
         } else {
