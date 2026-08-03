@@ -166,6 +166,7 @@ final class AppModel {
     // single-workspace call sites by pointing them at the active Space.
     private(set) var spaces: [WorkspaceSpace] = [] { didSet { persist() } }
     private(set) var activeSpaceID: WorkspaceSpace.ID? { didSet { persist() } }
+    private(set) var pendingFolderRenameID: TabGroup.ID?
 
     private var activeSpaceIndex: Int? {
         guard let activeSpaceID else { return spaces.indices.first }
@@ -252,11 +253,12 @@ final class AppModel {
     }
 
     private func restoreSidebarState(_ state: WorkspaceSidebarState, actionName: String) {
-        guard var workspace else { return }
+        var workspace = self.workspace ?? Workspace()
         let redo = workspace.sidebarState
         let previousPinnedContext = isPinnedListContext
         workspace.restoreSidebarState(state)
-        self.workspace = workspace
+        self.workspace = workspace.isEmpty ? nil : workspace
+        if self.workspace?.tabs.isEmpty != false { isBrowsing = true }
         registerSidebarUndo(redo, actionName: actionName)
         if previousPinnedContext != isPinnedListContext {
             applyActiveListContext(from: previousPinnedContext)
@@ -1864,6 +1866,28 @@ final class AppModel {
     func renameTabGroup(_ id: TabGroup.ID, to name: String) {
         mutateSidebarWorkspace(actionName: String(localized: "重命名")) {
             $0.renameGroup(id, to: name)
+        }
+    }
+
+    func createFolder() {
+        var workspace = self.workspace ?? Workspace()
+        let before = workspace.sidebarState
+        let id = workspace.createFolder()
+        workspace.flattenTemporaryTabs()
+        self.workspace = workspace
+        if workspace.tabs.isEmpty { isBrowsing = true }
+        pendingFolderRenameID = id
+        registerSidebarUndo(before, actionName: String(localized: "新建文件夹"))
+    }
+
+    func finishFolderRenameRequest(_ id: TabGroup.ID) {
+        if pendingFolderRenameID == id { pendingFolderRenameID = nil }
+    }
+
+    func dissolveFolder(_ id: TabGroup.ID) {
+        if pendingFolderRenameID == id { pendingFolderRenameID = nil }
+        mutateSidebarWorkspace(actionName: String(localized: "解散文件夹")) {
+            $0.dissolveFolder(id)
         }
     }
 

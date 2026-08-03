@@ -285,6 +285,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 _ = model.tabRootNodes
                 _ = model.spaces
                 _ = model.activeSpaceID
+                _ = model.pendingFolderRenameID
             } onChange: { [weak self] in
                 Task { @MainActor in
                     guard let self else { return }
@@ -324,6 +325,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             restoreViewportAnchor(viewportAnchor, in: outline)
             restoreMultiSelection(payloads: preservedPayloads, in: outline)
             selectCurrentItem(in: outline)
+            beginPendingFolderRename(in: outline)
         }
 
         private func captureViewportAnchor(in outline: NSOutlineView) -> ViewportAnchor? {
@@ -785,16 +787,31 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         // MARK: - Rename
 
-        fileprivate func beginRename(_ node: SidebarOutlineNode, in outlineView: NSOutlineView? = nil) {
-            guard canRename(node) else { return }
+        @discardableResult
+        fileprivate func beginRename(_ node: SidebarOutlineNode, in outlineView: NSOutlineView? = nil) -> Bool {
+            guard canRename(node) else { return false }
             let target = liveNode(matching: node) ?? node
             let outline = outlineView ?? self.outlineView
             guard let outline, let row = rowForItem(target, in: outline),
-                  let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarOutlineCellView else { return }
+                  let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarOutlineCellView else { return false }
             editingNode = target
             editingField = cell.titleField
             cancelingRename = false
             cell.beginEditing(delegate: self)
+            return true
+        }
+
+        private func beginPendingFolderRename(in outline: NSOutlineView) {
+            guard let id = model.pendingFolderRenameID,
+                  let node = findGroupNode(id, in: rootItems) else { return }
+            if let pinnedSection { outline.expandItem(pinnedSection) }
+            guard let row = rowForItem(node, in: outline) else { return }
+            _ = outline.view(atColumn: 0, row: row, makeIfNecessary: true)
+            isUpdatingSelection = true
+            outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            isUpdatingSelection = false
+            guard beginRename(node, in: outline) else { return }
+            model.finishFolderRenameRequest(id)
         }
 
         private func liveNode(matching node: SidebarOutlineNode) -> SidebarOutlineNode? {
@@ -998,7 +1015,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             switch node.kind {
             case .group(let id):
                 var items = [menuItem(String(localized: "重命名"), action: #selector(renameFromMenu(_:)), node: node)]
-                if let group = model.tabGroups.first(where: { $0.id == id }) {
+                if let group = model.tabGroups.first(where: { $0.id == id }), !group.children.isEmpty {
                     items.append(menuItem(group.isCollapsed
                         ? String(localized: "展开页面组")
                         : String(localized: "折叠页面组"),
@@ -1006,6 +1023,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 }
                 items.append(.separator())
                 items.append(menuItem(String(localized: "复制分享清单"), action: #selector(copyShareManifestFromMenu(_:)), node: node))
+                items.append(.separator())
+                items.append(menuItem(String(localized: "解散文件夹"), action: #selector(dissolveFolderFromMenu(_:)), node: node))
                 return items
             case .tab(let id):
                 guard let tab = model.tabs.first(where: { $0.id == id }) else { return [] }
@@ -1081,6 +1100,12 @@ struct SidebarOutlineView: NSViewRepresentable {
             guard let node = sender.representedObject as? SidebarOutlineNode,
                   case .group(let id) = node.kind else { return }
             model.toggleTabGroup(id)
+        }
+
+        @objc private func dissolveFolderFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode,
+                  case .group(let id) = node.kind else { return }
+            model.dissolveFolder(id)
         }
 
         @objc private func togglePinFromMenu(_ sender: NSMenuItem) {

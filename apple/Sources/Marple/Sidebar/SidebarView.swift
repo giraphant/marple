@@ -47,12 +47,30 @@ private struct SpaceSwitcherView: View {
 
             Spacer(minLength: 4)
 
-            Button {
-                model.addSpace()
+            Menu {
+                Button("新建空间", systemImage: "square.stack.3d.up") {
+                    model.addSpace()
+                }
+                Button("新建文件夹", systemImage: "folder.badge.plus") {
+                    model.createFolder()
+                }
+
+                Divider()
+
+                Button("新建笔记", systemImage: "note.text.badge.plus") {
+                    Task { await model.newIdeaNote() }
+                }
+                .keyboardShortcut("n", modifiers: .command)
+
+                Button("新建页面…", systemImage: "magnifyingglass") {
+                    CommandPalettePresenter.toggle(model: model)
+                }
+                .keyboardShortcut("t", modifiers: .command)
             } label: {
                 Image(systemName: "plus")
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .foregroundStyle(.secondary)
             .frame(width: 28, height: 28)
             .contentShape(Rectangle())

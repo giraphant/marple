@@ -286,6 +286,55 @@ private final class SidebarDraggingInfo: NSObject, @MainActor NSDraggingInfo {
 
 extension SidebarPageSectionTests {
     @MainActor
+    @Test func creatingFolderInEmptySpaceRendersAndStartsInlineRename() async throws {
+        let harness = try await makeHarness(hasFixed: false, hasTemporary: false)
+
+        harness.model.createFolder()
+        let folderID = try #require(harness.model.pendingFolderRenameID)
+        harness.coordinator.reload(harness.outline)
+
+        let folder = try #require(harness.model.tabGroups.first { $0.id == folderID })
+        let folderRow = try #require(row(containing: folder.name, in: harness.outline))
+        let cell = try #require(harness.outline.view(
+            atColumn: 0, row: folderRow, makeIfNecessary: true))
+        let titleField = try #require(descendants(of: NSTextField.self, in: cell)
+            .first { $0.stringValue == folder.name })
+        #expect(harness.model.pendingFolderRenameID == nil)
+        #expect(harness.outline.selectedRow == folderRow)
+        #expect(titleField.isEditable)
+    }
+
+    @MainActor
+    @Test func groupMenuDissolvesFolderAndPromotesPagesInOrder() async throws {
+        let pages = [
+            entry(path: "books/a.md", title: "A"),
+            entry(path: "books/b.md", title: "B"),
+        ]
+        let harness = try await makeHarness(
+            hasFixed: false, hasTemporary: true, temporaryPages: pages)
+        let ids = harness.model.tabs.map(\.id)
+        harness.model.setPinned(ids, to: true)
+        harness.model.groupTabs(ids)
+        harness.coordinator.reload(harness.outline)
+
+        let group = try #require(harness.model.tabGroups.first)
+        let groupRow = try #require(row(containing: group.name, in: harness.outline))
+        harness.outline.selectRowIndexes(
+            IndexSet(integer: groupRow), byExtendingSelection: false)
+        let menu = NSMenu()
+        harness.coordinator.menuNeedsUpdate(menu)
+        let dissolve = try #require(menu.items.first {
+            $0.title == String(localized: "解散文件夹")
+        })
+        let action = try #require(dissolve.action)
+
+        #expect(NSApplication.shared.sendAction(action, to: dissolve.target, from: dissolve))
+        #expect(harness.model.tabGroups.isEmpty)
+        #expect(harness.model.tabs.map(\.id) == ids)
+        #expect(harness.model.tabRootNodes.compactMap(\.tabID) == ids)
+    }
+
+    @MainActor
     @Test func mixedBatchMenuCopiesACombinedShareManifest() async throws {
         let pages = [
             entry(path: "books/a.md", title: "A"),
