@@ -1,9 +1,10 @@
-# Sidebar Page Sections Visual Design
+# Sidebar Page Sections and Menu Simplification Design
 
 ## Goal
 
 Present fixed and temporary pages as one visual `页面` area while retaining the
-two existing outline sections and all of their current behavior.
+two existing outline sections, their page children, and their drag/drop
+routing. Remove the niche `关闭其他页面` action from every tab UI.
 
 The layout follows Arc's page stack only where it helps this document sidebar:
 fixed pages appear first and temporary pages follow. A lightweight divider
@@ -42,21 +43,40 @@ Only their presentation changes:
 - otherwise the `.tabs` section returns no cell and occupies no visible
   geometry. AppKit rejects a literal zero row height, so the structural row
   uses `CGFloat.leastNormalMagnitude`; an AppKit probe confirms the following
-  visible row has exactly the same y-coordinate as if no row intervened.
+  visible row has exactly the same y-coordinate as if no row intervened;
+- `.tabs` remains a semantic section but is not reported as an AppKit group
+  item. Source-list group rows receive an automatic 13-point leading gap; not
+  using that appearance lets the 13-point divider row sit directly between
+  the adjacent 30-point page rows, with 6.5 points on each side of the line;
+- the `.tabs` disclosure cell stays hidden because expansion is restored
+  programmatically and this structural row has no interactive header.
 
 Using the existing `.tabs` section header avoids a synthetic outline node and
-keeps selection, context menus, drag payloads, undo, and persistence unchanged.
-Existing section expansion state also remains unchanged.
+keeps selection, remaining context menus, drag payloads, and persistence
+unchanged. Existing section expansion state also remains unchanged.
+
+## Context Menu Simplification
+
+Remove `关闭其他页面` globally rather than hiding it in only one sidebar:
+
+- remove the item and selector from the AppKit sidebar context menu;
+- remove the item from `TabStripView`;
+- remove the now-unreferenced `AppModel.closeOtherTabs(_:)` operation, its
+  dedicated undo test, and its localization key.
+
+Ordinary `关闭页面`, Command-W withdrawal, and explicit multi-selection closing
+remain unchanged. No replacement action or shortcut is introduced.
 
 ## Scope Boundaries
 
-This is a presentation-only change. It does not alter:
+Aside from removing the dedicated `关闭其他页面` operation, this change does not
+alter:
 
 - `Workspace`, `NavTab`, or persisted-state schemas;
 - fixed anchors or Command-W withdrawal;
 - pinning, unpinning, grouping, ordering, or multi-selection;
-- sidebar undo and redo;
-- context-menu actions;
+- undo and redo for the remaining sidebar actions;
+- context-menu actions other than `关闭其他页面`;
 - the existing drag-and-drop routing for either section.
 
 A sidebar New Tab button, hover close button, Arc Peek, and `Clear` remain
@@ -72,10 +92,15 @@ Automated coverage should verify:
 2. no New Tab button or second section title is rendered;
 3. a hidden `.tabs` structural row has no cell and adds zero y-coordinate
    delta before its first child;
-4. the empty `.pinned` section remains expandable and accepts single and batch
+4. with source-list styling, `.tabs` is not a group item, has no disclosure
+   cell, and its visible divider row directly touches the fixed and temporary
+   row rectangles above and below;
+5. neither tab UI contains `关闭其他页面`, and no dedicated
+   `closeOtherTabs(_:)` API, undo test, or localization remains;
+6. the empty `.pinned` section remains expandable and accepts single and batch
    drops;
-5. existing temporary-page activation and fixed-page grouping tests remain
-   green.
+7. existing temporary-page activation, fixed-page grouping, ordinary close,
+   and multi-selection close tests remain green.
 
 Manual verification should compare all four states in both light and dark
 appearance and confirm that the divider appears only between non-empty fixed
