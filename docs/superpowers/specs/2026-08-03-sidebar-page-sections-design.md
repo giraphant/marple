@@ -38,7 +38,9 @@ Only their presentation changes:
 - the `.pinned` section's visible title becomes `页面`;
 - the `.tabs` section no longer renders a second text title;
 - the `.tabs` section header renders only the divider when both sections have
-  children, and otherwise has zero visible height.
+  children, and otherwise has zero visible height. AppKit requires table-row
+  heights to be greater than zero, so the implementation uses a visually
+  collapsed 0.01-point row rather than returning an invalid literal zero.
 
 Using the existing `.tabs` section header avoids a synthetic outline node and
 keeps selection, context menus, drag payloads, undo, and persistence unchanged.
