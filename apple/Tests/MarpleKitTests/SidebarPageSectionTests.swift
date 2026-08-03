@@ -324,7 +324,7 @@ extension SidebarPageSectionTests {
     }
 
     @MainActor
-    @Test func groupFolderIconReflectsExpansionState() async throws {
+    @Test func groupFolderIconStaysNativeAcrossExpansionState() async throws {
         let pages = [
             entry(path: "books/a.md", title: "A"),
             entry(path: "books/b.md", title: "B"),
@@ -344,7 +344,7 @@ extension SidebarPageSectionTests {
         let collapsed = try folderIconData(
             for: group.name, in: harness.outline)
 
-        #expect(expanded != collapsed)
+        #expect(expanded == collapsed)
     }
 
     @MainActor
