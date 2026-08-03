@@ -10,35 +10,46 @@ struct SidebarPageSectionTests {
         let hasFixed: Bool
         let hasTemporary: Bool
         let expectedRows: [String]
+        let expectedDivider: Bool
     }
 
     @MainActor
     @Test func pageAreaRendersTheFourApprovedStates() async throws {
         let pageTitle = String(localized: "页面")
-        let newTabTitle = String(localized: "新建页面")
         let cases = [
             LayoutCase(name: "empty", hasFixed: false, hasTemporary: false,
-                       expectedRows: [pageTitle, newTabTitle]),
+                       expectedRows: [pageTitle], expectedDivider: false),
             LayoutCase(name: "temporary-only", hasFixed: false, hasTemporary: true,
-                       expectedRows: [pageTitle, newTabTitle, "Temporary"]),
+                       expectedRows: [pageTitle, "Temporary"], expectedDivider: false),
             LayoutCase(name: "fixed-only", hasFixed: true, hasTemporary: false,
-                       expectedRows: [pageTitle, "Fixed", newTabTitle]),
+                       expectedRows: [pageTitle, "Fixed"], expectedDivider: false),
             LayoutCase(name: "both", hasFixed: true, hasTemporary: true,
-                       expectedRows: [pageTitle, "Fixed", newTabTitle, "Temporary"]),
+                       expectedRows: [pageTitle, "Fixed", "Temporary"], expectedDivider: true),
         ]
 
         for item in cases {
             let harness = try await makeHarness(
                 hasFixed: item.hasFixed,
                 hasTemporary: item.hasTemporary)
-            let rendered = try renderedPageArea(in: harness.outline)
+            let rendered = renderedPageArea(in: harness.outline)
 
-            #expect(rendered.rows == item.expectedRows,
-                    Comment(rawValue: item.name))
-            #expect(rendered.dividerVisible == item.hasTemporary,
-                    Comment(rawValue: item.name))
-            #expect(rendered.newTabButton.title == newTabTitle,
-                    Comment(rawValue: item.name))
+            #expect(rendered.rows == item.expectedRows, Comment(rawValue: item.name))
+            #expect(rendered.dividerVisible == item.expectedDivider, Comment(rawValue: item.name))
+            #expect(rendered.dividerCellExists == item.expectedDivider, Comment(rawValue: item.name))
+            #expect(rendered.newTabButtonCount == 0, Comment(rawValue: item.name))
+            if item.expectedDivider {
+                #expect(rendered.dividerRowHeight == 13, Comment(rawValue: item.name))
+            } else {
+                #expect(rendered.dividerRowHeight == CGFloat.leastNormalMagnitude,
+                        Comment(rawValue: item.name))
+            }
+            if item.hasTemporary {
+                let expectedOffset: CGFloat = item.expectedDivider ? 13 : 0
+                #expect(rendered.temporaryRowOffset == expectedOffset,
+                        Comment(rawValue: item.name))
+            } else {
+                #expect(rendered.temporaryRowOffset == nil, Comment(rawValue: item.name))
+            }
         }
     }
 }
@@ -55,8 +66,10 @@ extension SidebarPageSectionTests {
     private struct RenderedPageArea {
         let rows: [String]
         let dividerVisible: Bool
-        let newTabButton: NSButton
-        let newTabRow: Int
+        let dividerCellExists: Bool
+        let dividerRowHeight: CGFloat
+        let temporaryRowOffset: CGFloat?
+        let newTabButtonCount: Int
     }
 
     @MainActor
@@ -104,35 +117,42 @@ extension SidebarPageSectionTests {
     }
 
     @MainActor
-    private func renderedPageArea(in outline: NSOutlineView) throws -> RenderedPageArea {
+    private func renderedPageArea(in outline: NSOutlineView) -> RenderedPageArea {
         let pageTitle = String(localized: "页面")
         let newTabTitle = String(localized: "新建页面")
         var rows: [String] = []
-        var button: NSButton?
-        var buttonRow = -1
-        var dividerVisible = false
+        var temporaryRow: Int?
+        var newTabButtonCount = 0
 
         for row in 0..<outline.numberOfRows {
             guard let view = outline.view(atColumn: 0, row: row, makeIfNecessary: true) else { continue }
             let text = descendants(of: NSTextField.self, in: view).map(\.stringValue)
             if text.contains(pageTitle) { rows.append(pageTitle) }
             if text.contains("Fixed") { rows.append("Fixed") }
-            if text.contains("Temporary") { rows.append("Temporary") }
-            if let newTab = descendants(of: NSButton.self, in: view)
-                .first(where: { $0.title == newTabTitle }) {
-                rows.append(newTabTitle)
-                button = newTab
-                buttonRow = row
-                dividerVisible = descendants(of: NSBox.self, in: view)
-                    .contains(where: { $0.boxType == .separator && !$0.isHidden })
+            if text.contains("Temporary") {
+                rows.append("Temporary")
+                temporaryRow = row
             }
+            newTabButtonCount += descendants(of: NSButton.self, in: view)
+                .filter { $0.title == newTabTitle }.count
         }
+
+        let dividerRow = temporaryRow.map { $0 - 1 } ?? outline.numberOfRows - 1
+        let dividerView = outline.view(atColumn: 0, row: dividerRow, makeIfNecessary: true)
+        let dividers = dividerView.map { descendants(of: NSBox.self, in: $0) } ?? []
+        let dividerRect = outline.rect(ofRow: dividerRow)
 
         return RenderedPageArea(
             rows: rows,
-            dividerVisible: dividerVisible,
-            newTabButton: try #require(button),
-            newTabRow: try #require(buttonRow >= 0 ? buttonRow : nil))
+            dividerVisible: dividers.contains {
+                $0.boxType == .separator && !$0.isHidden
+            },
+            dividerCellExists: dividerView != nil,
+            dividerRowHeight: dividerRect.height,
+            temporaryRowOffset: temporaryRow.map {
+                outline.rect(ofRow: $0).minY - dividerRect.minY
+            },
+            newTabButtonCount: newTabButtonCount)
     }
 
     @MainActor
@@ -147,30 +167,6 @@ extension SidebarPageSectionTests {
     private func entry(path: String, title: String) -> Entry {
         Entry(path: path, type: .book, title: title, author: [], year: nil,
               ratingScore: 0, themes: [], preview: "", hasPDF: false)
-    }
-}
-
-extension SidebarPageSectionTests {
-    @MainActor
-    @Test func newTabOpensGlobalSearchWithoutBecomingAPage() async throws {
-        _ = NSApplication.shared
-        NSApp.windows.compactMap { $0 as? CommandPalettePanel }.forEach { $0.close() }
-        defer { NSApp.windows.compactMap { $0 as? CommandPalettePanel }.forEach { $0.close() } }
-
-        let harness = try await makeHarness(hasFixed: false, hasTemporary: false)
-        let rendered = try renderedPageArea(in: harness.outline)
-        let item = try #require(harness.outline.item(atRow: rendered.newTabRow))
-
-        #expect(!harness.coordinator.outlineView(harness.outline, shouldSelectItem: item))
-        #expect(harness.coordinator.outlineView(
-            harness.outline, pasteboardWriterForItem: item) == nil)
-        #expect(harness.outline.selectedRowIndexes.isEmpty)
-
-        rendered.newTabButton.performClick(nil)
-
-        #expect(NSApp.windows.contains { $0 is CommandPalettePanel && $0.isVisible })
-        #expect(harness.model.tabs.isEmpty)
-        #expect(harness.outline.selectedRowIndexes.isEmpty)
     }
 }
 
