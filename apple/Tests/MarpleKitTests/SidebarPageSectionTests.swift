@@ -105,12 +105,18 @@ extension SidebarPageSectionTests {
     }
 
     @MainActor
-    private func makeHarness(hasFixed: Bool, hasTemporary: Bool) async throws -> Harness {
+    private func makeHarness(hasFixed: Bool, hasTemporary: Bool,
+                             temporaryPages: [Entry] = []) async throws -> Harness {
         let fixed = entry(path: "books/fixed.md", title: "Fixed")
         let temporary = entry(path: "books/temporary.md", title: "Temporary")
+        let pages = temporaryPages.isEmpty ? [temporary] : temporaryPages
+        var texts = [fixed.path: "# Fixed"]
+        for page in pages {
+            texts[page.path] = "# Page"
+        }
         let model = AppModel(client: StubVaultClient(
-            entries: [fixed, temporary],
-            texts: [fixed.path: "# Fixed", temporary.path: "# Temporary"]))
+            entries: [fixed] + pages,
+            texts: texts))
         await model.loadIndex()
 
         if hasFixed {
@@ -118,7 +124,9 @@ extension SidebarPageSectionTests {
             model.togglePin(try #require(model.activeTabID))
         }
         if hasTemporary {
-            await model.openInNewTab(temporary.path)
+            for page in pages {
+                await model.openInNewTab(page.path)
+            }
         }
 
         let collapseKey = "marple.collapsedSidebarSections"
@@ -226,7 +234,9 @@ extension SidebarPageSectionTests {
 private final class SidebarDraggingInfo: NSObject, @MainActor NSDraggingInfo {
     let draggingPasteboard: NSPasteboard
 
-    init(payloads: [String]) {
+    private let location: NSPoint
+
+    init(payloads: [String], location: NSPoint = .zero) {
         let pasteboard = NSPasteboard(
             name: NSPasteboard.Name("marple-sidebar-page-section-\(UUID().uuidString)"))
         pasteboard.clearContents()
@@ -237,11 +247,12 @@ private final class SidebarDraggingInfo: NSObject, @MainActor NSDraggingInfo {
         }
         pasteboard.writeObjects(items)
         draggingPasteboard = pasteboard
+        self.location = location
     }
 
     var draggingDestinationWindow: NSWindow? { nil }
     var draggingSourceOperationMask: NSDragOperation { .move }
-    var draggingLocation: NSPoint { .zero }
+    var draggingLocation: NSPoint { location }
     var draggedImageLocation: NSPoint { .zero }
     var draggedImage: NSImage? { nil }
     var draggingSource: Any? { nil }
@@ -263,6 +274,41 @@ private final class SidebarDraggingInfo: NSObject, @MainActor NSDraggingInfo {
 }
 
 extension SidebarPageSectionTests {
+    @MainActor
+    @Test func rootTemporaryDropsPreserveSingleAndBatchPositions() async throws {
+        let cases = [
+            (name: "single-before", localIndex: 0, sourceIndexes: [2],
+             expectedPaths: ["books/c.md", "books/a.md", "books/b.md"]),
+            (name: "batch-between", localIndex: 1, sourceIndexes: [0, 2],
+             expectedPaths: ["books/a.md", "books/c.md", "books/b.md"]),
+            (name: "single-after", localIndex: 3, sourceIndexes: [0],
+             expectedPaths: ["books/b.md", "books/c.md", "books/a.md"]),
+        ]
+
+        for item in cases {
+            let harness = try await makeTemporaryDropHarness()
+            let temporaryTabs = harness.model.tabs.filter { !$0.pinned }
+            let section = try #require(tabsSection(in: harness))
+            let sectionIndex = try #require(rootIndex(of: section, in: harness))
+            let info = SidebarDraggingInfo(
+                payloads: item.sourceIndexes.map { "tab:\(temporaryTabs[$0].id.uuidString)" },
+                location: try temporaryInsertionPoint(
+                    at: item.localIndex, in: harness.outline))
+            let proposedIndex = sectionIndex + item.localIndex + 1
+
+            #expect(harness.coordinator.outlineView(
+                harness.outline, validateDrop: info,
+                proposedItem: nil, proposedChildIndex: proposedIndex) == .move,
+                Comment(rawValue: item.name))
+            #expect(harness.coordinator.outlineView(
+                harness.outline, acceptDrop: info,
+                item: nil, childIndex: proposedIndex),
+                Comment(rawValue: item.name))
+            #expect(temporaryPaths(in: harness.model) == item.expectedPaths,
+                    Comment(rawValue: item.name))
+        }
+    }
+
     @MainActor
     @Test func emptyFixedSectionStillAcceptsSingleAndBatchPageDrops() async throws {
         let single = try await makeHarness(hasFixed: false, hasTemporary: false)
@@ -313,9 +359,64 @@ extension SidebarPageSectionTests {
     }
 
     @MainActor
+    private func makeTemporaryDropHarness() async throws -> Harness {
+        let pages = [
+            entry(path: "books/a.md", title: "A"),
+            entry(path: "books/b.md", title: "B"),
+            entry(path: "books/c.md", title: "C"),
+        ]
+        return try await makeHarness(
+            hasFixed: false, hasTemporary: true, temporaryPages: pages)
+    }
+
+    @MainActor
+    private func tabsSection(in harness: Harness) -> Any? {
+        let count = harness.coordinator.outlineView(
+            harness.outline, numberOfChildrenOfItem: nil)
+        for index in 0..<count {
+            let item = harness.coordinator.outlineView(
+                harness.outline, child: index, ofItem: nil)
+            if harness.coordinator.outlineView(
+                harness.outline, heightOfRowByItem: item) == CGFloat.leastNormalMagnitude {
+                return item
+            }
+        }
+        return nil
+    }
+
+    @MainActor
+    private func rootIndex(of target: Any, in harness: Harness) -> Int? {
+        let count = harness.coordinator.outlineView(
+            harness.outline, numberOfChildrenOfItem: nil)
+        return (0..<count).first { index in
+            let item = harness.coordinator.outlineView(
+                harness.outline, child: index, ofItem: nil)
+            return (item as AnyObject) === (target as AnyObject)
+        }
+    }
+
+    @MainActor
+    private func temporaryInsertionPoint(at index: Int, in outline: NSOutlineView) throws -> NSPoint {
+        let rows = try ["A", "B", "C"].map {
+            try #require(row(containing: $0, in: outline))
+        }
+        let y = index < rows.count
+            ? outline.rect(ofRow: rows[index]).minY
+            : outline.rect(ofRow: rows[rows.count - 1]).maxY
+        return outline.convert(NSPoint(x: outline.bounds.midX, y: y), to: nil)
+    }
+
+    @MainActor
     private func pinnedPaths(in model: AppModel) -> [String] {
         model.tabs
             .filter(\.pinned)
+            .compactMap { $0.identityLocation.openPath }
+    }
+
+    @MainActor
+    private func temporaryPaths(in model: AppModel) -> [String] {
+        model.tabs
+            .filter { !$0.pinned }
             .compactMap { $0.identityLocation.openPath }
     }
 

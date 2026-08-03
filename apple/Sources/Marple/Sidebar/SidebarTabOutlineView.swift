@@ -1148,9 +1148,12 @@ struct SidebarOutlineView: NSViewRepresentable {
                retargetTemporaryRowDrop(outlineView, info: info, item: item) {
                 return .move
             }
+            let rootDrop = temporaryRootDrop(
+                outlineView, info: info, item: item, childIndex: index)
             if allPayloads.count > 1 {
                 return validateMultiDrop(outlineView, info: info, payloads: allPayloads,
-                                         item: item, childIndex: index)
+                                         item: rootDrop?.section ?? item,
+                                         childIndex: rootDrop?.childIndex ?? index)
             }
             guard let payload = allPayloads.first
                     ?? SidebarTabPayload(info.draggingPasteboard.string(forType: SidebarDragPasteboard.tabItem)) else { return [] }
@@ -1166,9 +1169,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 logDrop("validate retarget sticky=\(describe(stickyRowDropTarget))")
                 return .move
             }
-            if item == nil, let section = tabsSection, point.y >= outlineView.rect(ofRow: outlineView.row(forItem: section)).minY {
+            if rootDrop != nil {
                 guard canMoveToTemporary(payload) else { return [] }
-                outlineView.setDropItem(section, dropChildIndex: temporaryItems.count)
                 return .move
             }
             guard let node = item as? SidebarOutlineNode else { return [] }
@@ -1202,9 +1204,12 @@ struct SidebarOutlineView: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo,
                          item: Any?, childIndex index: Int) -> Bool {
             let allPayloads = payloads(from: info)
+            let rootDrop = temporaryRootDrop(
+                outlineView, info: info, item: item, childIndex: index)
             if allPayloads.count > 1 {
                 let accepted = acceptMultiDrop(outlineView, info: info, payloads: allPayloads,
-                                               item: item, childIndex: index)
+                                               item: rootDrop?.section ?? item,
+                                               childIndex: rootDrop?.childIndex ?? index)
                 stickyRowDropTarget = nil
                 if accepted { reload(outlineView) }
                 return accepted
@@ -1242,8 +1247,9 @@ struct SidebarOutlineView: NSViewRepresentable {
                 case .section, .pane:
                     accepted = false
                 }
-            } else if let section = tabsSection, point.y >= outlineView.rect(ofRow: outlineView.row(forItem: section)).minY {
-                accepted = accept(payload, into: section, childIndex: temporaryItems.count)
+            } else if let rootDrop {
+                accepted = accept(payload, into: rootDrop.section,
+                                  childIndex: rootDrop.childIndex)
             } else {
                 accepted = false
             }
@@ -1511,6 +1517,25 @@ struct SidebarOutlineView: NSViewRepresentable {
             case .tab, .entry: return true
             case .group, .type, .savedView: return false
             }
+        }
+
+        private func temporaryRootDrop(
+            _ outlineView: NSOutlineView,
+            info: NSDraggingInfo,
+            item: Any?,
+            childIndex: Int
+        ) -> (section: SidebarOutlineNode, childIndex: Int)? {
+            guard item == nil,
+                  let section = tabsSection,
+                  let sectionIndex = visibleChildren(of: nil).firstIndex(where: { $0 === section }),
+                  let row = rowForItem(section, in: outlineView),
+                  draggingPoint(in: outlineView, info: info).y >= outlineView.rect(ofRow: row).minY else {
+                return nil
+            }
+            let localIndex = min(
+                max(childIndex - sectionIndex - 1, 0),
+                temporaryItems.count)
+            return (section, localIndex)
         }
 
         private func retargetTemporaryRowDrop(_ outlineView: NSOutlineView,
