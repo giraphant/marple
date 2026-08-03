@@ -106,7 +106,8 @@ extension SidebarPageSectionTests {
 
     @MainActor
     private func makeHarness(hasFixed: Bool, hasTemporary: Bool,
-                             temporaryPages: [Entry] = []) async throws -> Harness {
+                             temporaryPages: [Entry] = [],
+                             outline providedOutline: NSOutlineView? = nil) async throws -> Harness {
         let fixed = entry(path: "books/fixed.md", title: "Fixed")
         let temporary = entry(path: "books/temporary.md", title: "Temporary")
         let pages = temporaryPages.isEmpty ? [temporary] : temporaryPages
@@ -142,7 +143,8 @@ extension SidebarPageSectionTests {
         }
 
         let coordinator = SidebarOutlineView.Coordinator(model: model)
-        let outline = NSOutlineView(frame: NSRect(x: 0, y: 0, width: 280, height: 600))
+        let outline = providedOutline
+            ?? NSOutlineView(frame: NSRect(x: 0, y: 0, width: 280, height: 600))
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("sidebar"))
         column.width = 280
         outline.addTableColumn(column)
@@ -231,6 +233,15 @@ extension SidebarPageSectionTests {
 }
 
 @MainActor
+private final class RevealedRowOutlineView: NSOutlineView {
+    var revealedRows: [Int] = []
+
+    override func scrollRowToVisible(_ row: Int) {
+        revealedRows.append(row)
+    }
+}
+
+@MainActor
 private final class SidebarDraggingInfo: NSObject, @MainActor NSDraggingInfo {
     let draggingPasteboard: NSPasteboard
 
@@ -274,6 +285,102 @@ private final class SidebarDraggingInfo: NSObject, @MainActor NSDraggingInfo {
 }
 
 extension SidebarPageSectionTests {
+    @MainActor
+    @Test func mixedBatchMenuCopiesACombinedShareManifest() async throws {
+        let pages = [
+            entry(path: "books/a.md", title: "A"),
+            entry(path: "books/b.md", title: "B"),
+            entry(path: "books/c.md", title: "C"),
+        ]
+        let harness = try await makeHarness(
+            hasFixed: false, hasTemporary: true, temporaryPages: pages)
+        let ids = harness.model.tabs.map(\.id)
+        harness.model.setPinned(Array(ids.prefix(2)), to: true)
+        harness.model.groupTabs(Array(ids.prefix(2)))
+        harness.coordinator.reload(harness.outline)
+
+        let groupTitle = try #require(harness.model.tabGroups.first?.name)
+        let groupRow = try #require(row(containing: groupTitle, in: harness.outline))
+        let temporaryRow = try #require(row(containing: "C", in: harness.outline))
+        harness.outline.selectRowIndexes(
+            IndexSet([groupRow, temporaryRow]), byExtendingSelection: false)
+
+        let menu = NSMenu()
+        harness.coordinator.menuNeedsUpdate(menu)
+        let share = try #require(menu.items.first {
+            $0.title == String(localized: "复制分享清单")
+        })
+        let action = try #require(share.action)
+        NSPasteboard.general.clearContents()
+        defer { NSPasteboard.general.clearContents() }
+
+        #expect(NSApplication.shared.sendAction(action, to: share.target, from: share))
+        let markdown = try #require(
+            NSPasteboard.general.string(forType: .string))
+        #expect(markdown.contains("# \(groupTitle)"))
+        #expect(markdown.contains("**A**"))
+        #expect(markdown.contains("**B**"))
+        #expect(markdown.contains("**C**"))
+    }
+
+    @MainActor
+    @Test func groupFolderIconReflectsExpansionState() async throws {
+        let pages = [
+            entry(path: "books/a.md", title: "A"),
+            entry(path: "books/b.md", title: "B"),
+        ]
+        let harness = try await makeHarness(
+            hasFixed: false, hasTemporary: true, temporaryPages: pages)
+        let ids = harness.model.tabs.map(\.id)
+        harness.model.setPinned(ids, to: true)
+        harness.model.groupTabs(ids)
+        harness.coordinator.reload(harness.outline)
+
+        let group = try #require(harness.model.tabGroups.first)
+        let expanded = try folderIconData(
+            for: group.name, in: harness.outline)
+        harness.model.setTabGroup(group.id, collapsed: true)
+        harness.coordinator.reload(harness.outline)
+        let collapsed = try folderIconData(
+            for: group.name, in: harness.outline)
+
+        #expect(expanded != collapsed)
+    }
+
+    @MainActor
+    @Test func passiveReloadPreservesViewport() async throws {
+        let pages = (0..<18).map {
+            entry(path: "books/\($0).md", title: "Page \($0)")
+        }
+        let outline = RevealedRowOutlineView(
+            frame: NSRect(x: 0, y: 0, width: 280, height: 90))
+        let harness = try await makeHarness(
+            hasFixed: false, hasTemporary: true,
+            temporaryPages: pages, outline: outline)
+        outline.revealedRows.removeAll()
+
+        harness.coordinator.reload(outline)
+        #expect(outline.revealedRows.isEmpty)
+
+        let next = try #require(harness.model.tabs.dropLast().last?.id)
+        await harness.model.selectTab(next)
+        harness.coordinator.reload(outline)
+        let nextRow = try #require(row(containing: "Page 16", in: outline))
+        #expect(outline.selectedRowIndexes.contains(nextRow))
+    }
+
+    @MainActor
+    private func folderIconData(
+        for title: String, in outline: NSOutlineView
+    ) throws -> Data {
+        let rowIndex = try #require(self.row(containing: title, in: outline))
+        let cell = try #require(outline.view(
+            atColumn: 0, row: rowIndex, makeIfNecessary: true))
+        let image = try #require(descendants(of: NSImageView.self, in: cell)
+            .compactMap(\.image).first)
+        return try #require(image.tiffRepresentation)
+    }
+
     @MainActor
     @Test func rootTemporaryDropsPreserveSingleAndBatchPositions() async throws {
         let cases = [

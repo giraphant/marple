@@ -1330,6 +1330,7 @@ final class AppModel {
             let location = sourceLocation(for: path)
             mutateWorkspace { $0.navigateActive(to: location) }
             isBrowsing = false
+            if location.pane != browsePane { applyActiveListContext() }
             await loadDoc(path)
         }
     }
@@ -1411,7 +1412,18 @@ final class AppModel {
             return
         }
 
-        let location = active.location
+        let storedLocation = active.location
+        let entryType = storedLocation.openPath.flatMap { path in
+            entries.first { $0.path == path }?.type
+        } ?? active.cachedType
+        // A page explicitly spawned from the shared pinned list inherits that
+        // list by design. Ordinary temporary locations must remain revealable.
+        let location = previousPinnedContext == true
+            ? storedLocation
+            : locationCompatibleWithEntryType(storedLocation, entryType: entryType)
+        if location != storedLocation {
+            mutateWorkspace { $0.replaceActiveLocation(with: location) }
+        }
         browsePane = location.pane
         if let context = location.listContext {
             if case .savedView = location.pane {
@@ -1472,8 +1484,27 @@ final class AppModel {
             return NavLocation(pane: location.pane, openPath: path,
                                listContext: location.listContext)
         }
-        return NavLocation(pane: browsePane, openPath: path,
-                           listContext: currentBrowseListContext)
+        let location = NavLocation(pane: browsePane, openPath: path,
+                                   listContext: currentBrowseListContext)
+        let entryType = entries.first { $0.path == path }?.type
+        return locationCompatibleWithEntryType(location, entryType: entryType)
+    }
+
+    /// A type list cannot reveal a document of another type. This repairs stale
+    /// persisted locations and prevents new cross-type navigation from creating
+    /// the same impossible state. Named views keep their own list semantics.
+    private func locationCompatibleWithEntryType(
+        _ location: NavLocation, entryType: EntryType?
+    ) -> NavLocation {
+        guard let entryType,
+              case .type(let listType) = location.pane,
+              listType != entryType else { return location }
+        return NavLocation(
+            pane: .type(entryType),
+            openPath: location.openPath,
+            listContext: ListContext(
+                searchText: "", filters: [], filterMatch: .all,
+                sorts: location.listContext?.sorts ?? sortClauses))
     }
 
     func reloadOpen() async {
@@ -1493,6 +1524,7 @@ final class AppModel {
         if !isBrowsing, workspace != nil {
             let location = sourceLocation(for: hit.path)
             mutateWorkspace { $0.navigateActive(to: location) }
+            if location.pane != browsePane { applyActiveListContext() }
             await loadDoc(hit.path)
         } else {
             await open(hit.path)
@@ -1940,15 +1972,21 @@ final class AppModel {
 
     /// Markdown manifest for a single tab (one bullet, no header). Nil if the tab is gone.
     func shareManifest(forTab id: NavTab.ID) -> String? {
-        guard let tab = tabs.first(where: { $0.id == id }) else { return nil }
-        return renderTabShareManifest([shareNode(for: tab)])
+        shareManifest(for: [.tab(id)])
     }
 
     /// Markdown manifest for a group: an H1 of the group name plus a nested bullet list
     /// mirroring the folder structure. Nil if the group is gone.
     func shareManifest(forGroup id: TabGroup.ID) -> String? {
         guard let group = tabGroups.first(where: { $0.id == id }) else { return nil }
-        return renderTabShareManifest([shareNode(for: group)])
+        return shareManifest(for: [.group(group)])
+    }
+
+    /// Markdown manifest for an ordered mixed selection of tabs and groups.
+    func shareManifest(for roots: [TabNode]) -> String? {
+        let nodes = roots.compactMap(shareChild)
+        guard !nodes.isEmpty else { return nil }
+        return renderTabShareManifest(nodes)
     }
 
     private func shareNode(for group: TabGroup) -> TabShareNode {
