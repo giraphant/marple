@@ -236,6 +236,10 @@ struct SidebarOutlineView: NSViewRepresentable {
             Set(UserDefaults.standard.stringArray(forKey: "marple.collapsedSidebarSections") ?? [])
         private var lastReloadSpaceID: WorkspaceSpace.ID?
         private var stickyRowDropTarget: SidebarOutlineNode?
+        private struct ViewportAnchor {
+            let key: String
+            let offset: CGFloat
+        }
         // Row split for tab-on-tab grouping: top/bottom edge bands reorder, the
         // narrow center band triggers grouping. Exit ratio is the hysteresis that
         // keeps a sticky target latched while the cursor jitters.
@@ -302,6 +306,9 @@ struct SidebarOutlineView: NSViewRepresentable {
             // selection that covers the active row across no-op reloads — this
             // extends the same guarantee to structural reloads (QUA-98).
             let preservedPayloads = capturedMultiSelectionPayloads(in: outline)
+            let spaceChanged = lastReloadSignature != nil
+                && lastReloadSpaceID != model.activeSpaceID
+            let viewportAnchor = spaceChanged ? nil : captureViewportAnchor(in: outline)
             let spaceTransition = sidebarSpaceTransition(in: outline)
             lastReloadSignature = signature
             lastReloadSpaceID = model.activeSpaceID
@@ -314,8 +321,43 @@ struct SidebarOutlineView: NSViewRepresentable {
                 outline.reloadData()
             }
             restoreExpansion(in: outline)
+            restoreViewportAnchor(viewportAnchor, in: outline)
             restoreMultiSelection(payloads: preservedPayloads, in: outline)
             selectCurrentItem(in: outline)
+        }
+
+        private func captureViewportAnchor(in outline: NSOutlineView) -> ViewportAnchor? {
+            let visibleRows = outline.rows(in: outline.visibleRect)
+            guard visibleRows.location != NSNotFound, visibleRows.length > 0 else { return nil }
+            let row = visibleRows.location
+            guard let node = outline.item(atRow: row) as? SidebarOutlineNode,
+                  let key = viewportKey(for: node) else { return nil }
+            return ViewportAnchor(
+                key: key,
+                offset: outline.visibleRect.minY - outline.rect(ofRow: row).minY)
+        }
+
+        private func restoreViewportAnchor(_ anchor: ViewportAnchor?, in outline: NSOutlineView) {
+            guard let anchor,
+                  let scrollView = outline.enclosingScrollView else { return }
+            for row in 0..<outline.numberOfRows {
+                guard let node = outline.item(atRow: row) as? SidebarOutlineNode,
+                      viewportKey(for: node) == anchor.key else { continue }
+                let clipView = scrollView.contentView
+                clipView.scroll(to: NSPoint(
+                    x: clipView.bounds.minX,
+                    y: outline.rect(ofRow: row).minY + anchor.offset))
+                scrollView.reflectScrolledClipView(clipView)
+                return
+            }
+        }
+
+        private func viewportKey(for node: SidebarOutlineNode) -> String? {
+            if let payload = node.payload { return payload }
+            if case .section(let section) = node.kind {
+                return "section:\(section.key)"
+            }
+            return nil
         }
 
         /// Payload set of a multi-row selection (>=2 rows). Returns empty for a

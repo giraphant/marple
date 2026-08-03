@@ -370,6 +370,51 @@ extension SidebarPageSectionTests {
     }
 
     @MainActor
+    @Test func structuralReloadKeepsVisibleRowAnchoredWhenPinningAndUnpinning() async throws {
+        let pages = (0..<24).map {
+            entry(path: "books/\($0).md", title: "Page \($0)")
+        }
+        let outline = NSOutlineView(
+            frame: NSRect(x: 0, y: 0, width: 280, height: 90))
+        let scroll = NSScrollView(
+            frame: NSRect(x: 0, y: 0, width: 280, height: 90))
+        scroll.documentView = outline
+        let harness = try await makeHarness(
+            hasFixed: false, hasTemporary: true,
+            temporaryPages: pages, outline: outline)
+        scroll.layoutSubtreeIfNeeded()
+        outline.layoutSubtreeIfNeeded()
+
+        let anchorTitle = "Page 18"
+        let anchorRow = try #require(row(containing: anchorTitle, in: outline))
+        let clipView = scroll.contentView
+        clipView.scroll(to: NSPoint(
+            x: 0, y: outline.rect(ofRow: anchorRow).minY + 4))
+        scroll.reflectScrolledClipView(clipView)
+        let beforeOffset = outline.rect(ofRow: anchorRow).minY
+            - outline.visibleRect.minY
+
+        let movedID = try #require(harness.model.tabs.first?.id)
+        harness.model.setPinned([movedID], to: true)
+        harness.coordinator.reload(outline)
+
+        let reloadedAnchorRow = try #require(
+            row(containing: anchorTitle, in: outline))
+        let afterOffset = outline.rect(ofRow: reloadedAnchorRow).minY
+            - outline.visibleRect.minY
+        #expect(abs(afterOffset - beforeOffset) < 0.5)
+
+        harness.model.setPinned([movedID], to: false)
+        harness.coordinator.reload(outline)
+
+        let restoredAnchorRow = try #require(
+            row(containing: anchorTitle, in: outline))
+        let restoredOffset = outline.rect(ofRow: restoredAnchorRow).minY
+            - outline.visibleRect.minY
+        #expect(abs(restoredOffset - beforeOffset) < 0.5)
+    }
+
+    @MainActor
     private func folderIconData(
         for title: String, in outline: NSOutlineView
     ) throws -> Data {
