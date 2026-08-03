@@ -76,20 +76,20 @@ import Foundation
     @Test func testInitHasOneActiveTab() {
         let w = Workspace(initial: a)
         #expect(w.tabs.count == 1)
-        #expect(w.activeTab.location == a)
+        #expect(w.activeTab!.location == a)
         #expect(w.activeID == w.tabs[0].id)
     }
 
     @Test func testNavigateActiveOnlyTouchesActiveTab() {
         var w = Workspace(initial: a)
-        let firstID = w.activeID
+        let firstID = w.activeID!
         w.newTab(b)                 // appends + activates new tab
         w.navigateActive(to: c)     // pushes onto the new (active) tab
         let first = w.tabs.first { $0.id == firstID }!
         #expect(first.location == a)            // untouched
         #expect(!first.history.canGoBack)
-        #expect(w.activeTab.location == c)
-        #expect(w.activeTab.history.canGoBack)  // b -> c
+        #expect(w.activeTab!.location == c)
+        #expect(w.activeTab!.history.canGoBack)  // b -> c
     }
 
     @Test func testNewTabAppendsAndActivates() {
@@ -97,14 +97,14 @@ import Foundation
         w.newTab(b)
         #expect(w.tabs.count == 2)
         #expect(w.tabs.last?.location == b)
-        #expect(w.activeTab.location == b)
+        #expect(w.activeTab!.location == b)
     }
 
     @Test func testNewTabWithoutActivateKeepsActive() {
         var w = Workspace(initial: a)
         let id = w.newTab(b, activate: false)
         #expect(w.tabs.count == 2)
-        #expect(w.activeTab.location == a)
+        #expect(w.activeTab!.location == a)
         #expect(w.tabs.contains { $0.id == id })
     }
 
@@ -116,16 +116,16 @@ import Foundation
         w.select(bID)               // active b (index 1)
         w.closeTab(bID)             // remove index 1 -> [a, c]; active min(1, 1)=1 -> c
         #expect(w.tabs.map(\.location) == [a, c])
-        #expect(w.activeTab.location == c)
+        #expect(w.activeTab!.location == c)
     }
 
     @Test func testCloseLastIndexActivatesNewLast() {
         var w = Workspace(initial: a)
         w.newTab(b)                 // [a, b], active b (index 1)
-        let bID = w.activeID
+        let bID = w.activeID!
         w.closeTab(bID)             // remove last -> [a]; active min(1,0)=0 -> a
         #expect(w.tabs.map(\.location) == [a])
-        #expect(w.activeTab.location == a)
+        #expect(w.activeTab!.location == a)
     }
 
     @Test func testCloseInactiveTabKeepsActive() {
@@ -134,31 +134,31 @@ import Foundation
         let aID = w.tabs[0].id
         w.closeTab(aID)             // remove inactive a -> [b]; active still b
         #expect(w.tabs.map(\.location) == [b])
-        #expect(w.activeTab.location == b)
+        #expect(w.activeTab!.location == b)
     }
 
     @Test func testSelectIndexInRangeAndOutOfRange() {
         var w = Workspace(initial: a)
         w.newTab(b); w.newTab(c)    // [a, b, c], active c
         w.selectIndex(0)
-        #expect(w.activeTab.location == a)
+        #expect(w.activeTab!.location == a)
         w.selectIndex(99)           // ignored
-        #expect(w.activeTab.location == a)
+        #expect(w.activeTab!.location == a)
     }
 
     @Test func testSelectRelativeWraps() {
         var w = Workspace(initial: a)
         w.newTab(b); w.newTab(c)    // [a, b, c], active c (index 2)
         w.selectRelative(1)         // wraps to index 0
-        #expect(w.activeTab.location == a)
+        #expect(w.activeTab!.location == a)
         w.selectRelative(-1)        // wraps to index 2
-        #expect(w.activeTab.location == c)
+        #expect(w.activeTab!.location == c)
     }
 
     @Test func testTogglePin() {
         var w = Workspace(initial: a)
-        let id = w.activeID
-        #expect(w.activeTab.pinned == false)
+        let id = w.activeID!
+        #expect(w.activeTab!.pinned == false)
         w.togglePin(id)
         #expect(w.tabs.first { $0.id == id }?.pinned == true)
         w.togglePin(id)
@@ -168,62 +168,62 @@ import Foundation
     @Test func pinnedTabKeepsItsAnchorWhileNavigationMoves() {
         var w = Workspace(initial: a)
 
-        w.togglePin(w.activeID)
+        w.togglePin(w.activeID!)
         w.navigateActive(to: b)
         w.navigateActive(to: c)
 
-        #expect(w.activeTab.pinned)
-        #expect(w.activeTab.pinnedLocation == a)
-        #expect(w.activeTab.identityLocation == a)
-        #expect(w.activeTab.location == c)
-        #expect(w.activeTab.history.canGoBack)
+        #expect(w.activeTab!.pinned)
+        #expect(w.activeTab!.pinnedLocation == a)
+        #expect(w.activeTab!.identityLocation == a)
+        #expect(w.activeTab!.location == c)
+        #expect(w.activeTab!.history.canGoBack)
 
         w.backActive()
-        #expect(w.activeTab.location == b)
-        #expect(w.activeTab.identityLocation == a)
+        #expect(w.activeTab!.location == b)
+        #expect(w.activeTab!.identityLocation == a)
         w.forwardActive()
-        #expect(w.activeTab.location == c)
+        #expect(w.activeTab!.location == c)
     }
 
     @Test func withdrawingPinnedNavigationReturnsToAnchorAndClearsExcursion() {
         var w = Workspace(initial: a)
-        w.togglePin(w.activeID)
+        w.togglePin(w.activeID!)
         w.navigateActive(to: b)
         w.navigateActive(to: c)
 
         let didWithdraw = w.withdrawActivePinnedNavigation()
         #expect(didWithdraw)
-        #expect(w.activeTab.location == a)
-        #expect(w.activeTab.history.entries == [a])
-        #expect(!w.activeTab.history.canGoBack)
+        #expect(w.activeTab!.location == a)
+        #expect(w.activeTab!.history.entries == [a])
+        #expect(!w.activeTab!.history.canGoBack)
         let didNotWithdraw = w.withdrawActivePinnedNavigation()
         #expect(!didNotWithdraw)
     }
 
     @Test func unpinningKeepsCurrentNavigationAndClearsAnchor() {
         var w = Workspace(initial: a)
-        w.togglePin(w.activeID)
+        w.togglePin(w.activeID!)
         w.navigateActive(to: b)
 
-        w.togglePin(w.activeID)
+        w.togglePin(w.activeID!)
 
-        #expect(!w.activeTab.pinned)
-        #expect(w.activeTab.pinnedLocation == nil)
-        #expect(w.activeTab.identityLocation == b)
-        #expect(w.activeTab.location == b)
+        #expect(!w.activeTab!.pinned)
+        #expect(w.activeTab!.pinnedLocation == nil)
+        #expect(w.activeTab!.identityLocation == b)
+        #expect(w.activeTab!.location == b)
     }
 
     @Test func pruningADeletedPinnedPageAlsoPrunesItsAnchor() {
         let gone = NavLocation(pane: .type(.book), openPath: "gone.md")
         let keep = NavLocation(pane: .type(.chapter), openPath: "keep.md")
         var w = Workspace(initial: gone)
-        w.togglePin(w.activeID)
+        w.togglePin(w.activeID!)
         w.navigateActive(to: keep)
 
         w.pruneOpenPaths(validPaths: ["keep.md"])
 
-        #expect(w.activeTab.location == keep)
-        #expect(w.activeTab.pinnedLocation?.openPath == nil)
+        #expect(w.activeTab!.location == keep)
+        #expect(w.activeTab!.pinnedLocation?.openPath == nil)
     }
 
     @Test func testReorderAppliesIdOrder() {
@@ -236,11 +236,11 @@ import Foundation
 
     @Test func testRenameTabTrimsAndClearsEmptyTitle() {
         var w = Workspace(initial: a)
-        let id = w.activeID
+        let id = w.activeID!
         w.renameTab(id, to: "  Workbench  ")
-        #expect(w.activeTab.customTitle == "Workbench")
+        #expect(w.activeTab!.customTitle == "Workbench")
         w.renameTab(id, to: "   ")
-        #expect(w.activeTab.customTitle == nil)
+        #expect(w.activeTab!.customTitle == nil)
     }
 
     @Test func testReorderKeepsActiveAndIgnoresBadInput() {
@@ -257,11 +257,11 @@ import Foundation
     @Test func testTabLocationReflectsHistoryCurrent() {
         var w = Workspace(initial: a)
         w.navigateActive(to: b)
-        #expect(w.activeTab.location == b)
+        #expect(w.activeTab!.location == b)
         w.backActive()
-        #expect(w.activeTab.location == a)
+        #expect(w.activeTab!.location == a)
         w.forwardActive()
-        #expect(w.activeTab.location == b)
+        #expect(w.activeTab!.location == b)
     }
 
     @Test func testGroupTabCreatesNamedGroupInTabOrder() throws {
@@ -289,14 +289,14 @@ import Foundation
         #expect(w.tabGroups.first?.isCollapsed == true)
     }
 
-    @Test func testCloseTabDissolvesSmallGroup() throws {
+    @Test func testCloseTabKeepsSingleChildFolder() throws {
         var w = Workspace(initial: a)
         w.newTab(b)
         let ids = w.tabs.map(\.id)
         w.groupTab(ids[0], onto: ids[1])
         #expect(w.tabGroups.count == 1)
         w.closeTab(ids[0])
-        #expect(w.tabGroups.isEmpty)
+        #expect(w.tabGroups.first?.tabIDs == [ids[1]])
         #expect(w.tabs.map(\.id) == [ids[1]])
     }
 
@@ -329,8 +329,10 @@ import Foundation
         w.newTab(b); w.newTab(c)
         let ids = w.tabs.map(\.id)
         w.groupTab(ids[1], onto: ids[0])
+        let groupID = try #require(w.tabGroups.first?.id)
         w.moveTabToRoot(ids[1], beforeTab: ids[2])
-        #expect(w.tabGroups.isEmpty)
+        #expect(w.group(groupID)?.tabIDs == [ids[0]])
+        #expect(w.group(containing: ids[1]) == nil)
         #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[2]])
     }
 
@@ -374,7 +376,7 @@ import Foundation
 
     @Test func extractSingleTabForTransferRemovesFromSourceAndTargetInsertsAtRootPreservingFields() throws {
         var source = Workspace(initial: a)
-        let tabID = source.activeID
+        let tabID = try #require(source.activeID)
         source.togglePin(tabID)
         source.renameTab(tabID, to: "Desk")
         let cachedTab = NavTab(id: UUID(), location: NavLocation(pane: .type(.book), openPath: "cached.md"), pinned: false, cachedTitle: "Cached", cachedType: .book)
@@ -424,9 +426,9 @@ import Foundation
 
     @Test func extractingActiveTabFallsBackAndEmptyWorkspaceReportsEmpty() throws {
         var source = Workspace(initial: a)
-        let firstID = source.activeID
+        let firstID = try #require(source.activeID)
         source.newTab(b)
-        let secondID = source.activeID
+        let secondID = try #require(source.activeID)
 
         _ = source.extractItemsForTransfer([.tab(secondID)])
         #expect(source.activeID == firstID)
@@ -438,14 +440,47 @@ import Foundation
 
     @Test func insertingIntoWorkspaceEmptiedByTransferMakesInsertedTabActive() throws {
         var workspace = Workspace(initial: a)
-        _ = workspace.extractItemsForTransfer([.tab(workspace.activeID)])
+        let originalID = try #require(workspace.activeID)
+        _ = workspace.extractItemsForTransfer([.tab(originalID)])
         #expect(workspace.isEmpty)
         let inserted = NavTab(location: b)
 
         workspace.insertTransferBundleToRoot(WorkspaceTransferBundle(tabs: [inserted], nodes: [.tab(inserted.id)]), at: 0)
 
         #expect(workspace.activeID == inserted.id)
-        #expect(workspace.activeTab.id == inserted.id)
+        #expect(workspace.activeTab!.id == inserted.id)
+    }
+
+    @Test func emptyFolderSurvivesZeroAndOneChild() throws {
+        var workspace = Workspace()
+        let folderID = workspace.createFolder()
+        #expect(workspace.tabs.isEmpty)
+        #expect(workspace.activeID == nil)
+        #expect(workspace.group(folderID)?.children.isEmpty == true)
+        #expect(!workspace.isEmpty)
+
+        let pageID = workspace.newTab(a)
+        workspace.moveTab(pageID, toGroup: folderID)
+        #expect(workspace.group(folderID)?.tabIDs == [pageID])
+
+        workspace.closeTab(pageID)
+        #expect(workspace.activeID == nil)
+        #expect(workspace.group(folderID)?.children.isEmpty == true)
+        #expect(!workspace.isEmpty)
+    }
+
+    @Test func dissolvingFolderPromotesChildrenWithoutClosingThem() throws {
+        var workspace = Workspace(initial: a)
+        let firstID = try #require(workspace.activeID)
+        let secondID = workspace.newTab(b)
+        let folderID = workspace.createFolder()
+        workspace.moveTabs([firstID, secondID], toGroup: folderID, at: nil)
+
+        workspace.dissolveFolder(folderID)
+
+        #expect(workspace.group(folderID) == nil)
+        #expect(workspace.tabs.map(\.id) == [firstID, secondID])
+        #expect(workspace.rootNodes.compactMap(\.tabID) == [firstID, secondID])
     }
 
     @Test func extractTransferFiltersDescendantTabsWhenParentGroupSelected() throws {
@@ -578,23 +613,23 @@ import Foundation
         #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[2], ids[3], ids4])
     }
 
-    @Test func moveDeepTabToRootDissolvesEmptiedSubgroup() throws {
+    @Test func moveDeepTabToRootKeepsSingleChildSubgroup() throws {
         var (w, ids, g1, g2) = try twoGroups()
         w.moveGroup(g2, intoGroup: g1)               // G1 -> [0,1,G2[2,3]]
-        w.moveTabToRoot(ids[2], beforeTab: nil)      // G2 -> [3] -> dissolves, 3 promoted into G1
+        w.moveTabToRoot(ids[2], beforeTab: nil)      // G2 remains as [3]
         #expect(w.group(containing: ids[2]) == nil)
-        #expect(w.group(g2) == nil)
-        #expect(w.group(g1)?.tabIDs == [ids[0], ids[1], ids[3]])
+        #expect(w.group(g2)?.tabIDs == [ids[3]])
+        #expect(w.group(g1)?.tabIDs == [ids[0], ids[1]])
         #expect(Set(w.tabs.map(\.id)) == Set(ids))
     }
 
-    @Test func dissolveCascadePromotesNestedGroup() throws {
+    @Test func emptyAncestorKeepsNestedGroup() throws {
         var (w, ids, g1, g2) = try twoGroups()
         w.moveGroup(g2, intoGroup: g1)               // G1 -> [0,1,G2[2,3]]
         w.moveTabToRoot(ids[1], beforeTab: nil)      // G1 -> [0, G2]
         #expect(w.group(g1)?.children.count == 2)
-        w.moveTabToRoot(ids[0], beforeTab: nil)      // G1 -> [G2] -> dissolves, G2 promoted to root
-        #expect(w.group(g1) == nil)
+        w.moveTabToRoot(ids[0], beforeTab: nil)      // G1 remains as [G2]
+        #expect(w.group(g1)?.children.first?.group?.id == g2)
         #expect(w.group(g2) != nil)
         #expect(w.group(g2)?.tabIDs == [ids[2], ids[3]])
     }
@@ -677,10 +712,10 @@ import Foundation
     @Test func closingNestedTabReconcilesTree() throws {
         var (w, ids, g1, g2) = try twoGroups()
         w.moveGroup(g2, intoGroup: g1)               // G1 -> [0,1,G2[2,3]]
-        w.closeTab(ids[2])                           // G2 -> [3] -> dissolves
-        #expect(w.group(g2) == nil)
+        w.closeTab(ids[2])                           // G2 remains as [3]
+        #expect(w.group(g2)?.tabIDs == [ids[3]])
         #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[3]])
-        #expect(w.group(g1)?.tabIDs == [ids[0], ids[1], ids[3]])
+        #expect(w.group(g1)?.tabIDs == [ids[0], ids[1]])
     }
 
     @Test func reorderResortsTreeKeepingGroupsContiguous() throws {
@@ -755,11 +790,11 @@ import Foundation
         let g = try #require(w.tabGroups.first?.id)
         // ids[0] is in G, ids[2] is at root → no common group; new group anchors
         // at root[0] (root-level slot of the earliest's ancestor G). G keeps
-        // ids[1] alone, dissolves.
+        // ids[1] alone and remains a folder.
         w.groupTabs([ids[0], ids[2]])
-        #expect(w.group(g) == nil)                       // G dissolved (1 child left)
-        #expect(w.tabGroups.count == 1)
-        let new = try #require(w.tabGroups.first)
+        #expect(w.group(g)?.tabIDs == [ids[1]])
+        #expect(w.tabGroups.count == 2)
+        let new = try #require(w.tabGroups.first { $0.id != g })
         #expect(new.tabIDs == [ids[0], ids[2]])
         // root order: new group, then orphaned ids[1], then ids[3]
         #expect(w.tabs.map(\.id) == [ids[0], ids[2], ids[1], ids[3]])
@@ -779,18 +814,20 @@ import Foundation
         var w = try #require(Workspace(restoring: tabSpecs, activeIndex: 0, tree: snap))
         let ids = w.tabs.map(\.id)
         let g = try #require(w.tabGroups.first { $0.name == "G" }?.id)
+        let aID = try #require(w.tabGroups.first { $0.name == "A" }?.id)
         let bID = try #require(w.tabGroups.first { $0.name == "B" }?.id)
 
         // ids[0] is in G/A, ids[2] is in G/B → LCA is G. New group should sit
         // inside G at A's slot (the LCA child containing the earliest tab).
         w.groupTabs([ids[2], ids[0]])
 
-        let newGroup = try #require(w.tabGroups.first { $0.id != g && $0.id != bID })
+        let newGroup = try #require(w.tabGroups.first { ![g, aID, bID].contains($0.id) })
         let outer = try #require(w.group(g))
-        // A dissolves (one child left after lift); B dissolves (one child left).
-        // G now contains: [newGroup, ids1 (from A), ids3 (from B)].
+        // A and B remain as one-child folders.
         #expect(outer.children.first?.group?.id == newGroup.id)
-        #expect(outer.tabIDs.dropFirst(0) == [ids[1], ids[3]])
+        #expect(outer.children.compactMap(\.group?.id) == [newGroup.id, aID, bID])
+        #expect(w.group(aID)?.tabIDs == [ids[1]])
+        #expect(w.group(bID)?.tabIDs == [ids[3]])
         #expect(newGroup.tabIDs == [ids[0], ids[2]])
         #expect(w.tabs.map(\.id) == [ids[0], ids[2], ids[1], ids[3], ids[4]])
     }
@@ -821,8 +858,8 @@ import Foundation
     /// Layout: G[H[J[t0, anchorJ], K[t1, anchorK]], t2]. groupTabs([t1, t0]) —
     /// paths [G, H, J] vs [G, H, K] → LCA = [G, H]. New group lands inside H
     /// at slot 0 (the slot of J, which contains earliest tab t0). J keeps its
-    /// anchor; K keeps its anchor; both survive (≥2 children each? No — each
-    /// has 1 child left and dissolves). Final H = [newGroup, anchorJ, anchorK].
+    /// anchor; K keeps its anchor; both remain as one-child folders. Final H =
+    /// [newGroup, J[anchorJ], K[anchorK]].
     @Test func groupTabsAcrossDeeplyNestedSiblingsAnchorsAtLCA() throws {
         let l0 = loc(0); let l1 = loc(1); let lT2 = loc(2)
         let lAJ = loc(3); let lAK = loc(4)
@@ -845,12 +882,12 @@ import Foundation
         w.groupTabs([t1, t0])
 
         let hGroup = try #require(w.group(h))
-        // J dissolves to anchorJ; K dissolves to anchorK; H = [newGroup, aJ, aK].
+        // J and K remain around their anchor pages.
         #expect(hGroup.children.count == 3)
         let newGroup = try #require(hGroup.children[0].group)
         #expect(newGroup.tabIDs == [t0, t1])
-        #expect(hGroup.children[1].tabID == aJ)
-        #expect(hGroup.children[2].tabID == aK)
+        #expect(hGroup.children[1].group?.tabIDs == [aJ])
+        #expect(hGroup.children[2].group?.tabIDs == [aK])
         // DFS leaf order: [t0, t1, anchorJ, anchorK, tT2].
         #expect(w.tabs.map(\.id) == [t0, t1, aJ, aK, tT2])
     }
@@ -944,13 +981,13 @@ import Foundation
 
     // MARK: phase 3 — multi-item drag
 
-    @Test func moveTabsToRootDissolvesEmptiedSourceGroup() throws {
+    @Test func moveTabsToRootKeepsEmptiedSourceFolder() throws {
         var (w, ids) = workspace(4)
         w.groupTab(ids[1], onto: ids[0])                 // G = [ids0, ids1] at root[0]
-        // Lift both group members back to root at index 1. G empties and
-        // dissolves; the new tabs occupy the positions where G used to sit.
+        let g = try #require(w.tabGroups.first?.id)
+        // Lift both group members back to root at index 1. G remains empty.
         w.moveTabsToRoot([ids[0], ids[1]], at: 1)
-        #expect(w.tabGroups.isEmpty)
+        #expect(w.group(g)?.children.isEmpty == true)
         #expect(w.tabs.map(\.id) == [ids[0], ids[1], ids[2], ids[3]])
     }
 
@@ -983,7 +1020,7 @@ import Foundation
         let g2 = try #require(w.tabGroups.last?.id)
         w.moveGroup(g2, intoGroup: g1)                   // G1 = [ids0, ids1, G2]
         w.moveGroupsToRoot([g2], at: 0)                  // hoist G2 back, at root[0]
-        // Now G1 has 2 children left; should not dissolve.
+        // G1 remains with its two direct tab children.
         #expect(w.group(g2) != nil)
         #expect(w.group(g1) != nil)
         // Root order: G2 first, then G1.
@@ -1036,8 +1073,6 @@ import Foundation
     }
 
     @Test func moveItemsIntoGroupPreservesInterleavedOrder() throws {
-        // Dst needs ≥2 anchor tabs so it survives normalize after Src + ids4
-        // land inside it; otherwise dissolveSmall would unwrap Dst.
         let tabSpecs = (0..<5).map { (location: loc($0), pinned: false, customTitle: String?.none, cachedTitle: String?.none, cachedType: EntryType?.none) }
         let snap = WorkspaceTreeSnapshot(roots: [
             .group(.init(name: "Dst", isCollapsed: false, children: [.tab(0), .tab(1)])),

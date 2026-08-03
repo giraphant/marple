@@ -349,8 +349,8 @@ import Testing
         let saved = try #require(state.spaces?.flatMap(\.tabs).first { $0.pinned })
         #expect(saved.location.openPath == book.path)
         let restored = try #require(state.makeWorkspace())
-        #expect(restored.activeTab.location.openPath == book.path)
-        #expect(restored.activeTab.pinnedLocation?.openPath == book.path)
+        #expect(restored.activeTab!.location.openPath == book.path)
+        #expect(restored.activeTab!.pinnedLocation?.openPath == book.path)
     }
 
     @MainActor

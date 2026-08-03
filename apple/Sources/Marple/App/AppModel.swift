@@ -198,7 +198,7 @@ final class AppModel {
     }
 
     var pane: Pane { browsePane }
-    var openPath: String? { isBrowsing ? nil : workspace?.activeTab.location.openPath }
+    var openPath: String? { isBrowsing ? nil : workspace?.activeTab?.location.openPath }
     var tabs: [NavTab] { workspace?.tabs ?? [] }
     var tabGroups: [TabGroup] { workspace?.tabGroups ?? [] }
     var tabRootNodes: [TabNode] { workspace?.rootNodes ?? [] }
@@ -210,15 +210,15 @@ final class AppModel {
                 return tabs.first(where: { $0.id == id })?.pinned == true ? node : nil
             case .group(var group):
                 group.children = group.children.compactMap(pinnedOnly)
-                return group.children.isEmpty ? nil : .group(group)
+                return .group(group)
             }
         }
         return tabRootNodes.compactMap(pinnedOnly)
     }
     var activeTabID: NavTab.ID? { isBrowsing ? nil : workspace?.activeID }
-    var canGoBack: Bool { !isBrowsing && (workspace?.activeTab.history.canGoBack ?? false) }
-    var canGoForward: Bool { !isBrowsing && (workspace?.activeTab.history.canGoForward ?? false) }
-    var isPinnedListContext: Bool { !isBrowsing && (workspace?.activeTab.pinned ?? false) }
+    var canGoBack: Bool { !isBrowsing && (workspace?.activeTab?.history.canGoBack ?? false) }
+    var canGoForward: Bool { !isBrowsing && (workspace?.activeTab?.history.canGoForward ?? false) }
+    var isPinnedListContext: Bool { !isBrowsing && (workspace?.activeTab?.pinned ?? false) }
 
     @ObservationIgnored weak var undoManager: UndoManager?
 
@@ -589,10 +589,12 @@ final class AppModel {
         let savedSpaces = spaces.map { space -> PersistedWorkspaceSpace in
             let ws = space.workspace
             let savedTabs = ws?.tabs.map(persistedTab) ?? []
-            let idx = ws.flatMap { w in w.tabs.firstIndex { $0.id == w.activeID } } ?? 0
+            let idx = ws.flatMap { w in
+                w.activeID.flatMap { activeID in w.tabs.firstIndex { $0.id == activeID } }
+            } ?? 0
             return PersistedWorkspaceSpace(id: space.id,
                                            name: space.name,
-                                           isBrowsing: ws == nil ? true : space.isBrowsing,
+                                           isBrowsing: ws?.tabs.isEmpty != false ? true : space.isBrowsing,
                                            tabs: savedTabs,
                                            activeIndex: idx,
                                            iconName: space.iconName,
@@ -766,7 +768,7 @@ final class AppModel {
         activeSpaceID = id
         browseSearchText = ""
         pinnedSearchText = ""
-        if workspace == nil || isBrowsing {
+        if workspace?.tabs.isEmpty != false || isBrowsing {
             isBrowsing = true
             resetSearch(to: "")
             clearReaderHighlight()
@@ -954,13 +956,12 @@ final class AppModel {
             guard var ws = source.workspace else { return }
             bundle = ws.extractItemsForTransfer(items)
             source.workspace = ws.isEmpty ? nil : ws
-            if source.workspace == nil { source.isBrowsing = true }
+            if source.workspace?.tabs.isEmpty != false { source.isBrowsing = true }
         }
         guard !bundle.tabs.isEmpty else { return }
         mutateSpace(destinationID) { destination in
-            if destination.workspace == nil, let first = bundle.tabs.first {
-                var ws = Workspace(initial: first.location)
-                _ = ws.extractItemsForTransfer([.tab(ws.activeID)])
+            if destination.workspace == nil {
+                var ws = Workspace()
                 ws.insertTransferBundleToRoot(bundle, at: index)
                 destination.workspace = ws
             } else {
@@ -984,7 +985,7 @@ final class AppModel {
             guard var ws = source.workspace else { return }
             bundle = ws.extractItemsForTransfer(items)
             source.workspace = ws.isEmpty ? nil : ws
-            if source.workspace == nil { source.isBrowsing = true }
+            if source.workspace?.tabs.isEmpty != false { source.isBrowsing = true }
         }
         guard !bundle.tabs.isEmpty else { return }
         mutateSpace(destinationID) { destination in
@@ -1480,7 +1481,7 @@ final class AppModel {
     }
 
     private func sourceLocation(for path: String) -> NavLocation {
-        if isPinnedListContext, let location = workspace?.activeTab.location {
+        if isPinnedListContext, let location = workspace?.activeTab?.location {
             return NavLocation(pane: location.pane, openPath: path,
                                listContext: location.listContext)
         }
@@ -1738,7 +1739,7 @@ final class AppModel {
         for id in ordered { workspace.closeTab(id) }
         if let selectAfterClose { workspace.select(selectAfterClose) }
         self.workspace = workspace.isEmpty ? nil : workspace
-        if self.workspace == nil { isBrowsing = true }
+        if self.workspace?.tabs.isEmpty != false { isBrowsing = true }
         registerCloseUndo(record, actionName: actionName,
                           selectAfterClose: selectAfterClose)
         return (previousPinnedContext, activeTabID != previousActiveID)
@@ -1754,8 +1755,8 @@ final class AppModel {
 
     /// Close the active tab (⌘W). A pinned tab withdraws to its anchor.
     func closeActiveTab() async {
-        guard !isBrowsing, var workspace else { return }
-        if workspace.activeTab.pinned {
+        guard !isBrowsing, var workspace, let active = workspace.activeTab else { return }
+        if active.pinned {
             guard workspace.withdrawActivePinnedNavigation() else { return }
             self.workspace = workspace
             await syncToActiveLocation(from: true)
