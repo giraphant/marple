@@ -1057,22 +1057,6 @@
         }
       }
     },
-    "关闭其他页面" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Close Other Pages"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "关闭其他页面"
-          }
-        }
-      }
-    },
     "关闭窗口" : {
       "localizations" : {
         "en" : {

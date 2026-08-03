@@ -1733,16 +1733,6 @@ final class AppModel {
         await closeTab(id)
     }
 
-    /// Close every tab except `keep` and any pinned tabs.
-    func closeOtherTabs(_ keep: NavTab.ID) async {
-        let toClose = Set(tabs.filter { $0.id != keep && !$0.pinned }.map(\.id))
-        guard let sync = closeTabsNow(toClose, actionName: String(localized: "关闭其他页面"),
-                                      selectAfterClose: keep) else { return }
-        if sync.activeChanged {
-            await syncToActiveLocation(from: sync.previousPinnedContext)
-        }
-    }
-
     /// Close every tab in `ids` skipping pinned. Empties drop back to browse mode
     /// the same way the single-tab close does.
     func closeTabs(_ ids: Set<NavTab.ID>) async {

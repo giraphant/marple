@@ -31,12 +31,15 @@ struct SidebarPageSectionTests {
             let harness = try await makeHarness(
                 hasFixed: item.hasFixed,
                 hasTemporary: item.hasTemporary)
-            let rendered = renderedPageArea(in: harness.outline)
+            let rendered = try renderedPageArea(in: harness)
 
             #expect(rendered.rows == item.expectedRows, Comment(rawValue: item.name))
             #expect(rendered.dividerVisible == item.expectedDivider, Comment(rawValue: item.name))
             #expect(rendered.dividerCellExists == item.expectedDivider, Comment(rawValue: item.name))
             #expect(rendered.newTabButtonCount == 0, Comment(rawValue: item.name))
+            #expect(!rendered.dividerIsGroupItem, Comment(rawValue: item.name))
+            #expect(!rendered.dividerOutlineCellVisible, Comment(rawValue: item.name))
+            #expect(rendered.precedingRowGap == 0, Comment(rawValue: item.name))
             if item.expectedDivider {
                 #expect(rendered.dividerRowHeight == 13, Comment(rawValue: item.name))
             } else {
@@ -70,6 +73,9 @@ extension SidebarPageSectionTests {
         let dividerRowHeight: CGFloat
         let temporaryRowOffset: CGFloat?
         let newTabButtonCount: Int
+        let dividerIsGroupItem: Bool
+        let dividerOutlineCellVisible: Bool
+        let precedingRowGap: CGFloat
     }
 
     @MainActor
@@ -106,6 +112,8 @@ extension SidebarPageSectionTests {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("sidebar"))
         column.width = 280
         outline.addTableColumn(column)
+        outline.style = .sourceList
+        outline.floatsGroupRows = false
         outline.outlineTableColumn = column
         outline.dataSource = coordinator
         outline.delegate = coordinator
@@ -117,7 +125,8 @@ extension SidebarPageSectionTests {
     }
 
     @MainActor
-    private func renderedPageArea(in outline: NSOutlineView) -> RenderedPageArea {
+    private func renderedPageArea(in harness: Harness) throws -> RenderedPageArea {
+        let outline = harness.outline
         let pageTitle = String(localized: "页面")
         let newTabTitle = String(localized: "新建页面")
         var rows: [String] = []
@@ -141,6 +150,7 @@ extension SidebarPageSectionTests {
         let dividerView = outline.view(atColumn: 0, row: dividerRow, makeIfNecessary: true)
         let dividers = dividerView.map { descendants(of: NSBox.self, in: $0) } ?? []
         let dividerRect = outline.rect(ofRow: dividerRow)
+        let dividerItem = try #require(outline.item(atRow: dividerRow))
 
         return RenderedPageArea(
             rows: rows,
@@ -152,7 +162,13 @@ extension SidebarPageSectionTests {
             temporaryRowOffset: temporaryRow.map {
                 outline.rect(ofRow: $0).minY - dividerRect.minY
             },
-            newTabButtonCount: newTabButtonCount)
+            newTabButtonCount: newTabButtonCount,
+            dividerIsGroupItem: harness.coordinator.outlineView(
+                outline, isGroupItem: dividerItem),
+            dividerOutlineCellVisible: outline.delegate?.outlineView?(
+                outline, shouldShowOutlineCellForItem: dividerItem) ?? true,
+            precedingRowGap: dividerRect.minY
+                - outline.rect(ofRow: dividerRow - 1).maxY)
     }
 
     @MainActor

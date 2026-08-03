@@ -144,7 +144,6 @@ struct TabStripView: View {
             Divider()
             Button("关闭页面") { Task { await model.closeTab(tab.id) } }
                 .disabled(model.tabs.count <= 1)
-            Button("关闭其他页面") { Task { await model.closeOtherTabs(tab.id) } }
         }
     }
 }

@@ -218,25 +218,6 @@ import Testing
     }
 
     @MainActor
-    @Test func undoCloseOthersRestoresClosedActiveAndRedoKeepsRequestedPage() async throws {
-        let (model, ids) = try await modelWithThreeTabs()
-        model.setPinned([ids[0]], to: true)
-        let manager = attachUndoManager(to: model)
-
-        await grouped(manager) { await model.closeOtherTabs(ids[1]) }
-        #expect(model.tabs.map(\.id) == [ids[0], ids[1]])
-        #expect(model.activeTabID == ids[1])
-
-        manager.undo()
-        #expect(model.tabs.map(\.id) == ids)
-        #expect(model.activeTabID == ids[2])
-
-        manager.redo()
-        #expect(model.tabs.map(\.id) == [ids[0], ids[1]])
-        #expect(model.activeTabID == ids[1])
-    }
-
-    @MainActor
     @Test func typeOrderAndVisibilityUndoIndependently() throws {
         let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
         let originalOrder = model.typeOrder

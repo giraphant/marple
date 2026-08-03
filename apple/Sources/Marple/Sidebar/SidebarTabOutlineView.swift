@@ -674,8 +674,15 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         func outlineView(_ outlineView: NSOutlineView, isGroupItem item: Any) -> Bool {
             guard let node = item as? SidebarOutlineNode else { return false }
+            if node.isTabsSection { return false }
             if case .section = node.kind { return true }
             return false
+        }
+
+        func outlineView(_ outlineView: NSOutlineView,
+                         shouldShowOutlineCellForItem item: Any) -> Bool {
+            guard let node = item as? SidebarOutlineNode else { return true }
+            return !node.isTabsSection
         }
 
         func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
@@ -950,7 +957,6 @@ struct SidebarOutlineView: NSViewRepresentable {
                 let closeItem = menuItem(String(localized: "关闭页面"), action: #selector(closeTabFromMenu(_:)), node: node)
                 closeItem.isEnabled = tab.pinned || model.tabs.count > 1
                 items.append(closeItem)
-                items.append(menuItem(String(localized: "关闭其他页面"), action: #selector(closeOtherTabsFromMenu(_:)), node: node))
                 return items
             case .section, .pane:
                 return []
@@ -1011,12 +1017,6 @@ struct SidebarOutlineView: NSViewRepresentable {
             guard let node = sender.representedObject as? SidebarOutlineNode,
                   case .tab(let id) = node.kind else { return }
             Task { await model.closeTab(id) }
-        }
-
-        @objc private func closeOtherTabsFromMenu(_ sender: NSMenuItem) {
-            guard let node = sender.representedObject as? SidebarOutlineNode,
-                  case .tab(let id) = node.kind else { return }
-            Task { await model.closeOtherTabs(id) }
         }
 
         // MARK: - Selection & expansion notifications
