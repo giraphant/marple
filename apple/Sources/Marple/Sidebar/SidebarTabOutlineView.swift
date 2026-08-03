@@ -20,7 +20,7 @@ private enum SidebarOutlineSection {
         switch self {
         case .objects: return String(localized: "物件")
         case .views:   return String(localized: "视图")
-        case .pinned:  return String(localized: "固定页面")
+        case .pinned:  return String(localized: "页面")
         case .tabs:    return String(localized: "页面")
         }
     }
@@ -689,6 +689,8 @@ struct SidebarOutlineView: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
             guard let node = item as? SidebarOutlineNode else { return 30 }
             switch node.kind {
+            case .section(.tabs):
+                return SidebarNewTabCellView.height(showsDivider: !node.children.isEmpty)
             case .section:
                 return 22
             case .pane:
@@ -700,6 +702,13 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
             guard let node = item as? SidebarOutlineNode else { return nil }
+            if node.isTabsSection {
+                let view = outlineView.makeView(
+                    withIdentifier: SidebarNewTabCellView.identifier,
+                    owner: self) as? SidebarNewTabCellView ?? SidebarNewTabCellView()
+                view.configure(showsDivider: !node.children.isEmpty, coordinator: self)
+                return view
+            }
             let view = outlineView.makeView(withIdentifier: SidebarOutlineCellView.identifier, owner: self) as? SidebarOutlineCellView
                 ?? SidebarOutlineCellView()
             view.configure(node: node, coordinator: self)
@@ -1822,6 +1831,72 @@ struct SidebarOutlineView: NSViewRepresentable {
 }
 
 // MARK: - Cell view
+
+@MainActor
+private final class SidebarNewTabCellView: NSTableCellView {
+    static let identifier = NSUserInterfaceItemIdentifier("sidebar-new-tab-cell")
+
+    private let divider = NSBox()
+    private let button = NSButton()
+    private weak var coordinator: SidebarOutlineView.Coordinator?
+
+    static func height(showsDivider: Bool) -> CGFloat {
+        showsDivider ? 46 : 30
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        identifier = Self.identifier
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        identifier = Self.identifier
+        setup()
+    }
+
+    func configure(showsDivider: Bool,
+                   coordinator: SidebarOutlineView.Coordinator) {
+        self.coordinator = coordinator
+        divider.isHidden = !showsDivider
+    }
+
+    private func setup() {
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+
+        button.title = String(localized: "新建页面")
+        button.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        button.imagePosition = .imageLeading
+        button.imageHugsTitle = true
+        button.bezelStyle = .inline
+        button.isBordered = false
+        button.alignment = .left
+        button.font = .systemFont(ofSize: NSFont.systemFontSize)
+        button.contentTintColor = .secondaryLabelColor
+        button.target = self
+        button.action = #selector(openNewTab(_:))
+        button.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(divider)
+        addSubview(button)
+        NSLayoutConstraint.activate([
+            divider.topAnchor.constraint(equalTo: topAnchor, constant: 7),
+            divider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            divider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            button.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            button.trailingAnchor.constraint(equalTo: trailingAnchor),
+            button.bottomAnchor.constraint(equalTo: bottomAnchor),
+            button.heightAnchor.constraint(equalToConstant: 30),
+        ])
+    }
+
+    @objc private func openNewTab(_ sender: NSButton) {
+        guard let coordinator else { return }
+        CommandPalettePresenter.toggle(model: coordinator.model)
+    }
+}
 
 @MainActor
 private final class SidebarOutlineCellView: NSTableCellView {
