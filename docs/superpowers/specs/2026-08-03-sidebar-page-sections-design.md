@@ -27,7 +27,7 @@ no New Tab or `Clear` action in the sidebar.
 
 ## Outline Structure
 
-The existing `.pinned` and `.tabs` root sections remain separate:
+The existing `.pinned` and `.tabs` logical sections remain separate:
 
 - `.pinned` remains the fixed-page container and the drop target that accepts
   pages even when it has no children;
@@ -48,12 +48,21 @@ Only their presentation changes:
   item. Source-list group rows receive an automatic 13-point leading gap; not
   using that appearance lets the 13-point divider row sit directly between
   the adjacent 30-point page rows, with 6.5 points on each side of the line;
-- the `.tabs` disclosure cell stays hidden because expansion is restored
-  programmatically and this structural row has no interactive header.
+- the outline data source presents the `.tabs` divider and its temporary-page
+  children as root-level peers. The node still owns those children internally,
+  so lookup and drop routing keep using the existing logical section, while
+  AppKit no longer adds a child indentation level to the visible rows;
+- the `.tabs` disclosure cell stays hidden. It retains its existing logical
+  expandability for drop targeting, but expanding it yields no additional
+  visual rows because its children are already present in the flattened list;
+- the divider line has no additional horizontal inset inside its cell. The
+  fixed-page cell, divider cell and temporary-page cell therefore share the
+  same leading and trailing bounds.
 
 Using the existing `.tabs` section header avoids a synthetic outline node and
 keeps selection, remaining context menus, drag payloads, and persistence
-unchanged. Existing section expansion state also remains unchanged.
+unchanged. Visual flattening is confined to the outline data-source boundary;
+it does not change `Workspace`, `NavTab`, or persisted section data.
 
 ## Context Menu Simplification
 
@@ -95,14 +104,17 @@ Automated coverage should verify:
 4. with source-list styling, `.tabs` is not a group item, has no disclosure
    cell, and its visible divider row directly touches the fixed and temporary
    row rectangles above and below;
-5. neither tab UI contains `关闭其他页面`, and no dedicated
+5. fixed-page, divider, and temporary-page cells have identical horizontal
+   bounds, and the divider line fills those bounds without an extra inset;
+6. neither tab UI contains `关闭其他页面`, and no dedicated
    `closeOtherTabs(_:)` API, undo test, or localization remains;
-6. the empty `.pinned` section remains expandable and accepts single and batch
+7. the empty `.pinned` section remains expandable and accepts single and batch
    drops;
-7. existing temporary-page activation, fixed-page grouping, ordinary close,
+8. existing temporary-page activation, fixed-page grouping, ordinary close,
    and multi-selection close tests remain green.
 
 Manual verification should compare all four states in both light and dark
 appearance and confirm that the divider appears only between non-empty fixed
 and temporary lists, without introducing a second visible section title or an
-empty gap.
+empty gap. The divider and every page row below it must align horizontally with
+the fixed-page rows above it.

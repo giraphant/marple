@@ -2,23 +2,24 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove the sidebar New Tab control, vertically center the conditional fixed/temporary divider, and remove `关闭其他页面` globally.
+**Goal:** Remove the sidebar New Tab control, align the conditional fixed/temporary divider and page rows on one visual axis, and remove `关闭其他页面` globally.
 
-**Architecture:** Keep the existing `.pinned` and `.tabs` outline sections and their drag/drop behavior. Render a divider cell for `.tabs` only when both page lists contain items; otherwise return no cell and use `CGFloat.leastNormalMagnitude`. Present `.tabs` as a non-group structural row so AppKit adds no source-list group spacing, hide its disclosure cell, and delete the two `关闭其他页面` UI entries plus their now-unused model operation, undo test, and localization.
+**Architecture:** Keep the existing `.pinned` and `.tabs` logical sections and their drag/drop behavior. Render a divider cell for `.tabs` only when both page lists contain items; otherwise return no cell and use `CGFloat.leastNormalMagnitude`. Present the `.tabs` divider and its children as root-level peers at the outline data-source boundary so AppKit adds neither group spacing nor child indentation, while the logical node continues to own temporary pages. Delete the two `关闭其他页面` UI entries plus their now-unused model operation, undo test, and localization.
 
 **Tech Stack:** Swift 6, AppKit `NSOutlineView` and `NSBox`, Swift Testing, Swift Package Manager.
 
 ## Global Constraints
 
 - Work directly on `main`; do not create a branch or worktree.
-- Keep `.pinned` and `.tabs` as separate root sections with their existing stable keys, expansion state, children, and drag/drop routing.
+- Keep `.pinned` and `.tabs` as separate logical sections with their existing stable keys, children, and drag/drop routing. Flatten only the visible outline hierarchy for `.tabs`; do not change model or persistence data.
 - Keep the `.pinned` section's sole visible title as `页面`; never render the `.tabs` text title.
 - Show the divider only when fixed and temporary pages are both present; otherwise the `.tabs` section returns no cell and adds no visible geometry. AppKit rejects literal zero table-row heights, so retain the structural row at `CGFloat.leastNormalMagnitude`.
 - Never report `.tabs` as an AppKit group item and never show its outline disclosure cell. Its row rectangle must directly follow the preceding visible row; when shown, its 13-point divider cell sits between the two page lists with 6.5 points on each side of the line.
+- Present the `.tabs` divider and temporary pages as root-level visual peers. Their cell bounds must match the fixed-page cell bounds, and the divider line must not add another horizontal inset.
 - Remove the sidebar New Tab button, its action, and its `新建页面` / `New Tab` localization. Do not change the existing Command-T command.
 - Remove `关闭其他页面` from both the AppKit sidebar and `TabStripView`, then remove the unreferenced `AppModel.closeOtherTabs(_:)`, its dedicated undo test, and its localization. Keep ordinary close, Command-W withdrawal, and explicit multi-selection close unchanged.
 - Do not change `Workspace`, `NavTab`, `PersistedState`, undo/redo for remaining actions, pinning, grouping, ordering, page activation, or fixed-anchor behavior.
-- Do not add `Clear`, Peek, hover-close, a synthetic outline node, new state, or defensive fallbacks.
+- Do not add `Clear`, Peek, hover-close, a synthetic outline node, new state, manual negative frame offsets, or defensive fallbacks.
 - Preserve the empty `.pinned` section as an expandable single/batch drop target.
 - Limit production and test changes to the six files listed below; workflow spec/plan documents are excluded. Preserve unrelated content.
 - Build and launch only the cache-backed development bundle; do not overwrite `/Applications/Marple.app`, sign, push, publish, or create a release.
@@ -540,3 +541,174 @@ git commit -m "fix: center sidebar divider and simplify tab closing"
 ```
 
 Expected: exactly the six planned follow-up files are committed. Do not push until the user has tested the development app and asks for it.
+
+---
+
+### Task 2: Align the Divider and Temporary Pages Horizontally
+
+**Files:**
+- Modify: `apple/Tests/MarpleKitTests/SidebarPageSectionTests.swift`
+- Modify: `apple/Sources/Marple/Sidebar/SidebarTabOutlineView.swift:660-672, 1842-1872`
+
+**Interfaces:**
+- Keeps: `.tabs` as the logical owner of temporary `SidebarOutlineNode` children and the existing temporary-page drop target.
+- Produces: private `Coordinator.visibleChildren(of:) -> [SidebarOutlineNode]`, which flattens only `.tabs` at the `NSOutlineViewDataSource` boundary.
+- Keeps: the existing 13-point conditional divider and `CGFloat.leastNormalMagnitude` hidden row.
+- Changes: the divider's `NSBox` fills its cell horizontally instead of adding an 8-point inset.
+
+- [ ] **Step 1: Add a failing horizontal-lane regression**
+
+Add a focused test beside `pageAreaRendersTheFourApprovedStates`:
+
+```swift
+@MainActor
+@Test func fixedDividerAndTemporaryRowsShareHorizontalBounds() async throws {
+    let harness = try await makeHarness(hasFixed: true, hasTemporary: true)
+    let outline = harness.outline
+    let fixedRow = try #require(row(containing: "Fixed", in: outline))
+    let temporaryRow = try #require(row(containing: "Temporary", in: outline))
+    let dividerRow = temporaryRow - 1
+    let fixedCell = try #require(outline.view(
+        atColumn: 0, row: fixedRow, makeIfNecessary: true))
+    let dividerCell = try #require(outline.view(
+        atColumn: 0, row: dividerRow, makeIfNecessary: true))
+    let temporaryCell = try #require(outline.view(
+        atColumn: 0, row: temporaryRow, makeIfNecessary: true))
+    let divider = try #require(descendants(of: NSBox.self, in: dividerCell)
+        .first { $0.boxType == .separator })
+    outline.layoutSubtreeIfNeeded()
+    dividerCell.layoutSubtreeIfNeeded()
+
+    #expect(fixedCell.frame.minX == dividerCell.frame.minX)
+    #expect(fixedCell.frame.maxX == dividerCell.frame.maxX)
+    #expect(temporaryCell.frame.minX == fixedCell.frame.minX)
+    #expect(temporaryCell.frame.maxX == fixedCell.frame.maxX)
+    #expect(divider.frame.minX == dividerCell.bounds.minX)
+    #expect(divider.frame.maxX == dividerCell.bounds.maxX)
+}
+```
+
+Add this real-view lookup helper in the test extension:
+
+```swift
+@MainActor
+private func row(containing title: String, in outline: NSOutlineView) -> Int? {
+    (0..<outline.numberOfRows).first { row in
+        guard let view = outline.view(
+            atColumn: 0, row: row, makeIfNecessary: true) else { return false }
+        return descendants(of: NSTextField.self, in: view)
+            .contains { $0.stringValue == title }
+    }
+}
+```
+
+This test catches two regressions independently: nesting temporary pages below
+an ordinary `.tabs` row moves their cells right by one outline level, while
+restoring the divider's former insets moves its line away from the shared cell
+bounds.
+
+- [ ] **Step 2: Run the focused suite and verify RED**
+
+Run from `apple/`:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+CLANG_MODULE_CACHE_PATH=/private/tmp/marple-clang-cache \
+SWIFTPM_MODULECACHE_OVERRIDE=/private/tmp/marple-swiftpm-cache \
+xcrun swift test --filter SidebarPageSectionTests --quiet \
+  -Xswiftc -F -Xswiftc /Applications/Xcode.app/Contents/Developer/Library/Developer/Frameworks
+```
+
+Expected RED: the temporary cell is one `indentationPerLevel` farther right
+than the fixed cell, and the divider line begins and ends 8 points inside its
+cell. Existing row-order and vertical-spacing assertions remain green.
+
+- [ ] **Step 3: Flatten only the visible `.tabs` hierarchy**
+
+Add one data-source helper inside `Coordinator`:
+
+```swift
+private func visibleChildren(of item: SidebarOutlineNode?) -> [SidebarOutlineNode] {
+    guard let item else {
+        return rootItems.flatMap { node in
+            node.isTabsSection ? [node] + node.children : [node]
+        }
+    }
+    return item.isTabsSection ? [] : item.children
+}
+```
+
+Use it in both outline data-source methods:
+
+```swift
+func outlineView(_ outlineView: NSOutlineView,
+                 numberOfChildrenOfItem item: Any?) -> Int {
+    visibleChildren(of: item as? SidebarOutlineNode).count
+}
+
+func outlineView(_ outlineView: NSOutlineView,
+                 child index: Int, ofItem item: Any?) -> Any {
+    visibleChildren(of: item as? SidebarOutlineNode)[index]
+}
+```
+
+Do not move temporary nodes out of `tabsSection.children`, create proxy nodes,
+change persisted state, or change drop handlers. The same node instances are
+merely exposed as root-level visual rows.
+
+- [ ] **Step 4: Remove the divider's extra horizontal inset**
+
+Change only the horizontal constraints in `SidebarPageDividerCellView.setup()`:
+
+```swift
+NSLayoutConstraint.activate([
+    divider.leadingAnchor.constraint(equalTo: leadingAnchor),
+    divider.trailingAnchor.constraint(equalTo: trailingAnchor),
+    divider.centerYAnchor.constraint(equalTo: centerYAnchor),
+])
+```
+
+Do not add compensating constants or frame overrides.
+
+- [ ] **Step 5: Run the focused suite and verify GREEN**
+
+Re-run the Step 2 command. Expected: all `SidebarPageSectionTests` pass; the
+fixed cell, divider cell, temporary cell, and divider line share identical
+horizontal bounds, while the existing vertical-spacing and empty fixed-area
+drop regressions remain green.
+
+- [ ] **Step 6: Run adjacent and full verification**
+
+Run from `apple/`:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+CLANG_MODULE_CACHE_PATH=/private/tmp/marple-clang-cache \
+SWIFTPM_MODULECACHE_OVERRIDE=/private/tmp/marple-swiftpm-cache \
+xcrun swift test --filter NavigationContextTests --quiet \
+  -Xswiftc -F -Xswiftc /Applications/Xcode.app/Contents/Developer/Library/Developer/Frameworks
+
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+CLANG_MODULE_CACHE_PATH=/private/tmp/marple-clang-cache \
+SWIFTPM_MODULECACHE_OVERRIDE=/private/tmp/marple-swiftpm-cache \
+xcrun swift test --quiet \
+  -Xswiftc -F -Xswiftc /Applications/Xcode.app/Contents/Developer/Library/Developer/Frameworks
+```
+
+Expected: both commands pass. If the quiet full-suite helper exits with the
+known SIGPIPE, apply the existing one-identical-rerun policy from Task 1, then
+use a non-quiet run only if the identical retry also SIGPIPEs.
+
+- [ ] **Step 7: Commit the surgical hotfix**
+
+```bash
+git diff --check
+git status --short --branch
+git diff --stat
+git add \
+  apple/Sources/Marple/Sidebar/SidebarTabOutlineView.swift \
+  apple/Tests/MarpleKitTests/SidebarPageSectionTests.swift
+git commit -m "fix: align sidebar page rows"
+```
+
+Expected: only the two Task 2 code/test files are included in this commit.
