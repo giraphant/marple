@@ -36,12 +36,13 @@ enum CLIHandlers {
     }
 
     private static func read(req: CLIRequest, model: AppModel) async throws -> CLIResponse {
-        guard let path = req.path else {
+        guard let inputPath = req.path else {
             return .failure(code: CLIErrorCode.badRequest, message: "missing path")
         }
-        guard await model.cliEnsureIndexed(path: path),
+        guard let path = model.cliRelativePath(inputPath),
+              await model.cliEnsureIndexed(path: path),
               let entry = model.cliEntry(path: path) else {
-            return .failure(code: CLIErrorCode.notFound, message: "not found: \(path)")
+            return .failure(code: CLIErrorCode.notFound, message: "not found: \(inputPath)")
         }
         let (fm, body) = try await model.cliReadEntry(path: path)
         return .success(CLIResponseData(entry: EntryDetail(

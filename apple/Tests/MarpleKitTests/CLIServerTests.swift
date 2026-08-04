@@ -104,6 +104,75 @@ import Darwin
         #expect(model.openPath == first.path)
     }
 
+    @MainActor
+    @Test func readAcceptsAbsolutePathInsideWorkspace() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cli-absolute-\(UUID().uuidString)")
+        let relative = "vault/notes/absolute.md"
+        let entry = Self.entry(relative)
+        let model = AppModel(
+            client: StubVaultClient(
+                entries: [entry],
+                texts: [relative: "---\ntype: note\n---\n\nBody"]),
+            workspaceRoot: root.path
+        )
+        await model.loadIndex()
+
+        let response = await CLIHandlers.handle(
+            CLIRequest(
+                method: CLIMethod.read,
+                path: root.appendingPathComponent(relative).path),
+            model: model,
+            indexer: VaultIndexer(workspaceRoot: root.path)
+        )
+
+        #expect(response.ok)
+        #expect(response.data?.entry?.digest.path == relative)
+    }
+
+    @MainActor
+    @Test func coldOpenAcceptsAbsolutePathInsideWorkspace() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cli-absolute-\(UUID().uuidString)")
+        let relative = "vault/notes/absolute.md"
+        let entry = Self.entry(relative)
+        let model = AppModel(
+            client: StubVaultClient(entries: [entry], texts: [relative: "Body"]),
+            workspaceRoot: root.path
+        )
+        await model.loadIndex()
+
+        try await model.cliOpenDocument(
+            path: root.appendingPathComponent(relative).path)
+
+        #expect(model.openPath == relative)
+    }
+
+    @MainActor
+    @Test func absolutePathOutsideWorkspaceIsRejected() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cli-root-\(UUID().uuidString)")
+        let relative = "notes/outside.md"
+        let entry = Self.entry(relative)
+        let model = AppModel(
+            client: StubVaultClient(entries: [entry], texts: [relative: "Outside"]),
+            workspaceRoot: root.path
+        )
+        await model.loadIndex()
+        let outside = root.deletingLastPathComponent()
+            .appendingPathComponent("intruder/notes/outside.md").path
+
+        let response = await CLIHandlers.handle(
+            CLIRequest(method: CLIMethod.read, path: outside),
+            model: model,
+            indexer: VaultIndexer(workspaceRoot: root.path)
+        )
+
+        #expect(!response.ok)
+        #expect(response.error?.code == CLIErrorCode.notFound)
+        #expect(model.cliRelativePath(root.path) == nil)
+    }
+
     /// Regression: an agent writes a vault file and immediately `open`s it,
     /// before the 0.4s-debounced FSEvents watcher has reconciled. The CLI must
     /// self-heal via a synchronous reconcile instead of returning

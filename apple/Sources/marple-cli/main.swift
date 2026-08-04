@@ -181,7 +181,7 @@ struct Search: ParsableCommand {
 
 struct Read: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Read one document's frontmatter and body.")
-    @Argument(help: "Vault-relative path of the document.")
+    @Argument(help: "Workspace-relative or absolute path of the document.")
     var path: String
 
     func run() throws {
@@ -192,7 +192,7 @@ struct Read: ParsableCommand {
 
 struct Open: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Open a document in Marple's Pages workspace.")
-    @Argument(help: "Vault-relative path of the document.")
+    @Argument(help: "Workspace-relative or absolute path of the document.")
     var path: String
 
     func run() throws {
