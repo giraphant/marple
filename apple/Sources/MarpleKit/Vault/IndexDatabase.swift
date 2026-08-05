@@ -23,9 +23,8 @@ public final class IndexDatabase: @unchecked Sendable {
     private var cachedQueue: DatabaseQueue?
     private var cachedFileIdentity: FileIdentity?
 
-    /// `VaultIndexer.buildFull()` replaces index.sqlite atomically. A queue opened
-    /// before that swap remains attached to the unlinked old inode, so reuse is
-    /// safe only while the file at `indexDBPath` is still the same file.
+    /// Reuse the queue only while `indexDBPath` still names the same file. This
+    /// also tolerates an external tool replacing the derived index.
     private struct FileIdentity: Equatable {
         let device: UInt64
         let inode: UInt64

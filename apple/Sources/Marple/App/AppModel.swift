@@ -110,7 +110,7 @@ final class AppModel {
     }
 
     /// User-initiated recovery for the ordinary SQLite index. `buildFull` writes
-    /// a temporary DB and atomically swaps it over the live file, so a failed
+    /// a temporary DB and publishes it in a SQLite transaction, so a failed
     /// rebuild leaves the previous readable index intact.
     func rebuildGeneralIndex() async -> GeneralIndexRebuildResult {
         guard !isRebuildingGeneralIndex else { return .alreadyRunning }

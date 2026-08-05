@@ -27,7 +27,7 @@ public struct ReconcileStats: Sendable, Equatable {
 ///
 /// **Thread safety:** `VaultIndexer` is marked `@unchecked Sendable`; the
 /// `writeLock` NSLock serialises all mutations on the live DB (including the
-/// atomic temp→live rename). The class itself is `final` and every property
+/// SQLite backup publication). The class itself is `final` and every property
 /// that crosses actor boundaries is either let-bound or accessed under the lock.
 public final class VaultIndexer: @unchecked Sendable {
 
@@ -53,8 +53,8 @@ public final class VaultIndexer: @unchecked Sendable {
 
     // MARK: - Write lock (mirrors INDEX_WRITE_LOCK in Rust)
 
-    /// Serialises every mutation of the live index file — both the atomic
-    /// tmp→live rename in `buildFull` and the per-entry upsert/delete rows in
+    /// Serialises every mutation of the live index file — both the SQLite
+    /// backup publication in `buildFull` and the per-entry upsert/delete rows in
     /// `reconcile`.  Mirrors `static INDEX_WRITE_LOCK: Mutex<()>` in indexer.rs.
     private let writeLock = NSLock()
 
@@ -74,8 +74,8 @@ public final class VaultIndexer: @unchecked Sendable {
 
     // MARK: - buildFull
 
-    /// Full rebuild: walk vault → parse → sort → write temp DB → atomic rename →
-    /// flip to WAL. Returns the number of indexed entries.
+    /// Full rebuild: walk vault → parse → sort → write temp DB → publish through
+    /// SQLite's backup API. Returns the number of indexed entries.
     ///
     /// Mirrors `build_sqlite_index` (:247-311) + `write_sqlite_index` (:1160-1281).
     @discardableResult
@@ -179,15 +179,24 @@ public final class VaultIndexer: @unchecked Sendable {
         }
         // tmpQueue is deallocated here, closing its connection.
 
-        // 5. Atomic rename under the write lock.
-        //    Mirrors: let _swap = INDEX_WRITE_LOCK.lock(); fs::rename(&tmp, &paths.index_db)
+        // 5. Publish under the write lock through SQLite's backup API. Replacing
+        //    an open WAL database file can attach the old -wal/-shm generation to
+        //    the new main file, so SQLite must own the destination transaction.
         writeLock.lock()
         defer { writeLock.unlock() }
 
-        if FileManager.default.fileExists(atPath: indexDBPath) {
-            try FileManager.default.removeItem(atPath: indexDBPath)
+        var liveConfig = Configuration()
+        liveConfig.label = "MarpleIndexer.publish"
+        liveConfig.busyMode = .timeout(5)
+        let livePool = try DatabasePool(path: indexDBPath, configuration: liveConfig)
+        do {
+            var sourceConfig = Configuration()
+            sourceConfig.readonly = true
+            sourceConfig.label = "MarpleIndexer.publishSource"
+            let source = try DatabaseQueue(path: tmpPath, configuration: sourceConfig)
+            try source.backup(to: livePool)
         }
-        try FileManager.default.moveItem(atPath: tmpPath, toPath: indexDBPath)
+        try FileManager.default.removeItem(atPath: tmpPath)
 
         // QUA-104: a stale entries.cache from before this rebuild may still
         // happen to carry a revision number equal to the new DB's
@@ -197,12 +206,6 @@ public final class VaultIndexer: @unchecked Sendable {
         // new DB's revision.
         let cachePath = indexDBDir + "/entries.cache"
         try? FileManager.default.removeItem(atPath: cachePath)
-
-        // 6. Flip to WAL so all subsequent readers can open concurrently.
-        //    Mirrors: let _ = open_index_rw(&paths.index_db);
-        //    DatabasePool opens in WAL mode automatically (it issues PRAGMA journal_mode=WAL).
-        let _ = try DatabasePool(path: indexDBPath)
-        // DatabasePool is intentionally dropped immediately — we just need the WAL flip.
 
         return entries.count
     }
