@@ -6,7 +6,107 @@ import Darwin
 
 @Suite struct CLIServerTests {
     @MainActor
-    @Test func pingDoesNotCrossMainActorFromAcceptQueue() async throws {
+    @Test func replaySurvivesLostResponseAndRejectsChangedPayload() async throws {
+        let dir = URL(fileURLWithPath: "/tmp/cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let socketPath = dir.appendingPathComponent("s.sock").path
+        let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
+        let server = CLIServer(socketPath: socketPath)
+        let indexer = VaultIndexer(workspaceRoot: dir.path)
+        try server.start(model: model, indexer: indexer)
+        defer { server.stop() }
+        let key = UUID().uuidString
+        let first = try Self.keyedRequest(key: key, title: "必读 Essential")
+        try await Task.detached { try Self.sendAndClose(first, socketPath: socketPath) }.value
+        // Wait on observable state so response loss is known to occur AFTER
+        // the first mutation reached the app, before asking for its replay.
+        for _ in 0..<100 where model.tabGroups.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(model.tabGroups.count == 1)
+        let retry = try Self.keyedRequest(key: key, title: "必读 Essential", retry: true)
+        let response = try await Task.detached { try Self.roundTrip(retry, socketPath: socketPath) }.value
+        #expect(response.ok)
+        #expect(model.tabGroups.count == 1)
+        #expect(response.data?.createdID == model.tabGroups.first?.id)
+        let conflict = try Self.keyedRequest(key: key, title: "推荐 Recommended", retry: true)
+        let rejected = try await Task.detached { try Self.roundTrip(conflict, socketPath: socketPath) }.value
+        #expect(rejected.error?.code == "request_conflict")
+        #expect(model.tabGroups.count == 1)
+
+        server.stop()
+        try server.start(model: model, indexer: indexer)
+        let unknown = try await Task.detached { try Self.roundTrip(retry, socketPath: socketPath) }.value
+        #expect(unknown.error?.code == "request_unknown")
+        #expect(model.tabGroups.count == 1)
+    }
+
+    @MainActor
+    @Test func concurrentMutationDuplicatesCreateOneFolder() async throws {
+        let dir = URL(fileURLWithPath: "/tmp/cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let socketPath = dir.appendingPathComponent("s.sock").path
+        let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
+        let server = CLIServer(socketPath: socketPath)
+        try server.start(model: model, indexer: VaultIndexer(workspaceRoot: dir.path))
+        defer { server.stop() }
+        let request = try Self.keyedRequest(key: UUID().uuidString, title: "Concurrent")
+        let responses = try await withThrowingTaskGroup(of: CLIResponse.self) { group in
+            for _ in 0..<6 { group.addTask { try Self.roundTrip(request, socketPath: socketPath) } }
+            var responses: [CLIResponse] = []
+            for try await response in group { responses.append(response) }
+            return responses
+        }
+        #expect(responses.allSatisfy { $0.ok })
+        #expect(Set(responses.compactMap(\.data?.createdID)).count == 1)
+        #expect(model.tabGroups.count == 1)
+    }
+
+    private static func keyedRequest(key: String, title: String, retry: Bool = false) throws -> CLIRequest {
+        try JSONDecoder().decode(CLIRequest.self, from: JSONSerialization.data(withJSONObject: [
+            "method": "mutate", "operation": "folders.create", "requestID": key,
+            "retryOnly": retry, "title": title, "ids": []
+        ]))
+    }
+
+    @MainActor
+    @Test func organizationCommandsRoundTripOverSocket() async throws {
+        let dir = URL(fileURLWithPath: "/tmp/cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let socketPath = dir.appendingPathComponent("s.sock").path
+        let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
+        let server = CLIServer(socketPath: socketPath)
+        try server.start(model: model, indexer: VaultIndexer(workspaceRoot: dir.path))
+        defer { server.stop() }
+
+        let created = try await Task.detached {
+            try Self.roundTrip(CLIRequest(method: "folders.create", title: "Research"), socketPath: socketPath)
+        }.value
+        #expect(created.ok)
+        let id = try #require(created.data?.createdID)
+        let renamed = try await Task.detached {
+            try Self.roundTrip(CLIRequest(method: "folders.rename", id: id.uuidString, title: "Sources"), socketPath: socketPath)
+        }.value
+        #expect(renamed.ok)
+        let listed = try await Task.detached {
+            try Self.roundTrip(CLIRequest(method: "tabs.list"), socketPath: socketPath)
+        }.value
+        #expect(listed.ok)
+        #expect(listed.data?.tree?.first?.id == id)
+        #expect(listed.data?.tree?.first?.title == "Sources")
+        #expect(listed.data?.tree?.first?.children?.isEmpty == true)
+        let invalid = try await Task.detached {
+            try Self.roundTrip(CLIRequest(method: "folders.move", ids: [id.uuidString], parent: id.uuidString), socketPath: socketPath)
+        }.value
+        #expect(invalid.error?.code == CLIErrorCode.badRequest)
+        #expect(model.tabGroups.map(\.id) == [id])
+    }
+
+    @MainActor
+    @Test func pingDoesNotCrossMainActorFromAcceptQueue() throws {
         let dir = URL(fileURLWithPath: "/tmp/cli-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -18,12 +118,18 @@ import Darwin
         try server.start(model: model, indexer: indexer)
         defer { server.stop() }
 
-        let response = try await Task.detached {
-            try Self.roundTrip(CLIRequest(method: CLIMethod.ping), socketPath: socketPath)
-        }.value
-
-        #expect(response.ok)
-        #expect(response.data?.pong == "marple")
+        let silentPeer = try Self.connectAndSend(nil, socketPath: socketPath)
+        defer { close(silentPeer) }
+        let completed = DispatchSemaphore(value: 0)
+        let result = CLIResponseBox()
+        DispatchQueue.global().async {
+            result.set(try? Self.roundTrip(CLIRequest(method: CLIMethod.ping), socketPath: socketPath))
+            completed.signal()
+        }
+        // Deliberately hold MainActor: a ping requiring it cannot complete here.
+        #expect(completed.wait(timeout: .now() + 1) == .success)
+        #expect(result.get()?.ok == true)
+        #expect(result.get()?.data?.pong == "marple")
     }
 
     /// QUA-208: a client that times out and closes its socket before the
@@ -303,7 +409,7 @@ import Darwin
     }
 
     /// Connect to `socketPath` and send one request line. Caller owns the fd.
-    private static func connectAndSend(_ request: CLIRequest, socketPath: String) throws -> Int32 {
+    private static func connectAndSend(_ request: CLIRequest?, socketPath: String) throws -> Int32 {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
 
@@ -329,6 +435,7 @@ import Darwin
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
 
+        guard let request else { return fd }
         var line = try JSONEncoder().encode(request)
         line.append(0x0A)
         try line.withUnsafeBytes { buf in
@@ -369,4 +476,11 @@ import Darwin
         if response.last == 0x0A { response.removeLast() }
         return try JSONDecoder().decode(CLIResponse.self, from: response)
     }
+}
+
+private final class CLIResponseBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var response: CLIResponse?
+    func set(_ value: CLIResponse?) { lock.withLock { response = value } }
+    func get() -> CLIResponse? { lock.withLock { response } }
 }

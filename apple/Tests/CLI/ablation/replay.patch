@@ -1,0 +1,88 @@
+--- a/Sources/Marple/CLI/CLIMutationReplayCache.swift
++++ b/Sources/Marple/CLI/CLIMutationReplayCache.swift
+@@ -3,82 +3,11 @@
+ 
+ @MainActor
+ final class CLIMutationReplayCache {
+-    private struct Record {
+-        let payload: Data
+-        let response: CLIResponse
+-        let completedAt: TimeInterval
+-        let bytes: Int
+-    }
+-    private let maxEntries: Int
+-    private let maxBytes: Int
+-    private let timeToLive: TimeInterval
+-    private let now: () -> TimeInterval
+-    private var records: [String: Record] = [:]
+-    private var order: [String] = []
+-    private var bytes = 0
+-
+     init(maxEntries: Int = 256, maxBytes: Int = 16 * 1024 * 1024,
+          timeToLive: TimeInterval = 600,
+-         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+-        self.maxEntries = maxEntries
+-        self.maxBytes = maxBytes
+-        self.timeToLive = timeToLive
+-        self.now = now
+-    }
+-
+-    /// Organization writes do not suspend on MainActor. Capture their result
+-    /// before socket delivery so a lost response cannot cause a second write.
++         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {}
++    // Pass-through baseline used to establish duplicate-write regressions.
+     func respond(to request: CLIRequest, perform: () -> CLIResponse) -> CLIResponse {
+-        guard request.method == CLIMethod.mutate,
+-              CLIMethod.isOrganizationMutation(request.organizationMethod),
+-              let suppliedID = request.requestID, let uuid = UUID(uuidString: suppliedID) else {
+-            return CLIResponse.failure(code: CLIErrorCode.badRequest,
+-                                       message: "mutate requires an organization write and a UUID requestID")
+-                .identified(by: request.requestID)
+-        }
+-        let key = uuid.uuidString
+-        let encoder = JSONEncoder()
+-        guard let encoded = try? encoder.encode(request),
+-              var fields = (try? JSONSerialization.jsonObject(with: encoded)) as? [String: Any] else {
+-            return CLIResponse.failure(code: CLIErrorCode.badRequest, message: "cannot encode mutation")
+-                .identified(by: key)
+-        }
+-        fields.removeValue(forKey: "requestID")
+-        fields.removeValue(forKey: "retryOnly")
+-        guard let payload = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys]) else {
+-            return CLIResponse.failure(code: CLIErrorCode.badRequest, message: "cannot encode mutation payload")
+-                .identified(by: key)
+-        }
+-        prune(at: now())
+-        if let record = records[key] {
+-            guard record.payload == payload else {
+-                return CLIResponse.failure(code: "request_conflict", message: "requestID belongs to a different mutation payload")
+-                    .identified(by: key)
+-            }
+-            return record.response
+-        }
+-        guard request.retryOnly != true else {
+-            return CLIResponse.failure(code: "request_unknown",
+-                                       message: "request is absent or expired; inspect tabs list before issuing a new mutation")
+-                .identified(by: key)
+-        }
+-        let response = perform().identified(by: key)
+-        if let encodedResponse = try? encoder.encode(response) {
+-            let size = payload.count + encodedResponse.count
+-            records[key] = Record(payload: payload, response: response, completedAt: now(), bytes: size)
+-            order.append(key)
+-            bytes += size
+-            prune(at: now())
+-        }
+-        return response
+-    }
+-
+-    private func prune(at time: TimeInterval) {
+-        while let first = order.first, let record = records[first],
+-              records.count > maxEntries || bytes > maxBytes || time - record.completedAt >= timeToLive {
+-            bytes -= record.bytes
+-            records.removeValue(forKey: first)
+-            order.removeFirst()
+-        }
++        perform().identified(by: request.requestID)
+     }
+ }

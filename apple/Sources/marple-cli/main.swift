@@ -15,6 +15,8 @@ enum CLITransport {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         if fd < 0 { throw CLIClientError.cannotConnect(reason: "socket() failed: \(String(cString: strerror(errno)))") }
         defer { close(fd) }
+        var noSigPipe: Int32 = 1
+        _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
@@ -49,7 +51,7 @@ enum CLITransport {
         try line.withUnsafeBytes { buf in
             var sent = 0
             while sent < buf.count {
-                let n = write(fd, buf.baseAddress!.advanced(by: sent), buf.count - sent)
+                let n = send(fd, buf.baseAddress!.advanced(by: sent), buf.count - sent, MSG_NOSIGNAL)
                 if n <= 0 { throw CLIClientError.transport(reason: "write: \(String(cString: strerror(errno)))") }
                 sent += n
             }
@@ -124,6 +126,32 @@ func runRequest(_ request: CLIRequest, timeoutSeconds: Double = 5.0) -> Int32 {
     }
 }
 
+func runMutationRequest(_ request: CLIRequest, retryRequest: String?) -> Int32 {
+    let key: String
+    if let retryRequest {
+        guard let uuid = UUID(uuidString: retryRequest) else {
+            return emitError(code: CLIErrorCode.badRequest, message: "--retry-request must be a UUID")
+        }
+        key = uuid.uuidString
+    } else {
+        key = UUID().uuidString
+    }
+    let mutation = request.asMutation(requestID: key, retryOnly: retryRequest != nil)
+    do {
+        let response = try CLITransport.roundTrip(mutation)
+        if (response.ok && response.requestID != key)
+            || (response.requestID != nil && response.requestID != key) {
+            throw CLIClientError.transport(reason: "server did not acknowledge the mutation requestID")
+        }
+        return emit(response.identified(by: key))
+    } catch {
+        let code = (error as? CLIClientError)?.errorCode ?? CLIErrorCode.internalError
+        return emit(CLIResponse.failure(code: code, message:
+            "\(error). Operation outcome unknown; retry the original command with --retry-request \(key).")
+            .identified(by: key))
+    }
+}
+
 func runOpenWithFallback(_ path: String) -> Int32 {
     do {
         let response = try CLITransport.roundTrip(CLIRequest(method: CLIMethod.open, path: path),
@@ -160,8 +188,8 @@ func marpleURL(path: String) -> URL {
 struct MarpleCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "marple-cli",
-        abstract: "Search, read, and open Marple documents from agent workflows.",
-        subcommands: [Search.self, Read.self, Open.self, Ping.self]
+        abstract: "Search, read, open, and organize Marple documents from agent workflows.",
+        subcommands: [Search.self, Read.self, Open.self, Ping.self, Tabs.self, Folders.self]
     )
 }
 

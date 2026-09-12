@@ -14,6 +14,10 @@ enum CLIHandlers {
                 return try await read(req: req, model: model)
             case CLIMethod.open:
                 return try await open(req: req, model: model)
+            case CLIMethod.tabsList, CLIMethod.tabsRename, CLIMethod.tabsMove,
+                 CLIMethod.foldersCreate, CLIMethod.foldersRename,
+                 CLIMethod.foldersMove, CLIMethod.foldersDissolve:
+                return handleOrganization(req, model: model)
             default:
                 return .failure(code: CLIErrorCode.badRequest, message: "unknown method: \(req.method)")
             }
@@ -22,6 +26,17 @@ enum CLIHandlers {
             case .notFound(let p):
                 return .failure(code: CLIErrorCode.notFound, message: "entry not in index: \(p)")
             }
+        } catch {
+            return .failure(code: CLIErrorCode.internalError, message: "\(error)")
+        }
+    }
+
+    /// Synchronous so replay admission, mutation, and response capture do not
+    /// suspend or admit a second request on MainActor between those steps.
+    static func handleOrganization(_ req: CLIRequest, model: AppModel) -> CLIResponse {
+        do { return try model.cliOrganize(req) }
+        catch let error as CLIOrganizationError {
+            return .failure(code: error.code, message: error.message)
         } catch {
             return .failure(code: CLIErrorCode.internalError, message: "\(error)")
         }

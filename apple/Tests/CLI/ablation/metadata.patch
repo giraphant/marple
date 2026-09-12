@@ -1,0 +1,141 @@
+--- a/Sources/MarpleKit/Indexer/VaultIndexer.swift
++++ b/Sources/MarpleKit/Indexer/VaultIndexer.swift
+@@ -104,9 +104,8 @@
+                 continue
+             }
+             guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { continue }
+-            // Readable content remains indexable when metadata is unavailable.
+-            let mtimeMs = metadataReader.mtimeMs(atPath: file)
+             let fileStem = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
++            let mtimeMs  = metadataReader.mtimeMs(atPath: file)
+ 
+             let outcome = buildIndexedEntry(
+                 text: text,
+@@ -253,13 +252,10 @@
+         let sourceIndex = SourceSlugIndex(sourceSlugs)
+         let files = try walkMarkdown(vaultPath)
+         var fsMap = [String: Int64](minimumCapacity: files.count)
+-        var unavailablePaths = Set<String>()
+         for file in files {
+             let rel = slashRelative(root: workspaceRoot, path: file)
+             if let mt = metadataReader.mtimeMs(atPath: file) {
+                 fsMap[rel] = mt
+-            } else {
+-                unavailablePaths.insert(rel)
+             }
+         }
+ 
+@@ -301,8 +297,7 @@
+                 sourceSlugs: sourceSlugs,
+                 sourceIndex: sourceIndex,
+                 absPath: absPath,
+-                rel: rel,
+-                mtimeMs: mt
++                rel: rel
+             ) {
+                 writes.append((rel: rel, entry: entry))
+                 stats.upserted += 1
+@@ -313,7 +308,7 @@
+         }
+ 
+         // Vanished files: in index but not on disk → delete rows (mirrors :416-422).
+-        for rel in indexed.keys where fsMap[rel] == nil && !unavailablePaths.contains(rel) {
++        for rel in indexed.keys where fsMap[rel] == nil {
+             writes.append((rel: rel, entry: nil))
+             stats.removed += 1
+         }
+@@ -408,6 +403,11 @@
+         return p
+     }
+ 
++    // MARK: mtimeMs
++
++    /// Epoch milliseconds of the file's modification date, or nil.
++    /// Mirrors `mtime_ms` (:1145-1149).
++
+     // MARK: indexSchemaCurrent
+ 
+     /// Returns true iff the live index exists, has all REQUIRED columns AND no
+@@ -480,13 +480,13 @@
+         sourceSlugs: Set<String>,
+         sourceIndex: SourceSlugIndex,
+         absPath: String,
+-        rel: String,
+-        mtimeMs: Int64
++        rel: String
+     ) -> IndexedEntry? {
+         guard let text = try? String(contentsOfFile: absPath, encoding: .utf8) else {
+             return nil
+         }
+         let fileStem = URL(fileURLWithPath: absPath).deletingPathExtension().lastPathComponent
++        let mtimeMs  = metadataReader.mtimeMs(atPath: absPath)
+ 
+         let outcome = buildIndexedEntry(
+             text: text,
+--- a/Sources/MarpleKit/Indexer/MetadataReader.swift
++++ b/Sources/MarpleKit/Indexer/MetadataReader.swift
+@@ -1,61 +1,15 @@
+ import Foundation
+ 
+-/// Bounds waiting for filesystem metadata without pretending to cancel a stat.
+-/// Timed-out jobs keep their slot until the lookup returns; repeated requests
+-/// for that path join the same job. Saturation skips work instead of growing an
+-/// unbounded collection of blocked threads.
+-final class MetadataReader: @unchecked Sendable {
++/// Synchronous baseline seam for the metadata resilience regression.
++final class MetadataReader: Sendable {
+     private let lookup: @Sendable (String) -> Int64?
+-    private let timeout: TimeInterval
+-    // Serial GCD queues can make progress while Swift cooperative workers wait.
+-    // A concurrent global queue can starve behind those same waiting workers.
+-    private let workers: [DispatchQueue]
+-    private let lock = NSLock()
+-    private var availableWorkers: [Int]
+-    private var inFlight: [String: Job] = [:]
+-
+-    // `value` is protected by the reader's lock, including after completion.
+-    private final class Job: @unchecked Sendable {
+-        let done = DispatchGroup()
+-        let worker: Int
+-        var value: Int64?
+-        init(worker: Int) { self.worker = worker; done.enter() }
+-    }
+ 
+     init(timeout: TimeInterval = 0.25, maximumInFlight: Int = 4,
+          lookup: @escaping @Sendable (String) -> Int64? = MetadataReader.fileMtimeMs) {
+         self.lookup = lookup
+-        self.timeout = timeout
+-        self.workers = (0..<maximumInFlight).map {
+-            DispatchQueue(label: "marple.metadata.\($0)", qos: .utility)
+-        }
+-        self.availableWorkers = Array(0..<maximumInFlight)
+     }
+ 
+-    func mtimeMs(atPath path: String) -> Int64? {
+-        let deadline = DispatchTime.now() + timeout
+-        let admission: (Job, Bool)? = lock.withLock {
+-            if let existing = inFlight[path] { return (existing, false) }
+-            guard let worker = availableWorkers.popLast() else { return nil }
+-            let job = Job(worker: worker)
+-            inFlight[path] = job
+-            return (job, true)
+-        }
+-        guard let (job, isNew) = admission else { return nil }
+-        if isNew {
+-            workers[job.worker].async { [self] in
+-                let value = lookup(path)
+-                lock.withLock {
+-                    job.value = value
+-                    inFlight.removeValue(forKey: path)
+-                    availableWorkers.append(job.worker)
+-                }
+-                job.done.leave()
+-            }
+-        }
+-        guard job.done.wait(timeout: deadline) == .success else { return nil }
+-        return lock.withLock { job.value }
+-    }
++    func mtimeMs(atPath path: String) -> Int64? { lookup(path) }
+ 
+     static func fileMtimeMs(atPath path: String) -> Int64? {
+         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),

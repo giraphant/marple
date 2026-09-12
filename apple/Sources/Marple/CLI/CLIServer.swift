@@ -8,9 +8,9 @@ import MarpleKit
 // user has opted in.
 //
 // Wire format: one CLIRequest line in, one CLIResponse line out, close the
-// connection. Each connection runs in its own detached task; the actual
-// AppModel work happens via a @MainActor hop inside CLIHandlers so the GUI
-// remains the single source of truth.
+// connection. Each connection has a serial GCD I/O queue; blocking socket reads
+// never occupy Swift cooperative workers. Ping stays on that queue. Model work
+// hops to MainActor, then response delivery returns to the I/O queue.
 
 final class CLIServer: @unchecked Sendable {
     private let socketPath: String
@@ -21,6 +21,7 @@ final class CLIServer: @unchecked Sendable {
     // restarted across vaults — boot rebuilds it each time.
     @MainActor private var model: AppModel?
     @MainActor private var indexer: VaultIndexer?
+    @MainActor private var mutationReplay: CLIMutationReplayCache?
 
     init(socketPath: String = CLISocket.defaultPath()) {
         self.socketPath = socketPath
@@ -31,6 +32,7 @@ final class CLIServer: @unchecked Sendable {
         guard listenerFD < 0 else { return }
         self.model = model
         self.indexer = indexer
+        self.mutationReplay = CLIMutationReplayCache()
 
         // Make sure ~/Library/Application Support/Marple/ exists and any stale
         // socket from a prior crash is cleared (bind fails if the path exists).
@@ -95,6 +97,7 @@ final class CLIServer: @unchecked Sendable {
         _ = unlink(socketPath)
         model = nil
         indexer = nil
+        mutationReplay = nil
         print("[marple] CLI server stopped")
     }
 
@@ -121,26 +124,36 @@ final class CLIServer: @unchecked Sendable {
         var noSigpipe: Int32 = 1
         _ = setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
 
-        Task.detached(priority: .userInitiated) { [weak self] in
-            await self?.handle(clientFD: clientFD)
+        // A serial queue can make progress even when cooperative workers are
+        // blocked. Keep reads off acceptQueue too: a silent peer must not delay
+        // accepting the next health probe.
+        let ioQueue = DispatchQueue(label: "marple.cli.client", qos: .userInitiated)
+        ioQueue.async { [weak self] in
+            guard let self else { close(clientFD); return }
+            self.handle(clientFD: clientFD, ioQueue: ioQueue)
         }
     }
 
-    private func handle(clientFD: Int32) async {
-        defer { close(clientFD) }
+    private func handle(clientFD: Int32, ioQueue: DispatchQueue) {
         guard let line = Self.readLine(fd: clientFD) else {
-            _ = Self.writeResponse(fd: clientFD, response: .failure(code: CLIErrorCode.badRequest, message: "empty request"))
+            Self.replyAndClose(fd: clientFD, response: .failure(code: CLIErrorCode.badRequest, message: "empty request"))
             return
         }
         let req: CLIRequest
         do {
             req = try JSONDecoder().decode(CLIRequest.self, from: line)
         } catch {
-            _ = Self.writeResponse(fd: clientFD, response: .failure(code: CLIErrorCode.badRequest, message: "malformed request: \(error)"))
+            Self.replyAndClose(fd: clientFD, response: .failure(code: CLIErrorCode.badRequest, message: "malformed request: \(error)"))
             return
         }
-        let response = await dispatchOnMain(req)
-        _ = Self.writeResponse(fd: clientFD, response: response)
+        if req.method == CLIMethod.ping {
+            Self.replyAndClose(fd: clientFD, response: .success(CLIResponseData(pong: "marple")))
+            return
+        }
+        Task {
+            let response = await dispatchOnMain(req)
+            ioQueue.async { Self.replyAndClose(fd: clientFD, response: response) }
+        }
     }
 
     @MainActor
@@ -148,10 +161,20 @@ final class CLIServer: @unchecked Sendable {
         guard let model, let indexer else {
             return .failure(code: CLIErrorCode.internalError, message: "marple not ready")
         }
+        if req.method == CLIMethod.mutate, let mutationReplay {
+            return mutationReplay.respond(to: req) {
+                CLIHandlers.handleOrganization(req, model: model)
+            }
+        }
         return await CLIHandlers.handle(req, model: model, indexer: indexer)
     }
 
-    // MARK: - blocking I/O helpers (run inside the per-connection task)
+    // MARK: - blocking I/O helpers (per-connection GCD queue only)
+
+    private static func replyAndClose(fd: Int32, response: CLIResponse) {
+        defer { close(fd) }
+        _ = writeResponse(fd: fd, response: response)
+    }
 
     private static func readLine(fd: Int32) -> Data? {
         var buf = Data()
@@ -181,7 +204,9 @@ final class CLIServer: @unchecked Sendable {
         return bytes.withUnsafeBytes { buf -> Bool in
             var sent = 0
             while sent < buf.count {
-                let n = write(fd, buf.baseAddress!.advanced(by: sent), buf.count - sent)
+                // SO_NOSIGPIPE can fail with EINVAL if the peer closes before
+                // acceptOne configures it. Suppress SIGPIPE on each send too.
+                let n = send(fd, buf.baseAddress!.advanced(by: sent), buf.count - sent, MSG_NOSIGNAL)
                 if n <= 0 { return false }
                 sent += n
             }

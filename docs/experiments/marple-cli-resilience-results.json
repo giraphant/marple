@@ -1,0 +1,548 @@
+{
+  "date": "2026-09-12",
+  "source_head": "b4f6852",
+  "includes_preexisting_cli_work": true,
+  "original_wedge_reproduced": false,
+  "target_dictionary_tsan_reported": false,
+  "sample_binary_uuid": "C8E4EAC7-2F68-38DA-9A7C-12ED0BD96301",
+  "unmodified_runs": {
+    "mw-b2": {
+      "exit": 0,
+      "indexed": 1196,
+      "expected": 1196,
+      "final_health": [
+        true,
+        true,
+        true
+      ],
+      "commands": 4403,
+      "failures": 0,
+      "duration": 86.56,
+      "latencies": {
+        "ping": {
+          "p95": 0.0305,
+          "max": 0.169
+        },
+        "tabs": {
+          "p95": 0.031,
+          "max": 0.0433
+        },
+        "folders": {
+          "p95": 0.0311,
+          "max": 0.0407
+        }
+      }
+    },
+    "mw-b3": {
+      "exit": 0,
+      "indexed": 10396,
+      "expected": 10396,
+      "final_health": [
+        true,
+        true,
+        true
+      ],
+      "commands": 4936,
+      "failures": 0,
+      "duration": 130.77,
+      "latencies": {
+        "ping": {
+          "p95": 0.0714,
+          "max": 0.1215
+        },
+        "tabs": {
+          "p95": 0.0722,
+          "max": 0.1225
+        },
+        "folders": {
+          "p95": 0.0597,
+          "max": 0.1407
+        }
+      }
+    },
+    "mw-b4": {
+      "exit": 0,
+      "indexed": 10396,
+      "expected": 10396,
+      "final_health": [
+        true,
+        true,
+        true
+      ],
+      "commands": 2808,
+      "failures": 0,
+      "duration": 143.27,
+      "latencies": {
+        "ping": {
+          "p95": 0.181,
+          "max": 0.2283
+        },
+        "tabs": {
+          "p95": 0.1897,
+          "max": 0.2362
+        },
+        "folders": {
+          "p95": 0.1935,
+          "max": 0.2545
+        }
+      }
+    }
+  },
+  "unmodified_tsan_app": {
+    "exit": 0,
+    "indexed": 10396,
+    "expected": 10396,
+    "final_health": [
+      true,
+      true,
+      true
+    ],
+    "commands": 1307,
+    "failures": 0,
+    "duration": 226.84
+  },
+  "ablation_bit_order": [
+    "metadata",
+    "ping",
+    "replay"
+  ],
+  "ablation_fixed_scaffolding": [
+    "metadata injection",
+    "mutate wire/client admission",
+    "client SIGPIPE protection"
+  ],
+  "ablation": [
+    {
+      "variant": "000",
+      "enabled": {
+        "metadata": false,
+        "ping": false,
+        "replay": false
+      },
+      "exit": 1,
+      "expected_failures": [
+        "absentRecoveryNeverExecutesAnotherWrite",
+        "concurrentMutationDuplicatesCreateOneFolder",
+        "dissolveReplaysOriginalSuccessAndValidationErrorsAreCached",
+        "invalidKeysAndUnsupportedOperationsDoNotExecute",
+        "pingDoesNotCrossMainActorFromAcceptQueue",
+        "repeatedStalledPathDoesNotConsumeAnotherWorker",
+        "replaySurvivesLostResponseAndRejectsChangedPayload",
+        "saturatedReaderSkipsInsteadOfSpawningUnboundedWorkers",
+        "stalledPathTimesOutWhileHealthyPathsProgress",
+        "unavailableMetadataRetainsExistingRowAndIndexesHealthyFile"
+      ],
+      "actual_failures": [
+        "absentRecoveryNeverExecutesAnotherWrite",
+        "concurrentMutationDuplicatesCreateOneFolder",
+        "dissolveReplaysOriginalSuccessAndValidationErrorsAreCached",
+        "invalidKeysAndUnsupportedOperationsDoNotExecute",
+        "pingDoesNotCrossMainActorFromAcceptQueue",
+        "repeatedStalledPathDoesNotConsumeAnotherWorker",
+        "replaySurvivesLostResponseAndRejectsChangedPayload",
+        "saturatedReaderSkipsInsteadOfSpawningUnboundedWorkers",
+        "stalledPathTimesOutWhileHealthyPathsProgress",
+        "unavailableMetadataRetainsExistingRowAndIndexesHealthyFile"
+      ],
+      "matched": true
+    },
+    {
+      "variant": "001",
+      "enabled": {
+        "metadata": false,
+        "ping": false,
+        "replay": true
+      },
+      "exit": 1,
+      "expected_failures": [
+        "pingDoesNotCrossMainActorFromAcceptQueue",
+        "repeatedStalledPathDoesNotConsumeAnotherWorker",
+        "saturatedReaderSkipsInsteadOfSpawningUnboundedWorkers",
+        "stalledPathTimesOutWhileHealthyPathsProgress",
+        "unavailableMetadataRetainsExistingRowAndIndexesHealthyFile"
+      ],
+      "actual_failures": [
+        "pingDoesNotCrossMainActorFromAcceptQueue",
+        "repeatedStalledPathDoesNotConsumeAnotherWorker",
+        "saturatedReaderSkipsInsteadOfSpawningUnboundedWorkers",
+        "stalledPathTimesOutWhileHealthyPathsProgress",
+        "unavailableMetadataRetainsExistingRowAndIndexesHealthyFile"
+      ],
+      "matched": true
+    },
+    {
+      "variant": "010",
+      "enabled": {
+        "metadata": false,
+        "ping": true,
+        "replay": false
+      },
+      "exit": 1,
+      "expected_failures": [
+        "absentRecoveryNeverExecutesAnotherWrite",
+        "concurrentMutationDuplicatesCreateOneFolder",
+        "dissolveReplaysOriginalSuccessAndValidationErrorsAreCached",
+        "invalidKeysAndUnsupportedOperationsDoNotExecute",
+        "repeatedStalledPathDoesNotConsumeAnotherWorker",
+        "replaySurvivesLostResponseAndRejectsChangedPayload",
+        "saturatedReaderSkipsInsteadOfSpawningUnboundedWorkers",
+        "stalledPathTimesOutWhileHealthyPathsProgress",
+        "unavailableMetadataRetainsExistingRowAndIndexesHealthyFile"
+      ],
+      "actual_failures": [
+        "absentRecoveryNeverExecutesAnotherWrite",
+        "concurrentMutationDuplicatesCreateOneFolder",
+        "dissolveReplaysOriginalSuccessAndValidationErrorsAreCached",
+        "invalidKeysAndUnsupportedOperationsDoNotExecute",
+        "repeatedStalledPathDoesNotConsumeAnotherWorker",
+        "replaySurvivesLostResponseAndRejectsChangedPayload",
+        "saturatedReaderSkipsInsteadOfSpawningUnboundedWorkers",
+        "stalledPathTimesOutWhileHealthyPathsProgress",
+        "unavailableMetadataRetainsExistingRowAndIndexesHealthyFile"
+      ],
+      "matched": true
+    },
+    {
+      "variant": "011",
+      "enabled": {
+        "metadata": false,
+        "ping": true,
+        "replay": true
+      },
+      "exit": 1,
+      "expected_failures": [
+        "repeatedStalledPathDoesNotConsumeAnotherWorker",
+        "saturatedReaderSkipsInsteadOfSpawningUnboundedWorkers",
+        "stalledPathTimesOutWhileHealthyPathsProgress",
+        "unavailableMetadataRetainsExistingRowAndIndexesHealthyFile"
+      ],
+      "actual_failures": [
+        "repeatedStalledPathDoesNotConsumeAnotherWorker",
+        "saturatedReaderSkipsInsteadOfSpawningUnboundedWorkers",
+        "stalledPathTimesOutWhileHealthyPathsProgress",
+        "unavailableMetadataRetainsExistingRowAndIndexesHealthyFile"
+      ],
+      "matched": true
+    },
+    {
+      "variant": "100",
+      "enabled": {
+        "metadata": true,
+        "ping": false,
+        "replay": false
+      },
+      "exit": 1,
+      "expected_failures": [
+        "absentRecoveryNeverExecutesAnotherWrite",
+        "concurrentMutationDuplicatesCreateOneFolder",
+        "dissolveReplaysOriginalSuccessAndValidationErrorsAreCached",
+        "invalidKeysAndUnsupportedOperationsDoNotExecute",
+        "pingDoesNotCrossMainActorFromAcceptQueue",
+        "replaySurvivesLostResponseAndRejectsChangedPayload"
+      ],
+      "actual_failures": [
+        "absentRecoveryNeverExecutesAnotherWrite",
+        "concurrentMutationDuplicatesCreateOneFolder",
+        "dissolveReplaysOriginalSuccessAndValidationErrorsAreCached",
+        "invalidKeysAndUnsupportedOperationsDoNotExecute",
+        "pingDoesNotCrossMainActorFromAcceptQueue",
+        "replaySurvivesLostResponseAndRejectsChangedPayload"
+      ],
+      "matched": true
+    },
+    {
+      "variant": "101",
+      "enabled": {
+        "metadata": true,
+        "ping": false,
+        "replay": true
+      },
+      "exit": 1,
+      "expected_failures": [
+        "pingDoesNotCrossMainActorFromAcceptQueue"
+      ],
+      "actual_failures": [
+        "pingDoesNotCrossMainActorFromAcceptQueue"
+      ],
+      "matched": true
+    },
+    {
+      "variant": "110",
+      "enabled": {
+        "metadata": true,
+        "ping": true,
+        "replay": false
+      },
+      "exit": 1,
+      "expected_failures": [
+        "absentRecoveryNeverExecutesAnotherWrite",
+        "concurrentMutationDuplicatesCreateOneFolder",
+        "dissolveReplaysOriginalSuccessAndValidationErrorsAreCached",
+        "invalidKeysAndUnsupportedOperationsDoNotExecute",
+        "replaySurvivesLostResponseAndRejectsChangedPayload"
+      ],
+      "actual_failures": [
+        "absentRecoveryNeverExecutesAnotherWrite",
+        "concurrentMutationDuplicatesCreateOneFolder",
+        "dissolveReplaysOriginalSuccessAndValidationErrorsAreCached",
+        "invalidKeysAndUnsupportedOperationsDoNotExecute",
+        "replaySurvivesLostResponseAndRejectsChangedPayload"
+      ],
+      "matched": true
+    },
+    {
+      "variant": "111",
+      "enabled": {
+        "metadata": true,
+        "ping": true,
+        "replay": true
+      },
+      "exit": 0,
+      "expected_failures": [],
+      "actual_failures": [],
+      "matched": true
+    }
+  ],
+  "regression_tests": {
+    "normal": {
+      "tests": 104,
+      "suites": 10,
+      "pass": true,
+      "seconds": 4.934
+    },
+    "tsan": {
+      "tests": 104,
+      "suites": 10,
+      "pass": true,
+      "seconds": 28.024,
+      "reports": 0
+    }
+  },
+  "cli_smoke": {
+    "organization_mappings": 16,
+    "recovery_scenarios": 5,
+    "early_disconnect_repetitions": 5,
+    "pass": true
+  },
+  "tsan_positive_control": {
+    "warning_count": 3,
+    "intentionally_racy": true,
+    "linked_into_marple": false
+  },
+  "limits": [
+    "Original Documents/TCC fault period not recreated",
+    "No Catalog or SearchRanker production change",
+    "FTS5 quadratic delete untouched",
+    "Metadata deadline cannot cancel kernel stat",
+    "Enumeration/content reads still synchronous",
+    "Skipped metadata retried only by next refresh",
+    "Replay state is bounded and in-process"
+  ],
+  "lab": "/tmp/marple-wedge-20260912",
+  "real_app_ablation": [
+    {
+      "variant": "100",
+      "exit": 0,
+      "out": "/tmp/mw-a100",
+      "summary": {
+        "exit": 0,
+        "indexed": 10396,
+        "expected": 10396,
+        "final_health": [
+          true,
+          true,
+          true
+        ],
+        "commands": 2523,
+        "failures": 0,
+        "duration": 161.93
+      }
+    },
+    {
+      "variant": "010",
+      "exit": 0,
+      "out": "/tmp/mw-a010",
+      "summary": {
+        "exit": 0,
+        "indexed": 10396,
+        "expected": 10396,
+        "final_health": [
+          true,
+          true,
+          true
+        ],
+        "commands": 3551,
+        "failures": 0,
+        "duration": 144.43
+      }
+    },
+    {
+      "variant": "001",
+      "exit": 0,
+      "out": "/tmp/mw-a001",
+      "summary": {
+        "exit": 0,
+        "indexed": 10396,
+        "expected": 10396,
+        "final_health": [
+          true,
+          true,
+          true
+        ],
+        "commands": 2908,
+        "failures": 0,
+        "duration": 141.72
+      }
+    },
+    {
+      "variant": "111",
+      "exit": 0,
+      "out": "/tmp/mw-a111",
+      "summary": {
+        "exit": 0,
+        "indexed": 10396,
+        "expected": 10396,
+        "final_health": [
+          true,
+          true,
+          true
+        ],
+        "commands": 2680,
+        "failures": 0,
+        "duration": 144.74
+      }
+    }
+  ],
+  "baseline_evidence_files": {
+    "baseline-results.json": "ae93a65e2ac054fcfdba71d1b73222ac35e5cfe483af434927d2f139f23e6809",
+    "tsan-derived.log": "dcc34f2230efb0c03ba2c89be29038ab32261c010aeb4451225cdac7446a90d9",
+    "tsan-positive-control.log": "3cf36f591d76c3581ab78ee2a183600ab7f7e89faebd121d749fd29a5474fea8",
+    "final-regressions.log": "eb046f8ecc4a36264b50869ca07425abbb07fd22917f67dbd6f7db5662b0c5ba",
+    "final-tsan-regressions.log": "07a18011e2ab8a2fc033b81c9b40b698f0dff2544e76544fa221d798ae18a3fc",
+    "organization-green.log": "cb2b0db421560d0b57c0df31bfac484e40fe53e14f773940030e41db88c1f183",
+    "retry-green.log": "8c0e0885984e85cb4e45398295410fb77a47038e8c700ea1297b32b373f2321c"
+  },
+  "changed_files": {
+    "apple/Sources/Marple/CLI/CLIMutationReplayCache.swift": {
+      "before": null,
+      "after": "fc13df508756bb1fe410b3def3d6f0adc332c431a0057631d1d7b0bc8ac6de4b"
+    },
+    "apple/Sources/Marple/CLI/CLIServer.swift": {
+      "before": "118de2158c2c6fb8660839e92ad38e546fc15b15ab273eaba69e33406d61c1f7",
+      "after": "7cce84fe0d53147e93e24c95021989f19237e4918cf23dd63b31360b3721c8c7"
+    },
+    "apple/Sources/Marple/CLI/CLIHandlers.swift": {
+      "before": "eedb0909d1f31a19187e3cfd801475580115775f35b98602a57d30e354de0b2a",
+      "after": "c17449ce59280bc1d0ff39e053e78a3298af1abe44353ae080e1643ea31ad6bf"
+    },
+    "apple/Sources/Marple/CLI/AppModel+CLIOrganization.swift": {
+      "before": "50b8b73af8c6265ba72805a06ba939d34917d4beb3ee9766c1b757d55f25d5ca",
+      "after": "a7f8d9de0da19b344902ba4eb18b414b0f4abf83f2b6e20111d441d8f4c4630b"
+    },
+    "apple/Sources/marple-cli/OrganizationCommands.swift": {
+      "before": "7befb651e925489893a2079bfd40dedba0857ea99d9685ce7c9f0b88ad5e092f",
+      "after": "e994bdac0cbe6a41adb8340dcfd162becaeabe1a752c9e9c5b6e375c261e1844"
+    },
+    "apple/Sources/marple-cli/main.swift": {
+      "before": "0f01ddc4aedb2811d66717b92ef27f79aba103d24f4b42ba5e44deea26c51cd1",
+      "after": "30c59077050b1820650da7a480e85d82bee20707240371a171c6cb6b8627b917"
+    },
+    "apple/Sources/MarpleKit/CLI/CLIProtocol.swift": {
+      "before": "da4c9087f8e8bc46a0f99a51a14a28a48e983c080babf69672842369666888f9",
+      "after": "8aeb92da4e53b1d67d8e1af4f7af9b3e45e60a8ce1ea2a357a9391b1deb5c608"
+    },
+    "apple/Sources/MarpleKit/Indexer/MetadataReader.swift": {
+      "before": null,
+      "after": "f2e21f271f58793ea7f370a2d4476af1b648fcb6b089b1c8d303b8771f3b091d"
+    },
+    "apple/Sources/MarpleKit/Indexer/VaultIndexer.swift": {
+      "before": "bb7e1e54a4acbfb1a458e3e6f80a6e3c3b78bb5d23c3df0c3f065bcf6bbccf07",
+      "after": "0eaa909a135cb4e6b94640bc53c7bd76f40bdfd95ecb51f5113f4728e8276935"
+    },
+    "apple/Tests/MarpleKitTests/CLIServerTests.swift": {
+      "before": "ac497c8cde1d7d3f4c732dd38ae13f783aab8fee63dc0b6dc0018aad9a8dbd3b",
+      "after": "3edbda2315f4b007d54b775f300287e55a5fa70c20ff7fb38be041d650ba3e6a"
+    },
+    "apple/Tests/MarpleKitTests/MetadataResilienceTests.swift": {
+      "before": null,
+      "after": "70e1a8cf9e9e306434d2aade2aeb049cd33b054e1155f706be221b82831f27b6"
+    },
+    "apple/Tests/MarpleKitTests/DerivedRebuildStressTests.swift": {
+      "before": null,
+      "after": "b60087076c2a448e8839d251d3f880c5709b12344183e8fe24882cb6b66c7660"
+    },
+    "apple/Tests/MarpleKitTests/CLIMutationReplayTests.swift": {
+      "before": null,
+      "after": "5595fe51e494580254514a1f0d5412db193c516fe670a81875ca36929cd86dbd"
+    },
+    "apple/Tests/CLI/organization_smoke.py": {
+      "before": "316c40ea3373bd977c4c87607043b8b8594fc69d82be1143bff4a5246c854b6e",
+      "after": "b7076f7d2e95750efcbf48ee8723be9a105ee98b6c65e5def02ed649c7877cda"
+    },
+    "apple/Tests/CLI/retry_smoke.py": {
+      "before": null,
+      "after": "e54b82dcdd56a3ae21590f68ea2130e4d5a9323e5e62e8a5ba85c571f9750eee"
+    },
+    "apple/Tests/CLI/wedge_stress.py": {
+      "before": null,
+      "after": "6c5e0c1cf81b35e0cdc37e35baecb61caeaa53b5e6e0d8324aeaea5ed815a83c"
+    },
+    "apple/Tests/CLI/make_stress_app.py": {
+      "before": null,
+      "after": "81a63fc3c242681704603a7bf1400a727b552bbbf337ff229d4000a1faae0fa3"
+    },
+    "apple/Tests/CLI/wedge_ablation.py": {
+      "before": null,
+      "after": "d244a684efae2bc7387ae0927ae7f7963cacf24ddab7f1f44f37b4bb75027b36"
+    },
+    "apple/Tests/CLI/tsan-positive-control.swift": {
+      "before": null,
+      "after": "34372b734bc7dba6f2268741628e5003427c7fc29b5d754488295303cf3fc77c"
+    },
+    "apple/Tests/CLI/ablation/replay.patch": {
+      "before": null,
+      "after": "d24ed7df28e75d021463fa5d80ae35cc48b50d7608d931b78af6d732a898fd38"
+    },
+    "apple/Tests/CLI/ablation/ping.patch": {
+      "before": null,
+      "after": "0ee806123d881c287c8112cd44c08065221b4dead2289d7ea1e63cea3b6453dd"
+    },
+    "apple/Tests/CLI/ablation/metadata.patch": {
+      "before": null,
+      "after": "22c969b11fd45e251a7f3aa46edb803ead17a015d47e563e6a915d6d01c2fdd8"
+    },
+    "README.md": {
+      "before": "7b04c7e4c5cf78b6f72f633dfdb613389861e9b039ef1c2cb94a0a02339b2283",
+      "after": "11681ed09457c5f99d10a328c95959b00dea6a2897b16f91fa98467a8e2be68c"
+    }
+  },
+  "unchanged_source_hashes": {
+    "apple/Sources/Marple/App/AppModel.swift": "2e55261e8f35f60886af7b344751a10a6b1eab0951b9692a54d3c971edd76b1f",
+    "apple/Sources/MarpleKit/Catalog/Catalog+DeferredDerived.swift": "25d939632e9355f8d576d3fe85b4ce166f18eaf885c3a9ad0aeec942ff248445",
+    "apple/Sources/MarpleKit/Catalog/SearchRanker.swift": "73c94458fd86d139bbda9f339e910ca8202dae5ead6660c229d0954eef354f4b"
+  },
+  "combined_tsan_app": {
+    "exit": 0,
+    "indexed": 10396,
+    "expected": 10396,
+    "final_health": [
+      true,
+      true,
+      true
+    ],
+    "commands": 3171,
+    "failures": 0,
+    "duration": 226.55,
+    "report_files": 0,
+    "run": "/tmp/mw-t2",
+    "launch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "preinstall_full_suite": {
+    "tests": 1040,
+    "suites": 99,
+    "pass": true,
+    "seconds": 4.23,
+    "log": "/tmp/marple-install-20260912/tests.log",
+    "repository": "/Users/ramudai/Vibe/marple"
+  }
+}

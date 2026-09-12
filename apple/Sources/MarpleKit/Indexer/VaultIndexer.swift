@@ -50,6 +50,7 @@ public final class VaultIndexer: @unchecked Sendable {
     /// takes effect on the next VaultIndexer construction (macOS: once per
     /// launch; iOS ReaderModel constructs one per refresh).
     private let schema: VaultSchema
+    private let metadataReader: MetadataReader
 
     // MARK: - Write lock (mirrors INDEX_WRITE_LOCK in Rust)
 
@@ -64,12 +65,17 @@ public final class VaultIndexer: @unchecked Sendable {
 
     // MARK: - init
 
-    public init(workspaceRoot: String, indexDBPath: String? = nil) {
+    public convenience init(workspaceRoot: String, indexDBPath: String? = nil) {
+        self.init(workspaceRoot: workspaceRoot, indexDBPath: indexDBPath, metadataReader: MetadataReader())
+    }
+
+    init(workspaceRoot: String, indexDBPath: String? = nil, metadataReader: MetadataReader) {
         self.workspaceRoot = workspaceRoot
         self.indexDBPath  = indexDBPath ?? (workspaceRoot + "/.marple/index.sqlite")
         self.vaultPath    = workspaceRoot + "/vault"
         self.sourcesPath  = workspaceRoot + "/sources"
         self.schema       = VaultSchema.load(workspaceRoot: workspaceRoot)
+        self.metadataReader = metadataReader
     }
 
     // MARK: - buildFull
@@ -98,8 +104,9 @@ public final class VaultIndexer: @unchecked Sendable {
                 continue
             }
             guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { continue }
+            // Readable content remains indexable when metadata is unavailable.
+            let mtimeMs = metadataReader.mtimeMs(atPath: file)
             let fileStem = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
-            let mtimeMs  = Self.mtimeMs(atPath: file)
 
             let outcome = buildIndexedEntry(
                 text: text,
@@ -246,10 +253,13 @@ public final class VaultIndexer: @unchecked Sendable {
         let sourceIndex = SourceSlugIndex(sourceSlugs)
         let files = try walkMarkdown(vaultPath)
         var fsMap = [String: Int64](minimumCapacity: files.count)
+        var unavailablePaths = Set<String>()
         for file in files {
             let rel = slashRelative(root: workspaceRoot, path: file)
-            if let mt = Self.mtimeMs(atPath: file) {
+            if let mt = metadataReader.mtimeMs(atPath: file) {
                 fsMap[rel] = mt
+            } else {
+                unavailablePaths.insert(rel)
             }
         }
 
@@ -291,7 +301,8 @@ public final class VaultIndexer: @unchecked Sendable {
                 sourceSlugs: sourceSlugs,
                 sourceIndex: sourceIndex,
                 absPath: absPath,
-                rel: rel
+                rel: rel,
+                mtimeMs: mt
             ) {
                 writes.append((rel: rel, entry: entry))
                 stats.upserted += 1
@@ -302,7 +313,7 @@ public final class VaultIndexer: @unchecked Sendable {
         }
 
         // Vanished files: in index but not on disk → delete rows (mirrors :416-422).
-        for rel in indexed.keys where fsMap[rel] == nil {
+        for rel in indexed.keys where fsMap[rel] == nil && !unavailablePaths.contains(rel) {
             writes.append((rel: rel, entry: nil))
             stats.removed += 1
         }
@@ -397,17 +408,6 @@ public final class VaultIndexer: @unchecked Sendable {
         return p
     }
 
-    // MARK: mtimeMs
-
-    /// Epoch milliseconds of the file's modification date, or nil.
-    /// Mirrors `mtime_ms` (:1145-1149).
-    static func mtimeMs(atPath path: String) -> Int64? {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-              let date = attrs[.modificationDate] as? Date
-        else { return nil }
-        return Int64(date.timeIntervalSince1970 * 1000)
-    }
-
     // MARK: indexSchemaCurrent
 
     /// Returns true iff the live index exists, has all REQUIRED columns AND no
@@ -480,13 +480,13 @@ public final class VaultIndexer: @unchecked Sendable {
         sourceSlugs: Set<String>,
         sourceIndex: SourceSlugIndex,
         absPath: String,
-        rel: String
+        rel: String,
+        mtimeMs: Int64
     ) -> IndexedEntry? {
         guard let text = try? String(contentsOfFile: absPath, encoding: .utf8) else {
             return nil
         }
         let fileStem = URL(fileURLWithPath: absPath).deletingPathExtension().lastPathComponent
-        let mtimeMs  = Self.mtimeMs(atPath: absPath)
 
         let outcome = buildIndexedEntry(
             text: text,

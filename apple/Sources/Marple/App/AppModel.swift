@@ -242,24 +242,42 @@ final class AppModel {
         registerSidebarUndo(before, actionName: actionName)
     }
 
-    private func registerSidebarUndo(_ state: WorkspaceSidebarState, actionName: String) {
-        guard let undoManager else { return }
+    private func registerSidebarUndo(_ state: WorkspaceSidebarState, actionName: String,
+                                     spaceID: WorkspaceSpace.ID? = nil) {
+        guard let undoManager, let spaceID = spaceID ?? activeSpaceID else { return }
         undoManager.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated {
-                model.restoreSidebarState(state, actionName: actionName)
+                model.restoreSidebarState(state, actionName: actionName, spaceID: spaceID)
             }
         }
         undoManager.setActionName(actionName)
     }
 
-    private func restoreSidebarState(_ state: WorkspaceSidebarState, actionName: String) {
-        var workspace = self.workspace ?? Workspace()
+    /// Publish a validated CLI edit as one persisted, undoable sidebar operation.
+    func cliApplyWorkspace(_ updated: Workspace, actionName: String) {
+        let before = (workspace ?? Workspace()).sidebarState
+        let previousPinnedContext = isPinnedListContext
+        var updated = updated
+        updated.flattenTemporaryTabs()
+        guard updated.sidebarState != before else { return }
+        workspace = updated.isEmpty ? nil : updated
+        if workspace?.tabs.isEmpty != false { isBrowsing = true }
+        registerSidebarUndo(before, actionName: actionName)
+        if previousPinnedContext != isPinnedListContext {
+            applyActiveListContext(from: previousPinnedContext)
+        }
+    }
+
+    private func restoreSidebarState(_ state: WorkspaceSidebarState, actionName: String,
+                                     spaceID: WorkspaceSpace.ID) {
+        guard let index = spaces.firstIndex(where: { $0.id == spaceID }) else { return }
+        var workspace = spaces[index].workspace ?? Workspace()
         let redo = workspace.sidebarState
         let previousPinnedContext = isPinnedListContext
         workspace.restoreSidebarState(state)
-        self.workspace = workspace.isEmpty ? nil : workspace
-        if self.workspace?.tabs.isEmpty != false { isBrowsing = true }
-        registerSidebarUndo(redo, actionName: actionName)
+        spaces[index].workspace = workspace.isEmpty ? nil : workspace
+        if spaces[index].workspace?.tabs.isEmpty != false { spaces[index].isBrowsing = true }
+        registerSidebarUndo(redo, actionName: actionName, spaceID: spaceID)
         if previousPinnedContext != isPinnedListContext {
             applyActiveListContext(from: previousPinnedContext)
         }
