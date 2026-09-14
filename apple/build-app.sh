@@ -7,6 +7,20 @@ cd "$(dirname "$0")"
 # matching .build output dir. SIGN=1 enables Developer ID + hardened-runtime
 # codesigning (release/dist); unset keeps the old unsigned dev bundle.
 CONFIG="${CONFIG:-debug}"
+# Use one Xcode for Swift and resources. An older linked SDK opts the app out
+# of Tahoe's floating toolbar appearance even when it runs on a newer macOS.
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+if [ ! -x "$DEVELOPER_DIR/usr/bin/xcstringstool" ]; then
+    echo "ERROR: select a full Xcode installation with DEVELOPER_DIR (Xcode 26 or newer for releases)." >&2
+    exit 1
+fi
+if [ "$CONFIG" = "release" ]; then
+    SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+    if [ "${SDK_VERSION%%.*}" -lt 26 ]; then
+        echo "ERROR: release requires macOS SDK 26 or newer to preserve the native toolbar appearance; selected SDK is $SDK_VERSION." >&2
+        exit 1
+    fi
+fi
 PKG_ROOT=".build/arm64-apple-macosx/$CONFIG"
 # Bundle output dir. QUA-199: defaults to a local-volume path, NOT the repo
 # dir — the repo lives under ~/Documents (iCloud), and the File Provider keeps
@@ -26,9 +40,9 @@ BUILD="${BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 
 echo "Building ($CONFIG)..."
 if [ "$CONFIG" = "release" ]; then
-    swift build -c release
+    xcrun --sdk macosx swift build -c release
 else
-    swift build
+    xcrun --sdk macosx swift build
 fi
 
 # MLX looks for `default.metallib` at the package root so 深度 (semantic) mode
@@ -93,12 +107,7 @@ cp "$PKG_ROOT/marple-cli" "$APP/MacOS/marple-cli"
 # SwiftPM copies catalogs as raw JSON, which Foundation and SwiftUI cannot resolve
 # at runtime. Compile the catalog into main-bundle .strings resources instead of
 # embedding the SwiftPM resource bundle at the app root (which codesign rejects).
-XCODE_DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
-if [ ! -x "$XCODE_DEVELOPER_DIR/usr/bin/xcstringstool" ]; then
-    echo "ERROR: a full Xcode installation is required to compile Localizable.xcstrings." >&2
-    exit 1
-fi
-DEVELOPER_DIR="$XCODE_DEVELOPER_DIR" xcrun xcstringstool compile \
+xcrun xcstringstool compile \
     Sources/Marple/Resources/Localizable.xcstrings \
     --output-directory "$APP/Resources"
 
