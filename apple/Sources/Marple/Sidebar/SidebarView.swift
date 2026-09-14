@@ -35,20 +35,22 @@ struct SpaceSwitcherView: View {
 
             GeometryReader { geometry in
                 let spaces = model.activeSpaces
-                let compact = CGFloat(spaces.count * 34 - 6) > geometry.size.width
-                let slotWidth = compact ? max(20, min(28, geometry.size.width / CGFloat(max(1, spaces.count)))) : 28
-                let revealedID = hoveredSpaceID ?? model.activeSpaceID
+                let count = CGFloat(max(1, spaces.count))
+                let slotWidth = max(20, min(28, geometry.size.width / count))
+                let spacing = max(0, min(6, (geometry.size.width - count * slotWidth) / max(1, count - 1)))
+                // Tighten gaps and targets before hiding 16pt icons.
+                let compact = geometry.size.width < count * 24
 
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: compact ? 0 : 6) {
+                        HStack(spacing: spacing) {
                             ForEach(Array(spaces.enumerated()), id: \.element.id) { index, space in
                                 SpaceControlView(index: index + 1,
                                                  spaceID: space.id,
                                                  name: space.name,
                                                  iconName: space.iconName,
                                                  isActive: model.activeSpaceID == space.id,
-                                                 showsIcon: !compact || revealedID == space.id,
+                                                 showsIcon: !compact || model.activeSpaceID == space.id || hoveredSpaceID == space.id,
                                                  model: model,
                                                  onHover: { hovering in
                                                      if hovering { hoveredSpaceID = space.id }

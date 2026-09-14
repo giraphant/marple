@@ -70,7 +70,7 @@ struct SpaceSwitcherTests {
         for (space, icon) in zip(model.activeSpaces, ["bolt.fill", "hammer.fill", "flame.fill", "person.2.fill", "book.fill", "globe"]) {
             model.setSpaceIcon(icon, for: space.id)
         }
-        let selected = model.activeSpaceID
+        var selected = model.activeSpaceID
         let host = NSHostingView(rootView: SpaceSwitcherView(model: model)
             .background(Color(nsColor: .windowBackgroundColor)))
         host.sizingOptions = []
@@ -102,9 +102,20 @@ struct SpaceSwitcherTests {
         try await Task.sleep(for: .milliseconds(50))
         host.layoutSubtreeIfNeeded()
         #expect(model.activeSpaceID == selected)
-        #expect(items.filter(\.showsIcon).map(\.spaceID) == [target.spaceID])
+        #expect(items.filter(\.showsIcon).map(\.spaceID) == [target.spaceID, selected])
+        #expect(items.filter(\.isActive).map(\.spaceID) == [selected])
         #expect(items.map { $0.convert($0.bounds, to: host) } == frames)
         try capture("hover", host: host)
+
+        // Keyboard selection can move while the pointer still previews another Space.
+        let nextID = try #require(items[2].spaceID)
+        await model.selectSpace(nextID)
+        selected = nextID
+        try await expectSpaceVisible(selected, in: host)
+        #expect(items.filter(\.showsIcon).map(\.spaceID) == [target.spaceID, selected])
+        #expect(items.filter(\.isActive).map(\.spaceID) == [selected])
+        #expect(items.map { $0.convert($0.bounds, to: host) } == frames)
+        try capture("selection-during-hover", host: host)
         target.mouseExited(with: event)
         try await Task.sleep(for: .milliseconds(50))
         host.layoutSubtreeIfNeeded()
@@ -113,12 +124,22 @@ struct SpaceSwitcherTests {
         try await expectSpaceVisible(target.spaceID, in: host)
         #expect(model.activeSpaceID == target.spaceID)
         #expect(target.accessibilityLabel() == model.activeSpaces.first?.name)
-        window.setContentSize(NSSize(width: 360, height: 46))
+        // Tighten gaps and then targets before hiding icons. Six 24pt targets
+        // still fit at 240pt (96pt is occupied by padding and the end buttons).
+        for width in [360.0, 280, 240] {
+            window.setContentSize(NSSize(width: width, height: 46))
+            try await Task.sleep(for: .milliseconds(50))
+            host.layoutSubtreeIfNeeded()
+            #expect(items.allSatisfy { $0.showsIcon })
+            #expect(items.allSatisfy { $0.visibleRect.contains($0.bounds) })
+            #expect(items.allSatisfy { $0.bounds.width >= 24 })
+            if width == 360 { #expect(items.allSatisfy { $0.bounds.width == 28 }) }
+            try capture("expanded-\(Int(width))", host: host)
+        }
+        window.setContentSize(NSSize(width: 239, height: 46))
         try await Task.sleep(for: .milliseconds(50))
         host.layoutSubtreeIfNeeded()
-        #expect(items.allSatisfy { $0.showsIcon })
-        #expect(items.allSatisfy { $0.bounds.width == 28 })
-        try capture("expanded", host: host)
+        #expect(items.filter(\.showsIcon).map(\.spaceID) == [model.activeSpaceID])
     }
 
     private func capture(_ name: String, host: NSView) throws {
