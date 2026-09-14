@@ -241,7 +241,7 @@ struct MarkdownTextView: NSViewRepresentable {
         scrollView.reflectScrolledClipView(clip)
     }
 
-    private static func sizeDocumentView(in scrollView: NSScrollView) {
+    static func sizeDocumentView(in scrollView: NSScrollView) {
         guard let textView = scrollView.documentView as? NSTextView,
               let lm = textView.layoutManager,
               let tc = textView.textContainer,

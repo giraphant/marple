@@ -30,7 +30,7 @@ extension Catalog {
         let openPath = openDerivedPath
         let openBody = openDerivedBody
         let openBlocks = openDerivedBlocks
-        openEntry = entries.first { $0.path == openPath }
+        openEntry = entry(at: openPath)
         openOutline = outline(from: openBlocks)
         openStats = openBody.isEmpty ? nil : computeDocStats(openBody)
         if let e = openEntry {

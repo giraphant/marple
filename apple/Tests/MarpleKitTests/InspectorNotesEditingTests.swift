@@ -58,7 +58,9 @@ import Testing
         #expect(client.writeLog.last == nil)
 
         model.saveInspectorNoteDraft("new text", for: note)
-        for _ in 0..<200 where client.writeLog.last == nil {
+        // The client records the write before the awaiting main-actor save resumes.
+        // Wait for the model's completion state, not the earlier I/O signal.
+        for _ in 0..<200 where model.hasDirtyInspectorNotes {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         #expect(client.writeLog.last?.path == notePath)

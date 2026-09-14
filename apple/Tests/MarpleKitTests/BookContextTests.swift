@@ -37,6 +37,17 @@ import Testing
         #expect(ctx?.chapters.map(\.path) == ["vault/books/smith-2020/ch01.md"])
     }
 
+    @Test func preservesFirstOverviewAndDuplicateChaptersWithPathFallback() {
+        let overview = mk("vault/books/x/00-overview.md", "book", title: "First")
+        let duplicate = mk(overview.path, "book", title: "Second")
+        let chapter = mk("vault/books/x/ch01.md", "chapter")
+        let redirected = mk("vault/books/x/ch02.md", "chapter", book: "other")
+        let context = bookContext(for: chapter, in: [overview, duplicate, chapter, redirected, chapter])
+        #expect(context?.overview == overview)
+        #expect(context?.chapters == [chapter, chapter])
+        #expect(bookContext(for: chapter, in: []) == nil)
+    }
+
     @Test func nilForNonBookEntry() {
         let p = mk("vault/papers/p.md", "paper")
         #expect(bookContext(for: p, in: [p]) == nil)

@@ -27,8 +27,8 @@ import Darwin
     }
 
     /// QUA-208: a client that times out and closes its socket before the
-    /// response lands must not kill the app. Without SO_NOSIGPIPE on the
-    /// accepted fd, the server's write raises SIGPIPE and the whole process
+    /// response lands must not kill the app. Without inherited SO_NOSIGPIPE,
+    /// the server's write raises SIGPIPE and the whole process
     /// dies (exit 141) — this test then kills the test runner itself.
     @MainActor
     @Test func clientClosingBeforeResponseDoesNotKillTheProcess() async throws {
@@ -43,11 +43,17 @@ import Darwin
         try server.start(model: model, indexer: indexer)
         defer { server.stop() }
 
-        // Send a request and slam the socket shut without reading the response,
-        // like a marple-cli whose SO_RCVTIMEO expired.
-        try await Task.detached {
-            try Self.sendAndClose(CLIRequest(method: CLIMethod.ping), socketPath: socketPath)
-        }.value
+        // Send requests and close without reading, like clients whose timeout expired.
+        for _ in 0..<8 {
+            let response = try await Task.detached {
+                // Keep each burst below the listen backlog, then wait for acceptance.
+                for _ in 0..<4 {
+                    try Self.sendAndClose(CLIRequest(method: CLIMethod.ping), socketPath: socketPath)
+                }
+                return try Self.roundTrip(CLIRequest(method: CLIMethod.ping), socketPath: socketPath)
+            }.value
+            #expect(response.ok)
+        }
         // Give the server time to handle the request and write into the dead fd.
         try await Task.sleep(nanoseconds: 500_000_000)
 

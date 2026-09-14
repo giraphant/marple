@@ -28,9 +28,12 @@ public func bookContext(for entry: Entry, in entries: [Entry]) -> BookContext? {
     }
     guard let slug, !slug.isEmpty else { return nil }
 
-    let overview = entries.first { $0.type == .book && bookSlug($0.path) == slug }
-    let chapters = entries
-        .filter { $0.type == .chapter && chapterBookSlug($0) == slug }
+    let overview = entries.indices.first {
+        entries[$0].type == .book && bookSlug(entries[$0].path) == slug
+    }.map { entries[$0] }
+    let chapters = entries.indices
+        .filter { entries[$0].type == .chapter && chapterBookSlug(entries[$0]) == slug }
+        .map { entries[$0] }
         .sorted { $0.path < $1.path }
 
     if overview == nil && chapters.isEmpty { return nil }

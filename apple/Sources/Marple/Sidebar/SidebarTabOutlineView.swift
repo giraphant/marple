@@ -26,8 +26,7 @@ private enum SidebarOutlineSection {
     }
 
     /// Stable key for persisting the section's collapsed state across
-    /// reloads/launches (node objects are minted fresh every reload, so
-    /// AppKit's own per-item expansion memory can't carry it).
+    /// reloads/launches, including reloads that replace the node objects.
     var key: String {
         switch self {
         case .objects: return "objects"
@@ -227,7 +226,7 @@ struct SidebarOutlineView: NSViewRepresentable {
         private var isUpdatingSelection = false
         private var isRestoringExpansion = false
         private var pendingReload = false
-        private var lastReloadSignature: String?
+        private var lastReloadSignature: ReloadSignature?
         /// Collapsed sidebar sections by `SidebarOutlineSection.key`, persisted
         /// across launches. Lives here (not AppModel) — pure view chrome, the
         /// same way NSOutlineView owns its own scroll position.
@@ -302,16 +301,26 @@ struct SidebarOutlineView: NSViewRepresentable {
             // extends the same guarantee to structural reloads (QUA-98).
             let preservedPayloads = capturedMultiSelectionPayloads(in: outline)
             let spaceTransition = sidebarSpaceTransition(in: outline)
+            let previousSignature = lastReloadSignature
             lastReloadSignature = signature
             lastReloadSpaceID = model.activeSpaceID
             stickyRowDropTarget = nil
-            rootItems = makeRootItems()
             if let spaceTransition, let clipView = outline.enclosingScrollView?.contentView {
                 clipView.layer?.add(spaceTransition, forKey: "space-switch")
-                outline.reloadData()
-            } else {
-                outline.reloadData()
             }
+            if let previousSignature,
+               previousSignature.types == signature.types,
+               previousSignature.counts == signature.counts,
+               previousSignature.views == signature.views,
+               let pinnedSection, let tabsSection {
+                // Navigation changes the pages, while object/view rows stay put.
+                pinnedSection.children = makePinnedRootItems()
+                tabsSection.children = makeTemporaryItems()
+            } else {
+                rootItems = makeRootItems()
+            }
+            // Temporary pages are root siblings of the divider, not its children.
+            outline.reloadData()
             restoreExpansion(in: outline)
             restoreMultiSelection(payloads: preservedPayloads, in: outline)
             selectCurrentItem(in: outline)
@@ -377,43 +386,53 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         // MARK: - Reload signature
 
-        private func reloadSignature() -> String {
-            var parts: [String] = []
-            parts.append("entries:\(model.entries.count)")
-            parts.append("browse:\(model.isBrowsing):\(model.pane)")
-            // NOTE: activeTabID is deliberately NOT in the signature. The active
-            // tab changes the row *selection* (driven by selectCurrentItem's
-            // selectRowIndexes), never the row structure or cell content. Folding
-            // it in here forced a full reloadData() on every tab click; because
-            // makeRootItems() mints fresh node identities each pass, the outline
-            // couldn't preserve expansion across that reload, which collapsed the
-            // tree and clamped the scroll origin to the top — the viewport "jump".
-            // An active-only change now hits the no-op-reload path (selection
-            // update only), leaving the scroll position untouched.
-            parts.append("types:\(model.visibleTypeOrder.map(String.init(describing:)).joined(separator: ","))")
-            parts.append("counts:\(model.visibleTypeOrder.map { "\($0)=\(model.counts[$0] ?? 0)" }.joined(separator: ","))")
-            parts.append("views:\(model.savedViews.map { "\($0.id.uuidString):\($0.name)=\(model.savedViewCounts[$0.id] ?? 0)" }.joined(separator: ","))")
-            parts.append("tabs:\(model.tabs.map { "\($0.id.uuidString):\($0.identityLocation):\($0.pinned):\($0.customTitle ?? "")" }.joined(separator: ","))")
-            parts.append("tree:\(Self.treeSignature(model.tabRootNodes))")
-            parts.append("spaces:\(model.activeSpaceID?.uuidString ?? "nil"):\(model.spaces.map(\.id.uuidString).joined(separator: ","))")
-            return parts.joined(separator: "|")
+        private struct ReloadSignature: Equatable {
+            struct Tab: Equatable {
+                let id: NavTab.ID
+                let location: NavLocation
+                let pinned: Bool
+                let customTitle: String?
+            }
+            struct View: Equatable {
+                let id: UUID
+                let name: String
+                let count: Int
+            }
+            let entryCount: Int
+            let types: [EntryType]
+            let counts: [Int]
+            let views: [View]
+            let tabs: [Tab]
+            let tree: [TabNode]
+            let activeSpaceID: WorkspaceSpace.ID?
+            let spaceIDs: [WorkspaceSpace.ID]
         }
 
-        private static func treeSignature(_ nodes: [TabNode]) -> String {
-            nodes.map { node -> String in
-                switch node {
-                case .tab(let id):
-                    return "t\(id.uuidString)"
-                case .group(let g):
-                    return "g\(g.id.uuidString):\(g.name):\(g.isCollapsed)[\(treeSignature(g.children))]"
-                }
-            }.joined(separator: ",")
+        private func reloadSignature() -> ReloadSignature {
+            // Compare the state directly: reflecting every location into a long
+            // string costs milliseconds even when only selection has changed.
+            // Active tab, browse selection and history stay out: preserve row identities,
+            // expansion and scroll position; pinned rows use their identity location.
+            let types = model.visibleTypeOrder
+            return ReloadSignature(
+                entryCount: model.entries.count,
+                types: types,
+                counts: types.map { model.counts[$0] ?? 0 },
+                views: model.savedViews.map {
+                    .init(id: $0.id, name: $0.name, count: model.savedViewCounts[$0.id] ?? 0)
+                },
+                tabs: model.tabs.map {
+                    .init(id: $0.id, location: $0.identityLocation,
+                          pinned: $0.pinned, customTitle: $0.customTitle)
+                },
+                tree: model.tabRootNodes,
+                activeSpaceID: model.activeSpaceID,
+                spaceIDs: model.spaces.map(\.id))
         }
 
         // MARK: - Node tree construction
 
         private func makeRootItems() -> [SidebarOutlineNode] {
-            let entryByPath = Dictionary(model.entries.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
             var sections: [SidebarOutlineNode] = []
             // Hidden buckets (QUA-127) just drop out of the list; all hidden ⇒
             // the whole 物件 section disappears (re-enable via 设置 → 外观).
@@ -442,32 +461,34 @@ struct SidebarOutlineView: NSViewRepresentable {
             }
             sections.append(SidebarOutlineNode(kind: .section(.pinned),
                                                title: SidebarOutlineSection.pinned.title,
-                                               children: makePinnedRootItems(entryByPath: entryByPath)))
+                                               children: makePinnedRootItems()))
             sections.append(SidebarOutlineNode(kind: .section(.tabs),
                                                title: SidebarOutlineSection.tabs.title,
-                                               children: makeTemporaryItems(entryByPath: entryByPath)))
+                                               children: makeTemporaryItems()))
             return sections
         }
 
-        private func makePinnedRootItems(entryByPath: [String: Entry]) -> [SidebarOutlineNode] {
+        private func makePinnedRootItems() -> [SidebarOutlineNode] {
             let sourceSpaceID = model.activeSpaceID
+            let tabsByID = Dictionary(uniqueKeysWithValues: model.tabs.map { ($0.id, $0) })
             return model.pinnedTabRootNodes.compactMap {
-                outlineNode($0, entryByPath: entryByPath, sourceSpaceID: sourceSpaceID)
+                outlineNode($0, sourceSpaceID: sourceSpaceID, tabsByID: tabsByID)
             }
         }
 
-        private func makeTemporaryItems(entryByPath: [String: Entry]) -> [SidebarOutlineNode] {
+        private func makeTemporaryItems() -> [SidebarOutlineNode] {
             let sourceSpaceID = model.activeSpaceID
             return model.temporaryTabs.map {
-                tabNode($0, entryByPath: entryByPath, sourceSpaceID: sourceSpaceID)
+                tabNode($0, sourceSpaceID: sourceSpaceID)
             }
         }
 
-        private func outlineNode(_ node: TabNode, entryByPath: [String: Entry], sourceSpaceID: WorkspaceSpace.ID?) -> SidebarOutlineNode? {
+        private func outlineNode(_ node: TabNode, sourceSpaceID: WorkspaceSpace.ID?,
+                                 tabsByID: [NavTab.ID: NavTab]) -> SidebarOutlineNode? {
             switch node {
             case .tab(let id):
-                guard let tab = model.tabs.first(where: { $0.id == id }) else { return nil }
-                return tabNode(tab, entryByPath: entryByPath, sourceSpaceID: sourceSpaceID)
+                guard let tab = tabsByID[id] else { return nil }
+                return tabNode(tab, sourceSpaceID: sourceSpaceID)
             case .group(let group):
                 return SidebarOutlineNode(kind: .group(group.id),
                                           title: group.name,
@@ -475,13 +496,15 @@ struct SidebarOutlineView: NSViewRepresentable {
                                           iconName: "folder",
                                           pinned: true,
                                           sourceSpaceID: sourceSpaceID,
-                                          children: group.children.compactMap { outlineNode($0, entryByPath: entryByPath, sourceSpaceID: sourceSpaceID) })
+                                          children: group.children.compactMap {
+                                              outlineNode($0, sourceSpaceID: sourceSpaceID, tabsByID: tabsByID)
+                                          })
             }
         }
 
-        private func tabNode(_ tab: NavTab, entryByPath: [String: Entry], sourceSpaceID: WorkspaceSpace.ID?) -> SidebarOutlineNode {
+        private func tabNode(_ tab: NavTab, sourceSpaceID: WorkspaceSpace.ID?) -> SidebarOutlineNode {
             let location = tab.identityLocation
-            let entry = location.openPath.flatMap { entryByPath[$0] }
+            let entry = model.catalog.entry(at: location.openPath)
             // QUA-105: during bootstrap entries is empty so `entry?.type` is
             // nil, which would drop the row to the generic list.bullet icon.
             // Fall through to the persisted cachedType so the right type icon
@@ -601,7 +624,12 @@ struct SidebarOutlineView: NSViewRepresentable {
                 return
             }
             let row = outline.row(forItem: target)
-            guard row >= 0 else { return }
+            guard row >= 0 else {
+                // A collapsed section can hide the new target. Keep user-owned
+                // multi-selection, but don't highlight an unrelated single row.
+                if outline.selectedRowIndexes.count <= 1 { outline.deselectAll(nil) }
+                return
+            }
             // Any multi-row selection (>=2 rows) wins over the single-active
             // default. This covers both the no-op-reload case (selection
             // already on screen) and the structural-reload case where
@@ -2031,6 +2059,8 @@ private final class SidebarOutlineCellView: NSTableCellView {
         if let type = node.entryType {
             symbolImageView.isHidden = true
             let badge = NSHostingView(rootView: TypeBadge(type: type, size: 16).allowsHitTesting(false))
+            // The enclosing constraints already assign a fixed 18×18 frame.
+            badge.sizingOptions = []
             badge.translatesAutoresizingMaskIntoConstraints = false
             iconContainer.addSubview(badge)
             NSLayoutConstraint.activate([

@@ -537,7 +537,7 @@ import Testing
     }
 }
 
-private actor DocLoadGate {
+actor DocLoadGate {
     private var blocked = false
     private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
     private var releaseWaiter: CheckedContinuation<Void, Never>?
@@ -555,12 +555,13 @@ private actor DocLoadGate {
     }
 
     func release() {
+        blocked = false
         releaseWaiter?.resume()
         releaseWaiter = nil
     }
 }
 
-private struct GatedVaultClient: VaultClient {
+struct GatedVaultClient: VaultClient {
     let base: StubVaultClient
     let blockedPath: String
     let gate: DocLoadGate

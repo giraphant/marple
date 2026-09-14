@@ -5,6 +5,132 @@ import Testing
 
 @Suite(.serialized)
 struct SidebarPageSectionTests {
+    @MainActor
+    @Test func hiddenBrowseSelectionClearsPreviousSingleTabHighlight() async throws {
+        let harness = try await makeHarness(hasFixed: true, hasTemporary: true,
+                                            collapsedSections: ["objects"])
+        harness.coordinator.reload(harness.outline)
+        #expect(harness.outline.selectedRow == row(containing: "Temporary", in: harness.outline))
+        harness.model.select(pane: .type(.paper))
+        harness.coordinator.reload(harness.outline)
+        #expect(harness.outline.selectedRowIndexes.isEmpty)
+        #expect(!harness.outline.isItemExpanded(harness.outline.item(atRow: 0)))
+
+        // Multi-selection remains user-owned even when navigation targets a hidden row.
+        let fixed = try #require(row(containing: "Fixed", in: harness.outline))
+        let temporary = try #require(row(containing: "Temporary", in: harness.outline))
+        let selected = IndexSet([fixed, temporary])
+        harness.outline.selectRowIndexes(selected, byExtendingSelection: false)
+        harness.model.select(pane: .type(.book))
+        harness.coordinator.reload(harness.outline)
+        #expect(harness.outline.selectedRowIndexes == selected)
+    }
+
+    @MainActor
+    @Test func browseSelectionPreservesTabRows() async throws {
+        let harness = try await makeHarness(hasFixed: true, hasTemporary: true)
+        let model = harness.model
+        let outline = harness.outline
+        let tabID = try #require(model.activeTabID)
+        let nodes = (0..<outline.numberOfRows).compactMap { outline.item(atRow: $0) as? NSObject }
+        for type in [EntryType.paper, .book] {
+            model.select(pane: .type(type))
+            harness.coordinator.reload(outline)
+            #expect(outline.selectedRow == row(containing: AppPresentation.entryTypeLabel(type), in: outline))
+            #expect(outline.numberOfRows == nodes.count)
+            for (index, node) in nodes.enumerated() {
+                #expect(outline.item(atRow: index) as? NSObject === node)
+            }
+        }
+        await model.selectTab(tabID)
+        harness.coordinator.reload(outline)
+        #expect(outline.selectedRow == row(containing: "Temporary", in: outline))
+        for (index, node) in nodes.enumerated() {
+            #expect(outline.item(atRow: index) as? NSObject === node)
+        }
+    }
+
+    @MainActor
+    @Test func fixedTypeBadgesUseAssignedBoundsWithoutIntrinsicSizing() async throws {
+        let harness = try await makeHarness(hasFixed: true, hasTemporary: true)
+        let outline = harness.outline
+        var badges: [NSView] = []
+        for row in 0..<outline.numberOfRows {
+            guard let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) else { continue }
+            if let badge = descendants(of: NSView.self, in: cell).first(where: {
+                String(describing: type(of: $0)).hasPrefix("NSHostingView<")
+            }) { badges.append(badge) }
+        }
+        outline.layoutSubtreeIfNeeded()
+        #expect(badges.count == 2)
+        for badge in badges {
+            #expect(badge.frame.size == NSSize(width: 18, height: 18))
+            #expect(badge.intrinsicContentSize == NSSize(width: NSView.noIntrinsicMetric,
+                                                       height: NSView.noIntrinsicMetric))
+        }
+    }
+
+    @MainActor
+    @Test func spaceChangesPreserveObjectRowsAndRestorePages() async throws {
+        let harness = try await makeHarness(hasFixed: true, hasTemporary: true)
+        let model = harness.model
+        let outline = harness.outline
+        let coordinator = harness.coordinator
+        let firstSpace = try #require(model.activeSpaceID)
+        let objects = try #require(outline.item(atRow: 0) as? NSObject)
+        model.addSpace()
+        let secondSpace = try #require(model.activeSpaceID)
+        await model.openInNewTab("books/temporary.md")
+        coordinator.reload(outline)
+        #expect(outline.item(atRow: 0) as? NSObject === objects)
+        let second = try renderedPageArea(in: harness)
+        #expect(second.rows == [String(localized: "页面"), "Temporary"])
+        #expect(!second.dividerVisible)
+        #expect(second.temporaryRowOffset == 0)
+
+        await model.selectSpace(firstSpace)
+        coordinator.reload(outline)
+        #expect(outline.item(atRow: 0) as? NSObject === objects)
+        let first = try renderedPageArea(in: harness)
+        #expect(first.rows == [String(localized: "页面"), "Fixed", "Temporary"])
+        #expect(first.dividerVisible)
+        #expect(first.temporaryRowOffset == 13)
+
+        let ids = model.tabs.map(\.id)
+        model.togglePin(ids[1])
+        model.groupTab(ids[1], onto: ids[0])
+        let group = try #require(model.tabGroups.first)
+        model.setTabGroup(group.id, collapsed: true)
+        coordinator.reload(outline)
+        await model.selectSpace(secondSpace)
+        coordinator.reload(outline)
+        await model.selectSpace(firstSpace)
+        coordinator.reload(outline)
+        #expect(row(containing: group.name, in: outline) != nil)
+        #expect(row(containing: "Fixed", in: outline) == nil)
+        model.setTabGroup(group.id, collapsed: false)
+        coordinator.reload(outline)
+        #expect(row(containing: "Fixed", in: outline) != nil)
+        #expect(row(containing: "Temporary", in: outline) != nil)
+    }
+
+    @MainActor
+    @Test func selectionKeepsSidebarRowsAndRenameUpdatesThem() async throws {
+        let harness = try await makeHarness(hasFixed: false, hasTemporary: true,
+            temporaryPages: [entry(path: "books/a.md", title: "A"),
+                             entry(path: "books/b.md", title: "B")])
+        let first = try #require(harness.model.tabs.first)
+        let root = try #require(harness.outline.item(atRow: 0) as? NSObject)
+        await harness.model.selectTab(first.id)
+        harness.coordinator.reload(harness.outline)
+        #expect(harness.outline.item(atRow: 0) as? NSObject === root)
+        #expect(harness.outline.selectedRow == row(containing: "A", in: harness.outline))
+        harness.model.renameTab(first.id, to: "Renamed")
+        harness.coordinator.reload(harness.outline)
+        #expect(row(containing: "Renamed", in: harness.outline) != nil)
+        #expect(row(containing: "A", in: harness.outline) == nil)
+    }
+
     private struct LayoutCase {
         let name: String
         let hasFixed: Bool
@@ -106,7 +232,8 @@ extension SidebarPageSectionTests {
 
     @MainActor
     private func makeHarness(hasFixed: Bool, hasTemporary: Bool,
-                             temporaryPages: [Entry] = []) async throws -> Harness {
+                             temporaryPages: [Entry] = [],
+                             collapsedSections: [String] = []) async throws -> Harness {
         let fixed = entry(path: "books/fixed.md", title: "Fixed")
         let temporary = entry(path: "books/temporary.md", title: "Temporary")
         let pages = temporaryPages.isEmpty ? [temporary] : temporaryPages
@@ -132,7 +259,7 @@ extension SidebarPageSectionTests {
         let collapseKey = "marple.collapsedSidebarSections"
         let defaults = UserDefaults.standard
         let previousCollapsedSections = defaults.object(forKey: collapseKey)
-        defaults.set([], forKey: collapseKey)
+        defaults.set(collapsedSections, forKey: collapseKey)
         defer {
             if let previousCollapsedSections {
                 defaults.set(previousCollapsedSections, forKey: collapseKey)

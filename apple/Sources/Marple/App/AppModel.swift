@@ -159,7 +159,7 @@ final class AppModel {
 
     // Browse axis: which category list the sidebar shows. Separate from tabs —
     // selecting a category never touches the open document tabs.
-    private(set) var browsePane: Pane = .type(.paper) { didSet { persist() } }
+    private(set) var browsePane: Pane = .type(.paper) { didSet { if browsePane != oldValue { persist() } } }
 
     // Arc-style Spaces: each Space owns an independent document-tab workspace.
     // The computed workspace/isBrowsing properties below preserve the previous
@@ -181,7 +181,7 @@ final class AppModel {
     private(set) var isBrowsing: Bool {
         get { activeSpaceIndex.map { spaces[$0].isBrowsing } ?? true }
         set {
-            guard let index = activeSpaceIndex else { return }
+            guard let index = activeSpaceIndex, spaces[index].isBrowsing != newValue else { return }
             spaces[index].isBrowsing = newValue
         }
     }
@@ -204,10 +204,11 @@ final class AppModel {
     var tabRootNodes: [TabNode] { workspace?.rootNodes ?? [] }
     var temporaryTabs: [NavTab] { tabs.filter { !$0.pinned } }
     var pinnedTabRootNodes: [TabNode] {
+        let pinnedIDs = Set(tabs.lazy.filter(\.pinned).map(\.id))
         func pinnedOnly(_ node: TabNode) -> TabNode? {
             switch node {
             case .tab(let id):
-                return tabs.first(where: { $0.id == id })?.pinned == true ? node : nil
+                return pinnedIDs.contains(id) ? node : nil
             case .group(var group):
                 group.children = group.children.compactMap(pinnedOnly)
                 return group.children.isEmpty ? nil : .group(group)
@@ -269,9 +270,9 @@ final class AppModel {
     @ObservationIgnored private var docLoadGeneration = 0
 
     // Browse state (mutate via the intent methods below so derived caches refresh)
-    private(set) var sortClauses: [SortClause] = [] { didSet { persist() } }
-    private(set) var filterClauses: [FilterClause] = [] { didSet { persist() } }
-    private(set) var filterMatch: FilterMatch = .all { didSet { persist() } }
+    private(set) var sortClauses: [SortClause] = [] { didSet { if sortClauses != oldValue { persist() } } }
+    private(set) var filterClauses: [FilterClause] = [] { didSet { if filterClauses != oldValue { persist() } } }
+    private(set) var filterMatch: FilterMatch = .all { didSet { if filterMatch != oldValue { persist() } } }
 
     // Saved smart-folder views (QUA-127). Each carries its own filter+sort,
     // edited write-through while browsing it; the global clauses above belong
@@ -333,12 +334,15 @@ final class AppModel {
     var topicMembership: TopicMembership { catalog.topicMembership }
     var visibleEntries: [Entry] {
         guard isPinnedListContext else { return catalog.visibleEntries }
-        var order: [String: Int] = [:]
-        for tab in tabs where tab.pinned {
-            if let path = tab.identityLocation.openPath, order[path] == nil { order[path] = order.count }
+        let paths = tabs.filter(\.pinned).compactMap { $0.identityLocation.openPath }
+        if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+            return catalog.entries(inPathOrder: paths)
         }
-        let source = searchText.trimmingCharacters(in: .whitespaces).isEmpty
-            ? entries : searchHits.map(\.entry)
+        var order: [String: Int] = [:]
+        for path in paths where order[path] == nil {
+            order[path] = order.count
+        }
+        let source = searchHits.map(\.entry)
         return source.compactMap { entry in order[entry.path].map { ($0, entry) } }
             .sorted { $0.0 < $1.0 }
             .map { $0.1 }
@@ -564,13 +568,30 @@ final class AppModel {
     /// bootstrap completes, the live `counts` is authoritative. QUA-105.
     private var loadedCountsSnapshot: [EntryType: Int]?
 
-    /// Save the current place (browse category + Spaces + doc tabs + controls). Cheap —
-    /// a small JSON blob to UserDefaults; invoked from state properties' didSet.
+    @ObservationIgnored private var persistenceDepth = 0
+    @ObservationIgnored private var persistencePending = false
+
+    /// Finish synchronous navigation state changes before saving; never span a document read.
+    private func withPersistenceBatch(_ update: () -> Void) {
+        persistenceDepth += 1
+        defer {
+            persistenceDepth -= 1
+            if persistenceDepth == 0, persistencePending {
+                persistencePending = false
+                persist()
+            }
+        }
+        update()
+    }
+
+    /// Save the current place (browse category + Spaces + doc tabs + controls).
+    /// Only retain metadata for open tabs, not a copy of the entire vault index.
     private func persist() {
         guard let stateStore else { return }
-        let liveByPath: [String: Entry] = Dictionary(
-            entries.lazy.compactMap { e -> (String, Entry)? in (e.path, e) },
-            uniquingKeysWith: { a, _ in a })
+        guard persistenceDepth == 0 else {
+            persistencePending = true
+            return
+        }
         func persistedTab(_ tab: NavTab) -> PersistedTab {
             // Title + type snapshot: prefer the live entry; if entries haven't
             // loaded (bootstrap window) or the path no longer resolves (file
@@ -578,7 +599,7 @@ final class AppModel {
             // next launch's sidebar still shows the right title AND the right
             // type icon. Falls to nil only if no source has ever produced one.
             let location = tab.identityLocation
-            let liveEntry = location.openPath.flatMap { liveByPath[$0] }
+            let liveEntry = catalog.entry(at: location.openPath)
             let cachedTitle = liveEntry?.title ?? tab.cachedTitle
             let cachedType = liveEntry?.type ?? tab.cachedType
             return PersistedTab(location: location, pinned: tab.pinned,
@@ -763,17 +784,20 @@ final class AppModel {
     func selectSpace(_ id: WorkspaceSpace.ID) async {
         guard spaces.contains(where: { $0.id == id }) else { return }
         guard activeSpaceID != id else { return }
-        activeSpaceID = id
-        browseSearchText = ""
-        pinnedSearchText = ""
-        if workspace == nil || isBrowsing {
-            isBrowsing = true
-            resetSearch(to: "")
-            clearReaderHighlight()
-            await loadDoc(nil)
-        } else {
-            await syncToActiveLocation()
+        withPersistenceBatch {
+            activeSpaceID = id
+            browseSearchText = ""
+            pinnedSearchText = ""
+            if workspace == nil || isBrowsing {
+                isBrowsing = true
+                resetSearch(to: "")
+                clearReaderHighlight()
+            } else {
+                prepareActiveLocation()
+            }
         }
+        if workspace == nil || isBrowsing { await loadDoc(nil) }
+        else { await loadActiveLocationIfNeeded() }
     }
 
     /// Open `path` as a document tab in a specific Space (QUA-114, drag a browse
@@ -1358,7 +1382,7 @@ final class AppModel {
         if path != loadedDocPath {
             await flushAllInspectorNoteSaves()
             guard generation == docLoadGeneration else { return }
-            let nextTargetPath = entries.first(where: { $0.path == path })
+            let nextTargetPath = catalog.entry(at: path)
                 .map { annotationTarget(for: $0, in: entries).path }
             if inspectorSelectedNoteEntry?.annotates != nextTargetPath { clearInspectorNoteSelection() }
         }
@@ -1397,8 +1421,16 @@ final class AppModel {
     /// Used after history nav, tab switch, new/close tab. Reloads the doc only when
     /// it differs from what's already loaded.
     private func syncToActiveLocation(from previousPinnedContext: Bool? = nil) async {
+        withPersistenceBatch { prepareActiveLocation(from: previousPinnedContext) }
+        await loadActiveLocationIfNeeded()
+    }
+
+    private func prepareActiveLocation(from previousPinnedContext: Bool? = nil) {
         applyActiveListContext(from: previousPinnedContext)
         clearReaderHighlight()
+    }
+
+    private func loadActiveLocationIfNeeded() async {
         if openPath != loadedDocPath { await loadDoc(openPath) }
     }
 
@@ -1429,7 +1461,7 @@ final class AppModel {
                 resetSearch(to: "")
             } else {
                 let entryType = location.openPath.flatMap { path in
-                    entries.first { $0.path == path }?.type
+                    catalog.entry(at: path)?.type
                 } ?? active.cachedType
                 guard let entryType else {
                     if previousPinnedContext == true { resetSearch(to: browseSearchText) }
@@ -1504,17 +1536,23 @@ final class AppModel {
     func goBack() async {
         guard canGoBack else { return }
         let previousPinnedContext = isPinnedListContext
-        mutateWorkspace { $0.backActive() }
+        withPersistenceBatch {
+            mutateWorkspace { $0.backActive() }
+            prepareActiveLocation(from: previousPinnedContext)
+        }
         print("[marple] back -> \(openPath ?? "browse")")
-        await syncToActiveLocation(from: previousPinnedContext)
+        await loadActiveLocationIfNeeded()
     }
 
     func goForward() async {
         guard canGoForward else { return }
         let previousPinnedContext = isPinnedListContext
-        mutateWorkspace { $0.forwardActive() }
+        withPersistenceBatch {
+            mutateWorkspace { $0.forwardActive() }
+            prepareActiveLocation(from: previousPinnedContext)
+        }
         print("[marple] forward -> \(openPath ?? "browse")")
-        await syncToActiveLocation(from: previousPinnedContext)
+        await loadActiveLocationIfNeeded()
     }
 
     /// "New tab" in a documents-only tab model = a fresh note (a new page).
@@ -1610,9 +1648,12 @@ final class AppModel {
 
     func selectTab(_ id: NavTab.ID) async {
         let previousPinnedContext = isPinnedListContext
-        mutateWorkspace { $0.select(id) }
-        isBrowsing = false
-        await syncToActiveLocation(from: previousPinnedContext)
+        withPersistenceBatch {
+            mutateWorkspace { $0.select(id) }
+            isBrowsing = false
+            prepareActiveLocation(from: previousPinnedContext)
+        }
+        await loadActiveLocationIfNeeded()
     }
 
     /// The pinned middle list switches existing tabs; object lists keep their
@@ -1630,29 +1671,38 @@ final class AppModel {
 
     func selectTab(index: Int) async {
         let previousPinnedContext = isPinnedListContext
-        mutateWorkspace { $0.selectIndex(index) }
-        isBrowsing = false
-        await syncToActiveLocation(from: previousPinnedContext)
+        withPersistenceBatch {
+            mutateWorkspace { $0.selectIndex(index) }
+            isBrowsing = false
+            prepareActiveLocation(from: previousPinnedContext)
+        }
+        await loadActiveLocationIfNeeded()
     }
 
     func selectNextTab() async {
         let previousActiveID = activeTabID
         let previousPinnedContext = isPinnedListContext
-        mutateWorkspace { $0.selectRelative(1) }
-        isBrowsing = false
-        if activeTabID != previousActiveID {
-            await syncToActiveLocation(from: previousPinnedContext)
+        withPersistenceBatch {
+            mutateWorkspace { $0.selectRelative(1) }
+            isBrowsing = false
+            if activeTabID != previousActiveID {
+                prepareActiveLocation(from: previousPinnedContext)
+            }
         }
+        if activeTabID != previousActiveID { await loadActiveLocationIfNeeded() }
     }
 
     func selectPrevTab() async {
         let previousActiveID = activeTabID
         let previousPinnedContext = isPinnedListContext
-        mutateWorkspace { $0.selectRelative(-1) }
-        isBrowsing = false
-        if activeTabID != previousActiveID {
-            await syncToActiveLocation(from: previousPinnedContext)
+        withPersistenceBatch {
+            mutateWorkspace { $0.selectRelative(-1) }
+            isBrowsing = false
+            if activeTabID != previousActiveID {
+                prepareActiveLocation(from: previousPinnedContext)
+            }
         }
+        if activeTabID != previousActiveID { await loadActiveLocationIfNeeded() }
     }
 
     private func registerCloseUndo(_ record: WorkspaceCloseRecord, actionName: String,
@@ -1921,7 +1971,7 @@ final class AppModel {
         if let customTitle = tab.customTitle { return customTitle }
         let loc = tab.identityLocation
         if let p = loc.openPath {
-            if let live = entries.first(where: { $0.path == p })?.title { return live }
+            if let live = catalog.entry(at: p)?.title { return live }
             if let cached = tab.cachedTitle, !cached.isEmpty { return cached }
             return (p as NSString).lastPathComponent
         }
@@ -1974,7 +2024,7 @@ final class AppModel {
     private func originalTabTitle(_ tab: NavTab) -> String {
         let loc = tab.identityLocation
         if let p = loc.openPath {
-            if let live = entries.first(where: { $0.path == p })?.title { return live }
+            if let live = catalog.entry(at: p)?.title { return live }
             if let cached = tab.cachedTitle, !cached.isEmpty { return cached }
             return (p as NSString).lastPathComponent
         }
@@ -2607,7 +2657,7 @@ final class AppModel {
     /// NameResolver (exact tier = the old scan; folded tier per QUA-218 PR2
     /// approved diffs ①②). Used by the Inspector author chips.
     func authorProfile(for name: String) -> Entry? {
-        NameResolver.authorProfile(named: name, in: entries)
+        catalog.authorProfile(for: name)
     }
 
     func setSource(_ text: String?) async {

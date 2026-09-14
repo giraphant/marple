@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import GRDB
 
 /// Read-only view of the SQLite index (`<workspaceRoot>/.marple/index.sqlite`)
@@ -23,9 +24,8 @@ public final class IndexDatabase: @unchecked Sendable {
     private var cachedQueue: DatabaseQueue?
     private var cachedFileIdentity: FileIdentity?
 
-    /// `VaultIndexer.buildFull()` replaces index.sqlite atomically. A queue opened
-    /// before that swap remains attached to the unlinked old inode, so reuse is
-    /// safe only while the file at `indexDBPath` is still the same file.
+    /// Reopen if an external restore replaces the file. Normal full rebuilds
+    /// publish through SQLite and preserve this connection's file identity.
     private struct FileIdentity: Equatable {
         let device: UInt64
         let inode: UInt64
@@ -108,39 +108,34 @@ public final class IndexDatabase: @unchecked Sendable {
     public func loadEntries() throws -> [Entry] {
         guard let queue = try openQueue() else { return [] }
 
-        // 1. Read the current revision via the cached queue. The WAL snapshot
-        //    inside the `read` block guarantees this number describes the
-        //    `entries` rows we would observe in this same transaction.
-        let revision: Int64 = try queue.read { db in
-            guard try db.tableExists("entries") else { return Int64(-1) }
-            return try IndexWriter.entriesRevision(db)
-        }
-        // entries table absent → empty result, no cache work needed.
-        if revision < 0 { return [] }
-
-        // 2. Try cache hit. On any failure (missing, wrong magic, version
-        //    mismatch, revision mismatch, decode error), fall through to SQL.
-        let cacheStart = Date()
-        if let cached = try? readCache(expectedRevision: revision) {
-            let ms = Int(Date().timeIntervalSince(cacheStart) * 1000)
-            print("[marple] loadEntries: cache HIT (\(cached.count) entries, rev=\(revision), \(ms) ms)")
-            return cached
-        }
-
-        // 3. SQL path. ORDER BY path keeps cache order stable across
-        //    rebuilds — without it SQLite's row order is whatever the
-        //    underlying b-tree happens to hand back.
-        let sqlStart = Date()
-        let entries = try queue.read { db -> [Entry] in
+        // A full rebuild can change the schema through another connection.
+        // Keep rows and their cache revision in the same SQLite snapshot.
+        return try queue.read { db in
+            db.clearSchemaCache()
             guard try db.tableExists("entries") else { return [] }
+            let revision = try IndexWriter.entriesRevision(db)
+
+            // Try cache hit. On any failure (missing, wrong magic, version
+            //    mismatch, revision mismatch, decode error), fall through to SQL.
+            let cacheStart = Date()
+            if let cached = try? readCache(expectedRevision: revision) {
+                let ms = Int(Date().timeIntervalSince(cacheStart) * 1000)
+                print("[marple] loadEntries: cache HIT (\(cached.count) entries, rev=\(revision), \(ms) ms)")
+                return cached
+            }
+
+            // SQL path. ORDER BY path keeps cache order stable across
+            //    rebuilds — without it SQLite's row order is whatever the
+            //    underlying b-tree happens to hand back.
+            let sqlStart = Date()
             // Stream rows via cursor + decode inline. Avoids the giant [Row]
             // allocation that fetchAll builds before we ever look at row #1 —
             // on a 15k-row * 17-col query that allocation alone is hundreds of
             // ms. Pre-reserve the result so it never reallocates as we append.
             let countRow = try Row.fetchOne(db, sql: "SELECT COUNT(*) AS c FROM entries")
             let expected = (countRow?["c"] as Int?) ?? 0
-            var result: [Entry] = []
-            result.reserveCapacity(expected)
+            var entries: [Entry] = []
+            entries.reserveCapacity(expected)
             let cursor = try Row.fetchCursor(db, sql: """
                 SELECT path, type, book, title, author, year_json, rating_score,
                        themes_json, topics_json, kind, journal, source, doi, publisher, isbn, category,
@@ -150,18 +145,17 @@ public final class IndexDatabase: @unchecked Sendable {
                 ORDER BY path
                 """)
             while let row = try cursor.next() {
-                result.append(Self.entry(from: row))
+                entries.append(Self.entry(from: row))
             }
-            return result
+
+            let sqlMs = Int(Date().timeIntervalSince(sqlStart) * 1000)
+            print("[marple] loadEntries: cache MISS → SQL (\(entries.count) entries, rev=\(revision), \(sqlMs) ms) — rewriting cache async")
+
+            // Schedule async cache write. We don't block the caller — even a
+            //    slow encode (~50 ms for 15k entries) is amortized away from boot.
+            scheduleCacheWrite(entries: entries, revision: revision)
+            return entries
         }
-
-        let sqlMs = Int(Date().timeIntervalSince(sqlStart) * 1000)
-        print("[marple] loadEntries: cache MISS → SQL (\(entries.count) entries, rev=\(revision), \(sqlMs) ms) — rewriting cache async")
-
-        // 4. Schedule async cache write. We don't block the caller — even a
-        //    slow encode (~50 ms for 15k entries) is amortized away from boot.
-        scheduleCacheWrite(entries: entries, revision: revision)
-        return entries
     }
 
     // MARK: - Cache I/O
@@ -171,6 +165,12 @@ public final class IndexDatabase: @unchecked Sendable {
     /// so the next loadEntries doesn't keep replaying the failure.
     private func readCache(expectedRevision: Int64) throws -> [Entry] {
         let path = entriesCachePath
+        // A cloud-evicted cache is optional: use SQLite instead of waiting for
+        // materialization. Apple's TN3150 recommends checking SF_DATALESS first.
+        var info = stat()
+        if stat(path, &info) == 0, info.st_flags & UInt32(SF_DATALESS) != 0 {
+            throw CacheReadError.dataless
+        }
         let data: Data
         do {
             data = try Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe)
@@ -191,6 +191,7 @@ public final class IndexDatabase: @unchecked Sendable {
     }
 
     enum CacheReadError: Error, Equatable {
+        case dataless
         case shortHeader
         case badMagic
         case versionMismatch(expected: UInt32, got: UInt32)
@@ -316,6 +317,7 @@ public final class IndexDatabase: @unchecked Sendable {
         guard !terms.isEmpty else { return [] }
         let canUseFTS = terms.allSatisfy { $0.unicodeScalars.count >= 3 }
         return try queue.read { db in
+            db.clearSchemaCache()
             guard try db.tableExists("entry_trigram"), try db.tableExists("entries") else { return [] }
             if canUseFTS {
                 return try Self.searchViaFTS(db: db, terms: terms, type: type,

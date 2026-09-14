@@ -233,4 +233,25 @@ struct IndexBodyTests {
         let result = firstParagraph(body)
         #expect(!result.isEmpty)
     }
+
+    @Test("firstParagraph: preserve separator, byte-length and Unicode cap boundaries")
+    func firstParagraphBoundaries() {
+        let prefix = String(repeating: "a", count: 799)
+        let shortBold = "**" + String(repeating: "中", count: 25) + "**"
+        let longBold = "**" + String(repeating: "中", count: 26) + "**"
+        let cases: [(String, String)] = [
+            ("\n\n\n# Heading\n\n**作者**：张三\nignored\n\nReal\ntext\n\n\nTail\n\n", "Real text Tail"),
+            ("First\r\n\r\n\r\nSecond\r\n", "First Second"),
+            (shortBold + "\n\n" + longBold, longBold),
+            (prefix + "\n\nsecond paragraph", prefix + " "),
+            (prefix + "e\u{301}", prefix + "e"),
+            (prefix + "👨‍👩‍👧‍👦", prefix + "👨"),
+            ("first" + String(repeating: " \t", count: 1000) + "last", "first last"),
+            ("a \u{301}b\u{2028}c\u{200b}d", "a b c\u{200b}d"),
+            ("\n\n\n\n", ""),
+        ]
+        for (body, expected) in cases {
+            #expect(Array(firstParagraph(body).utf8) == Array(expected.utf8))
+        }
+    }
 }

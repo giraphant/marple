@@ -5,6 +5,34 @@ import Testing
 
 @Suite struct SidebarUndoTests {
     @MainActor
+    @Test func pinnedTreeTracksNestedGroupsAndSpaceChanges() async throws {
+        let (model, ids) = try await modelWithThreeTabs()
+        let firstSpace = try #require(model.activeSpaceID)
+        await model.openInNewTab("papers/later.md")
+        let fourth = try #require(model.activeTabID)
+        model.groupTabs([ids[0], ids[1]])
+        let outer = try #require(model.tabGroups.first?.id)
+        model.groupTabs([ids[2], fourth])
+        let inner = try #require(model.tabGroups.last?.id)
+        model.moveGroup(inner, intoGroup: outer)
+        model.renameTabGroup(inner, to: "Nested")
+        model.setTabGroup(inner, collapsed: true)
+        let groupedTree = model.tabRootNodes
+        #expect(model.pinnedTabRootNodes == groupedTree)
+
+        model.addSpace()
+        #expect(model.pinnedTabRootNodes.isEmpty)
+        await model.selectSpace(firstSpace)
+        #expect(model.pinnedTabRootNodes == groupedTree)
+        model.setPinned([ids[2], fourth], to: false)
+        let remaining = try #require(model.tabGroups.first)
+        #expect(remaining.id == outer)
+        #expect(remaining.children == [.tab(ids[0]), .tab(ids[1])])
+        #expect(model.pinnedTabRootNodes == [.group(remaining)])
+        #expect(model.temporaryTabs.map(\.id) == [ids[2], fourth])
+    }
+
+    @MainActor
     @Test func groupingTemporaryPagesPinsThemInVisualOrder() async throws {
         let first = sidebarEntry("papers/first.md")
         let second = sidebarEntry("papers/second.md")

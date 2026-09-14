@@ -27,7 +27,7 @@ extension Catalog {
         if hasOpenDerivedInput {
             recomputeOpenDerivedFromStoredInput()
         }
-        scheduleDeferredDerivedRebuild(entries: entries)
+        scheduleDeferredDerivedRebuild()
     }
 
     /// Sidebar counts for saved views — each view's clauses over the browse

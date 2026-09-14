@@ -42,6 +42,14 @@ final class CLIServer: @unchecked Sendable {
         if fd < 0 {
             throw CLIServerError.posix(op: "socket", errno: errno)
         }
+        // Accepted sockets inherit this flag. Setting it after accept can fail
+        // with EINVAL if the peer already closed, leaving writes fatal (QUA-208).
+        var noSigpipe: Int32 = 1
+        if setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size)) != 0 {
+            let saved = errno
+            close(fd)
+            throw CLIServerError.posix(op: "setsockopt(SO_NOSIGPIPE)", errno: saved)
+        }
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         let pathBytes = Array(socketPath.utf8)
@@ -115,12 +123,6 @@ final class CLIServer: @unchecked Sendable {
         var tv = timeval(tv_sec: 10, tv_usec: 0)
         _ = setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         _ = setsockopt(clientFD, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-        // QUA-208: a client that times out and closes before we write the
-        // response must fail that write with EPIPE, not raise SIGPIPE — the
-        // default disposition silently kills the whole app (exit 141).
-        var noSigpipe: Int32 = 1
-        _ = setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
-
         Task.detached(priority: .userInitiated) { [weak self] in
             await self?.handle(clientFD: clientFD)
         }

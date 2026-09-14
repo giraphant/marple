@@ -27,7 +27,7 @@ public struct ReconcileStats: Sendable, Equatable {
 ///
 /// **Thread safety:** `VaultIndexer` is marked `@unchecked Sendable`; the
 /// `writeLock` NSLock serialises all mutations on the live DB (including the
-/// atomic temp→live rename). The class itself is `final` and every property
+/// atomic temp→live backup). The class itself is `final` and every property
 /// that crosses actor boundaries is either let-bound or accessed under the lock.
 public final class VaultIndexer: @unchecked Sendable {
 
@@ -54,7 +54,7 @@ public final class VaultIndexer: @unchecked Sendable {
     // MARK: - Write lock (mirrors INDEX_WRITE_LOCK in Rust)
 
     /// Serialises every mutation of the live index file — both the atomic
-    /// tmp→live rename in `buildFull` and the per-entry upsert/delete rows in
+    /// tmp→live backup in `buildFull` and the per-entry upsert/delete rows in
     /// `reconcile`.  Mirrors `static INDEX_WRITE_LOCK: Mutex<()>` in indexer.rs.
     private let writeLock = NSLock()
 
@@ -74,8 +74,8 @@ public final class VaultIndexer: @unchecked Sendable {
 
     // MARK: - buildFull
 
-    /// Full rebuild: walk vault → parse → sort → write temp DB → atomic rename →
-    /// flip to WAL. Returns the number of indexed entries.
+    /// Full rebuild: walk vault → parse → sort → write temp DB → publish through
+    /// SQLite. The live DB stays in WAL mode. Returns the indexed entry count.
     ///
     /// Mirrors `build_sqlite_index` (:247-311) + `write_sqlite_index` (:1160-1281).
     @discardableResult
@@ -131,78 +131,55 @@ public final class VaultIndexer: @unchecked Sendable {
         try FileManager.default.createDirectory(
             atPath: marpleDir, withIntermediateDirectories: true, attributes: nil)
 
-        // Keep revisions monotonic across full rebuilds. An IndexDatabase may
-        // still be finishing an async entries.cache write for the old DB; if a
-        // rebuilt DB reset to revision 1, that stale cache could look current.
-        let previousRevision: Int64
-        if FileManager.default.fileExists(atPath: indexDBPath) {
-            previousRevision = (try? DatabaseQueue(path: indexDBPath).read {
-                try IndexWriter.entriesRevision($0)
-            }) ?? 0
-        } else {
-            previousRevision = 0
-        }
-        let nextRevision = previousRevision &+ 1
-
-        // 4. Write to temp file with journal_mode=OFF + synchronous=OFF for speed.
-        //    Mirrors `write_sqlite_index` (:1160-1281).
-        let tmpPath = indexDBPath + ".tmp"
-        if FileManager.default.fileExists(atPath: tmpPath) {
-            try FileManager.default.removeItem(atPath: tmpPath)
+        var liveConfig = Configuration()
+        liveConfig.label = "MarpleIndexer.rebuild"
+        liveConfig.busyMode = .timeout(5)
+        let liveQueue = try DatabaseQueue(path: indexDBPath, configuration: liveConfig)
+        let pageSize = try liveQueue.read { db in
+            try Int.fetchOne(db, sql: "PRAGMA page_size")!
         }
 
-        // Build into the temp DB (DatabaseQueue → single connection, no WAL).
-        do {
-            var config = Configuration()
-            config.label = "MarpleIndexer.tmp"
-            let tmpQueue = try DatabaseQueue(path: tmpPath, configuration: config)
-
-            try tmpQueue.writeWithoutTransaction { db in
-                // Bulk-speed pragmas (mirrors PRAGMA journal_mode=OFF + synchronous=OFF)
-                try db.execute(sql: "PRAGMA journal_mode=OFF")
-                try db.execute(sql: "PRAGMA synchronous=OFF")
+        // 4. Build off to the side with journaling disabled. Each build owns its
+        // temp file; the live database remains readable throughout this phase.
+        let tmpPath = indexDBPath + ".\(UUID().uuidString).tmp"
+        let tmpQueue = try DatabaseQueue(path: tmpPath)
+        defer {
+            try? tmpQueue.close()
+            try? FileManager.default.removeItem(atPath: tmpPath)
+        }
+        try tmpQueue.writeWithoutTransaction { db in
+            // SQLite backup into WAL requires matching page sizes.
+            try db.execute(sql: "PRAGMA page_size=\(pageSize)")
+            try db.execute(sql: "PRAGMA journal_mode=OFF")
+            try db.execute(sql: "PRAGMA synchronous=OFF")
+        }
+        try tmpQueue.write { db in
+            try IndexWriter.createSchema(db)
+            for entry in entries {
+                try IndexWriter.insert(db, entry)
             }
-
-            try tmpQueue.write { db in
-                try IndexWriter.createSchema(db)
-                for entry in entries {
-                    try IndexWriter.insert(db, entry)
-                }
-                // QUA-104: publish the next revision in the same transaction so
-                // any entries.cache from before this rebuild is invalidated.
-                try db.execute(
-                    sql: "INSERT OR REPLACE INTO meta(key, value) VALUES ('entries_revision', ?)",
-                    arguments: [String(nextRevision)]
-                )
-            }
-            // Ensure all writes are flushed before we close the queue.
         }
-        // tmpQueue is deallocated here, closing its connection.
 
-        // 5. Atomic rename under the write lock.
-        //    Mirrors: let _swap = INDEX_WRITE_LOCK.lock(); fs::rename(&tmp, &paths.index_db)
+        // 5. Publish through SQLite, which keeps existing WAL readers attached
+        // to a valid snapshot. Unlinking the live file can mispair it with an
+        // old connection's WAL, even when the replacement file is complete.
         writeLock.lock()
         defer { writeLock.unlock() }
-
-        if FileManager.default.fileExists(atPath: indexDBPath) {
-            try FileManager.default.removeItem(atPath: indexDBPath)
+        let nextRevision = try liveQueue.read { db in
+            db.clearSchemaCache()
+            return try IndexWriter.entriesRevision(db) &+ 1
         }
-        try FileManager.default.moveItem(atPath: tmpPath, toPath: indexDBPath)
-
-        // QUA-104: a stale entries.cache from before this rebuild may still
-        // happen to carry a revision number equal to the new DB's
-        // freshly-bumped revision (both could be 1 if entries_revision wraps
-        // back to 0 after createSchema). Nuke the cache file so the next
-        // loadEntries takes the SQL path once and writes a cache tied to the
-        // new DB's revision.
-        let cachePath = indexDBDir + "/entries.cache"
-        try? FileManager.default.removeItem(atPath: cachePath)
-
-        // 6. Flip to WAL so all subsequent readers can open concurrently.
-        //    Mirrors: let _ = open_index_rw(&paths.index_db);
-        //    DatabasePool opens in WAL mode automatically (it issues PRAGMA journal_mode=WAL).
-        let _ = try DatabasePool(path: indexDBPath)
-        // DatabasePool is intentionally dropped immediately — we just need the WAL flip.
+        try tmpQueue.write { db in
+            try db.execute(
+                sql: "INSERT OR REPLACE INTO meta(key, value) VALUES ('entries_revision', ?)",
+                arguments: [String(nextRevision)]
+            )
+        }
+        try liveQueue.writeWithoutTransaction { db in
+            try db.execute(sql: "PRAGMA journal_mode=WAL")
+        }
+        try tmpQueue.backup(to: liveQueue)
+        try? FileManager.default.removeItem(atPath: indexDBDir + "/entries.cache")
 
         return entries.count
     }
@@ -308,8 +285,8 @@ public final class VaultIndexer: @unchecked Sendable {
         // a matching old entries.cache can hide newly indexed rows from loadEntries().
         if !writes.isEmpty {
             try pool.write { db in
+                try deletePathRows(db, paths: writes.map(\.rel))
                 for write in writes {
-                    try deletePathRows(db, rel: write.rel)
                     if let entry = write.entry {
                         try IndexWriter.insert(db, entry)
                     }
@@ -462,11 +439,16 @@ public final class VaultIndexer: @unchecked Sendable {
 
     // MARK: deletePathRows
 
-    /// Delete all rows for `rel` across the 3 tables we write to.
-    private func deletePathRows(_ db: Database, rel: String) throws {
-        try db.execute(sql: "DELETE FROM entries WHERE path = ?",      arguments: [rel])
-        try db.execute(sql: "DELETE FROM entry_themes WHERE path = ?", arguments: [rel])
-        try db.execute(sql: "DELETE FROM entry_trigram WHERE path = ?",arguments: [rel])
+    /// Delete the batch before reinserting changed entries in the same transaction.
+    private func deletePathRows(_ db: Database, paths: [String]) throws {
+        // FTS path is UNINDEXED: per-path deletion scans the entire text table
+        // for every write. One JSON parameter gives us one scan, without a
+        // placeholder-count limit or assumptions about legacy FTS rowids.
+        // ponytail: still one full scan per reconcile; persist FTS rowids if single-entry refreshes become a bottleneck.
+        let json = String(decoding: try JSONEncoder().encode(paths), as: UTF8.self)
+        try db.execute(sql: "DELETE FROM entries WHERE path IN (SELECT value FROM json_each(?))", arguments: [json])
+        try db.execute(sql: "DELETE FROM entry_themes WHERE path IN (SELECT value FROM json_each(?))", arguments: [json])
+        try db.execute(sql: "DELETE FROM entry_trigram WHERE path IN (SELECT value FROM json_each(?))", arguments: [json])
     }
 
     // MARK: indexedEntryForPath

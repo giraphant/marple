@@ -131,6 +131,41 @@ import Testing
         #expect(proseStyle.lineSpacing < Self.tableRenderStyle.lineSpacing)
     }
 
+    @Test func tableTokenWidthsPreserveMixedScriptsAndFontChanges() {
+        let tokens = ["中", "文", "。", "カ", "ナ", "Ａ", "long-word", "e\u{301}", "👩🏽‍💻"]
+        for size in [12.0, 24.0] {
+            let font = NSFont.systemFont(ofSize: size)
+            let expected = tokens.map { TableLayoutMath.singleLineWidth($0, font: font) }.max()!
+            let text = "中文。カナＡ long-word\te\u{301}\n👩🏽‍💻 "
+            #expect(TableLayoutMath.longestUnbreakableWidth(String(repeating: text, count: 20), font: font) == expected)
+            #expect(TableLayoutMath.longestUnbreakableWidth(" \t\n", font: font) == 0)
+        }
+    }
+
+    @Test func tableTokenWidthsKeepDistinctUnicodeSpellings() {
+        let font = NSFont.systemFont(ofSize: 14)
+        for (a, b) in [("\u{01EE}", "\u{01B7}\u{030C}"), ("\u{0387}", "\u{00B7}")] {
+            let expected = max(TableLayoutMath.singleLineWidth(a, font: font),
+                               TableLayoutMath.singleLineWidth(b, font: font))
+            #expect(TableLayoutMath.longestUnbreakableWidth(a + " " + b, font: font) == expected)
+            #expect(TableLayoutMath.longestUnbreakableWidth(b + " " + a, font: font) == expected)
+        }
+    }
+
+    @Test func tableColumnTokenWidthsKeepCellBoundariesAndFontSizes() {
+        let cases = [["hello", "world"], ["a\r", "b"], ["a", "\u{301}"],
+                     ["\u{01EE}", "\u{01B7}\u{030C}"], ["\u{0387}", "\u{00B7}"],
+                     ["中", "文", "👩🏽‍💻", "long-word"]]
+        for size in [12.0, 24.0] {
+            let font = NSFont.systemFont(ofSize: size)
+            for cells in cases {
+                let expected = cells.map { TableLayoutMath.singleLineWidth($0, font: font) }.max()!
+                #expect(TableLayoutMath.longestUnbreakableWidth(in: cells + cells, font: font) == expected)
+            }
+            #expect(TableLayoutMath.longestUnbreakableWidth(in: [], font: font) == 0)
+        }
+    }
+
     @Test func renderedBodyUsesUlyssesProseRhythm() throws {
         let rendered = Self.renderUlyssesReference("A paragraph.")
         let font = try Self.font(in: rendered, containing: "A paragraph")

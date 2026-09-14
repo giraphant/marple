@@ -6,39 +6,42 @@ import Foundation
 extension Catalog {
     /// Build the heavy derived caches (relation graph, search index) on a
     /// background task and publish them on the main actor when done. If
-    /// `entries` changes again before this task completes, the in-flight task
-    /// is cancelled and stale dispatch blocks are vetoed by generation counter
-    /// — only the latest snapshot wins.
-    func scheduleDeferredDerivedRebuild(entries: [Entry]) {
-        deferredDerivedTask?.cancel()
+    /// `entries` changes during a build, discard that result and build the latest
+    /// snapshot next. One worker bounds memory during refresh bursts; cancelling
+    /// an outer task alone would leave all its detached builds running.
+    func scheduleDeferredDerivedRebuild() {
         derivedGeneration &+= 1
-        let generation = derivedGeneration
-        let snapshot = entries
-        // Capture the active schema on the main actor; the detached build below
-        // can't reach `VaultSchema.active` (@MainActor). VaultSchema is Sendable.
-        let schema = VaultSchema.active
+        guard deferredDerivedTask == nil else { return }
         deferredDerivedTask = Task { [weak self] in
-            let result = await Task.detached(priority: .utility) {
-                let graph = RelationGraph.build(snapshot, schema: schema)
-                let search = buildSearchIndex(snapshot)
-                return (graph, search)
-            }.value
-            if Task.isCancelled { return }
-            // Hop to the next main-runloop tick (not MainActor.run, which can
-            // run synchronously inside the current render pass and triggered an
-            // NSTableView reentrant-delegate warning when @Observable
-            // invalidation cascaded back into the table mid-render).
-            //
-            // DispatchQueue.main.async can't be cancelled, so guard the
-            // assignment with the generation counter: any newer rebuild bumps
-            // `derivedGeneration` and this stale block becomes a no-op.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.derivedGeneration == generation else { return }
-                self.relationGraph = result.0
-                self.searchIndex = result.1
-                if self.hasOpenDerivedInput {
-                    self.recomputeOpenDerivedFromStoredInput()
+            while let self {
+                let generation = self.derivedGeneration
+                let snapshot = self.entries
+                let schema = VaultSchema.active
+                let graph = await Task.detached(priority: .utility) {
+                    RelationGraph.build(snapshot, schema: schema)
+                }.value
+                guard generation == self.derivedGeneration else { continue }
+                // Publish on the next runloop tick to avoid NSTableView reentrant
+                // delegate calls. A newer snapshot can still veto this block.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.derivedGeneration == generation else { return }
+                    self.relationGraph = graph
+                    if self.hasOpenDerivedInput {
+                        self.recomputeOpenDerivedFromStoredInput()
+                    }
                 }
+                // The search index can take seconds. Make the ready graph
+                // available first so navigation doesn't keep rebuilding it.
+                let search = await Task.detached(priority: .utility) {
+                    buildSearchIndex(snapshot)
+                }.value
+                guard generation == self.derivedGeneration else { continue }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.derivedGeneration == generation else { return }
+                    self.searchIndex = search
+                }
+                self.deferredDerivedTask = nil
+                return
             }
         }
     }

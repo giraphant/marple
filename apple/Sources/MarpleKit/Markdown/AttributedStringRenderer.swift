@@ -996,11 +996,11 @@ enum TableLayoutMath {
 
         for column in 0..<columnCount {
             let header = headerTexts[column]
-            minWidths[column] = max(minWidths[column], longestUnbreakableWidth(header, font: headerFont))
+            let bodyTexts = rowTexts.compactMap { column < $0.count ? $0[column] : nil }
+            minWidths[column] = max(longestUnbreakableWidth(header, font: headerFont),
+                                    longestUnbreakableWidth(in: bodyTexts, font: bodyFont))
             naturalWidths[column] = max(naturalWidths[column], singleLineWidth(header, font: headerFont))
-            for row in rowTexts where column < row.count {
-                let text = row[column]
-                minWidths[column] = max(minWidths[column], longestUnbreakableWidth(text, font: bodyFont))
+            for text in bodyTexts {
                 naturalWidths[column] = max(naturalWidths[column], singleLineWidth(text, font: bodyFont))
             }
             naturalWidths[column] = min(naturalWidths[column], naturalCap)
@@ -1032,11 +1032,12 @@ enum TableLayoutMath {
         var minTotal: CGFloat = 0
         var naturalTotal: CGFloat = 0
         for column in 0..<headerTexts.count {
-            var minWidth = longestUnbreakableWidth(headerTexts[column], font: headerFont)
+            let bodyTexts = rowTexts.compactMap { column < $0.count ? $0[column] : nil }
+            let minWidth = max(longestUnbreakableWidth(headerTexts[column], font: headerFont),
+                               longestUnbreakableWidth(in: bodyTexts, font: bodyFont))
             var naturalWidth = singleLineWidth(headerTexts[column], font: headerFont)
-            for row in rowTexts where column < row.count {
-                minWidth = max(minWidth, longestUnbreakableWidth(row[column], font: bodyFont))
-                naturalWidth = max(naturalWidth, singleLineWidth(row[column], font: bodyFont))
+            for text in bodyTexts {
+                naturalWidth = max(naturalWidth, singleLineWidth(text, font: bodyFont))
             }
             minTotal += minWidth
             naturalTotal += max(naturalWidth, minWidth)
@@ -1053,25 +1054,39 @@ enum TableLayoutMath {
     /// Width of the widest run the line-breaker won't split: whitespace and CJK
     /// boundaries allow breaks, so Latin words stay whole while CJK measures per char.
     static func longestUnbreakableWidth(_ text: String, font: PlatformFont) -> CGFloat {
-        guard !text.isEmpty else { return 0 }
+        longestUnbreakableWidth(in: [text], font: font)
+    }
+
+    /// A column only needs the maximum across cells. Measure repeated tokens once
+    /// for this column/font, flushing at cell boundaries so words never join.
+    static func longestUnbreakableWidth(in texts: [String], font: PlatformFont) -> CGFloat {
         var maxWidth: CGFloat = 0
+        // Canonically equivalent Strings can still have different glyph widths.
+        var measured = Set<[UInt8]>()
         var token = ""
-        func flush() {
-            guard !token.isEmpty else { return }
-            maxWidth = max(maxWidth, singleLineWidth(token, font: font))
-            token = ""
-        }
-        for ch in text {
-            if ch == " " || ch == "\t" || ch == "\n" {
-                flush()
-            } else if let scalar = ch.unicodeScalars.first, isCJKBreakable(scalar) {
-                flush()
-                maxWidth = max(maxWidth, singleLineWidth(String(ch), font: font))
-            } else {
-                token.append(ch)
+        func measure(_ text: String) {
+            if measured.insert(Array(text.utf8)).inserted {
+                maxWidth = max(maxWidth, singleLineWidth(text, font: font))
             }
         }
-        flush()
+        func flush() {
+            guard !token.isEmpty else { return }
+            measure(token)
+            token = ""
+        }
+        for text in texts {
+            for ch in text {
+                if ch == " " || ch == "\t" || ch == "\n" {
+                    flush()
+                } else if let scalar = ch.unicodeScalars.first, isCJKBreakable(scalar) {
+                    flush()
+                    measure(String(ch))
+                } else {
+                    token.append(ch)
+                }
+            }
+            flush()
+        }
         return maxWidth
     }
 

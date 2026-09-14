@@ -1,4 +1,7 @@
 import Testing
+import Foundation
+import Observation
+import Synchronization
 @testable import MarpleKit
 
 @MainActor @Suite struct CatalogTests {
@@ -18,6 +21,122 @@ import Testing
         c.themeIndex = [ThemeCount(theme: "存在主义", count: 3)]
         #expect(c.themeIndex.count == 1)
         #expect(c.themeIndex.first?.theme == "存在主义")
+    }
+
+    @Test func entryLookupFollowsPublishedAndOptimisticChanges() {
+        let c = Catalog()
+        let first = mk("vault/notes/a.md", "note", title: "First")
+        let duplicate = mk(first.path, "paper", title: "Duplicate")
+        let other = mk("vault/notes/b.md", "note", title: "Other")
+        let pass = c.beginStandalonePass()
+        c.publish([first, duplicate, other], pass: pass)
+        #expect(c.entry(at: first.path) == first)
+        #expect(c.entry(at: nil) == nil)
+        #expect(c.entry(at: "missing") == nil)
+        c.mutateEntries { $0.removeFirst() }
+        #expect(c.entry(at: first.path) == duplicate)
+        c.mutateEntries { $0.reverse(); $0[0] = mk(other.path, "note", title: "Renamed") }
+        #expect(c.entry(at: other.path)?.title == "Renamed")
+        #expect(c.entry(at: first.path) == duplicate)
+        let newer = c.beginStandalonePass()
+        #expect(!c.publish([first], pass: pass))
+        #expect(c.entry(at: first.path) == duplicate)
+        c.publish([], pass: newer)
+        #expect(c.entry(at: first.path) == nil)
+        #expect(c.entry(at: other.path) == nil)
+    }
+
+    @Test func missingEntryLookupObservesLaterPublication() {
+        let c = Catalog()
+        let changed = Mutex(false)
+        withObservationTracking {
+            #expect(c.entry(at: "vault/notes/a.md") == nil)
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+        c.publish([mk("vault/notes/a.md", "note")], pass: c.beginStandalonePass())
+        #expect(changed.withLock { $0 })
+        #expect(c.entry(at: "vault/notes/a.md")?.path == "vault/notes/a.md")
+    }
+
+    @Test func orderedEntryLookupPreservesDuplicateRowsAndTracksChanges() {
+        let c = Catalog()
+        let a = mk("vault/notes/a.md", "note", title: "A")
+        let b = mk("vault/notes/b.md", "note", title: "B")
+        let duplicate = mk(a.path, "paper", title: "Second A")
+        let paths = [b.path, "missing", a.path, b.path]
+        c.publish([a, b], pass: c.beginStandalonePass())
+        #expect(c.entries(inPathOrder: paths) == [b, a])
+        c.mutateEntries { $0.insert(duplicate, at: 1) }
+        #expect(c.entries(inPathOrder: paths) == [b, a, duplicate])
+        c.mutateEntries { $0.removeFirst() }
+        #expect(c.entries(inPathOrder: paths) == [b, duplicate])
+        c.mutateEntries { $0.removeAll() }
+        #expect(c.entries(inPathOrder: paths).isEmpty)
+    }
+
+    @Test func authorProfilesFollowPublishedAndOptimisticChanges() {
+        let c = Catalog()
+        let folded = mk("vault/authors/folded.md", "author", title: "René")
+        let exact = mk("vault/authors/exact.md", "author", title: "Rene")
+        let pass = c.beginStandalonePass()
+        c.publish([folded, exact], pass: pass)
+        #expect(c.authorProfile(for: " rene ")?.path == exact.path)
+        c.mutateEntries { $0.removeLast() }
+        #expect(c.authorProfile(for: "Rene")?.path == folded.path)
+        c.mutateEntries { $0[0] = mk(folded.path, "author", title: "Changed") }
+        #expect(c.authorProfile(for: "Rene") == nil)
+        #expect(c.authorProfile(for: "Changed")?.title == "Changed")
+        let newer = c.beginStandalonePass()
+        #expect(!c.publish([exact], pass: pass))
+        #expect(c.authorProfile(for: "Changed") != nil)
+        c.publish([], pass: newer)
+        #expect(c.authorProfile(for: "Changed") == nil)
+    }
+
+    @Test func deferredRebuildBurstKeepsOneWorkerAndPublishesLatest() async throws {
+        let c = Catalog()
+        c.entries = makeSyntheticEntries(5_000)
+        c.scheduleDeferredDerivedRebuild()
+        let worker = try #require(c.deferredDerivedTask)
+        // Let the worker capture its first snapshot before replacing it.
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        try #require(c.deferredDerivedTask != nil)
+        for i in 0..<10 {
+            c.entries = [mk("vault/papers/\(i).md", "paper", title: "Latest \(i)")]
+            c.scheduleDeferredDerivedRebuild()
+        }
+        // Cancelling an outer task does not stop its detached worker. A burst
+        // must reuse the running worker, then converge on the newest snapshot.
+        #expect(!worker.isCancelled)
+        await worker.value
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(c.deferredDerivedTask == nil)
+        #expect(c.searchIndex.documents.map(\.entry.path) == ["vault/papers/9.md"])
+    }
+
+    @Test func deferredGraphPublishesBeforeSearchFinishes() async throws {
+        let c = Catalog()
+        c.entries = makeSyntheticEntries(5_000)
+        withObservationTracking {
+            _ = c.relationGraph
+        } onChange: {
+            MainActor.assumeIsolated {
+                #expect(c.searchIndex.isEmpty)
+                #expect(c.deferredDerivedTask != nil)
+            }
+        }
+        c.scheduleDeferredDerivedRebuild()
+        await c.deferredDerivedTask?.value
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(!c.relationGraph.isEmpty)
+        #expect(!c.searchIndex.isEmpty)
     }
 
     @Test func rebuildIndexDerivedCountsAndTopicMembership() {

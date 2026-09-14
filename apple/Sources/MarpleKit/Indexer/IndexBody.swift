@@ -7,6 +7,8 @@
 //   search_text (:1597-1604)
 // and isKVLabel (:828-838) is also exposed directly for use in IndexedEntry.
 
+import Foundation
+
 // MARK: - normalizeBodyForSearch
 
 /// CRLF → LF, trim each line, drop blank lines, join with "\n".
@@ -86,9 +88,17 @@ public func firstHeading(_ body: String) -> String? {
 /// - Truncate to exactly 800 Unicode scalars.
 public func firstParagraph(_ body: String) -> String {
     let maxChars = 800
-    let normalized = body.replacingOccurrences(of: "\r\n", with: "\n")
+    let normalized = body.utf8.contains(13) ? body.replacingOccurrences(of: "\r\n", with: "\n") : body
     var out = ""
-    for paragraph in normalized.components(separatedBy: "\n\n") {
+    // Scan only the paragraphs needed for the preview, preserving literal LF pairs.
+    let text = normalized as NSString
+    var start = 0
+    while start < text.length {
+        let separator = text.range(of: "\n\n", options: .literal,
+                                   range: NSRange(location: start, length: text.length - start))
+        let end = separator.location == NSNotFound ? text.length : separator.location
+        let paragraph = text.substring(with: NSRange(location: start, length: end - start))
+        start = separator.location == NSNotFound ? text.length : NSMaxRange(separator)
         let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { continue }
         if trimmed.hasPrefix("#") { continue }

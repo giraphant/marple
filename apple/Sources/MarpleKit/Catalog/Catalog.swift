@@ -19,7 +19,43 @@ public final class Catalog {
     /// `internal(set)`：壳无法直接赋值，只能经 `publish`/`mutateEntries` 改（核内
     /// 唯一权威）；壳侧以 `var entries { catalog.entries }` facade 只读转发，所有
     /// 读 `model.entries` 的视图调用点不变。
-    public internal(set) var entries: [Entry] = []
+    public internal(set) var entries: [Entry] = [] {
+        didSet {
+            let snapshot = entries
+            entryIndexByPath = Dictionary(snapshot.indices.lazy.map { (snapshot[$0].path, $0) },
+                                          uniquingKeysWith: { first, _ in first })
+            authorPageIndex = NameResolver.AuthorPageIndex(snapshot)
+        }
+    }
+    @ObservationIgnored private var entryIndexByPath: [String: Int] = [:]
+    private var authorPageIndex = NameResolver.AuthorPageIndex([])
+
+    /// Resolve against the current snapshot without scanning or copying the vault.
+    public func entry(at path: String?) -> Entry? {
+        // Read entries even on a miss so a later publication invalidates observers.
+        let snapshot = entries
+        guard let path, let index = entryIndexByPath[path] else { return nil }
+        return snapshot[index]
+    }
+
+    /// Resolve a path list in its first-seen order, omitting missing paths.
+    public func entries(inPathOrder paths: [String]) -> [Entry] {
+        let snapshot = entries
+        var seen = Set<String>()
+        let paths = paths.filter { seen.insert($0).inserted }
+        if entryIndexByPath.count == snapshot.count {
+            return paths.compactMap { path in entryIndexByPath[path].map { snapshot[$0] } }
+        }
+        // Preserve all source rows if an imported index contains duplicate paths.
+        let order = Dictionary(uniqueKeysWithValues: paths.enumerated().map { ($0.element, $0.offset) })
+        return snapshot.compactMap { entry in order[entry.path].map { ($0, entry) } }
+            .sorted { $0.0 < $1.0 }
+            .map { $0.1 }
+    }
+
+    public func authorProfile(for name: String) -> Entry? {
+        authorPageIndex.pages(named: name).first
+    }
 
     // 索引派生（entries 变即重算）
     public internal(set) var counts: [EntryType: Int] = [:]

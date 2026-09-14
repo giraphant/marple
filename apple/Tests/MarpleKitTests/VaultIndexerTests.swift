@@ -177,6 +177,56 @@ struct VaultIndexerTests {
         #expect(mode?.lowercased() == "wal")
     }
 
+    @Test("full rebuild preserves an open WAL snapshot and publishes to the same reader")
+    func rebuildWithOpenWALReader() throws {
+        let ws = try makeTempWorkspace()
+        defer { try? FileManager.default.removeItem(atPath: ws) }
+        let path = ws + "/vault/papers/a.md"
+        try write(at: path, title: "Before")
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+        let held = try DatabaseQueue(path: ws + "/.marple/index.sqlite")
+        try held.write { db in
+            try db.execute(sql: "UPDATE entries SET title = 'Before WAL'")
+        }
+        try write(at: path, title: "After")
+        try held.read { db in
+            let before = try String.fetchOne(db, sql: "SELECT title FROM entries")
+            #expect(before == "Before WAL")
+            _ = try indexer.buildFull()
+            let during = try String.fetchOne(db, sql: "SELECT title FROM entries")
+            #expect(during == "Before WAL")
+        }
+        try held.read { db in
+            let after = try String.fetchOne(db, sql: "SELECT title FROM entries")
+            let integrity = try String.fetchOne(db, sql: "PRAGMA quick_check")
+            #expect(after == "After")
+            #expect(integrity == "ok")
+        }
+        #expect(try openDB(ws).loadEntries().first?.title == "After")
+    }
+
+    @Test("an existing empty index reader sees the schema after a full build")
+    func rebuildPublishesSchemaToExistingReader() throws {
+        let ws = try makeTempWorkspace()
+        defer { try? FileManager.default.removeItem(atPath: ws) }
+        try FileManager.default.createDirectory(atPath: ws + "/.marple", withIntermediateDirectories: true)
+        let held = try DatabaseQueue(path: ws + "/.marple/index.sqlite")
+        try held.writeWithoutTransaction { db in
+            try db.execute(sql: "PRAGMA page_size=8192")
+            try db.execute(sql: "CREATE TABLE legacy (id INTEGER)")
+        }
+        let reader = openDB(ws)
+        #expect(try reader.loadEntries().isEmpty)
+        #expect(try reader.search("Published", type: nil, minRating: nil, theme: nil, limit: 10).isEmpty)
+        try write(at: ws + "/vault/papers/a.md", title: "Published")
+        _ = try VaultIndexer(workspaceRoot: ws).buildFull()
+        #expect(try reader.search("Published", type: nil, minRating: nil, theme: nil, limit: 10).first?.entry.title == "Published")
+        #expect(try reader.loadEntries().first?.title == "Published")
+        let fresh = try DatabaseQueue(path: ws + "/.marple/index.sqlite")
+        #expect(try fresh.read { try Int.fetchOne($0, sql: "PRAGMA page_size") } == 8192)
+    }
+
     // MARK: - reconcile when index missing
 
     @Test("reconcile builds the index when none exists")
@@ -227,6 +277,11 @@ struct VaultIndexerTests {
         #expect(entries.count == 2)
         let paths = entries.map(\.path).sorted()
         #expect(paths == ["vault/papers/a.md", "vault/papers/c.md"])
+        try DatabaseQueue(path: ws + "/.marple/index.sqlite").read { db throws -> Void in
+            #expect(try String.fetchAll(db, sql: "SELECT path FROM entry_trigram ORDER BY path") == ["vault/papers/a.md", "vault/papers/c.md"])
+            #expect(try String.fetchAll(db, sql: "SELECT path FROM entry_trigram WHERE entry_trigram MATCH 'update'") == ["vault/papers/a.md"])
+            #expect(try String.fetchAll(db, sql: "SELECT path FROM entry_trigram WHERE entry_trigram MATCH 'search'") == ["vault/papers/c.md"])
+        }
     }
 
     @Test("second reconcile with no changes is all unchanged")
@@ -243,6 +298,40 @@ struct VaultIndexerTests {
         #expect(stats.upserted == 0)
         #expect(stats.removed == 0)
         #expect(stats.unchanged == 2)
+    }
+
+    @Test("reconcile removes a large batch without leaving search rows or deleting unchanged entries")
+    func reconcileLargeDeletionBatch() throws {
+        let ws = try makeTempWorkspace()
+        defer { try? FileManager.default.removeItem(atPath: ws) }
+        try write(at: ws + "/vault/papers/keep.md", body: "Preserved searchable anchor.")
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+        let queue = try DatabaseQueue(path: ws + "/.marple/index.sqlite")
+        try queue.write { db in
+            for i in 0..<1100 {
+                let path = "vault/papers/中文-'\"\\\n%_-\(i).md"
+                try db.execute(sql: "INSERT INTO entries (path, type, mtime) VALUES (?, 'paper', 0)",
+                               arguments: [path])
+                try db.execute(sql: "INSERT INTO entry_themes VALUES (?, 'obsolete', 'paper')",
+                               arguments: [path])
+                // FTS rowids are independent of entries rowids, including legacy duplicates.
+                try db.execute(sql: "INSERT INTO entry_trigram (rowid, path, type, text) VALUES (?, ?, 'paper', 'obsolete')",
+                               arguments: [10000 + i, path])
+                if i == 0 {
+                    try db.execute(sql: "INSERT INTO entry_trigram (rowid, path, type, text) VALUES (20000, ?, 'paper', 'obsolete')",
+                                   arguments: [path])
+                }
+            }
+        }
+
+        #expect(try indexer.reconcile() == ReconcileStats(removed: 1100, unchanged: 1))
+        try queue.read { db throws -> Void in
+            #expect(try String.fetchAll(db, sql: "SELECT path FROM entries") == ["vault/papers/keep.md"])
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM entry_themes") == 0)
+            #expect(try String.fetchAll(db, sql: "SELECT path FROM entry_trigram") == ["vault/papers/keep.md"])
+            #expect(try String.fetchAll(db, sql: "SELECT path FROM entry_trigram WHERE entry_trigram MATCH 'anchor'") == ["vault/papers/keep.md"])
+        }
     }
 
     // MARK: - dotfiles and .trash exclusion
@@ -542,6 +631,10 @@ struct VaultIndexerTests {
                 END
                 """)
         }
+        // The successful entry is also replaced in this transaction. A failure
+        // must restore its old search row as well as its metadata and revision.
+        try write(at: ws + "/vault/papers/a.md", title: "Changed", body: "replacement")
+        try touch(ws + "/vault/papers/a.md")
         try writeRaw(at: ws + "/vault/papers/b.md", """
         ---
         type: paper
@@ -559,6 +652,12 @@ struct VaultIndexerTests {
 
         #expect(try entriesRevision(indexPath) == revBefore)
         #expect(try entryCount(indexPath, path: "vault/papers/b.md") == 0)
+        try DatabaseQueue(path: indexPath).read { db throws -> Void in
+            #expect(try String.fetchOne(db, sql: "SELECT title FROM entries") == "Paper A")
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM entry_trigram") == 1)
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM entry_trigram WHERE entry_trigram MATCH 'search'") == 1)
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM entry_trigram WHERE entry_trigram MATCH 'replacement'") == 0)
+        }
     }
 
     @Test("reconcile bumps entries_revision when an indexed file becomes skipped")
