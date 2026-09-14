@@ -17,8 +17,9 @@ struct SidebarView: View {
     }
 }
 
-private struct SpaceSwitcherView: View {
+struct SpaceSwitcherView: View {
     @Bindable var model: AppModel
+    @State private var hoveredSpaceID: WorkspaceSpace.ID?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -32,20 +33,46 @@ private struct SpaceSwitcherView: View {
             .frame(width: 28, height: 28)
             .contentShape(Rectangle())
 
-            Spacer(minLength: 4)
+            GeometryReader { geometry in
+                let spaces = model.activeSpaces
+                let compact = CGFloat(spaces.count * 34 - 6) > geometry.size.width
+                let slotWidth = compact ? max(20, min(28, geometry.size.width / CGFloat(max(1, spaces.count)))) : 28
+                let revealedID = hoveredSpaceID ?? model.activeSpaceID
 
-            HStack(spacing: 6) {
-                ForEach(Array(model.activeSpaces.enumerated()), id: \.element.id) { index, space in
-                    SpaceControlView(index: index + 1,
-                                     spaceID: space.id,
-                                     iconName: space.iconName,
-                                     isActive: model.activeSpaceID == space.id,
-                                     model: model)
-                        .frame(width: 28, height: 28)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: compact ? 0 : 6) {
+                            ForEach(Array(spaces.enumerated()), id: \.element.id) { index, space in
+                                SpaceControlView(index: index + 1,
+                                                 spaceID: space.id,
+                                                 name: space.name,
+                                                 iconName: space.iconName,
+                                                 isActive: model.activeSpaceID == space.id,
+                                                 showsIcon: !compact || revealedID == space.id,
+                                                 model: model,
+                                                 onHover: { hovering in
+                                                     if hovering { hoveredSpaceID = space.id }
+                                                     else if hoveredSpaceID == space.id { hoveredSpaceID = nil }
+                                                 })
+                                    .frame(width: slotWidth, height: 28)
+                                    .id(space.id)
+                            }
+                        }
+                    }
+                    .defaultScrollAnchor(.center, for: .alignment)
+                    .onChange(of: model.activeSpaceID, initial: true) { _, id in
+                        if let id { proxy.scrollTo(id) }
+                    }
+                    .onChange(of: geometry.size.width) { _, _ in
+                        if let id = model.activeSpaceID { proxy.scrollTo(id, anchor: .center) }
+                    }
+                    .onChange(of: spaces.count) { _, _ in
+                        hoveredSpaceID = nil
+                        if let id = model.activeSpaceID { proxy.scrollTo(id, anchor: .center) }
+                    }
                 }
             }
-
-            Spacer(minLength: 4)
+            .frame(height: 28)
 
             Button {
                 model.addSpace()
@@ -106,15 +133,20 @@ private struct SpaceIconPaletteView: View {
 }
 
 /// A Space dot that also accepts a dragged browse card (`.string` entry path) via
-private struct SpaceControlView: NSViewRepresentable {
+struct SpaceControlView: NSViewRepresentable {
     let index: Int
     let spaceID: WorkspaceSpace.ID
+    let name: String
     let iconName: String?
     let isActive: Bool
+    let showsIcon: Bool
     var model: AppModel
+    var onHover: (Bool) -> Void
 
     func makeNSView(context: Context) -> SpaceControl {
         let view = SpaceControl()
+        view.setAccessibilityElement(true)
+        view.setAccessibilityRole(.button)
         view.registerForDraggedTypes([SidebarDragPasteboard.tabItem, SpaceDragPasteboard.spaceItem])
         return view
     }
@@ -124,8 +156,17 @@ private struct SpaceControlView: NSViewRepresentable {
         view.spaceID = spaceID
         view.iconName = iconName
         view.isActive = isActive
+        view.showsIcon = showsIcon
         view.model = model
+        view.onHover = onHover
+        view.toolTip = name
+        view.setAccessibilityLabel(name)
+        view.setAccessibilitySelected(isActive)
         view.needsDisplay = true
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: SpaceControl, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 28, height: 28)
     }
 
     @MainActor final class SpaceControl: NSView, NSDraggingSource {
@@ -133,8 +174,11 @@ private struct SpaceControlView: NSViewRepresentable {
         var spaceID: WorkspaceSpace.ID?
         var iconName: String?
         var isActive = false
+        var showsIcon = true
         weak var model: AppModel?
+        var onHover: ((Bool) -> Void)?
 
+        private var hoverTrackingArea: NSTrackingArea?
         private var mouseDownEvent: NSEvent?
         private var didStartDrag = false
         private var hoverGeneration = 0
@@ -156,10 +200,30 @@ private struct SpaceControlView: NSViewRepresentable {
 
         override var intrinsicContentSize: NSSize { NSSize(width: 28, height: 28) }
 
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+            let area = NSTrackingArea(rect: .zero,
+                                      options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                      owner: self, userInfo: nil)
+            addTrackingArea(area)
+            hoverTrackingArea = area
+        }
+
+        override func mouseEntered(with event: NSEvent) { onHover?(true) }
+        override func mouseExited(with event: NSEvent) { onHover?(false) }
+
         override func draw(_ dirtyRect: NSRect) {
             super.draw(dirtyRect)
+            guard showsIcon else {
+                NSColor.tertiaryLabelColor.setFill()
+                NSBezierPath(ovalIn: NSRect(x: bounds.midX - 2, y: bounds.midY - 2, width: 4, height: 4)).fill()
+                return
+            }
             if isActive {
-                let rect = bounds.insetBy(dx: 1, dy: 1)
+                let diameter = min(bounds.width, bounds.height) - 2
+                let rect = NSRect(x: bounds.midX - diameter / 2, y: bounds.midY - diameter / 2,
+                                  width: diameter, height: diameter)
                 NSColor.labelColor.withAlphaComponent(0.10).setFill()
                 NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2).fill()
             }
@@ -234,8 +298,14 @@ private struct SpaceControlView: NSViewRepresentable {
                 mouseDownEvent = nil
                 didStartDrag = false
             }
-            guard !didStartDrag, let spaceID else { return }
-            Task { await model?.selectSpace(spaceID) }
+            guard !didStartDrag else { return }
+            _ = accessibilityPerformPress()
+        }
+
+        override func accessibilityPerformPress() -> Bool {
+            guard let spaceID, let model else { return false }
+            Task { await model.selectSpace(spaceID) }
+            return true
         }
 
         private var lastMenuPoint: NSPoint = .zero
@@ -303,10 +373,12 @@ private struct SpaceControlView: NSViewRepresentable {
         func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
             mouseDownEvent = nil
             didStartDrag = false
+            onHover?(false)
         }
 
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-            draggingUpdated(sender)
+            onHover?(true)
+            return draggingUpdated(sender)
         }
 
         override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -328,10 +400,12 @@ private struct SpaceControlView: NSViewRepresentable {
         }
 
         override func draggingExited(_ sender: NSDraggingInfo?) {
+            onHover?(false)
             cancelSwitch()
         }
 
         override func draggingEnded(_ sender: NSDraggingInfo) {
+            onHover?(false)
             cancelSwitch()
         }
 
