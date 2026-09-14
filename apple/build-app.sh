@@ -24,11 +24,24 @@ ENTITLEMENTS="Resources/Marple.entitlements"
 VERSION="${VERSION:-$(cat VERSION)}"
 BUILD="${BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 
+# Pass the real SDK version to ld: mixed toolchains can otherwise record the
+# deployment target as the SDK and make AppKit select its older appearance.
+MACOS_SDK_PATH="${SDKROOT:-$(xcrun --sdk macosx --show-sdk-path)}"
+MACOS_SDK_VERSION="$(/usr/libexec/PlistBuddy -c 'Print Version' "$MACOS_SDK_PATH/SDKSettings.plist")"
+SDK_BUILD_FLAGS=(--sdk "$MACOS_SDK_PATH"
+    -Xlinker -platform_version -Xlinker macos -Xlinker 15.0 -Xlinker "$MACOS_SDK_VERSION")
+
 echo "Building ($CONFIG)..."
 if [ "$CONFIG" = "release" ]; then
-    swift build -c release
+    swift build -c release "${SDK_BUILD_FLAGS[@]}"
 else
-    swift build
+    swift build "${SDK_BUILD_FLAGS[@]}"
+fi
+
+BUILT_SDK_VERSION="$(xcrun vtool -show-build "$PKG_ROOT/Marple" | awk '$1 == "sdk" {print $2; exit}')"
+if [ "$BUILT_SDK_VERSION" != "$MACOS_SDK_VERSION" ]; then
+    echo "ERROR: built SDK ($BUILT_SDK_VERSION) != selected SDK ($MACOS_SDK_VERSION). Refusing to package." >&2
+    exit 1
 fi
 
 # MLX looks for `default.metallib` at the package root so 深度 (semantic) mode
