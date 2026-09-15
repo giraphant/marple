@@ -48,7 +48,7 @@ final class RoundedCardBlock: NSTextTableBlock {
 
     // Drawn during NSTextView layout/draw, where NSAppearance.current is already the
     // view's effective appearance — so the dynamic NSColors resolve for light/dark.
-    override func drawBackground(withFrame frameRect: CGRect, in controlView: PlatformView,
+    override func drawBackground(withFrame frameRect: CGRect, in controlView: PlatformView?,
                                  characterRange: NSRange, layoutManager: NSLayoutManager) {
         lastFrame = frameRect
         let rect = frameRect.insetBy(dx: 0.5, dy: 0.5)
@@ -93,7 +93,7 @@ final class TableCellBlock: NSTextTableBlock {
     weak var card: RoundedCardBlock?
     private(set) var lastFrame: CGRect = .zero
 
-    override func drawBackground(withFrame frameRect: CGRect, in controlView: PlatformView,
+    override func drawBackground(withFrame frameRect: CGRect, in controlView: PlatformView?,
                                  characterRange: NSRange, layoutManager: NSLayoutManager) {
         lastFrame = frameRect
         let cardFrame = card?.lastFrame ?? .zero
