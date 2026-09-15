@@ -33,6 +33,10 @@ final class TalkPlayerController: ObservableObject {
     func teardown() {
         if let observer { player.removeTimeObserver(observer); self.observer = nil }
         player.pause()
+        player.replaceCurrentItem(with: nil)
+        loadedMedia = nil
+        cues = []
+        caption = ""
     }
 
     private func installObserver() {
@@ -130,6 +134,8 @@ struct TalkPlayerView: View {
             .buttonStyle(.plain)
             .help(enlarged ? String(localized: "还原") : String(localized: "放大"))
             Button {
+                // Stop before the removal animation / onDisappear runs.
+                controller.teardown()
                 model.closeTalkPlayback()
             } label: {
                 Image(systemName: "xmark.circle.fill")

@@ -5,15 +5,18 @@ import SwiftUI
 /// transparent-titlebar `NSPanel` that becomes key — which is the reliable native
 /// fix for "the search field doesn't get focus." A SwiftUI `.overlay` inside the
 /// main window can't take first responder cleanly; a key panel makes the hosted
-/// `TextField` first responder automatically. Closes itself when it loses key.
-final class CommandPalettePanel: NSPanel, NSWindowDelegate {
+/// `TextField` first responder automatically. App switching preserves the search;
+/// clicking another window in Marple dismisses it.
+final class CommandPalettePanel: NSPanel {
+    private var outsideClickMonitor: Any?
+
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 60),
             styleMask: [.fullSizeContentView, .titled, .resizable],
             backing: .buffered, defer: false
         )
-        delegate = self
+        hidesOnDeactivate = false
         titlebarAppearsTransparent = true
         titleVisibility = .hidden
         isMovableByWindowBackground = true
@@ -27,6 +30,14 @@ final class CommandPalettePanel: NSPanel, NSWindowDelegate {
         // CotEditor .utilityWindow for the same reason).
         animationBehavior = .none
         center()
+        // Resigning key also happens on app switches and automatic focus
+        // restoration. Only an explicit in-app outside click dismisses search.
+        outsideClickMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] event in
+            if let self, let window = event.window, window !== self { self.close() }
+            return event
+        }
     }
 
     override var canBecomeKey: Bool { true }
@@ -37,19 +48,30 @@ final class CommandPalettePanel: NSPanel, NSWindowDelegate {
         return button
     }
 
-    func windowDidResignKey(_ notification: Notification) { close() }
+    override func close() {
+        if let outsideClickMonitor {
+            NSEvent.removeMonitor(outsideClickMonitor)
+            self.outsideClickMonitor = nil
+        }
+        super.close()
+    }
 }
 
-/// Owns the single command-palette panel and toggles it (⌘T). Recreates the
-/// hosted SwiftUI view on each open so the query/mode reset to a fresh state.
+/// Owns the single command-palette panel and toggles it (⌘T). Resumes an open
+/// search after app switching; only a dismissed search gets a fresh view.
 @MainActor
 enum CommandPalettePresenter {
     private static var panel: CommandPalettePanel?
 
     static func toggle(model: AppModel) {
-        if let panel, panel.isKeyWindow {
-            panel.close()
-            Self.panel = nil
+        if let panel, panel.isVisible {
+            if NSApp.isActive && panel.isKeyWindow {
+                panel.close()
+                Self.panel = nil
+            } else {
+                if !NSApp.isActive { NSApp.activate() }
+                panel.makeKeyAndOrderFront(nil)
+            }
             return
         }
         open(model: model)
