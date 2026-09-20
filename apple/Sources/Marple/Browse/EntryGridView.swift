@@ -1,16 +1,10 @@
 import SwiftUI
 import MarpleKit
 
-/// Multi-column masonry browse of `visibleEntries` (QUA-114), backed by a native
-/// `NSCollectionView` + custom waterfall layout + pure-AppKit cells
-/// (`CollectionGridVariant`). Native scrolling, single-click select, ⌘/⇧
-/// multi-select, rubber-band marquee, item drag, double-click to open. Image card
-/// heights come from indexed pixel dimensions (`Entry.width`/`height`, QUA-175).
-/// A density slider sets the target column width.
+/// Regular native grid. Density changes the item size; the system wraps rows.
 struct EntryGridView: View {
     let model: AppModel
-    @State private var columnWidth: CGFloat = 260
-    @State private var dims = GridDimensions()
+    @State private var columnWidth: CGFloat = 136
     @State private var isDropTargeted = false
 
     var body: some View {
@@ -18,7 +12,7 @@ struct EntryGridView: View {
             header
             Divider()
             ZStack {
-                CollectionGridVariant(model: model, dims: dims, columnWidth: columnWidth)
+                CollectionGridVariant(model: model, columnWidth: columnWidth)
 
                 if acceptsImageDrops && model.visibleEntries.isEmpty {
                     ContentUnavailableView(
@@ -45,14 +39,13 @@ struct EntryGridView: View {
 
     private var header: some View {
         HStack(spacing: Space.s5) {
-            BrowseModeMenu(model: model)
-
             Spacer(minLength: Space.s4)
 
             HStack(spacing: Space.s2) {
                 Image(systemName: "rectangle.grid.3x2").foregroundStyle(.secondary)
-                Slider(value: $columnWidth, in: 180...380)
+                Slider(value: $columnWidth, in: 120...260)
                     .frame(width: 120)
+                    .accessibilityLabel(String(localized: "缩略图大小"))
                 Image(systemName: "rectangle.grid.1x2").foregroundStyle(.secondary)
             }
 

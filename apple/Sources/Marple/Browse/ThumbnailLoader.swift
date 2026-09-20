@@ -73,11 +73,11 @@ final class ThumbnailLoader {
     }
 
     /// Longest-side pixel budget for a card thumbnail: the largest dimension the card can
-    /// actually show — the column width, or the 360 pt portrait height cap
-    /// (`CardLayout.maxImageHeight`) — times the screen's backing scale, quantised to a
-    /// 128 px step so density nudges reuse the same cache bucket instead of thrashing it.
+    /// actually show — the width of the fixed 4:3 preview slot — times the screen's
+    /// backing scale, quantised to a 128 px step so density nudges reuse the same
+    /// cache bucket instead of thrashing it.
     static func maxPixel(columnWidth: CGFloat, scale: CGFloat) -> Int {
-        let points = max(columnWidth, CardLayout.maxImageHeight)
+        let points = columnWidth
         let step: CGFloat = 128
         let bucket = (points * max(scale, 1) / step).rounded(.up) * step
         return Int(min(max(bucket, 384), 1024))

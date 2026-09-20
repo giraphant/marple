@@ -48,7 +48,6 @@ struct EntryListView: View {
                 sortButton
                 filterButton
             }
-            BrowseModeMenu(model: model)
         }
         .padding(8)
         .disabled(isThemesIndex)   // header is meaningless on the themes index pane
@@ -506,27 +505,5 @@ private struct SearchField: View {
         }
         .padding(6)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-    }
-}
-
-/// Changes only the presentation of the browse column.
-struct BrowseModeMenu: View {
-    @Bindable var model: AppModel
-
-    var body: some View {
-        Menu {
-            Picker("浏览方式", selection: $model.browseMode) {
-                Label("表格", systemImage: "tablecells").tag(BrowseMode.table)
-                Label("摘要", systemImage: "list.bullet").tag(BrowseMode.list)
-                Label("网格", systemImage: "square.grid.2x2").tag(BrowseMode.grid)
-            }
-        } label: {
-            Image(systemName: model.browseMode == .table ? "tablecells"
-                : model.browseMode == .grid ? "square.grid.2x2" : "list.bullet")
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("浏览方式")
-        .accessibilityLabel("浏览方式")
     }
 }

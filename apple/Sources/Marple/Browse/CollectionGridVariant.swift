@@ -3,19 +3,12 @@ import AppKit
 import Quartz
 import MarpleKit
 
-/// Variant ② — native `NSCollectionView` with a custom waterfall layout and a
-/// **pure-AppKit cell** (`EntryCardItem`, drawn with `NSImageView`/`NSTextField`,
-/// no `NSHostingView`). This is the path that fits the AppKit-first stack
-/// (matches the NSTableView list / NSOutlineView sidebar) and buys Mac-standard
-/// interactions for free: cell-recycled scrolling, single-click select, ⌘/⇧
-/// multi-select, rubber-band marquee, item dragging (writes the entry path), and
-/// double-click to open. No SwiftUI bridge → none of the earlier crash.
+/// Native collection browsing with reusable AppKit cells and a regular flow layout.
 struct CollectionGridVariant: NSViewRepresentable {
     let model: AppModel
-    let dims: GridDimensions
     let columnWidth: CGFloat
 
-    func makeCoordinator() -> Coordinator { Coordinator(model: model, dims: dims) }
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
     func makeNSView(context: Context) -> NSScrollView {
         let coordinator = context.coordinator
@@ -26,6 +19,7 @@ struct CollectionGridVariant: NSViewRepresentable {
         collectionView.allowsMultipleSelection = true
         collectionView.allowsEmptySelection = true
         collectionView.backgroundColors = [.clear]
+        collectionView.setAccessibilityLabel(String(localized: "资料网格"))
         collectionView.onOpen = { [weak coordinator] item in
             guard let entry = coordinator?.entries[safe: item] else { return }
             Task { await coordinator?.model.open(entry.path) }
@@ -44,14 +38,12 @@ struct CollectionGridVariant: NSViewRepresentable {
             return coordinator.model.client.fileURL(for: entry.path)
         }
 
-        let layout = WaterfallCollectionLayout()
-        layout.columnWidth = columnWidth
-        layout.heightForItem = { [weak coordinator] index, width in
-            guard let coordinator, let entry = coordinator.entries[safe: index] else { return 200 }
-            let live = coordinator.collectionView?.inLiveResize ?? false
-            return coordinator.dims.estimatedHeight(for: entry, columnWidth: width, allowStale: live)
-        }
+        let layout = EntryGridLayout()
+        layout.preferredItemWidth = columnWidth
         collectionView.collectionViewLayout = layout
+        // Setting the first modern layout replaces AppKit's legacy core. Register
+        // afterward, or makeItem loses the class and tries to load a nonexistent nib.
+        collectionView.register(EntryCardItem.self, forItemWithIdentifier: .init("EntryCard"))
         coordinator.collectionView = collectionView
 
         let scrollView = NSScrollView()
@@ -68,32 +60,49 @@ struct CollectionGridVariant: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         let coordinator = context.coordinator
         guard let collectionView = coordinator.collectionView,
-              let layout = collectionView.collectionViewLayout as? WaterfallCollectionLayout else { return }
+              let layout = collectionView.collectionViewLayout as? EntryGridLayout else { return }
 
-        if layout.columnWidth != columnWidth {
-            layout.columnWidth = columnWidth
-            layout.invalidateLayout()
+        let resized = layout.preferredItemWidth != columnWidth
+        let scale = collectionView.window?.backingScaleFactor ?? 2
+        let refreshThumbnails = ThumbnailLoader.maxPixel(columnWidth: layout.preferredItemWidth, scale: scale)
+            != ThumbnailLoader.maxPixel(columnWidth: columnWidth, scale: scale)
+        if resized { layout.preferredItemWidth = columnWidth }
+        var selected = Set(collectionView.selectionIndexPaths.compactMap {
+            coordinator.entries[safe: $0.item]?.path
+        })
+        let openPath = model.openPath
+        let openedAnotherEntry = openPath != coordinator.lastOpenPath
+        if openedAnotherEntry {
+            selected = Set(openPath.map { [$0] } ?? [])
+            coordinator.lastOpenPath = openPath
         }
         let newEntries = model.visibleEntries
-        if newEntries.map(\.path) != coordinator.entries.map(\.path) {
+        if newEntries != coordinator.entries {
             coordinator.entries = newEntries
-            // Do NOT clear the height cache here: it's keyed by path+width, so
-            // switching between panes reuses each entry's already-measured height
-            // (the boundingRect re-measure of a whole pane was the switch hitch).
             collectionView.reloadData()
+        } else if refreshThumbnails {
+            // Re-decode only when crossing a pixel-size bucket, not every slider tick.
+            collectionView.reloadItems(at: collectionView.indexPathsForVisibleItems())
+        }
+        let indices = Set(newEntries.indices.filter { selected.contains(newEntries[$0].path) }
+            .map { IndexPath(item: $0, section: 0) })
+        if collectionView.selectionIndexPaths != indices {
+            collectionView.selectionIndexPaths = indices
+        }
+        if openedAnotherEntry, !indices.isEmpty {
+            collectionView.scrollToItems(at: indices, scrollPosition: .nearestHorizontalEdge.union(.nearestVerticalEdge))
         }
     }
 
     @MainActor
     final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate {
         let model: AppModel
-        let dims: GridDimensions
         var entries: [Entry] = []
+        var lastOpenPath: String?
         weak var collectionView: NSCollectionView?
 
-        init(model: AppModel, dims: GridDimensions) {
+        init(model: AppModel) {
             self.model = model
-            self.dims = dims
         }
 
         func numberOfSections(in _: NSCollectionView) -> Int { 1 }
@@ -103,16 +112,12 @@ struct CollectionGridVariant: NSViewRepresentable {
 
         func collectionView(_ collectionView: NSCollectionView,
                             itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
-            // Instantiate directly (no register/makeItem): this SPM executable has
-            // no main bundle, and class registration makes NSCollectionViewItem
-            // auto-load a nib named after the class, which throws. Passing
-            // nibName: nil + our code-based loadView avoids it entirely.
-            let item = EntryCardItem(nibName: nil, bundle: nil)
+            let item = collectionView.makeItem(withIdentifier: .init("EntryCard"), for: indexPath) as! EntryCardItem
             guard let entry = entries[safe: indexPath.item] else { return item }
             let nonConforming = model.conformance(for: entry)?.isConforming == false
             // Decode the thumbnail only as large as this card can show it (column width ×
             // backing scale), not at the source resolution — see ThumbnailLoader (QUA-219).
-            let columnWidth = (collectionView.collectionViewLayout as? WaterfallCollectionLayout)?.columnWidth ?? 240
+            let columnWidth = (collectionView.collectionViewLayout as? EntryGridLayout)?.preferredItemWidth ?? 136
             let scale = collectionView.window?.backingScaleFactor ?? 2
             let maxPixel = ThumbnailLoader.maxPixel(columnWidth: columnWidth, scale: scale)
             item.configure(entry: entry, nonConforming: nonConforming, maxPixel: maxPixel) { [model] path in
@@ -165,7 +170,7 @@ private final class ClosureMenuItem: NSMenuItem {
 /// ourselves via `beginDraggingSession` (the same mechanism the sidebar Space
 /// reorder uses, which does deliver), suppressing the built-in one by not
 /// forwarding `mouseDragged` to super. QUA-114.
-private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
     var onOpen: ((Int) -> Void)?
     var onDragPath: ((Int) -> String?)?
     var menuForItem: ((Int) -> NSMenu?)?
@@ -176,7 +181,21 @@ private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDat
 
     override var acceptsFirstResponder: Bool { true }
 
-    private var focusedIndex: Int? { selectionAnchor ?? selectionIndexPaths.map(\.item).min() }
+    override func setFrameSize(_ newSize: NSSize) {
+        // Update metrics before AppKit calculates rows for the new viewport.
+        // Doing this inside layout.prepare() leaves its cached row geometry stale.
+        if frame.width != newSize.width {
+            (collectionViewLayout as? EntryGridLayout)?.updateMetrics(width: newSize.width)
+        }
+        super.setFrameSize(newSize)
+    }
+
+    private var focusedIndex: Int? {
+        if let selectionAnchor, selectionIndexPaths.contains(IndexPath(item: selectionAnchor, section: 0)) {
+            return selectionAnchor
+        }
+        return selectionIndexPaths.map(\.item).min()
+    }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
@@ -210,9 +229,14 @@ private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDat
 
         let ip = IndexPath(item: index, section: 0)
         let start = event.locationInWindow
+        // Keep an existing group intact until mouse-up so pressing a selected
+        // item can drag the group. Fresh selections respond on mouse-down.
+        let collapseOnMouseUp = selectionIndexPaths.contains(ip) && selectionIndexPaths.count > 1
+            && event.modifierFlags.intersection([.command, .shift]).isEmpty
+        if !collapseOnMouseUp { selectClick(index, modifiers: event.modifierFlags) }
         while let next = window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
             if next.type == .leftMouseUp {
-                selectClick(index, modifiers: event.modifierFlags)
+                if collapseOnMouseUp { selectClick(index, modifiers: event.modifierFlags) }
                 return
             }
             let p = next.locationInWindow
@@ -234,7 +258,7 @@ private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDat
     }
 
     /// Click selection: ⇧ = range from anchor, ⌘ = toggle, plain = single.
-    private func selectClick(_ index: Int, modifiers: NSEvent.ModifierFlags) {
+    func selectClick(_ index: Int, modifiers: NSEvent.ModifierFlags) {
         let ip = IndexPath(item: index, section: 0)
         if modifiers.contains(.shift), let anchor = selectionAnchor {
             let range = Set((min(anchor, index)...max(anchor, index)).map { IndexPath(item: $0, section: 0) })
@@ -255,19 +279,22 @@ private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDat
     /// (the SAME payload as a tab drag). Multiple items stack into a pile image and
     /// arrive on the drop side as multiple payloads → the tab outline's multi-drop.
     private func startManualDrag(indices: [Int], event: NSEvent) {
-        let items: [NSDraggingItem] = indices.compactMap { i in
+        let items = draggingItems(indices: indices, location: convert(event.locationInWindow, from: nil))
+        guard !items.isEmpty else { return }
+        beginDraggingSession(with: items, event: event, source: self)
+    }
+
+    func draggingItems(indices: [Int], location: NSPoint) -> [NSDraggingItem] {
+        indices.compactMap { i in
             guard let path = onDragPath?(i) else { return nil }
             let pb = NSPasteboardItem()
             pb.setString("entry:\(path)", forType: SidebarDragPasteboard.tabItem)
             let dragItem = NSDraggingItem(pasteboardWriter: pb)
             let frame = layoutAttributesForItem(at: IndexPath(item: i, section: 0))?.frame
-                ?? NSRect(origin: convert(event.locationInWindow, from: nil),
-                          size: NSSize(width: 220, height: 80))
+                ?? NSRect(origin: location, size: NSSize(width: 136, height: 180))
             dragItem.setDraggingFrame(frame, contents: itemSnapshot(i))
             return dragItem
         }
-        guard !items.isEmpty else { return }
-        beginDraggingSession(with: items, event: event, source: self)
     }
 
     private func itemSnapshot(_ index: Int) -> NSImage? {
@@ -281,59 +308,20 @@ private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDat
 
     // MARK: Keyboard
 
-    private enum NavDir { case left, right, up, down }
-
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
-        case 123: moveSelection(.left)
-        case 124: moveSelection(.right)
-        case 125: moveSelection(.down)
-        case 126: moveSelection(.up)
         case 36, 76:   // return / enter → open
             if let i = focusedIndex { onOpen?(i) }
         case 49:       // space → Quick Look
             showQuickLook()
         default:
             super.keyDown(with: event)
-        }
-    }
-
-    private func moveSelection(_ dir: NavDir) {
-        guard numberOfItems(inSection: 0) > 0 else { return }
-        let target = focusedIndex.flatMap { neighbor(of: $0, direction: dir) } ?? 0
-        let ip = IndexPath(item: target, section: 0)
-        deselectItems(at: selectionIndexPaths)
-        selectItems(at: [ip], scrollPosition: [])
-        selectionAnchor = target
-        if let frame = layoutAttributesForItem(at: ip)?.frame {
-            scrollToVisible(frame.insetBy(dx: 0, dy: -16))
-        }
-        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible {
-            showQuickLook()   // keep the open preview in sync with arrow nav
-        }
-    }
-
-    /// Nearest item in a direction by frame center — favours staying aligned on
-    /// the cross axis, so up/down step a visual row in the waterfall.
-    private func neighbor(of index: Int, direction: NavDir) -> Int? {
-        guard let cur = layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { return nil }
-        let c = CGPoint(x: cur.midX, y: cur.midY)
-        var best: (idx: Int, score: CGFloat)?
-        for i in 0..<numberOfItems(inSection: 0) where i != index {
-            guard let f = layoutAttributesForItem(at: IndexPath(item: i, section: 0))?.frame else { continue }
-            let dx = f.midX - c.x, dy = f.midY - c.y
-            let inDir: Bool, primary: CGFloat, secondary: CGFloat
-            switch direction {
-            case .right: inDir = dx > 1;  primary = dx;  secondary = abs(dy)
-            case .left:  inDir = dx < -1; primary = -dx; secondary = abs(dy)
-            case .down:  inDir = dy > 1;  primary = dy;  secondary = abs(dx)
-            case .up:    inDir = dy < -1; primary = -dy; secondary = abs(dx)
+            selectionAnchor = selectionIndexPaths.map(\.item).min()
+            if (123...126).contains(event.keyCode),
+               QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible {
+                showQuickLook()
             }
-            guard inDir else { continue }
-            let score = primary + secondary * 2
-            if best == nil || score < best!.score { best = (i, score) }
         }
-        return best?.idx
     }
 
     // MARK: Quick Look (space)
@@ -372,12 +360,5 @@ private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDat
             quickLookURLs.indices.contains(index) ? quickLookURLs[index] : nil
         }
         return url as NSURL?
-    }
-
-    /// During live resize the layout repacks with stale (cached) heights for
-    /// speed; once the drag ends, recompute precise heights for the final width.
-    override func viewDidEndLiveResize() {
-        super.viewDidEndLiveResize()
-        collectionViewLayout?.invalidateLayout()
     }
 }
