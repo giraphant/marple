@@ -113,10 +113,6 @@ final class MarpleWindowController: NSWindowController, NSWindowDelegate {
         toolbarController.shell = split
         toolbarController.splitView = split.splitView   // we own this split → tracking separators are safe
         window?.toolbar = toolbarController.makeToolbar()
-        split.onLayoutChange = { [weak self] in
-            guard let self else { return }
-            self.window?.toolbar = self.toolbarController.makeToolbar()
-        }
     }
 
     private func applyTheme() {

@@ -30,11 +30,6 @@ struct CollectionGridVariant: NSViewRepresentable {
             guard let entry = coordinator?.entries[safe: item] else { return }
             Task { await coordinator?.model.open(entry.path) }
         }
-        collectionView.onSelect = { [weak coordinator] item in
-            guard let coordinator, coordinator.model.threeColumnLayout,
-                  let entry = coordinator.entries[safe: item] else { return }
-            Task { await coordinator.model.activateVisibleEntry(entry.path) }
-        }
         collectionView.onDragPath = { [weak coordinator] item in
             coordinator?.entries[safe: item]?.path
         }
@@ -176,7 +171,6 @@ private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDat
     var menuForItem: ((Int) -> NSMenu?)?
     /// Resolve the file URL to Quick Look for an item (image original / vault .md).
     var previewURL: ((Int) async -> URL?)?
-    var onSelect: ((Int) -> Void)?
     private var selectionAnchor: Int?
     private var quickLookURLs: [URL] = []
 
@@ -219,7 +213,6 @@ private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDat
         while let next = window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
             if next.type == .leftMouseUp {
                 selectClick(index, modifiers: event.modifierFlags)
-                if selectionIndexPaths.count == 1, let selected = selectionIndexPaths.first { onSelect?(selected.item) }
                 return
             }
             let p = next.locationInWindow
@@ -312,7 +305,6 @@ private final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDat
         deselectItems(at: selectionIndexPaths)
         selectItems(at: [ip], scrollPosition: [])
         selectionAnchor = target
-        onSelect?(target)
         if let frame = layoutAttributesForItem(at: ip)?.frame {
             scrollToVisible(frame.insetBy(dx: 0, dy: -16))
         }

@@ -3,7 +3,7 @@ import SwiftUI
 import MarpleKit
 
 /// The window's content: an `NSSplitViewController` we own (Notes / Mail / CodeEdit
-/// pattern), hosting the SwiftUI columns via `NSHostingController`. Owning the
+/// pattern), hosting the four SwiftUI columns via `NSHostingController`. Owning the
 /// split (rather than embedding it in an `NSHostingController`) is what makes the
 /// sidebar/inspector behaviors, min widths, and toolbar tracking separators work —
 /// CodeEdit explicitly abandoned the embedded approach for this reason.
@@ -14,12 +14,6 @@ final class MarpleSplitViewController: NSSplitViewController {
     private var listItem: NSSplitViewItem?
     private var inspectorItem: NSSplitViewItem?
     private var inspectorObs: NSKeyValueObservation?
-    private var readerController: NSViewController!
-    private var propertiesController: NSViewController!
-    private var detailSplit: NSSplitViewController?
-    private var appliedThreeColumnLayout: Bool?
-    private var needsDetailSizing = false
-    var onLayoutChange: (() -> Void)?
 
     init(model: AppModel) {
         self.model = model
@@ -62,83 +56,34 @@ final class MarpleSplitViewController: NSSplitViewController {
         addSplitViewItem(content)
         listItem = content
 
-        readerController = host(Chrome { DocView(model: model) })
-        propertiesController = host(Chrome { InspectorView(model: model) })
-        applyLayout()
+        let detail = NSSplitViewItem(viewController:
+            host(Chrome { DocView(model: model) }))
+        detail.minimumThickness = 400
+        detail.holdingPriority = NSLayoutConstraint.Priority(248)   // reader absorbs freed space
+        addSplitViewItem(detail)
 
-        observeModelInspector()
-    }
-
-    /// Move the same reader and property controllers between layouts, keeping
-    /// their scroll/edit state. No second reader (or media player) is mounted.
-    private func applyLayout() {
-        guard appliedThreeColumnLayout != model.threeColumnLayout else { return }
-        appliedThreeColumnLayout = model.threeColumnLayout
-        splitView.window?.toolbar = nil // detach tracking separators before removing dividers
-        inspectorObs = nil
-        for item in splitViewItems.dropFirst(2) { removeSplitViewItem(item) }
-        if let detailSplit {
-            for item in detailSplit.splitViewItems { detailSplit.removeSplitViewItem(item) }
-        }
-        detailSplit = nil
-
-        let inspector: NSSplitViewItem
-        if model.threeColumnLayout {
-            let right = NSSplitViewController()
-            right.splitView.isVertical = false
-            right.splitView.dividerStyle = .thin
-            let preview = NSSplitViewItem(viewController: readerController)
-            preview.minimumThickness = 260
-            preview.preferredThicknessFraction = 0.4
-            right.addSplitViewItem(preview)
-            let properties = NSSplitViewItem(viewController: propertiesController)
-            properties.minimumThickness = 180
-            right.addSplitViewItem(properties)
-            detailSplit = right
-            needsDetailSizing = true
-            inspector = NSSplitViewItem(viewController: right)
-            inspector.minimumThickness = 344
-            inspector.maximumThickness = 560
-            inspector.preferredThicknessFraction = 0.32
-            inspector.canCollapse = true
-            inspector.holdingPriority = NSLayoutConstraint.Priority(260)
-            listItem?.holdingPriority = NSLayoutConstraint.Priority(248)
-        } else {
-            let detail = NSSplitViewItem(viewController: readerController)
-            detail.minimumThickness = 400
-            detail.holdingPriority = NSLayoutConstraint.Priority(248)
-            addSplitViewItem(detail)
-            inspector = NSSplitViewItem(inspectorWithViewController: propertiesController)
-            inspector.minimumThickness = 240
-            inspector.maximumThickness = 460
-            inspector.isSpringLoaded = true
-            listItem?.holdingPriority = NSLayoutConstraint.Priority(260)
-        }
+        let inspector = NSSplitViewItem(inspectorWithViewController:
+            host(Chrome { InspectorView(model: model) }))
+        inspector.minimumThickness = 240
+        inspector.maximumThickness = 460
         inspector.collapseBehavior = .useConstraints
-        inspector.isCollapsed = !model.inspectorVisible || (!model.threeColumnLayout && model.openPath == nil)
+        inspector.isSpringLoaded = true
+        inspector.isCollapsed = true
         addSplitViewItem(inspector)
         inspectorItem = inspector
+
+        // Sync the model when the user collapses the inspector by dragging (only while
+        // a doc is open — an empty-doc auto-collapse shouldn't erase the user's intent).
         inspectorObs = inspector.observe(\.isCollapsed, options: [.new]) { [weak self] _, change in
             guard let collapsed = change.newValue else { return }
-            MainActor.assumeIsolated {
-                guard let self, self.model.threeColumnLayout || self.model.openPath != nil else { return }
-                if self.model.inspectorVisible == collapsed { self.model.inspectorVisible = !collapsed }
+            MainActor.assumeIsolated {   // KVO fires on the main thread for UI changes
+                guard let self, self.model.openPath != nil else { return }
+                let visible = !collapsed
+                if self.model.inspectorVisible != visible { self.model.inspectorVisible = visible }
             }
         }
-        onLayoutChange?()
-        if view.window?.isVisible == true { sizePreviewIfNeeded() }
-    }
 
-    override func viewDidAppear() {
-        super.viewDidAppear()
-        sizePreviewIfNeeded()
-    }
-
-    private func sizePreviewIfNeeded() {
-        guard needsDetailSizing, let detailSplit else { return }
-        view.layoutSubtreeIfNeeded()
-        needsDetailSizing = false
-        detailSplit.splitView.setPosition(detailSplit.view.bounds.height * 0.4, ofDividerAt: 0)
+        observeModelInspector()
     }
 
     override func viewWillAppear() {
@@ -162,12 +107,10 @@ final class MarpleSplitViewController: NSSplitViewController {
     /// no SwiftUI parent to drive this for us anymore).
     private func observeModelInspector() {
         withObservationTracking {
-            _ = model.threeColumnLayout
             _ = model.inspectorVisible
             _ = model.openPath
         } onChange: { [weak self] in
             Task { @MainActor in
-                self?.applyLayout()
                 self?.applyInspector()
                 self?.observeModelInspector()
             }
@@ -176,7 +119,7 @@ final class MarpleSplitViewController: NSSplitViewController {
 
     private func applyInspector() {
         guard let inspectorItem else { return }
-        let visible = model.inspectorVisible && (model.threeColumnLayout || model.openPath != nil)
+        let visible = model.inspectorVisible && model.openPath != nil
         if inspectorItem.isCollapsed == visible {
             inspectorItem.animator().isCollapsed = !visible
         }
@@ -226,11 +169,7 @@ struct BrowseColumn: View {
     var body: some View {
         Group {
             if model.isPinnedListContext {
-                if model.threeColumnLayout && model.browseMode == .grid {
-                    EntryGridView(model: model)
-                } else {
-                    EntryListView(model: model)
-                }
+                EntryListView(model: model)
             } else {
                 switch model.pane {
                 case .themesIndex: ThemesView(model: model)

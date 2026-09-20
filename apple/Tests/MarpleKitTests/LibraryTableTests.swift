@@ -43,15 +43,11 @@ struct LibraryTableTests {
         #expect(table.tableColumns.allSatisfy { $0.sortDescriptorPrototype == nil })
     }
 
-    @Test func threeColumnsStayStableAndReuseReaderAndProperties() async throws {
-        let prior = UserDefaults.standard.object(forKey: SettingsKeys.threeColumnLayout)
-        defer { UserDefaults.standard.set(prior, forKey: SettingsKeys.threeColumnLayout) }
+    @Test func browseModesPreserveFourColumnsAndRightSide() async throws {
         let model = try await makeModel()
-        model.threeColumnLayout = true
-        model.browseMode = .table
         await model.open("paper-4.md")
         let shell = MarpleSplitViewController(model: model)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 760),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 760),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .aqua)
@@ -61,82 +57,36 @@ struct LibraryTableTests {
         toolbar.shell = shell
         toolbar.splitView = shell.splitView
         window.toolbar = toolbar.makeToolbar()
-        shell.onLayoutChange = { [weak window, weak toolbar] in
-            window?.toolbar = toolbar?.makeToolbar()
-        }
-        window.setContentSize(NSSize(width: 1280, height: 760))
+        window.setContentSize(NSSize(width: 1440, height: 760))
         shell.view.wantsLayer = true
         shell.view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         window.orderFront(nil)
         defer { window.close() }
         try await settle(shell)
-        #expect(shell.splitViewItems.count == 3)
-        let right = try #require(shell.splitViewItems.last?.viewController as? NSSplitViewController)
-        #expect(!right.splitView.isVertical)
-        let reader = right.splitViewItems[0].viewController
-        let properties = right.splitViewItems[1].viewController
-        let table = try #require(descendants(of: NSTableView.self, in: shell.view).first { $0.headerView != nil && $0.numberOfColumns == 5 })
-        #expect(table.selectedRow == 4)
-        table.autosaveTableColumns = false
-        for width in [960, 1280, 1440] {
-            window.setContentSize(NSSize(width: width, height: 760))
-            try await settle(shell)
-            #expect(shell.splitViewItems.count == 3)
-            #expect(shell.splitViewItems[1].viewController.view.frame.width >= 320)
-            #expect(right.view.frame.width >= 340)
-            #expect(reader.view.frame.height >= 260)
-            #expect(reader.view.frame.height < 400)
-            #expect(properties.view.frame.height >= 180)
-            for column in table.tableColumns {
-                column.isHidden = false
-                column.width = ["title": 300.0, "author": 132, "year": 60, "rating": 64, "added": 110][column.identifier.rawValue]!
-            }
-            table.sizeToFit()
-            try await settle(shell)
-            try snapshot(shell.view, name: "\(width)-five-columns")
-            print("[ablation] five width=\(width) title=\(table.tableColumns[0].width) table=\(table.frame.width) clip=\(table.enclosingScrollView?.contentSize.width ?? 0)")
-            for column in table.tableColumns.suffix(2) { column.isHidden = true }
-            table.sizeToFit()
-            try await settle(shell)
-            #expect(table.frame.width <= (table.enclosingScrollView?.contentSize.width ?? 0) + 1)
-            try snapshot(shell.view, name: "\(width)-three-columns")
-            print("[ablation] width=\(width) panes=\(shell.splitView.arrangedSubviews.map { $0.frame.width }) title=\(table.tableColumns[0].width) preview=\(reader.view.frame.height) properties=\(properties.view.frame.height)")
-        }
-        window.setContentSize(NSSize(width: 960, height: 560))
-        try await settle(shell)
-        #expect(reader.view.frame.height >= 260)
-        #expect(properties.view.frame.height >= 180)
-        try snapshot(shell.view, name: "960-short-window")
-        window.setContentSize(NSSize(width: 1440, height: 760))
-        try await settle(shell)
-        right.splitView.setPosition(360, ofDividerAt: 0)
-        try await settle(shell)
-        #expect(abs(reader.view.frame.height - 360) < 2)
-        let preview = right.splitViewItems[0]
-        preview.canCollapse = true
-        preview.isCollapsed = true
-        try await settle(shell)
-        try snapshot(shell.view, name: "1440-no-preview")
-        preview.isCollapsed = false
-        model.select(pane: .type(.paper))
-        try await settle(shell)
-        #expect(shell.splitViewItems.count == 3)
-        #expect(!shell.splitViewItems[2].isCollapsed)
-        await model.open("paper-8.md")
-        model.threeColumnLayout = false
-        try await settle(shell)
         #expect(shell.splitViewItems.count == 4)
-        #expect(shell.splitViewItems[2].viewController === reader)
-        #expect(shell.splitViewItems[3].viewController === properties)
-        model.threeColumnLayout = true
-        try await settle(shell)
-        let restored = try #require(shell.splitViewItems.last?.viewController as? NSSplitViewController)
-        #expect(restored.splitViewItems[0].viewController === reader)
-        #expect(restored.splitViewItems[1].viewController === properties)
-        #expect(model.openPath == "paper-8.md")
+        let reader = shell.splitViewItems[2].viewController
+        let properties = shell.splitViewItems[3].viewController
+        #expect(!(properties is NSSplitViewController))
+        let originalToolbar = window.toolbar
+        for mode in [BrowseMode.grid, .list, .table] {
+            model.browseMode = mode
+            try await settle(shell)
+            #expect(shell.splitViewItems.count == 4)
+            #expect(shell.splitViewItems[2].viewController === reader)
+            #expect(shell.splitViewItems[3].viewController === properties)
+            #expect(!shell.splitViewItems[3].isCollapsed)
+            #expect(window.toolbar === originalToolbar)
+            #expect(model.openPath == "paper-4.md")
+        }
+        let table = try #require(descendants(of: NSTableView.self, in: shell.view).first {
+            $0.headerView != nil && $0.numberOfColumns == 5
+        })
+        #expect(table.numberOfRows == 600)
+        #expect(table.selectedRow == 4)
         let ids = window.toolbar?.items.map { $0.itemIdentifier.rawValue } ?? []
         #expect(ids.contains("readerSeparator"))
-        #expect(!ids.contains("inspectorSeparator"))
+        #expect(ids.contains("inspectorSeparator"))
+        try snapshot(shell.view, name: "four-column-table")
     }
 
     private func makeModel() async throws -> AppModel {
@@ -173,7 +123,7 @@ struct LibraryTableTests {
     }
 
     private func snapshot(_ view: NSView, name: String) throws {
-        guard let dir = ProcessInfo.processInfo.environment["MARPLE_ABLATION_DIR"] else { return }
+        guard let dir = ProcessInfo.processInfo.environment["MARPLE_LIBRARY_SNAPSHOT_DIR"] else { return }
         let url = URL(fileURLWithPath: dir, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))

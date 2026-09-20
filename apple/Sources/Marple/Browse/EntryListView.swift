@@ -509,7 +509,7 @@ private struct SearchField: View {
     }
 }
 
-/// One explicit menu for presentation; selecting an entry never changes the layout.
+/// Changes only the presentation of the browse column.
 struct BrowseModeMenu: View {
     @Bindable var model: AppModel
 
@@ -520,15 +520,13 @@ struct BrowseModeMenu: View {
                 Label("摘要", systemImage: "list.bullet").tag(BrowseMode.list)
                 Label("网格", systemImage: "square.grid.2x2").tag(BrowseMode.grid)
             }
-            Divider()
-            Toggle("三栏布局", isOn: $model.threeColumnLayout)
         } label: {
             Image(systemName: model.browseMode == .table ? "tablecells"
                 : model.browseMode == .grid ? "square.grid.2x2" : "list.bullet")
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .help("浏览方式与布局")
-        .accessibilityLabel("浏览方式与布局")
+        .help("浏览方式")
+        .accessibilityLabel("浏览方式")
     }
 }

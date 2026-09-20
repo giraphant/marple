@@ -421,15 +421,6 @@ final class AppModel {
     }
     private(set) var matchJump: MatchJump?
 
-    var threeColumnLayout = UserDefaults.standard.bool(forKey: SettingsKeys.threeColumnLayout) {
-        didSet {
-            UserDefaults.standard.set(threeColumnLayout, forKey: SettingsKeys.threeColumnLayout)
-            if threeColumnLayout && !oldValue {
-                browseMode = .table
-                inspectorVisible = true
-            }
-        }
-    }
     /// Right inspector visibility. Lives here (not as view @State) so the AppKit
     /// toolbar's far-right toggle can drive it while SwiftUI's `.inspector` observes.
     var inspectorVisible = true
