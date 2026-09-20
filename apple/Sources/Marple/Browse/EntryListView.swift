@@ -14,7 +14,11 @@ struct EntryListView: View {
             // pale-blue sourceList selection needs `NSTableView` directly, and
             // SwiftUI List's internal table triggers the QUA-103 reentrant
             // delegate warning that we can't silence from outside.
-            EntryListTable(model: model)
+            if model.browseMode == .table {
+                EntryTableView(model: model)
+            } else {
+                EntryListTable(model: model)
+            }
         }
         .navigationTitle(title)
     }
@@ -43,8 +47,8 @@ struct EntryListView: View {
             if !model.isPinnedListContext {
                 sortButton
                 filterButton
-                gridToggle
             }
+            BrowseModeMenu(model: model)
         }
         .padding(8)
         .disabled(isThemesIndex)   // header is meaningless on the themes index pane
@@ -52,17 +56,6 @@ struct EntryListView: View {
     }
 
     private var isThemesIndex: Bool { if case .themesIndex = model.pane { return true } else { return false } }
-
-    /// Switch to the grid lab (QUA-114). The app had no list/grid toggle at all;
-    /// browseMode was only ever restored from persisted state.
-    private var gridToggle: some View {
-        Button { model.browseMode = .grid } label: {
-            Image(systemName: "square.grid.2x2")
-        }
-        .buttonStyle(.borderless)
-        .fixedSize()
-        .help(String(localized: "切换到网格"))
-    }
 
     private var sortButton: some View {
         Button { showingSorts.toggle() } label: {
@@ -513,5 +506,29 @@ private struct SearchField: View {
         }
         .padding(6)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// One explicit menu for presentation; selecting an entry never changes the layout.
+struct BrowseModeMenu: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        Menu {
+            Picker("浏览方式", selection: $model.browseMode) {
+                Label("表格", systemImage: "tablecells").tag(BrowseMode.table)
+                Label("摘要", systemImage: "list.bullet").tag(BrowseMode.list)
+                Label("网格", systemImage: "square.grid.2x2").tag(BrowseMode.grid)
+            }
+            Divider()
+            Toggle("三栏布局", isOn: $model.threeColumnLayout)
+        } label: {
+            Image(systemName: model.browseMode == .table ? "tablecells"
+                : model.browseMode == .grid ? "square.grid.2x2" : "list.bullet")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("浏览方式与布局")
+        .accessibilityLabel("浏览方式与布局")
     }
 }

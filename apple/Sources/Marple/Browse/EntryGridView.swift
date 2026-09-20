@@ -45,12 +45,7 @@ struct EntryGridView: View {
 
     private var header: some View {
         HStack(spacing: Space.s5) {
-            Button { model.browseMode = .list } label: {
-                Image(systemName: "list.bullet")
-            }
-            .buttonStyle(.borderless)
-            .fixedSize()
-            .help(String(localized: "切换到列表"))
+            BrowseModeMenu(model: model)
 
             Spacer(minLength: Space.s4)
 

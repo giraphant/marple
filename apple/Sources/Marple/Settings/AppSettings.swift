@@ -5,6 +5,7 @@ import MarpleKit
 /// UserDefaults keys for user settings. Plain `@AppStorage` rather than a Codable
 /// blob: the set is small and each control binds to one key directly.
 enum SettingsKeys {
+    static let threeColumnLayout = "marple.threeColumnLayout"
     static let theme = "marple.theme"
     static let readingFontFamily = "marple.readingFontFamily"
     static let readingFontSize = "marple.readingFontSize"

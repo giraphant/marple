@@ -59,7 +59,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [
+        let items: [NSToolbarItem.Identifier] = [
             .flexibleSpace,              // push the toggle to the sidebar's right edge
             .toggleNav,
             .sidebarTrackingSeparator,   // divider 0 (sidebar↔list), system-managed
@@ -76,6 +76,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
             .inspectorSeparator,         // divider 2 (reader↔inspector)
             .toggleInspector,            // sits over the inspector
         ]
+        return model?.threeColumnLayout == true ? items.filter { $0 != .inspectorSeparator } : items
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -106,7 +107,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
             }
         case .toggleInspector:
             return iconItem(id, "sidebar.trailing", String(localized: "检查器"), #selector(toggleInspector)) { [weak self] in
-                self?.model?.openPath != nil
+                self?.model.map { $0.threeColumnLayout || $0.openPath != nil } ?? false
             }
         case .citation:
             return buttonItem(id, "quote.bubble", String(localized: "复制引用 · 右键选格式"),

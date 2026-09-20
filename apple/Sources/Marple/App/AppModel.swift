@@ -3,7 +3,7 @@ import MarpleKit
 import Observation
 
 /// Middle-column display mode for the entry list.
-enum BrowseMode: String, CaseIterable, Sendable { case list, grid }
+enum BrowseMode: String, CaseIterable, Sendable { case list, grid, table }
 
 /// Save lifecycle for the note card expanded in the right Inspector.
 enum InspectorNoteStatus: Equatable {
@@ -154,7 +154,7 @@ final class AppModel {
         return lines.joined(separator: "\n")
     }
 
-    /// Card grid vs single-column list. Pure UI toggle; no derived cache depends on it.
+    /// Table, card grid, or summary list. Pure UI toggle; no derived cache depends on it.
     var browseMode: BrowseMode = .grid { didSet { persist() } }
 
     // Browse axis: which category list the sidebar shows. Separate from tabs —
@@ -421,6 +421,15 @@ final class AppModel {
     }
     private(set) var matchJump: MatchJump?
 
+    var threeColumnLayout = UserDefaults.standard.bool(forKey: SettingsKeys.threeColumnLayout) {
+        didSet {
+            UserDefaults.standard.set(threeColumnLayout, forKey: SettingsKeys.threeColumnLayout)
+            if threeColumnLayout && !oldValue {
+                browseMode = .table
+                inspectorVisible = true
+            }
+        }
+    }
     /// Right inspector visibility. Lives here (not as view @State) so the AppKit
     /// toolbar's far-right toggle can drive it while SwiftUI's `.inspector` observes.
     var inspectorVisible = true
