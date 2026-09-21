@@ -6,6 +6,7 @@ import MarpleKit
 
 struct AttachmentPreview: View {
     let url: URL
+    var mediaType: String? = nil
     @State private var error: String?
 
     var body: some View {
@@ -13,10 +14,16 @@ struct AttachmentPreview: View {
             if let error {
                 ContentUnavailableView("无法预览此文件", systemImage: "doc.questionmark",
                                        description: Text(error))
-            } else if url.pathExtension.lowercased() == "webarchive" {
+            } else if LocalAttachment.previewKind(url, mediaType: mediaType) == .webarchive {
                 WebArchivePreview(url: url, onError: { error = $0 })
-            } else if LocalAttachment.isMedia(url) {
+            } else if LocalAttachment.previewKind(url, mediaType: mediaType) == .media {
                 LocalMediaPreview(url: url)
+            } else if LocalAttachment.previewKind(url, mediaType: mediaType) == .unsupported {
+                ContentUnavailableView {
+                    Label("此格式请在外部打开", systemImage: "doc")
+                } actions: {
+                    Button("在外部打开") { NSWorkspace.shared.open(url) }
+                }
             } else {
                 QuickLookAttachmentPreview(url: url)
             }

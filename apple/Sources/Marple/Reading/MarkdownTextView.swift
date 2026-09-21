@@ -16,6 +16,7 @@ struct MarkdownTextView: NSViewRepresentable {
     var highlightQuery: String?
     /// One-shot scroll-to-match request (a clicked search line); nil = none.
     var jump: AppModel.MatchJump?
+    var imageURLs: [String: URL] = [:]
     let onLinkClick: (URL) -> Bool
 
     private static let matchColor = NSColor.controlAccentColor.withAlphaComponent(0.22)
@@ -110,11 +111,12 @@ struct MarkdownTextView: NSViewRepresentable {
             co.scrollOffsets[outgoing] = scrollView.contentView.bounds.origin.y
         }
 
-        if contentChanged || style != co.lastStyle {
-            let rendered = MarkdownRenderer.render(markdown, style: style)
+        if contentChanged || style != co.lastStyle || imageURLs != co.lastImageURLs {
+            let rendered = MarkdownRenderer.render(markdown, style: style, imageURLs: imageURLs)
             textView.textStorage?.setAttributedString(rendered.attributedString)
             co.lastMarkdown = markdown
             co.lastStyle = style
+            co.lastImageURLs = imageURLs
             co.headings = rendered.headings
         }
         if contentChanged { co.currentDocID = documentID }
@@ -275,11 +277,13 @@ struct MarkdownTextView: NSViewRepresentable {
     // MARK: Coordinator
 
     class Coordinator: NSObject, NSTextViewDelegate {
-        let onLinkClick: (URL) -> Bool
+        var imageURLs: [String: URL] = [:]
+    let onLinkClick: (URL) -> Bool
         weak var textView: NSTextView?
 
         var lastMarkdown: String = ""
         var lastStyle: RenderStyle?
+        var lastImageURLs: [String: URL] = [:]
         var lastScrollTarget: NSRange?
         var headings: [HeadingAnchor] = []
 

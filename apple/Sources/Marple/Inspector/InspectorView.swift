@@ -363,6 +363,7 @@ private struct InfoSection: View {
                     }
                     .disabled(model.savingField != nil)
                 }
+                if e.type == .archive { ArchiveInfoSection(model: model) }
                 ThemesEditor(model: model, themes: e.themes)
                 RelationsView(model: model)
             } else {
@@ -380,7 +381,7 @@ private struct InspectorInfoRowsView: View {
     let entry: Entry
 
     var body: some View {
-        ForEach(Array(inspectorInfoRows(for: entry, in: model.entries, localise: model.localisation).enumerated()), id: \.offset) { _, row in
+        ForEach(Array(inspectorInfoRows(for: entry, in: model.entries, localise: model.localisation, archiveManifest: model.openArchiveManifest).enumerated()), id: \.offset) { _, row in
             switch row {
             case .rating:
                 RatingRow(model: model, score: Int(entry.ratingScore))

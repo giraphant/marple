@@ -369,9 +369,9 @@ public struct RenderStyle: Equatable {
 public enum MarkdownRenderer {
     /// Render preprocessed markdown (wikilinks already converted to marple:// links)
     /// into an NSAttributedString with heading anchor metadata.
-    public static func render(_ markdown: String, style: RenderStyle) -> RenderedDocument {
+    public static func render(_ markdown: String, style: RenderStyle, imageURLs: [String: URL] = [:]) -> RenderedDocument {
         let document = Document(parsing: markdown)
-        let ctx = RenderContext(style: style)
+        let ctx = RenderContext(style: style, imageURLs: imageURLs)
         ctx.walk(document)
         return RenderedDocument(attributedString: ctx.attributed, headings: ctx.headings)
     }
@@ -387,6 +387,7 @@ private final class RenderContext {
     // `var` so table-cell rendering can temporarily swap in a scratch buffer (iOS).
     var attributed = NSMutableAttributedString()
     let style: RenderStyle
+    let imageURLs: [String: URL]
     var headings: [HeadingAnchor] = []
 
     /// Current base font (body or heading — changed per block).
@@ -428,7 +429,8 @@ private final class RenderContext {
         return style.synthStroke(of: currentFont, target: target)
     }
 
-    init(style: RenderStyle) {
+    init(style: RenderStyle, imageURLs: [String: URL] = [:]) {
+        self.imageURLs = imageURLs
         self.style = style
         self.baseFont = style.bodyFont
         self.baseWeight = style.bodyWeight
@@ -905,7 +907,18 @@ private final class RenderContext {
 
         case let img as Image:
             let alt = plainText(of: img)
+            #if canImport(AppKit)
+            if let destination = img.source, let url = imageURLs[destination],
+               let attachment = ArchiveImageAttachment(url: url) {
+                let text = NSMutableAttributedString(attachment: attachment)
+                text.addAttributes([.link: url, .paragraphStyle: ps], range: NSRange(location: 0, length: 1))
+                attributed.append(text)
+            } else {
+                append(alt.isEmpty ? "[image]" : "[\(alt)]", color: .tertiaryLabelColor)
+            }
+            #else
             append(alt.isEmpty ? "[image]" : "[\(alt)]", color: .tertiaryLabelColor)
+            #endif
 
         case let html as InlineHTML:
             append(html.rawHTML, color: .tertiaryLabelColor)

@@ -38,7 +38,7 @@ struct DocView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.openPath != nil && (!model.openAttachments.isEmpty || model.attachmentPreviewURL != nil) {
+            if model.openPath != nil && (!model.openAttachments.isEmpty || model.attachmentPreviewURL != nil || model.openArchiveManifest != nil) {
                 attachmentBar
                 Divider()
             }
@@ -57,7 +57,18 @@ struct DocView: View {
             if model.openPath == nil {
                 ContentUnavailableView("选择一篇文档", systemImage: "doc.text")
             } else if let url = model.attachmentPreviewURL {
-                AttachmentPreview(url: url).id(url)
+                AttachmentPreview(url: url, mediaType: model.selectedArchiveFile?.mediaType).id(url)
+            } else if let manifest = model.openArchiveManifest,
+                      model.openBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                ContentUnavailableView {
+                    Label(model.openEntry?.title ?? String(localized: "档案"), systemImage: "archivebox")
+                } description: {
+                    Text(manifest.files.isEmpty ? String(localized: "仅保存来源，未保存原件")
+                         : String(localized: "从原件菜单选择文件预览"))
+                    if !manifest.coverage.isEmpty { Text(manifest.coverage) }
+                } actions: {
+                    if let url = manifest.source.webURL { Link("查看来源", destination: url) }
+                }
             } else if model.openEntry?.type == .image {
                 ImageObjectDetailView(model: model)
             } else {
@@ -68,6 +79,7 @@ struct DocView: View {
                     scrollTargetOrdinal: resolvedScrollOrdinal,
                     highlightQuery: model.openSearchQuery,
                     jump: model.matchJump,
+                    imageURLs: model.archiveImageURLs,
                     onLinkClick: { url in
                         if let seconds = SeekURL.seconds(from: url) {
                             model.playTalk(seconds: seconds)
@@ -112,17 +124,28 @@ struct DocView: View {
                 Button("返回正文", systemImage: "chevron.left") { model.attachmentPreviewURL = nil }
                     .buttonStyle(.borderless)
             }
-            Spacer(minLength: 0)
-            Menu {
-                ForEach(model.openAttachments, id: \.self) { url in
-                    Button(url.lastPathComponent) { model.previewAttachment(url.absoluteString) }
+            if let source = model.openArchiveManifest?.source, let url = source.webURL {
+                Link(destination: url) {
+                    Label(source.title ?? url.host ?? source.url, systemImage: "link")
+                        .lineLimit(1)
                 }
-            } label: {
-                Text(model.attachmentPreviewURL?.lastPathComponent ?? String(localized: "预览附件"))
-                    .lineLimit(1).truncationMode(.middle)
+                .help(source.url)
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            if model.openAttachments.isEmpty {
+                Text("无本地原件").foregroundStyle(.secondary)
+            } else {
+                Menu {
+                    ForEach(model.openAttachments, id: \.self) { url in
+                        Button(url.lastPathComponent) { model.previewAttachment(url.absoluteString) }
+                    }
+                } label: {
+                    Text(model.attachmentPreviewURL?.lastPathComponent ?? String(localized: "预览附件"))
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize(horizontal: false, vertical: true)
+            }
             if let url = model.attachmentPreviewURL {
                 Button("在外部打开", systemImage: "arrow.up.forward.square") { NSWorkspace.shared.open(url) }
                     .labelStyle(.iconOnly)

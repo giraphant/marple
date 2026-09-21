@@ -445,12 +445,33 @@ final class AppModel {
     }
     private(set) var talkPlayback: TalkPlayback?
     private(set) var openAttachments: [URL] = []
+    private(set) var openArchiveManifest: ArchiveManifest?
+    private(set) var archiveManifestError: String?
     var attachmentPreviewURL: URL?
+
+    var selectedArchiveFile: ArchiveManifest.File? {
+        guard let url = attachmentPreviewURL, let path = openPath else { return nil }
+        return openArchiveManifest?.file(for: url, entryPath: path, workspaceRoot: workspaceRoot)
+    }
+
+    var archiveImageURLs: [String: URL] {
+        guard let manifest = openArchiveManifest, let path = openPath else { return [:] }
+        return Dictionary(uniqueKeysWithValues: manifest.files.compactMap { file in
+            guard let url = manifest.localURL(for: file, entryPath: path, workspaceRoot: workspaceRoot),
+                  LocalAttachment.previewKind(url, mediaType: file.mediaType) == .image else { return nil }
+            return (file.path, url)
+        })
+    }
 
     @discardableResult
     func previewAttachment(_ target: String) -> Bool {
-        guard let path = openPath,
-              let url = LocalAttachment.resolve(target, entryPath: path, workspaceRoot: workspaceRoot) else { return false }
+        guard let path = openPath else { return false }
+        let listedURL = openArchiveManifest?.files.first { file in
+            file.path == target || openArchiveManifest?.localURL(for: file, entryPath: path,
+                workspaceRoot: workspaceRoot)?.absoluteString == target
+        }.flatMap { openArchiveManifest?.localURL(for: $0, entryPath: path, workspaceRoot: workspaceRoot) }
+        guard let url = listedURL ?? LocalAttachment.resolve(target, entryPath: path,
+            workspaceRoot: workspaceRoot) else { return false }
         if !openAttachments.contains(url) { openAttachments.append(url) }
         closeTalkPlayback()
         attachmentPreviewURL = url
@@ -1404,6 +1425,8 @@ final class AppModel {
         if path != loadedDocPath {
             attachmentPreviewURL = nil
             openAttachments = []
+            openArchiveManifest = nil
+            archiveManifestError = nil
             await flushAllInspectorNoteSaves()
             guard generation == docLoadGeneration else { return }
             let nextTargetPath = catalog.entry(at: path)
@@ -1420,15 +1443,28 @@ final class AppModel {
             guard generation == docLoadGeneration else { return }
             if let entry = catalog.entry(at: path), entry.type == .webpage || entry.type == .archive {
                 let root = workspaceRoot
-                let attachments = await Task.detached(priority: .utility) {
-                    LocalAttachment.companions(for: entry, workspaceRoot: root)
+                let inventory = await Task.detached(priority: .utility) { () -> (ArchiveManifest?, String?, [URL]) in
+                    do {
+                        let manifest = entry.type == .archive
+                            ? try ArchiveManifest.load(entryPath: path, workspaceRoot: root) : nil
+                        let files = manifest.map { inventory in
+                            inventory.files.compactMap { inventory.localURL(for: $0, entryPath: path, workspaceRoot: root) }
+                        } ?? LocalAttachment.companions(for: entry, workspaceRoot: root)
+                        return (manifest, nil, files)
+                    } catch {
+                        return (nil, error.localizedDescription, LocalAttachment.companions(for: entry, workspaceRoot: root))
+                    }
                 }.value
                 guard generation == docLoadGeneration else { return }
+                openArchiveManifest = inventory.0
+                archiveManifestError = inventory.1
+                let attachments = inventory.2
                 openAttachments = attachments
                 if path != loadedDocPath, entry.type == .webpage, openSearchQuery == nil {
                     attachmentPreviewURL = attachments.first { $0.pathExtension.lowercased() == "webarchive" }
                 } else if let url = attachmentPreviewURL,
-                          !FileManager.default.fileExists(atPath: url.path) {
+                          !FileManager.default.fileExists(atPath: url.path)
+                            || (openArchiveManifest != nil && !attachments.contains(url)) {
                     attachmentPreviewURL = nil
                 }
                 if let url = attachmentPreviewURL, !openAttachments.contains(url) {

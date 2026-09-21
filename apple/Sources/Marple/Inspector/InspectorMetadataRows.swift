@@ -30,7 +30,7 @@ enum InspectorInfoRow: Equatable {
 
 // Keep this presentation policy in sync with the Quasi plugin schemas at ~/.agents/plugins/quasi/scripts/schemas.
 func inspectorInfoRows(for entry: Entry, in entries: [Entry] = [],
-                       localise: CnDoubanIndex? = nil) -> [InspectorInfoRow] {
+                       localise: CnDoubanIndex? = nil, archiveManifest: ArchiveManifest? = nil) -> [InspectorInfoRow] {
     var rows: [InspectorInfoRow]
     switch entry.type {
     case .paper:   rows = paperRows(for: entry, in: entries)
@@ -41,7 +41,17 @@ func inspectorInfoRows(for entry: Entry, in entries: [Entry] = [],
     case .journal: rows = journalRows(for: entry)
     case .note:    rows = noteRows(for: entry, in: entries)
     case .image:   rows = imageRows(for: entry)
-    case .archive: rows = archiveRows(for: entry)
+    case .archive:
+        rows = archiveRows(for: entry)
+        if archiveManifest != nil {
+            rows.removeAll { row in
+                switch row {
+                case .readOnlyScalar(let label, _, _): return label == "来源"
+                case .linkedScalar(let label, _, _, _): return label == "原始链接"
+                default: return false
+                }
+            }
+        }
     case .webpage: rows = webpageRows(for: entry)
     case .talk:    rows = talkRows(for: entry, in: entries)
     case .transcript: rows = transcriptRows(for: entry, in: entries)
