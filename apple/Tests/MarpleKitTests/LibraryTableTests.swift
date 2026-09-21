@@ -68,19 +68,17 @@ struct LibraryTableTests {
         let properties = shell.splitViewItems[3].viewController
         #expect(!(properties is NSSplitViewController))
         let originalToolbar = window.toolbar
-        let modeControl = try #require(window.toolbar?.items.first {
-            $0.itemIdentifier.rawValue == "browseMode"
-        } as? NSToolbarItemGroup)
-        #expect(modeControl.selectedIndex == 0)
-        #expect(modeControl.selectionMode == .selectOne)
-        #expect(modeControl.controlRepresentation == .expanded)
-        let action = try #require(modeControl.action)
+        let modeButtons = try ["browseGrid", "browseList", "browseTable"].map { id in
+            try #require(window.toolbar?.items.first { $0.itemIdentifier.rawValue == id }?.view as? NSButton)
+        }
+        #expect(modeButtons.map(\.state) == [.on, .off, .off])
         for (index, mode) in [BrowseMode.grid, .list, .table].enumerated() {
-            modeControl.selectedIndex = index
-            #expect(NSApp.sendAction(action, to: modeControl.target, from: modeControl))
+            modeButtons[index].performClick(nil)
             try await waitUntil { model.browseMode == mode }
             try await settle(shell)
-            #expect(modeControl.selectedIndex == index)
+            #expect(modeButtons.enumerated().allSatisfy { $0.element.state == ($0.offset == index ? .on : .off) })
+            modeButtons[index].performClick(nil)
+            #expect(modeButtons[index].state == .on)
             #expect(shell.splitViewItems.count == 4)
             #expect(shell.splitViewItems[2].viewController === reader)
             #expect(shell.splitViewItems[3].viewController === properties)
@@ -101,16 +99,16 @@ struct LibraryTableTests {
         #expect(ids.contains("inspectorSeparator"))
         try snapshot(try #require(window.contentView?.superview), name: "four-column-table")
         model.browseMode = .list
-        try await waitUntil { modeControl.selectedIndex == 1 }
+        try await waitUntil { modeButtons[1].state == .on }
         model.togglePin(try #require(model.activeTabID))
         model.browseMode = .grid
-        try await waitUntil { !modeControl.subitems[0].isEnabled }
-        #expect(modeControl.selectedIndex == 1)
+        try await waitUntil { !modeButtons[0].isEnabled }
+        #expect(modeButtons[1].state == .on)
         model.select(pane: .trash)
-        try await waitUntil { !modeControl.isEnabled }
+        try await waitUntil { modeButtons.allSatisfy { !$0.isEnabled } }
         model.select(pane: .type(.paper))
-        try await waitUntil { modeControl.isEnabled && modeControl.subitems[0].isEnabled }
-        #expect(modeControl.selectedIndex == 0)
+        try await waitUntil { modeButtons.allSatisfy(\.isEnabled) }
+        #expect(modeButtons[0].state == .on)
     }
 
     private func makeModel() async throws -> AppModel {

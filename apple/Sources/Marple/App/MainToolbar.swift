@@ -6,7 +6,9 @@ import MarpleKit
 
 private extension NSToolbarItem.Identifier {
     static let toggleNav          = NSToolbarItem.Identifier("toggleNav")          // sidebar / list toggle
-    static let browseMode         = NSToolbarItem.Identifier("browseMode")
+    static let browseGrid         = NSToolbarItem.Identifier("browseGrid")
+    static let browseList         = NSToolbarItem.Identifier("browseList")
+    static let browseTable        = NSToolbarItem.Identifier("browseTable")
     static let readerSeparator    = NSToolbarItem.Identifier("readerSeparator")    // divider 1: content↔reader
     static let inspectorSeparator = NSToolbarItem.Identifier("inspectorSeparator") // divider 2: reader↔inspector
     static let back               = NSToolbarItem.Identifier("readerBack")
@@ -65,7 +67,7 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
             .flexibleSpace,              // push the toggle to the sidebar's right edge
             .toggleNav,
             .sidebarTrackingSeparator,   // divider 0 (sidebar↔list), system-managed
-            .browseMode,
+            .browseGrid, .browseList, .browseTable,
             .readerSeparator,            // divider 1 (list↔reader): back/forward at reader's left
             .back,
             .forward,
@@ -91,23 +93,12 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
         switch id {
         case .toggleNav:
             return iconItem(id, "sidebar.leading", String(localized: "切换边栏"), #selector(toggleNav)) { true }
-        case .browseMode:
-            let labels = [String(localized: "网格"), String(localized: "摘要"), String(localized: "表格")]
-            let images = zip(["square.grid.2x2", "list.bullet", "tablecells"], labels).map {
-                NSImage(systemSymbolName: $0.0, accessibilityDescription: $0.1)!
-            }
-            let item = NSToolbarItemGroup(itemIdentifier: id, images: images,
-                selectionMode: .selectOne, labels: labels, target: self, action: #selector(changeBrowseMode(_:)))
-            item.label = String(localized: "浏览方式")
-            item.controlRepresentation = .expanded
-            item.isBordered = true
-            item.autovalidates = false
-            for (subitem, label) in zip(item.subitems, labels) {
-                subitem.toolTip = label
-                subitem.autovalidates = false
-            }
-            observeBrowseMode(item)
-            return item
+        case .browseGrid:
+            return browseModeItem(id, mode: .grid, symbol: "square.grid.2x2", label: String(localized: "网格"))
+        case .browseList:
+            return browseModeItem(id, mode: .list, symbol: "list.bullet", label: String(localized: "摘要"))
+        case .browseTable:
+            return browseModeItem(id, mode: .table, symbol: "tablecells", label: String(localized: "表格"))
         case .readerSeparator:
             guard let splitView, splitView.arrangedSubviews.count >= 3 else { return nil }
             return NSTrackingSeparatorToolbarItem(identifier: .readerSeparator,
@@ -152,31 +143,51 @@ final class MarpleToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate
         }
     }
 
-    private func observeBrowseMode(_ item: NSToolbarItemGroup) {
+    private func browseModeItem(_ id: NSToolbarItem.Identifier, mode: BrowseMode,
+                                symbol: String, label: String) -> NSToolbarItem {
+        // Adjacent native buttons share the toolbar well without the automatic
+        // segmented group's internal dividers, like the reader actions below.
+        let item = NSToolbarItem(itemIdentifier: id)
+        let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: label)!,
+                              target: self, action: #selector(changeBrowseMode(_:)))
+        button.bezelStyle = .texturedRounded
+        button.setButtonType(.pushOnPushOff)
+        button.tag = browseModes.firstIndex(of: mode)!
+        button.imageScaling = .scaleProportionallyDown
+        button.setAccessibilityLabel(label)
+        item.view = button
+        item.label = label
+        item.toolTip = label
+        item.autovalidates = false
+        observeBrowseMode(item, mode: mode)
+        return item
+    }
+
+    private func observeBrowseMode(_ item: NSToolbarItem, mode: BrowseMode) {
+        guard let button = item.view as? NSButton else { return }
         withObservationTracking {
             guard let model else { return }
             let pinned = model.isPinnedListContext
             // Pinned pages use the existing list presentation when grid is the
             // library preference; the toolbar must reflect what is on screen.
-            let mode: BrowseMode = pinned && model.browseMode == .grid ? .list : model.browseMode
-            item.selectedIndex = browseModes.firstIndex(of: mode) ?? 0
-            let enabled = pinned || (model.pane != .themesIndex && model.pane != .trash)
+            let selected: BrowseMode = pinned && model.browseMode == .grid ? .list : model.browseMode
+            button.state = selected == mode ? .on : .off
+            let enabled = (pinned || (model.pane != .themesIndex && model.pane != .trash))
+                && !(pinned && mode == .grid)
             item.isEnabled = enabled
-            for (index, subitem) in item.subitems.enumerated() {
-                subitem.isEnabled = enabled && !(pinned && browseModes[index] == .grid)
-            }
+            button.isEnabled = enabled
         } onChange: { [weak self, weak item] in
             Task { @MainActor in
                 guard let self, let item else { return }
-                self.observeBrowseMode(item)
+                self.observeBrowseMode(item, mode: mode)
             }
         }
     }
 
-    @objc private func changeBrowseMode(_ sender: NSToolbarItemGroup) {
-        guard let model, sender.isEnabled, browseModes.indices.contains(sender.selectedIndex),
-              sender.subitems[sender.selectedIndex].isEnabled else { return }
-        model.browseMode = browseModes[sender.selectedIndex]
+    @objc private func changeBrowseMode(_ sender: NSButton) {
+        guard let model, sender.isEnabled, browseModes.indices.contains(sender.tag) else { return }
+        sender.state = .on // Clicking the current mode must keep it selected.
+        model.browseMode = browseModes[sender.tag]
     }
 
     // MARK: Item builders
