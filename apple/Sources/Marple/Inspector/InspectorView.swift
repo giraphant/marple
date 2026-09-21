@@ -647,12 +647,12 @@ private struct AuthorRow: View {
     @State private var editingIndex: Int? = nil
     @State private var editingAll = false
 
-    /// Talks store presenters under `speaker:` and images their makers under
+    /// Talks store presenters under `speaker:` and images/archives their makers under
     /// `creator:`, so label this row 讲者/创作者 for them.
     private var noun: String {
         switch entry.type {
         case .talk:  return "讲者"
-        case .image: return "创作者"
+        case .image, .archive: return "创作者"
         default:     return "作者"
         }
     }

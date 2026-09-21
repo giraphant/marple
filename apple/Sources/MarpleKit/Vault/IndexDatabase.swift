@@ -139,7 +139,7 @@ public final class IndexDatabase: @unchecked Sendable {
             let cursor = try Row.fetchCursor(db, sql: """
                 SELECT path, type, book, title, author, year_json, rating_score,
                        themes_json, topics_json, kind, journal, source, doi, publisher, isbn, category,
-                       annotates, created, media, width, height, file_size,
+                       annotates, created, date, url, media, width, height, file_size,
                        has_pdf, pdf_slug, mtime, preview, added
                 FROM entries
                 ORDER BY path
@@ -341,7 +341,7 @@ public final class IndexDatabase: @unchecked Sendable {
                    e.journal AS journal, e.source AS source, e.doi AS doi,
                    e.publisher AS publisher, e.isbn AS isbn,
                    e.category AS category, e.annotates AS annotates, e.created AS created,
-                   e.media AS media,
+                   e.date AS date, e.url AS url, e.media AS media,
                    e.width AS width, e.height AS height, e.file_size AS file_size,
                    e.has_pdf AS has_pdf,
                    e.pdf_slug AS pdf_slug,
@@ -390,7 +390,7 @@ public final class IndexDatabase: @unchecked Sendable {
                    e.journal AS journal, e.source AS source, e.doi AS doi,
                    e.publisher AS publisher, e.isbn AS isbn,
                    e.category AS category, e.annotates AS annotates, e.created AS created,
-                   e.media AS media,
+                   e.date AS date, e.url AS url, e.media AS media,
                    e.width AS width, e.height AS height, e.file_size AS file_size,
                    e.has_pdf AS has_pdf,
                    e.pdf_slug AS pdf_slug,
@@ -471,6 +471,8 @@ public final class IndexDatabase: @unchecked Sendable {
         let category: String? = row["category"]
         let annotates: String? = row["annotates"]
         let created: String? = row["created"]
+        let date: String? = row["date"]
+        let url: String? = row["url"]
         let media: String? = row["media"]
         let width: Int? = row["width"]
         let height: Int? = row["height"]
@@ -499,6 +501,8 @@ public final class IndexDatabase: @unchecked Sendable {
             category: category,
             annotates: annotates,
             created: created,
+            date: date,
+            url: url,
             media: media,
             width: width,
             height: height,

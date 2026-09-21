@@ -2603,7 +2603,7 @@ final class AppModel {
     /// (legacy alias) frontmatter keys; non-empty → write canonical block
     /// list under `author:` per SPEC §5.2.
     ///
-    /// A `talk` stores its presenters under `speaker:` and an `image` its
+    /// A `talk` stores its presenters under `speaker:` and an `image`/`archive` its
     /// makers under `creator:` (not `author:`), so for those types the same
     /// edit writes their own key instead — the inspector reuses the authors
     /// row for 讲者/创作者, and the indexer folds the key back into `author`
@@ -2615,7 +2615,7 @@ final class AppModel {
         let key: String
         switch openEntry?.type {
         case .talk:  key = "speaker"
-        case .image: key = "creator"
+        case .image, .archive: key = "creator"
         default:     key = "author"
         }
         await applyPatch(

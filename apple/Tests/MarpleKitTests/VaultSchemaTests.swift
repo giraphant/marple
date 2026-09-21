@@ -12,6 +12,7 @@ import Testing
             VaultSchema.FieldAlias("authors"),
             VaultSchema.FieldAlias("speaker", onlyForType: "talk"),
             VaultSchema.FieldAlias("creator", onlyForType: "image"),
+            VaultSchema.FieldAlias("creator", onlyForType: "archive"),
         ])
     }
 
@@ -39,6 +40,7 @@ import Testing
             (.chapter,    "list.bullet.rectangle",    "indigo"),
             (.note,       "note.text",                "yellow"),
             (.image,      "photo",                    "pink"),
+            (.archive,    "archivebox",               "brown"),
             (.talk,       "waveform",                 "red"),
             (.transcript, "text.quote",               "brown"),
             (.other("x"), "questionmark.square.dashed", "gray"),

@@ -14,6 +14,7 @@ enum AppPresentation {
         case .chapter: return String(localized: "章节")
         case .note: return String(localized: "笔记")
         case .image: return String(localized: "图片")
+        case .archive: return String(localized: "档案")
         case .talk: return String(localized: "讲座")
         case .transcript: return String(localized: "转写")
         case .other(let raw): return raw
@@ -163,6 +164,9 @@ enum AppPresentation {
         case "标注": return String(localized: "标注")
         case "名称": return String(localized: "名称")
         case "日期": return String(localized: "日期")
+        case "建档日期": return String(localized: "建档日期")
+        case "发布日期": return String(localized: "发布日期")
+        case "原始链接": return String(localized: "原始链接")
         case "来源": return String(localized: "来源")
         case "尺寸": return String(localized: "尺寸")
         case "大小": return String(localized: "大小")

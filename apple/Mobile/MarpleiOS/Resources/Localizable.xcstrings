@@ -401,6 +401,22 @@
         }
       }
     },
+    "档案" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Archive"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "档案"
+          }
+        }
+      }
+    },
     "概述" : {
       "localizations" : {
         "en" : {

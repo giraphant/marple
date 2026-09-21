@@ -62,7 +62,7 @@ private func byRatingDesc(_ a: Entry, _ b: Entry) -> Bool { a.ratingScore > b.ra
 
 private func relationPanelType(_ entry: Entry) -> EntryType? {
     switch entry.type {
-    case .paper, .book: return entry.type
+    case .paper, .book, .archive: return entry.type
     default: return nil
     }
 }

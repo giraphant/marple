@@ -58,7 +58,7 @@ public enum VaultConformance {
     private static func isPresent(_ field: String, in entry: Entry) -> Bool {
         switch field {
         case "title", "name":   return nonEmpty(entry.title)
-        case "authors", "author": return !entry.author.isEmpty
+        case "authors", "author", "creator": return !entry.author.isEmpty
         case "themes":          return !entry.themes.isEmpty
         case "year":            return nonEmpty(entry.year)
         case "publisher":       return nonEmpty(entry.publisher)
@@ -66,9 +66,9 @@ public enum VaultConformance {
         case "kind":            return nonEmpty(entry.kind)
         case "journal":         return nonEmpty(entry.journal)
         case "created":         return nonEmpty(entry.created)
-        // `talk` requires `date`; the indexer folds it into the `created` column
-        // (same as `note`'s `created`), so verify it there.
-        case "date":            return nonEmpty(entry.created)
+        // Legacy talk/image dates live in `created`; archives keep both dates.
+        case "date":            return nonEmpty(entry.type == .archive ? entry.date : entry.created)
+        case "url":             return nonEmpty(entry.url)
         case "doi":             return nonEmpty(entry.doi)
         case "isbn":            return nonEmpty(entry.isbn)
         case "category":        return nonEmpty(entry.category)

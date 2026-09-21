@@ -41,6 +41,7 @@ func inspectorInfoRows(for entry: Entry, in entries: [Entry] = [],
     case .journal: rows = journalRows(for: entry)
     case .note:    rows = noteRows(for: entry, in: entries)
     case .image:   rows = imageRows(for: entry)
+    case .archive: rows = archiveRows(for: entry)
     case .talk:    rows = talkRows(for: entry, in: entries)
     case .transcript: rows = transcriptRows(for: entry, in: entries)
     case .other:   rows = []
@@ -222,6 +223,27 @@ private func imageRows(for entry: Entry) -> [InspectorInfoRow] {
     return rows
 }
 
+private func archiveRows(for entry: Entry) -> [InspectorInfoRow] {
+    var rows: [InspectorInfoRow] = [.authors]
+    if let kind = nonEmpty(entry.kind) {
+        rows.append(.readOnlyScalar(label: "类型", value: kindDisplayValue(kind), copyValue: kind))
+    }
+    if let created = nonEmpty(entry.created) {
+        rows.append(.readOnlyScalar(label: "建档日期", value: created, copyValue: nil))
+    }
+    if let date = nonEmpty(entry.date) {
+        rows.append(.readOnlyScalar(label: "发布日期", value: date, copyValue: nil))
+    }
+    if let source = nonEmpty(entry.source) {
+        rows.append(.readOnlyScalar(label: "来源", value: source, copyValue: nil))
+    }
+    if let url = nonEmpty(entry.url) {
+        rows.append(.linkedScalar(label: "原始链接", value: url, path: url, copyValue: url))
+    }
+    rows.append(.rating)
+    return rows
+}
+
 private func talkRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRow] {
     // `speaker` is indexed into `author`, so reuse the standard authors row
     // (AuthorChip with author-page links + editing). It renders the label as
@@ -279,6 +301,13 @@ private func kindDisplayValue(_ kind: String) -> String {
     switch kind.lowercased() {
     case "overview": return String(localized: "概览")
     case "resources": return String(localized: "资源")
+    case "patent": return String(localized: "专利")
+    case "thread": return String(localized: "讨论串")
+    case "post": return String(localized: "帖子")
+    case "video": return String(localized: "视频")
+    case "image": return String(localized: "图片")
+    case "webpage": return String(localized: "网页")
+    case "document": return String(localized: "文档")
     default: return kind
     }
 }

@@ -417,6 +417,22 @@
         }
       }
     },
+    "专利" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Patent"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "专利"
+          }
+        }
+      }
+    },
     "专著" : {
       "localizations" : {
         "en" : {
@@ -1505,6 +1521,22 @@
         }
       }
     },
+    "原始链接" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original URL"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原始链接"
+          }
+        }
+      }
+    },
     "原文" : {
       "localizations" : {
         "en" : {
@@ -1517,6 +1549,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "原文"
+          }
+        }
+      }
+    },
+    "发布日期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Publication date"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发布日期"
           }
         }
       }
@@ -2833,6 +2881,22 @@
         }
       }
     },
+    "帖子" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Post"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帖子"
+          }
+        }
+      }
+    },
     "平衡" : {
       "localizations" : {
         "en" : {
@@ -2861,6 +2925,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "年份"
+          }
+        }
+      }
+    },
+    "建档日期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record created"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建档日期"
           }
         }
       }
@@ -3485,6 +3565,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文库发生变动后会自动生成快照。"
+          }
+        }
+      }
+    },
+    "文档" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Document"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文档"
           }
         }
       }
@@ -4365,6 +4461,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "格式整理"
+          }
+        }
+      }
+    },
+    "档案" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Archive"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "档案"
           }
         }
       }
@@ -5633,6 +5745,22 @@
         }
       }
     },
+    "网页" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Web page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网页"
+          }
+        }
+      }
+    },
     "自动备份" : {
       "localizations" : {
         "en" : {
@@ -5821,6 +5949,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "对话讨论"
+          }
+        }
+      }
+    },
+    "视频" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Video"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "视频"
+          }
+        }
+      }
+    },
+    "讨论串" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thread"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讨论串"
           }
         }
       }

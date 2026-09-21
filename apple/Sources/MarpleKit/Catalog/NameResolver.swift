@@ -73,7 +73,7 @@ public enum NameResolver {
 
     /// [[target]] → 条目。第一级逐字 = 旧 WikiResolver.resolve（小写 title
     /// 全等 → 小写文件名 stem 全等，均不 trim）；中间补"按 vault 相对路径"层，
-    /// 让 `[[papers/x|label]]` 这类带目录前缀的路径形命中（QUA-225）——只有当
+    /// 让 `[[papers/x|label]]` 或 `[[vault/archives/x/archive.md]]` 命中——只有当
     /// needle 带 `/` 时才触发，纯 stem/title 形不受影响；第二级同链 folded。
     public static func resolveWikilink(_ target: String, in entries: [Entry]) -> Entry? {
         let needle = target.lowercased()
@@ -84,7 +84,8 @@ public enum NameResolver {
             return byStem
         }
         if needle.contains("/") {
-            let pathNeedle = needle.hasSuffix(".md") ? String(needle.dropLast(3)) : needle
+            let withoutRoot = needle.hasPrefix("vault/") ? String(needle.dropFirst(6)) : needle
+            let pathNeedle = withoutRoot.hasSuffix(".md") ? String(withoutRoot.dropLast(3)) : withoutRoot
             if let byPath = entries.first(where: { vaultRelPath($0.path).lowercased() == pathNeedle }) {
                 return byPath
             }

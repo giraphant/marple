@@ -260,7 +260,7 @@ func rankSearchDocument(_ doc: SearchDocument, _ query: SearchPrepared) -> Doubl
 }
 
 private func entryFields(_ entry: Entry) -> [SearchField] {
-    let identifierText = (entry.doi ?? "").trimmingCharacters(in: .whitespaces)
+    let identifierText = [entry.doi, entry.url].compactMap { $0 }.joined(separator: " ")
     let rawTexts: [String] = [
         entry.title ?? "",
         entry.author.joined(separator: ", "),

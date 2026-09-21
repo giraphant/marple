@@ -120,6 +120,9 @@ public struct IndexedEntry: Sendable, Equatable {
 
     /// Free-text creation date from frontmatter.  Column: `created`.
     public var created: String?
+    /// Archive publication date and direct source URL; neither implies an attachment.
+    public var date: String? = nil
+    public var url: String? = nil
 
     /// `talk` recording filename from the `media:` frontmatter key.  Indexed
     /// only so conformance can verify talk's required `media` key; the player
@@ -299,7 +302,7 @@ public func buildIndexedEntry(
         return .skippedNoType
     }
 
-    // 4. Canonical type mapping (QUA-119: only the eight short Quasi forms;
+    // 4. Canonical type mapping (QUA-119: only the registered short forms;
     //    everything else is reported and skipped, not silently normalized).
     guard let entryType = canonicalType(rawType) else {
         UnknownTypeReporter.report(
@@ -338,7 +341,7 @@ public func buildIndexedEntry(
     let themesValue: [String]? = themeArray(field(frontmatter, "themes"))
     let topicsValue: [String]? = themeArray(field(frontmatter, "topics"))
     // Entity-reference aliases come from the schema table (builtin mirrors the
-    // old hard-coded chain: author → authors → speaker(talk) → creator(image)).
+    // author → authors → speaker(talk) → creator(image/archive)).
     let authorValue: [String] = parseAuthors(
         entityFieldValue(frontmatter, entity: "author", entryType: entryType, schema: schema)
     )
@@ -359,6 +362,8 @@ public func buildIndexedEntry(
     let previewValue: String = firstParagraph(body)
 
     // 11. Search text — composite path/title/metadata/body text for trigram FTS.
+    let archiveMetadata: [String] = entryType == "archive"
+        ? ["source", "url", "kind", "date"].compactMap { truthyText(frontmatter, $0) } : []
     let searchTextValue: String = searchText([
         rel,
         titleValue ?? "",
@@ -370,6 +375,7 @@ public func buildIndexedEntry(
         isbnValue ?? "",
         translationTitleCnValue ?? "",
         bodyTextValue,
+        searchText(archiveMetadata),
     ])
 
     // 12. Remaining optional fields.
@@ -419,6 +425,8 @@ public func buildIndexedEntry(
         chaptersAnalyzed: chaptersAnalyzedValue,
         annotates: annotatesValue,
         created: createdValue,
+        date: entryType == "archive" ? textValue(field(frontmatter, "date")) : nil,
+        url: entryType == "archive" ? truthyText(frontmatter, "url") : nil,
         media: mediaValue,
         pdfSlug: pdfSlugValue,
         hasPDF: hasPDFValue,

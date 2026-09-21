@@ -405,6 +405,8 @@ public final class VaultIndexer: @unchecked Sendable {
             // QUA-175: `width`/`height`/`file_size` carry image technical
             // fields derived from original.<ext>. Absence → rebuild.
             "width",
+            // Archive publication date and source link require reindexing old files.
+            "date", "url",
         ]
 
         var config = Configuration()

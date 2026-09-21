@@ -22,7 +22,7 @@ import GRDB
                   rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topics_json TEXT, kind TEXT, journal TEXT, source TEXT,
                   doi TEXT, publisher TEXT, isbn TEXT, category TEXT, translation_title_cn TEXT,
                   translation_douban_url TEXT, chapters_analyzed INTEGER, annotates TEXT,
-                  created TEXT, media TEXT, width INTEGER, height INTEGER, file_size INTEGER,
+                  created TEXT, date TEXT, url TEXT, media TEXT, width INTEGER, height INTEGER, file_size INTEGER,
                   pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
                   preview TEXT NOT NULL DEFAULT '', body_len INTEGER NOT NULL DEFAULT 0,
                   added INTEGER NOT NULL DEFAULT 0
@@ -222,7 +222,7 @@ import GRDB
                       rating_score REAL NOT NULL DEFAULT 0, themes_json TEXT, topics_json TEXT, kind TEXT, journal TEXT, source TEXT,
                       doi TEXT, publisher TEXT, isbn TEXT, category TEXT, translation_title_cn TEXT,
                       translation_douban_url TEXT, chapters_analyzed INTEGER, annotates TEXT,
-                      created TEXT, media TEXT, width INTEGER, height INTEGER, file_size INTEGER,
+                      created TEXT, date TEXT, url TEXT, media TEXT, width INTEGER, height INTEGER, file_size INTEGER,
                       pdf_slug TEXT, has_pdf INTEGER NOT NULL DEFAULT 0, mtime INTEGER,
                       preview TEXT NOT NULL DEFAULT '', body_len INTEGER NOT NULL DEFAULT 0,
                       added INTEGER NOT NULL DEFAULT 0

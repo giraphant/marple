@@ -139,7 +139,11 @@ struct LibraryGridTests {
         window.orderFront(nil)
         try await settle(window)
         let collection = try #require(descendants(ClickableCollectionView.self, in: host).first)
-        #expect(collection.numberOfItems(inSection: 0) == 600)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while collection.numberOfItems(inSection: 0) != 600, ContinuousClock.now < deadline {
+            try await settle(window)
+        }
+        try #require(collection.numberOfItems(inSection: 0) == 600)
         return (window, host, model, collection)
     }
 

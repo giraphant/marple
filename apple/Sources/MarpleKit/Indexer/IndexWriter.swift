@@ -22,7 +22,7 @@ public enum IndexWriter {
     /// - DROP IF EXISTS for every table this writer creates (idempotent;
     ///   safe to call twice) PLUS `entry_search`/`entry_text` so any older
     ///   DB that happens to be opened directly is also stripped.
-    /// - CREATE TABLE entries (34 columns)
+    /// - CREATE TABLE entries (36 columns)
     /// - CREATE TABLE entry_themes
     /// - CREATE VIRTUAL TABLE entry_trigram USING fts5(tokenize='trigram')
     /// - CREATE TABLE meta
@@ -66,6 +66,8 @@ public enum IndexWriter {
               chapters_analyzed INTEGER,
               annotates TEXT,
               created TEXT,
+              date TEXT,
+              url TEXT,
               media TEXT,
               width INTEGER,
               height INTEGER,
@@ -175,8 +177,8 @@ public enum IndexWriter {
                   path, type, book, title, title_en, title_cn, author, year_json, rating_json,
                   rating_score, themes_json, topics_json, kind, journal, source, doi, publisher, isbn, category,
                   translation_title_cn, translation_douban_url, chapters_analyzed,
-                  annotates, created, media, width, height, file_size, pdf_slug, has_pdf, mtime, preview, body_len, added
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  annotates, created, date, url, media, width, height, file_size, pdf_slug, has_pdf, mtime, preview, body_len, added
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
             arguments: [
                 entry.path,
@@ -203,6 +205,8 @@ public enum IndexWriter {
                 entry.chaptersAnalyzed,
                 entry.annotates,
                 entry.created,
+                entry.date,
+                entry.url,
                 entry.media,
                 entry.width,
                 entry.height,

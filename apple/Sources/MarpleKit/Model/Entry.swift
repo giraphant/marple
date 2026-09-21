@@ -9,6 +9,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
     case journal
     case note
     case image
+    case archive
     case talk
     case transcript
     /// Any type the reader doesn't model. The vault is produced by an evolving
@@ -28,6 +29,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
         case "journal": self = .journal
         case "note":    self = .note
         case "image":   self = .image
+        case "archive": self = .archive
         case "talk":    self = .talk
         case "transcript": self = .transcript
         default:        self = .other(rawValue)
@@ -44,6 +46,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
         case .journal: return "journal"
         case .note:    return "note"
         case .image:   return "image"
+        case .archive: return "archive"
         case .talk:    return "talk"
         case .transcript: return "transcript"
         case .other(let raw): return raw
@@ -66,7 +69,7 @@ public extension EntryType {
     static let modeled: [EntryType] = [
         .paper, .book, .author,
         .topic, .journal, .chapter, .note, .image,
-        .talk,
+        .talk, .archive,
         // `transcript` is intentionally NOT a browse category. It is still a
         // recognized, indexed type (searchable, openable, and linked from its
         // talk's inspector), but a transcript is the raw text *of* a talk — you
@@ -83,6 +86,7 @@ public extension EntryType {
         case .chapter: return "章节"
         case .note:    return "笔记"
         case .image:   return "图片"
+        case .archive: return "档案"
         case .talk:    return "讲座"
         case .transcript: return "转写"
         case .other(let raw): return raw
@@ -124,6 +128,9 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public let category: String?
     public let annotates: String?
     public let created: String?
+    /// Original material's publication date, distinct from archive record creation.
+    public let date: String?
+    public let url: String?
     /// Talk recording filename from the `media:` frontmatter key (e.g.
     /// `recording.mov`). Carried only so `VaultConformance` can verify talk's
     /// required `media` key is present — playback resolves the file on disk via
@@ -145,6 +152,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         case hasPDF = "has_pdf"
         case pdfSlug = "pdf_slug"
         case mtime, added, source, book, kind, journal, doi, publisher, isbn, category, annotates, created, media
+        case date, url
         case width, height
         case fileSize = "file_size"
     }
@@ -190,6 +198,8 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         category = (try? c.decodeIfPresent(String.self, forKey: .category)) ?? nil
         annotates = (try? c.decodeIfPresent(String.self, forKey: .annotates)) ?? nil
         created = (try? c.decodeIfPresent(String.self, forKey: .created)) ?? nil
+        date = try? c.decodeIfPresent(String.self, forKey: .date)
+        url = try? c.decodeIfPresent(String.self, forKey: .url)
         media = (try? c.decodeIfPresent(String.self, forKey: .media)) ?? nil
         width = (try? c.decodeIfPresent(Int.self, forKey: .width)) ?? nil
         height = (try? c.decodeIfPresent(Int.self, forKey: .height)) ?? nil
@@ -204,7 +214,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
                 book: String? = nil, kind: String? = nil,
                 journal: String? = nil, doi: String? = nil, publisher: String? = nil,
                 isbn: String? = nil, category: String? = nil, annotates: String? = nil,
-                created: String? = nil, media: String? = nil,
+                created: String? = nil, date: String? = nil, url: String? = nil, media: String? = nil,
                 width: Int? = nil, height: Int? = nil, fileSize: Int? = nil) {
         self.path = path
         self.type = type
@@ -229,6 +239,8 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
         self.category = category
         self.annotates = annotates
         self.created = created
+        self.date = date
+        self.url = url
         self.media = media
         self.width = width
         self.height = height
@@ -262,7 +274,7 @@ public extension Entry {
               pdfSlug: pdfSlug, mtime: mtime, added: added, source: source ?? self.source,
               book: book, kind: kind, journal: journal,
               doi: doi ?? self.doi, publisher: publisher, isbn: isbn, category: category,
-              annotates: annotates, created: created ?? self.created, media: media,
+              annotates: annotates, created: created ?? self.created, date: date, url: url, media: media,
               width: width, height: height, fileSize: fileSize)
     }
 }
