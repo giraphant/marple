@@ -37,9 +37,27 @@ struct DocView: View {
     @State private var playerEnlarged = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            if model.openPath != nil && (!model.openAttachments.isEmpty || model.attachmentPreviewURL != nil) {
+                attachmentBar
+                Divider()
+            }
+            document
+        }
+        .onChange(of: model.scrollTarget) { _, target in
+            if target != nil { model.attachmentPreviewURL = nil }
+        }
+        .onChange(of: model.matchJump) { _, jump in
+            if jump != nil { model.attachmentPreviewURL = nil }
+        }
+    }
+
+    private var document: some View {
         Group {
             if model.openPath == nil {
                 ContentUnavailableView("选择一篇文档", systemImage: "doc.text")
+            } else if let url = model.attachmentPreviewURL {
+                AttachmentPreview(url: url).id(url)
             } else if model.openEntry?.type == .image {
                 ImageObjectDetailView(model: model)
             } else {
@@ -59,7 +77,7 @@ struct DocView: View {
                             Task { await model.follow(target) }
                             return true
                         }
-                        return false
+                        return model.previewAttachment(url.absoluteString)
                     }
                 )
             }
@@ -86,6 +104,35 @@ struct DocView: View {
         // eases in once the first loadIndex has published.
         .opacity(model.isBootstrapping ? 0.0 : 1.0)
         .animation(.easeOut(duration: 0.22), value: model.isBootstrapping)
+    }
+
+    private var attachmentBar: some View {
+        HStack(spacing: Space.s3) {
+            if model.attachmentPreviewURL != nil {
+                Button("返回正文", systemImage: "chevron.left") { model.attachmentPreviewURL = nil }
+                    .buttonStyle(.borderless)
+            }
+            Spacer(minLength: 0)
+            Menu {
+                ForEach(model.openAttachments, id: \.self) { url in
+                    Button(url.lastPathComponent) { model.previewAttachment(url.absoluteString) }
+                }
+            } label: {
+                Text(model.attachmentPreviewURL?.lastPathComponent ?? String(localized: "预览附件"))
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize(horizontal: false, vertical: true)
+            if let url = model.attachmentPreviewURL {
+                Button("在外部打开", systemImage: "arrow.up.forward.square") { NSWorkspace.shared.open(url) }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .help("在外部打开")
+            }
+        }
+        .font(Typo.caption)
+        .padding(.horizontal, Space.s6)
+        .padding(.vertical, Space.s3)
     }
 
     @ViewBuilder private var toastOverlay: some View {

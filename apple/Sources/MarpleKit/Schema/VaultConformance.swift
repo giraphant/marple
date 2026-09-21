@@ -65,7 +65,9 @@ public enum VaultConformance {
         case "book":            return nonEmpty(entry.book)
         case "kind":            return nonEmpty(entry.kind)
         case "journal":         return nonEmpty(entry.journal)
-        case "created":         return nonEmpty(entry.created)
+        case "created", "captured_at": return nonEmpty(entry.created)
+        case "published":       return nonEmpty(entry.date)
+        case "site":            return nonEmpty(entry.source)
         // Legacy talk/image dates live in `created`; archives keep both dates.
         case "date":            return nonEmpty(entry.type == .archive ? entry.date : entry.created)
         case "url":             return nonEmpty(entry.url)

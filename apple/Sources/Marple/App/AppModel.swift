@@ -34,8 +34,8 @@ final class AppModel {
     private(set) var lastIndexFailure: String?
     private(set) var isRebuildingGeneralIndex = false
 
-    /// Workspace root (parent of `vault/`). Used only to locate the optional
-    /// `.quasi/schema.json` conformance snapshot. Empty in stub-backed tests.
+    /// Workspace root (parent of `vault/`), for schema snapshots and local originals.
+    /// Empty in stub-backed tests.
     let workspaceRoot: String
 
     /// The vault indexer, injected at boot. Lets the CLI surface self-heal the
@@ -444,6 +444,28 @@ final class AppModel {
         var seekToken = UUID()
     }
     private(set) var talkPlayback: TalkPlayback?
+    private(set) var openAttachments: [URL] = []
+    var attachmentPreviewURL: URL?
+
+    @discardableResult
+    func previewAttachment(_ target: String) -> Bool {
+        guard let path = openPath,
+              let url = LocalAttachment.resolve(target, entryPath: path, workspaceRoot: workspaceRoot) else { return false }
+        if !openAttachments.contains(url) { openAttachments.append(url) }
+        closeTalkPlayback()
+        attachmentPreviewURL = url
+        return true
+    }
+
+    var canOpenOriginal: Bool { !openAttachments.isEmpty || canOpenPDF }
+
+    func openOriginal() async {
+        if let url = openAttachments.first {
+            previewAttachment(url.absoluteString)
+        } else {
+            await openPDF()
+        }
+    }
 
     /// Open (or re-seek) the player for the current talk/transcript at `seconds`.
     /// No-op with a toast when the gitignored recording is absent on this machine.
@@ -1380,6 +1402,8 @@ final class AppModel {
         let generation = docLoadGeneration
         writeError = nil
         if path != loadedDocPath {
+            attachmentPreviewURL = nil
+            openAttachments = []
             await flushAllInspectorNoteSaves()
             guard generation == docLoadGeneration else { return }
             let nextTargetPath = catalog.entry(at: path)
@@ -1394,6 +1418,23 @@ final class AppModel {
         do {
             let raw = try await client.entryText(path: path)
             guard generation == docLoadGeneration else { return }
+            if let entry = catalog.entry(at: path), entry.type == .webpage || entry.type == .archive {
+                let root = workspaceRoot
+                let attachments = await Task.detached(priority: .utility) {
+                    LocalAttachment.companions(for: entry, workspaceRoot: root)
+                }.value
+                guard generation == docLoadGeneration else { return }
+                openAttachments = attachments
+                if path != loadedDocPath, entry.type == .webpage, openSearchQuery == nil {
+                    attachmentPreviewURL = attachments.first { $0.pathExtension.lowercased() == "webarchive" }
+                } else if let url = attachmentPreviewURL,
+                          !FileManager.default.fileExists(atPath: url.path) {
+                    attachmentPreviewURL = nil
+                }
+                if let url = attachmentPreviewURL, !openAttachments.contains(url) {
+                    openAttachments.append(url)
+                }
+            }
             let body = Frontmatter.split(raw).body
             // Watcher refreshes land here for ANY vault change (e.g. inline-note
             // autosaves, issue #87). When the doc text didn't change, skip the
@@ -1513,6 +1554,7 @@ final class AppModel {
     }
 
     func follow(_ target: String) async {
+        if previewAttachment(target) { return }
         guard let hit = NameResolver.resolveWikilink(target, in: entries) else {
             status = String(localized: "未解析链接：[[\(target)]]")
             print("[marple] follow [[\(target)]] -> UNRESOLVED")

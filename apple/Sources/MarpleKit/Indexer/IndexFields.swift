@@ -154,7 +154,7 @@ public func parseAuthors(_ v: YamlValue?) -> [String] {
 ///
 /// - "" and "A" → nil (sentinel "skip entry" values from the legacy pipeline)
 /// - one of `paper / book / chapter / author / topic / journal / note / image /
-///   talk / transcript / archive` → the same string
+///   talk / transcript / archive / webpage` → the same string
 /// - anything else (including pre-QUA-119 long forms like `paper-analysis` /
 ///   `book-overview` and the older free-text aliases like `monograph` /
 ///   `reading-list` / `concept-note`) → nil, so `buildIndexedEntry` returns
@@ -167,7 +167,7 @@ public func canonicalType(_ raw: String) -> String? {
     switch raw {
     case "paper", "book", "chapter", "author",
          "topic", "journal", "note", "image",
-         "talk", "transcript", "archive":
+         "talk", "transcript", "archive", "webpage":
         return raw
     default:
         return nil

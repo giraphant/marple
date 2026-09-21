@@ -267,7 +267,7 @@ private func entryFields(_ entry: Entry) -> [SearchField] {
         entry.book ?? "",
         entry.themes.joined(separator: " "),
         entry.topics.joined(separator: " "),
-        entry.source ?? "",
+        [entry.source, entry.url].compactMap { $0 }.joined(separator: " "),
         entry.year ?? "",
         entry.path,
         entry.preview,

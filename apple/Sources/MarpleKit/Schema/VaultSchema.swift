@@ -101,6 +101,7 @@ public struct VaultSchema: Sendable, Equatable {
             "note":       TypeDisplay(symbol: "note.text", tint: "yellow"),
             "image":      TypeDisplay(symbol: "photo", tint: "pink"),
             "archive":    TypeDisplay(symbol: "archivebox", tint: "brown"),
+            "webpage":    TypeDisplay(symbol: "globe", tint: "blue"),
             "talk":       TypeDisplay(symbol: "waveform", tint: "red"),
             "transcript": TypeDisplay(symbol: "text.quote", tint: "brown"),
         ],

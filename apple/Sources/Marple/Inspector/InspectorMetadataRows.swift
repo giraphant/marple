@@ -42,6 +42,7 @@ func inspectorInfoRows(for entry: Entry, in entries: [Entry] = [],
     case .note:    rows = noteRows(for: entry, in: entries)
     case .image:   rows = imageRows(for: entry)
     case .archive: rows = archiveRows(for: entry)
+    case .webpage: rows = webpageRows(for: entry)
     case .talk:    rows = talkRows(for: entry, in: entries)
     case .transcript: rows = transcriptRows(for: entry, in: entries)
     case .other:   rows = []
@@ -244,6 +245,24 @@ private func archiveRows(for entry: Entry) -> [InspectorInfoRow] {
     return rows
 }
 
+private func webpageRows(for entry: Entry) -> [InspectorInfoRow] {
+    var rows: [InspectorInfoRow] = []
+    if let site = nonEmpty(entry.source) {
+        rows.append(.readOnlyScalar(label: "网站", value: site, copyValue: nil))
+    }
+    if let captured = nonEmpty(entry.created) {
+        rows.append(.readOnlyScalar(label: "保存时间", value: captured, copyValue: nil))
+    }
+    if let published = nonEmpty(entry.date) {
+        rows.append(.readOnlyScalar(label: "发布日期", value: published, copyValue: nil))
+    }
+    if let url = nonEmpty(entry.url) {
+        rows.append(.linkedScalar(label: "原始链接", value: url, path: url, copyValue: url))
+    }
+    rows.append(.rating)
+    return rows
+}
+
 private func talkRows(for entry: Entry, in entries: [Entry]) -> [InspectorInfoRow] {
     // `speaker` is indexed into `author`, so reuse the standard authors row
     // (AuthorChip with author-page links + editing). It renders the label as
@@ -338,6 +357,8 @@ func conformanceFieldLabel(_ field: String) -> String {
     case "book":      return String(localized: "书籍")
     case "kind":      return String(localized: "类型")
     case "created":   return String(localized: "创建")
+    case "captured_at": return String(localized: "保存时间")
+    case "url":       return String(localized: "原始链接")
     default:          return field
     }
 }

@@ -10,6 +10,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
     case note
     case image
     case archive
+    case webpage
     case talk
     case transcript
     /// Any type the reader doesn't model. The vault is produced by an evolving
@@ -30,6 +31,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
         case "note":    self = .note
         case "image":   self = .image
         case "archive": self = .archive
+        case "webpage": self = .webpage
         case "talk":    self = .talk
         case "transcript": self = .transcript
         default:        self = .other(rawValue)
@@ -47,6 +49,7 @@ public enum EntryType: RawRepresentable, Codable, Sendable, Equatable, Hashable 
         case .note:    return "note"
         case .image:   return "image"
         case .archive: return "archive"
+        case .webpage: return "webpage"
         case .talk:    return "talk"
         case .transcript: return "transcript"
         case .other(let raw): return raw
@@ -69,7 +72,7 @@ public extension EntryType {
     static let modeled: [EntryType] = [
         .paper, .book, .author,
         .topic, .journal, .chapter, .note, .image,
-        .talk, .archive,
+        .talk, .archive, .webpage,
         // `transcript` is intentionally NOT a browse category. It is still a
         // recognized, indexed type (searchable, openable, and linked from its
         // talk's inspector), but a transcript is the raw text *of* a talk — you
@@ -87,6 +90,7 @@ public extension EntryType {
         case .note:    return "笔记"
         case .image:   return "图片"
         case .archive: return "档案"
+        case .webpage: return "网页"
         case .talk:    return "讲座"
         case .transcript: return "转写"
         case .other(let raw): return raw
@@ -118,6 +122,7 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public let pdfSlug: String?
     public let mtime: Double?
     public let added: Double?
+    /// Source description; `site` for webpage entries.
     public let source: String?
     public let book: String?
     public let kind: String?
@@ -127,8 +132,9 @@ public struct Entry: Codable, Sendable, Identifiable, Equatable {
     public let isbn: String?
     public let category: String?
     public let annotates: String?
+    /// Record date; `captured_at` for webpage entries.
     public let created: String?
-    /// Original material's publication date, distinct from archive record creation.
+    /// Original publication date (`date` on archives, `published` on webpages).
     public let date: String?
     public let url: String?
     /// Talk recording filename from the `media:` frontmatter key (e.g.

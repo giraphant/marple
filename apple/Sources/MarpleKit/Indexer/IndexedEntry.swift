@@ -362,8 +362,9 @@ public func buildIndexedEntry(
     let previewValue: String = firstParagraph(body)
 
     // 11. Search text — composite path/title/metadata/body text for trigram FTS.
-    let archiveMetadata: [String] = entryType == "archive"
-        ? ["source", "url", "kind", "date"].compactMap { truthyText(frontmatter, $0) } : []
+    let sourceMetadata: [String] = ["archive", "webpage"].contains(entryType)
+        ? ["source", "url", "kind", "date", "site", "published", "captured_at"]
+            .compactMap { truthyText(frontmatter, $0) } : []
     let searchTextValue: String = searchText([
         rel,
         titleValue ?? "",
@@ -375,13 +376,13 @@ public func buildIndexedEntry(
         isbnValue ?? "",
         translationTitleCnValue ?? "",
         bodyTextValue,
-        searchText(archiveMetadata),
+        searchText(sourceMetadata),
     ])
 
     // 12. Remaining optional fields.
     let kindValue: String? = truthyText(frontmatter, "kind")
     let journalValue: String? = truthyText(frontmatter, "journal")
-    let sourceValue: String? = truthyText(frontmatter, "source")
+    let sourceValue: String? = truthyText(frontmatter, entryType == "webpage" ? "site" : "source")
     let doiValue: String? = truthyText(frontmatter, "doi")
     let chaptersAnalyzedValue: Int64? = intValue(field(frontmatter, "chapters_analyzed"))
     // `transcript`'s required back-ref to its talk lives under `talk` (a slug);
@@ -396,7 +397,7 @@ public func buildIndexedEntry(
     // `talk` dates its event and `image` its creation under `date` (full ISO
     // day), reusing the `created` column so the inspector / sort surfaces
     // treat it like any other date.
-    let createdValue: String? = textValue(field(frontmatter, "created"))
+    let createdValue: String? = textValue(field(frontmatter, entryType == "webpage" ? "captured_at" : "created"))
         ?? (entryType == "talk" || entryType == "image"
             ? textValue(field(frontmatter, "date")) : nil)
 
@@ -425,8 +426,9 @@ public func buildIndexedEntry(
         chaptersAnalyzed: chaptersAnalyzedValue,
         annotates: annotatesValue,
         created: createdValue,
-        date: entryType == "archive" ? textValue(field(frontmatter, "date")) : nil,
-        url: entryType == "archive" ? truthyText(frontmatter, "url") : nil,
+        date: entryType == "webpage" ? textValue(field(frontmatter, "published"))
+            : (entryType == "archive" ? textValue(field(frontmatter, "date")) : nil),
+        url: ["archive", "webpage"].contains(entryType) ? truthyText(frontmatter, "url") : nil,
         media: mediaValue,
         pdfSlug: pdfSlugValue,
         hasPDF: hasPDFValue,
