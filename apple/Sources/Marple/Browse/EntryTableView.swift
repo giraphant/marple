@@ -57,7 +57,7 @@ struct EntryTableView: NSViewRepresentable {
             table.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
             table.setAccessibilityLabel(String(localized: "资料表格"))
             self.table = table
-            let scroll = NSScrollView()
+            let scroll = BrowseScrollView()
             scroll.documentView = table
             scroll.hasVerticalScroller = true
             scroll.hasHorizontalScroller = true

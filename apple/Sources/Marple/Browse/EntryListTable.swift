@@ -51,7 +51,7 @@ struct EntryListTable: NSViewRepresentable {
 
         context.coordinator.tableView = table
 
-        let scroll = NSScrollView()
+        let scroll = BrowseScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false

@@ -46,7 +46,7 @@ struct CollectionGridVariant: NSViewRepresentable {
         collectionView.register(EntryCardItem.self, forItemWithIdentifier: .init("EntryCard"))
         coordinator.collectionView = collectionView
 
-        let scrollView = NSScrollView()
+        let scrollView = BrowseScrollView()
         scrollView.documentView = collectionView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
