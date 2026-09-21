@@ -29,7 +29,7 @@ struct EntryListTable: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let table = NSTableView()
+        let table = BrowseTableView()
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("entry"))
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
@@ -37,17 +37,16 @@ struct EntryListTable: NSViewRepresentable {
         table.style = .inset
         table.backgroundColor = .clear
         table.intercellSpacing = NSSize(width: 0, height: 0)
-        table.allowsMultipleSelection = false
+        table.allowsMultipleSelection = true
         table.allowsEmptySelection = true
         table.usesAutomaticRowHeights = false
         table.rowSizeStyle = .custom
         table.delegate = context.coordinator
         table.dataSource = context.coordinator
 
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        menu.delegate = context.coordinator
-        table.menu = menu
+        table.menuForRows = { [weak coordinator = context.coordinator] rows in
+            coordinator?.contextMenu(for: rows)
+        }
 
         context.coordinator.tableView = table
 
@@ -85,7 +84,7 @@ struct EntryListTable: NSViewRepresentable {
         case spacer
     }
 
-    @MainActor final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
+    @MainActor final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         var model: AppModel
         weak var tableView: NSTableView?
 
@@ -95,6 +94,21 @@ struct EntryListTable: NSViewRepresentable {
         private var lastActiveTabID: NavTab.ID?
         private var lastPinnedListContext = false
         private var isUpdatingSelection = false
+        private var lastOpenPath: String?
+        private var lastMatchJumpID: UUID?
+
+        private enum SelectionKey: Hashable {
+            case entry(String)
+            case match(String, Int)
+        }
+
+        private func selectionKey(_ item: RowItem) -> SelectionKey? {
+            switch item {
+            case .entryHeader(let entry): return .entry(entry.path)
+            case .match(let path, let line): return .match(path, line.matchOrdinal)
+            case .spacer, .expandToggle: return nil
+            }
+        }
         private var pendingReload = false
 
         private static let headerCellID = NSUserInterfaceItemIdentifier("entry-header-cell")
@@ -171,12 +185,20 @@ struct EntryListTable: NSViewRepresentable {
 
             if itemsChanged || searchModeFlipped || snapshotChanged {
                 let wasSearchMode = lastSearchMode
+                let selected = Set(table.selectedRowIndexes.compactMap { row in
+                    items.indices.contains(row) ? selectionKey(items[row]) : nil
+                })
+                isUpdatingSelection = true
                 items = newItems
                 lastSearchMode = newSearchMode
                 lastSnapshot = model.schemaSnapshot
                 NSAnimationContext.beginGrouping()
                 NSAnimationContext.current.duration = 0
                 table.reloadData()
+                table.selectRowIndexes(IndexSet(items.indices.filter { row in
+                    selectionKey(items[row]).map { selected.contains($0) } ?? false
+                }), byExtendingSelection: false)
+                isUpdatingSelection = false
                 NSAnimationContext.endGrouping()
                 let restoredSelection = syncSelection(in: table, reveal: contextChanged || searchModeFlipped)
                 if newSearchMode && !wasSearchMode && !restoredSelection && table.numberOfRows > 0 {
@@ -260,6 +282,16 @@ struct EntryListTable: NSViewRepresentable {
 
         @discardableResult
         private func syncSelection(in table: NSTableView, reveal: Bool = false) -> Bool {
+            let openedAnotherEntry = model.openPath != lastOpenPath
+            let jumpedToMatch = model.matchJump?.id != lastMatchJumpID
+            lastOpenPath = model.openPath
+            lastMatchJumpID = model.matchJump?.id
+            // A normal refresh must not collapse a native range/Command selection,
+            // nor reselect a row the user explicitly deselected.
+            guard openedAnotherEntry || jumpedToMatch || reveal else {
+                refreshGroupHighlight(in: table)
+                return !table.selectedRowIndexes.isEmpty
+            }
             let target: Int = {
                 guard let path = model.openPath else { return -1 }
                 // Prefer the match row whose ordinal == matchJump.ordinal, if
@@ -283,7 +315,7 @@ struct EntryListTable: NSViewRepresentable {
             isUpdatingSelection = true
             defer { isUpdatingSelection = false }
             if target >= 0 {
-                if table.selectedRow != target {
+                if !table.selectedRowIndexes.contains(target) || jumpedToMatch || reveal {
                     table.selectRowIndexes(IndexSet(integer: target), byExtendingSelection: false)
                     table.scrollRowToVisible(target)
                 } else if reveal {
@@ -405,7 +437,7 @@ struct EntryListTable: NSViewRepresentable {
 
             // Programmatic selection (syncSelection) shouldn't re-trigger
             // model.open / openMatchedLine — that would be a feedback loop.
-            guard !isUpdatingSelection else { return }
+            guard !isUpdatingSelection, table.selectedRowIndexes.count == 1 else { return }
             let row = table.selectedRow
             guard row >= 0 && row < items.count else { return }
             switch items[row] {
@@ -434,42 +466,13 @@ struct EntryListTable: NSViewRepresentable {
             return false
         }
 
-        // MARK: NSMenuDelegate (entry-header rows only)
-
-        func menuNeedsUpdate(_ menu: NSMenu) {
-            menu.removeAllItems()
-            guard let table = tableView else { return }
-            let row = table.clickedRow
-            guard row >= 0 && row < items.count else { return }
-            guard case .entryHeader(let entry) = items[row] else { return }
-            menu.addItem(menuItem(String(localized: "在新页面页打开"), action: #selector(openInNewTabFromMenu(_:)), path: entry.path))
-            menu.addItem(menuItem(String(localized: "新建批注"), action: #selector(newAnnotationFromMenu(_:)), path: entry.path))
-            menu.addItem(.separator())
-            menu.addItem(menuItem(String(localized: "移到回收站"), action: #selector(moveToTrashFromMenu(_:)), path: entry.path))
+        func contextMenu(for rows: IndexSet) -> NSMenu? {
+            let paths = Set(rows.compactMap { row in
+                items.indices.contains(row) ? ownerEntryPath(of: items[row]) : nil
+            })
+            return BrowseEntryMenu.make(entries: model.visibleEntries.filter { paths.contains($0.path) }, model: model)
         }
 
-        private func menuItem(_ title: String, action: Selector, path: String) -> NSMenuItem {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            item.target = self
-            item.representedObject = path
-            return item
-        }
-
-        @objc private func openInNewTabFromMenu(_ sender: NSMenuItem) {
-            guard let path = sender.representedObject as? String else { return }
-            Task { await model.openInNewTab(path) }
-        }
-
-        @objc private func newAnnotationFromMenu(_ sender: NSMenuItem) {
-            guard let path = sender.representedObject as? String,
-                  let entry = model.visibleEntries.first(where: { $0.path == path }) else { return }
-            Task { await model.newAnnotation(for: entry) }
-        }
-
-        @objc private func moveToTrashFromMenu(_ sender: NSMenuItem) {
-            guard let path = sender.representedObject as? String else { return }
-            Task { await model.moveToTrash(path) }
-        }
     }
 }
 

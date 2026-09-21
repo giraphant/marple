@@ -21,7 +21,7 @@ struct EntryTableView: NSViewRepresentable {
         init(model: AppModel) { self.model = model }
 
         func makeScrollView() -> NSScrollView {
-            let table = NSTableView()
+            let table = BrowseTableView()
             table.style = .fullWidth
             table.rowHeight = 28
             table.intercellSpacing = .zero
@@ -50,6 +50,12 @@ struct EntryTableView: NSViewRepresentable {
                 }
             }
             table.headerView?.menu = menu
+            table.menuForRows = { [weak self] rows in
+                guard let self else { return nil }
+                return BrowseEntryMenu.make(entries: rows.compactMap {
+                    self.entries.indices.contains($0) ? self.entries[$0] : nil
+                }, model: self.model)
+            }
             table.autosaveName = "MarpleLibraryTable"
             table.autosaveTableColumns = true
             table.delegate = self
