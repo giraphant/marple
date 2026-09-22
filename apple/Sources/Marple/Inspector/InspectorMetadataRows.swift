@@ -46,7 +46,6 @@ func inspectorInfoRows(for entry: Entry, in entries: [Entry] = [],
         if archiveManifest != nil {
             rows.removeAll { row in
                 switch row {
-                case .readOnlyScalar(let label, _, _): return label == "来源"
                 case .linkedScalar(let label, _, _, _): return label == "原始链接"
                 default: return false
                 }

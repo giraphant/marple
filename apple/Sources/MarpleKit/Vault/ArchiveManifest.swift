@@ -16,6 +16,8 @@ public struct ArchiveManifest: Decodable, Equatable, Sendable {
 
     public struct File: Decodable, Equatable, Sendable {
         public let path: String
+        public let title: String
+        public let description: String
         public let mediaType: String
         public let capturedAt: String
         public let size: Int64
@@ -24,7 +26,7 @@ public struct ArchiveManifest: Decodable, Equatable, Sendable {
         public let source: Source?
 
         enum CodingKeys: String, CodingKey {
-            case path, size, sha256, url, source
+            case path, title, description, size, sha256, url, source
             case mediaType = "media_type", capturedAt = "captured_at"
         }
     }
@@ -47,11 +49,13 @@ public struct ArchiveManifest: Decodable, Equatable, Sendable {
         guard url.path.hasPrefix(root.path + "/") else { throw CocoaError(.fileReadNoPermission) }
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         let manifest = try YAMLDecoder().decode(Self.self, from: String(contentsOf: url, encoding: .utf8))
-        guard manifest.schemaVersion == "quasi.archive.manifest/0.1",
+        guard manifest.schemaVersion == "quasi.archive.manifest/0.2",
               manifest.source.webURL != nil,
               Set(manifest.files.map(\.path)).count == manifest.files.count,
               manifest.files.allSatisfy({
-                  $0.path.range(of: #"^originals/[a-z0-9]+(?:-[a-z0-9]+)*\.[a-z0-9]+$"#, options: .regularExpression) != nil
+                  !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                  && !$0.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                  && $0.path.range(of: #"^originals/[a-z0-9]+(?:-[a-z0-9]+)*\.[a-z0-9]+$"#, options: .regularExpression) != nil
               }) else { throw CocoaError(.fileReadCorruptFile) }
         return manifest
     }

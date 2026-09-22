@@ -267,14 +267,19 @@ private struct TopicNavGroup: View {
 private struct BookNavRow: View {
     let label: String
     let active: Bool
+    var subtitle: String? = nil
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            Text(label)
-                .font(Typo.callout)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text(label).font(Typo.callout).lineLimit(subtitle == nil ? 1 : 2)
+                if let subtitle {
+                    Text(subtitle).font(Typo.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+            }
+                .padding(.vertical, subtitle == nil ? 0 : Space.s2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Space.s4)
                 .frame(minHeight: InspectorStyle.rowHeight)
@@ -328,12 +333,13 @@ private struct PageOutlineGroup: View {
                         ForEach(manifest.files, id: \.path) { file in
                             let url = manifest.localURL(for: file, entryPath: model.openPath ?? "",
                                                         workspaceRoot: model.workspaceRoot)
-                            BookNavRow(label: (file.path as NSString).lastPathComponent,
-                                       active: url != nil && url == model.attachmentPreviewURL) {
+                            BookNavRow(label: file.title,
+                                       active: url != nil && url == model.attachmentPreviewURL,
+                                       subtitle: file.description) {
                                 model.previewAttachment(file.path)
                             }
                             .disabled(url == nil)
-                            .help(url == nil ? String(localized: "原件在本机不可用") : file.path)
+                            .help(url == nil ? String(localized: "原件在本机不可用") : "\(file.description)\n\(file.path)")
                         }
                     }
                 }
@@ -418,7 +424,7 @@ private struct ArchiveInfoSection: View {
                 }
             }
             if let file = model.selectedArchiveFile {
-                ReadOnlyScalarRow(label: String(localized: "当前原件"), value: (file.path as NSString).lastPathComponent)
+                ReadOnlyScalarRow(label: String(localized: "当前原件"), value: file.title, copyValue: file.path)
                 if manifest.source(for: file) != manifest.source {
                     sourceRow(String(localized: "原件来源"), source: manifest.source(for: file))
                 }

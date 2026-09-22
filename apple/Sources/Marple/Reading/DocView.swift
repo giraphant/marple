@@ -137,10 +137,13 @@ struct DocView: View {
             } else {
                 Menu {
                     ForEach(model.openAttachments, id: \.self) { url in
-                        Button(url.lastPathComponent) { model.previewAttachment(url.absoluteString) }
+                        Button(model.openArchiveManifest?.file(for: url, entryPath: model.openPath ?? "",
+                            workspaceRoot: model.workspaceRoot)?.title ?? url.lastPathComponent) {
+                            model.previewAttachment(url.absoluteString)
+                        }
                     }
                 } label: {
-                    Text(model.attachmentPreviewURL?.lastPathComponent ?? String(localized: "预览附件"))
+                    Text(model.selectedArchiveFile?.title ?? model.attachmentPreviewURL?.lastPathComponent ?? String(localized: "预览附件"))
                         .lineLimit(1).truncationMode(.middle)
                 }
                 .menuStyle(.borderlessButton)

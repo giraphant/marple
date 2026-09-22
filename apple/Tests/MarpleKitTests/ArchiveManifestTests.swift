@@ -24,18 +24,22 @@ import Testing
     """
 
     private let manifest = """
-    schema_version: quasi.archive.manifest/0.1
+    schema_version: quasi.archive.manifest/0.2
     source:
       url: https://example.org/repair
       title: 屏幕维修讨论
     files:
       - path: originals/001-screen.png
+        title: 屏幕色偏细节
+        description: 原帖展示屏幕色偏的照片。
         media_type: image/png
         captured_at: '2026-09-21T12:00:00+00:00'
         size: 120
         sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         url: https://cdn.example.org/screen.png
       - path: originals/002-demo.bin
+        title: 屏幕拆卸演示
+        description: 来源页面附带的演示视频，未逐帧核读。
         media_type: video/mp4
         captured_at: '2026-09-21T12:02:00+00:00'
         size: 4096
@@ -45,6 +49,8 @@ import Testing
           url: https://other.example.org/demo
           title: 补充演示
       - path: originals/003-missing.pdf
+        title: 维修手册
+        description: 补充维修步骤的 PDF 手册。
         media_type: application/pdf
         captured_at: '2026-09-21T12:03:00+00:00'
         size: 2048
@@ -57,6 +63,8 @@ import Testing
         let root = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         let inventory = try #require(try ArchiveManifest.load(entryPath: path, workspaceRoot: root.path))
+        #expect(inventory.files[0].title == "屏幕色偏细节")
+        #expect(inventory.files[0].description == "原帖展示屏幕色偏的照片。")
         #expect(inventory.files.map(\.path) == ["originals/001-screen.png", "originals/002-demo.bin", "originals/003-missing.pdf"])
         #expect(inventory.source(for: inventory.files[0]).url == "https://example.org/repair")
         #expect(inventory.source(for: inventory.files[1]).url == "https://other.example.org/demo")
@@ -68,17 +76,22 @@ import Testing
                                         mediaType: "video/mp4") == nil)
     }
 
-    @Test func legacyEmptyInvalidAndUnsafeManifests() throws {
+    @Test func emptyInvalidAndUnsafeManifests() throws {
         let root = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent(path).deletingLastPathComponent().appendingPathComponent("manifest.yaml")
         try FileManager.default.removeItem(at: file)
         #expect(try ArchiveManifest.load(entryPath: path, workspaceRoot: root.path) == nil)
-        let empty = "schema_version: quasi.archive.manifest/0.1\nsource: {url: 'https://example.org/'}\nfiles: []\ncoverage: 仅保存出处\n"
+        let empty = "schema_version: quasi.archive.manifest/0.2\nsource: {url: 'https://example.org/'}\nfiles: []\ncoverage: 仅保存出处\n"
         try empty.write(to: file, atomically: true, encoding: .utf8)
         #expect(try ArchiveManifest.load(entryPath: path, workspaceRoot: root.path)?.files.isEmpty == true)
-        for invalid in [manifest.replacingOccurrences(of: "originals/001-screen.png", with: "../outside.png"),
-                        manifest.replacingOccurrences(of: "quasi.archive.manifest/0.1", with: "unknown/9"),
+        for invalid in [manifest.replacingOccurrences(of: "quasi.archive.manifest/0.2", with: "quasi.archive.manifest/0.1"),
+                        manifest.replacingOccurrences(of: "    title: 屏幕色偏细节\n", with: ""),
+                        manifest.replacingOccurrences(of: "    description: 原帖展示屏幕色偏的照片。\n", with: ""),
+                        manifest.replacingOccurrences(of: "title: 屏幕色偏细节", with: "title: '   '"),
+                        manifest.replacingOccurrences(of: "description: 原帖展示屏幕色偏的照片。", with: "description: '   '"),
+                        manifest.replacingOccurrences(of: "originals/001-screen.png", with: "../outside.png"),
+                        manifest.replacingOccurrences(of: "quasi.archive.manifest/0.2", with: "unknown/9"),
                         manifest.replacingOccurrences(of: "originals/002-demo.bin", with: "originals/001-screen.png")] {
             try invalid.write(to: file, atomically: true, encoding: .utf8)
             #expect(throws: (any Error).self) { try ArchiveManifest.load(entryPath: path, workspaceRoot: root.path) }
@@ -106,7 +119,7 @@ import Testing
         #expect(model.openArchiveManifest?.files.count == 3)
         let entry = try #require(model.openEntry)
         let rows = inspectorInfoRows(for: entry, archiveManifest: model.openArchiveManifest)
-        #expect(!rows.contains(.readOnlyScalar(label: "来源", value: "旧出处", copyValue: nil)))
+        #expect(rows.contains(.readOnlyScalar(label: "来源", value: "旧出处", copyValue: nil)))
         #expect(inspectorInfoRows(for: entry).contains(.readOnlyScalar(label: "来源", value: "旧出处", copyValue: nil)))
         let rendered = MarkdownRenderer.render(model.openBody, style: RenderStyle(size: 16, fontFamily: nil, lineHeight: 1.5),
                                                imageURLs: model.archiveImageURLs)
@@ -124,6 +137,8 @@ import Testing
         #expect(imageCount == 1)
         #expect(model.previewAttachment("originals/002-demo.bin"))
         #expect(model.selectedArchiveFile?.source?.title == "补充演示")
+        #expect(model.selectedArchiveFile?.title == "屏幕拆卸演示")
+        #expect(model.selectedArchiveFile?.description == "来源页面附带的演示视频，未逐帧核读。")
         model.attachmentPreviewURL = nil
 
         if let output = ProcessInfo.processInfo.environment["MARPLE_ARCHIVE_SNAPSHOT"] {
@@ -149,7 +164,7 @@ import Testing
 
         #expect(model.previewAttachment("originals/001-screen.png"))
         let manifestURL = root.appendingPathComponent(path).deletingLastPathComponent().appendingPathComponent("manifest.yaml")
-        try "schema_version: quasi.archive.manifest/0.1\nsource: {url: 'https://new.example.org/'}\nfiles: []\ncoverage: 仅保存出处\n"
+        try "schema_version: quasi.archive.manifest/0.2\nsource: {url: 'https://new.example.org/'}\nfiles: []\ncoverage: 仅保存出处\n"
             .write(to: manifestURL, atomically: true, encoding: .utf8)
         await model.reloadOpen()
         #expect(model.openArchiveManifest?.source.url == "https://new.example.org/")
