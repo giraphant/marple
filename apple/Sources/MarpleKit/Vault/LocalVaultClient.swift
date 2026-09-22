@@ -10,10 +10,34 @@ import AppKit
 public struct LocalVaultClient: VaultClient {
     private let workspaceRoot: String
     private let indexDB: IndexDatabase
+    typealias OpenRequest = @Sendable (URL, @escaping @Sendable (Error?) -> Void) -> Void
+    private let requestOpen: OpenRequest
 
     public init(workspaceRoot: String, index: IndexDatabase) {
         self.workspaceRoot = workspaceRoot
         self.indexDB = index
+        self.requestOpen = { url, completion in
+            NSWorkspace.shared.open(url, configuration: .init()) { _, error in
+                completion(error)
+            }
+        }
+    }
+
+    init(workspaceRoot: String, index: IndexDatabase, requestOpen: @escaping OpenRequest) {
+        self.workspaceRoot = workspaceRoot
+        self.indexDB = index
+        self.requestOpen = requestOpen
+    }
+
+    /// LaunchServices may wait on another app's Apple Event reply. Only the
+    /// continuation waits: never synchronously block the UI with openURL:.
+    private func openWithDefaultApplication(_ url: URL) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            requestOpen(url) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
     }
 
     private func absURL(_ relPath: String) -> URL {
@@ -53,7 +77,7 @@ public struct LocalVaultClient: VaultClient {
         #if canImport(AppKit)
         let appName = app.trimmingCharacters(in: .whitespaces)
         if appName.isEmpty {
-            _ = await MainActor.run { NSWorkspace.shared.open(url) }
+            try await openWithDefaultApplication(url)
             return
         }
         // Honor a specific editor via `open -a <app> <path>`.
@@ -70,7 +94,7 @@ public struct LocalVaultClient: VaultClient {
             throw VaultError.notFound("sources/\(slug).pdf")
         }
         #if canImport(AppKit)
-        _ = await MainActor.run { NSWorkspace.shared.open(url) }
+        try await openWithDefaultApplication(url)
         #endif
     }
 
@@ -80,7 +104,7 @@ public struct LocalVaultClient: VaultClient {
             throw VaultError.notFound("processing/translations/\(slug)-zh.pdf")
         }
         #if canImport(AppKit)
-        _ = await MainActor.run { NSWorkspace.shared.open(url) }
+        try await openWithDefaultApplication(url)
         #endif
     }
 
