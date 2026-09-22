@@ -300,8 +300,15 @@ private struct PageOutlineGroup: View {
     var body: some View {
         VStack(alignment: .leading, spacing: InspectorStyle.headerSpacing) {
             SectionHeader("页面目录")
+            if model.openArchiveManifest != nil {
+                BookNavRow(label: String(localized: "档案正文"), active: model.attachmentPreviewURL == nil) {
+                    model.attachmentPreviewURL = nil
+                }
+            }
             if model.openOutline.isEmpty {
-                Text("无标题").foregroundStyle(.secondary).font(.callout)
+                if model.openArchiveManifest == nil {
+                    Text("无标题").foregroundStyle(.secondary).font(.callout)
+                }
             } else {
                 let minLevel = model.openOutline.map(\.level).min() ?? 1
                 VStack(alignment: .leading, spacing: 0) {
@@ -311,6 +318,28 @@ private struct PageOutlineGroup: View {
                         }
                     }
                 }
+            }
+            if let manifest = model.openArchiveManifest {
+                SectionHeader(String(localized: "档案原件"))
+                if manifest.files.isEmpty {
+                    Text("仅保存来源，未保存原件").font(.callout).foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(manifest.files, id: \.path) { file in
+                            let url = manifest.localURL(for: file, entryPath: model.openPath ?? "",
+                                                        workspaceRoot: model.workspaceRoot)
+                            BookNavRow(label: (file.path as NSString).lastPathComponent,
+                                       active: url != nil && url == model.attachmentPreviewURL) {
+                                model.previewAttachment(file.path)
+                            }
+                            .disabled(url == nil)
+                            .help(url == nil ? String(localized: "原件在本机不可用") : file.path)
+                        }
+                    }
+                }
+            } else if let error = model.archiveManifestError {
+                Label("无法读取原件清单", systemImage: "exclamationmark.triangle")
+                    .font(.callout).help(error)
             }
         }
     }
@@ -360,10 +389,10 @@ private struct InfoSection: View {
                     }
                     VStack(alignment: .leading, spacing: 0) {
                         InspectorInfoRowsView(model: model, entry: e)
+                        if e.type == .archive { ArchiveInfoSection(model: model) }
                     }
                     .disabled(model.savingField != nil)
                 }
-                if e.type == .archive { ArchiveInfoSection(model: model) }
                 ThemesEditor(model: model, themes: e.themes)
                 RelationsView(model: model)
             } else {
@@ -373,6 +402,52 @@ private struct InfoSection: View {
                 }
             }
         }
+    }
+}
+
+
+private struct ArchiveInfoSection: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        if let manifest = model.openArchiveManifest {
+            sourceRow(String(localized: "档案来源"), source: manifest.source)
+            if !manifest.coverage.isEmpty {
+                FieldRow(String(localized: "收录范围")) {
+                    Text(manifest.coverage).font(Typo.callout).textSelection(.enabled)
+                }
+            }
+            if let file = model.selectedArchiveFile {
+                ReadOnlyScalarRow(label: String(localized: "当前原件"), value: (file.path as NSString).lastPathComponent)
+                if manifest.source(for: file) != manifest.source {
+                    sourceRow(String(localized: "原件来源"), source: manifest.source(for: file))
+                }
+                ReadOnlyScalarRow(label: String(localized: "文件类型"), value: file.mediaType)
+                ReadOnlyScalarRow(label: String(localized: "文件大小"), value: ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
+                ReadOnlyScalarRow(label: String(localized: "保存时间"), value: captureTime(file.capturedAt))
+                if let url = URL(string: file.url), ["http", "https"].contains(url.scheme ?? "") {
+                    FieldRow(String(localized: "下载地址")) {
+                        Link(url.host ?? file.url, destination: url).font(Typo.callout).help(file.url)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func sourceRow(_ label: String, source: ArchiveManifest.Source) -> some View {
+        if let url = source.webURL {
+            FieldRow(label) {
+                Link(source.title ?? url.host ?? source.url, destination: url)
+                    .font(Typo.callout).lineLimit(2).help(source.url)
+            }
+        }
+    }
+
+    private func captureTime(_ value: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        return date?.formatted(date: .abbreviated, time: .shortened) ?? value
     }
 }
 
