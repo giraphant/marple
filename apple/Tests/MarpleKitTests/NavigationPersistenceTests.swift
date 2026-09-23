@@ -59,7 +59,7 @@ import Testing
             #expect(saved?.filterClauses == contexts[target].filters)
             #expect(saved?.filterMatch == contexts[target].filterMatch)
             #expect(saved?.sortClauses == contexts[target].sorts)
-            #expect(saved?.makeWorkspace()?.activeTab.location.openPath == entries[target].path)
+            #expect(saved?.makeWorkspace()?.activeTab?.location.openPath == entries[target].path)
             #expect(saved?.activeSpaceID == (action == 4 ? second.id : first.id))
             if target == 0 { await gate.release() }
             await selection.value
@@ -97,7 +97,7 @@ import Testing
         await model.selectSpace(firstSpace)
         #expect(store.saveCount - before == 1)
         #expect(store.load()?.activeSpaceID == firstSpace)
-        #expect(store.load()?.makeWorkspace()?.activeTab.location.openPath == entries[0].path)
+        #expect(store.load()?.makeWorkspace()?.activeTab?.location.openPath == entries[0].path)
     }
 }
 

@@ -59,7 +59,7 @@ private struct LegacyNavLocation: Encodable {
         ], activeIndex: 1))
         #expect(ws.tabs.count == 2)
         #expect(ws.tabs[1].pinned)
-        #expect(ws.activeTab.location.openPath == "v/a.md")
+        #expect(ws.activeTab!.location.openPath == "v/a.md")
         #expect(ws.tabs[1].pinnedLocation?.openPath == "v/a.md")
         #expect(ws.tabs[1].identityLocation.openPath == "v/a.md")
     }
@@ -73,7 +73,7 @@ private struct LegacyNavLocation: Encodable {
         let ws = try #require(Workspace(restoring: [
             (NavLocation(pane: .trash), false),
         ], activeIndex: 9))
-        #expect(ws.activeTab.location.pane == .trash)
+        #expect(ws.activeTab!.location.pane == .trash)
     }
 
     @Test func pruneNullsMissingOpenPaths() throws {
@@ -129,7 +129,7 @@ private struct LegacyNavLocation: Encodable {
     @Test func makeWorkspaceRebuildsActiveAndPinned() throws {
         let ws = try #require(sample().makeWorkspace())
         #expect(ws.tabs.count == 2)
-        #expect(ws.activeTab.location.openPath == "v/a.md")
+        #expect(ws.activeTab!.location.openPath == "v/a.md")
         #expect(ws.tabs[1].pinned)
     }
 
@@ -144,7 +144,7 @@ private struct LegacyNavLocation: Encodable {
             filterMatch: .all,
             browseMode: "grid")
         let ws = try #require(s.makeWorkspace())
-        #expect(ws.activeTab.customTitle == "Desk")
+        #expect(ws.activeTab!.customTitle == "Desk")
     }
 
     @Test func makeWorkspaceRestoresDefaultSpaceGroups() throws {
@@ -283,13 +283,13 @@ private struct LegacyNavLocation: Encodable {
         #expect(made.spaces.map(\.name) == ["Alpha", "Beta"])
         #expect(made.spaces.map(\.isBrowsing) == [false, true])
         let firstWorkspace = try #require(made.spaces[0].workspace)
-        #expect(firstWorkspace.activeTab.location.openPath == "t1.md")
+        #expect(firstWorkspace.activeTab!.location.openPath == "t1.md")
         #expect(firstWorkspace.tabGroups.first?.isCollapsed == true)
         let secondWorkspace = try #require(made.spaces[1].workspace)
-        #expect(secondWorkspace.activeTab.location.openPath == "t2.md")
+        #expect(secondWorkspace.activeTab!.location.openPath == "t2.md")
         #expect(secondWorkspace.tabs.map(\.location.openPath) == ["t0.md", "t1.md", "t2.md"])
         let activeWorkspace = try #require(restored.makeWorkspace())
-        #expect(activeWorkspace.activeTab.location.openPath == "t2.md")
+        #expect(activeWorkspace.activeTab!.location.openPath == "t2.md")
     }
 
     @Test func makeSpacesRestoresLegacySingleSpaceFieldsAsDefaultSpace() throws {
@@ -340,6 +340,40 @@ private struct LegacyNavLocation: Encodable {
         #expect(space.name == "Empty")
         #expect(space.isBrowsing)
         #expect(space.workspace == nil)
+    }
+
+    @Test func emptyFolderTreeRoundTripsWithoutAnActivePage() throws {
+        let id = UUID()
+        let tree = WorkspaceTreeSnapshot(roots: [
+            .group(.init(name: "Reading", isCollapsed: false, children: [])),
+        ])
+        let state = PersistedState(
+            browsePane: .type(.note),
+            isBrowsing: true,
+            tabs: [],
+            activeIndex: 0,
+            sortClauses: [],
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "list",
+            spaces: [PersistedWorkspaceSpace(
+                id: id,
+                name: "Empty Folder Space",
+                isBrowsing: true,
+                tabs: [],
+                activeIndex: 0,
+                tree: tree)],
+            activeSpaceID: id)
+
+        let data = try JSONEncoder().encode(state)
+        let restored = try JSONDecoder().decode(PersistedState.self, from: data)
+        let space = try #require(restored.makeSpaces().spaces.first)
+        let workspace = try #require(space.workspace)
+
+        #expect(workspace.tabs.isEmpty)
+        #expect(workspace.activeID == nil)
+        #expect(workspace.tabGroups.map(\.name) == ["Reading"])
+        #expect(workspace.treeSnapshot == tree)
     }
 
     @Test func userDefaultsStoreRoundTrips() throws {

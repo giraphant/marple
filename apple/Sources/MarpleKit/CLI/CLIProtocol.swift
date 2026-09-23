@@ -15,34 +15,89 @@ public struct CLIRequest: Codable, Sendable {
     public let path: String?
     public let query: String?
     public let limit: Int?
+    public let id: String?
+    public let ids: [String]?
+    public let title: String?
+    public let reset: Bool?
+    public let parent: String?
+    public let before: String?
+    public let after: String?
+    public let root: Bool?
+    public let operation: String?
+    public let requestID: String?
+    public let retryOnly: Bool?
 
     public init(method: String,
                 path: String? = nil,
                 query: String? = nil,
-                limit: Int? = nil) {
+                limit: Int? = nil,
+                id: String? = nil, ids: [String]? = nil,
+                title: String? = nil, reset: Bool? = nil,
+                parent: String? = nil, before: String? = nil,
+                after: String? = nil, root: Bool? = nil,
+                operation: String? = nil, requestID: String? = nil, retryOnly: Bool? = nil) {
         self.method = method
         self.path = path
         self.query = query
         self.limit = limit
+        self.id = id
+        self.ids = ids
+        self.title = title
+        self.reset = reset
+        self.parent = parent
+        self.before = before
+        self.after = after
+        self.root = root
+        self.operation = operation
+        self.requestID = requestID
+        self.retryOnly = retryOnly
     }
+
+    /// The separate method makes older servers reject before applying a write.
+    public func asMutation(requestID: String, retryOnly: Bool) -> CLIRequest {
+        CLIRequest(method: CLIMethod.mutate, path: path, query: query, limit: limit,
+                   id: id, ids: ids, title: title, reset: reset, parent: parent,
+                   before: before, after: after, root: root,
+                   operation: method, requestID: requestID, retryOnly: retryOnly)
+    }
+
+    public var organizationMethod: String { method == CLIMethod.mutate ? (operation ?? "") : method }
 }
 
 public enum CLIMethod {
+    public static let mutate = "mutate"
     public static let search = "search"
     public static let read = "read"
     public static let open = "open"
     public static let ping = "ping"
+    public static let tabsList = "tabs.list"
+    public static let tabsRename = "tabs.rename"
+    public static let tabsMove = "tabs.move"
+    public static let foldersCreate = "folders.create"
+    public static let foldersRename = "folders.rename"
+    public static let foldersMove = "folders.move"
+    public static let foldersDissolve = "folders.dissolve"
+
+    public static func isOrganizationMutation(_ method: String) -> Bool {
+        [tabsRename, tabsMove, foldersCreate, foldersRename, foldersMove, foldersDissolve].contains(method)
+    }
 }
 
 public struct CLIResponse: Codable, Sendable {
     public let ok: Bool
     public let data: CLIResponseData?
     public let error: CLIError?
+    public let requestID: String?
 
-    public init(ok: Bool, data: CLIResponseData? = nil, error: CLIError? = nil) {
+    public init(ok: Bool, data: CLIResponseData? = nil, error: CLIError? = nil, requestID: String? = nil) {
         self.ok = ok
         self.data = data
         self.error = error
+        self.requestID = requestID
+    }
+
+    public func identified(by requestID: String?) -> CLIResponse {
+        CLIResponse(ok: ok, data: data, error: error, requestID: requestID)
     }
 
     public static func success(_ data: CLIResponseData? = nil) -> CLIResponse {
@@ -77,15 +132,48 @@ public struct CLIResponseData: Codable, Sendable {
     public let entry: EntryDetail?
     public let opened: Bool?
     public let pong: String?
+    public let tree: [CLITabNode]?
+    public let spaceID: UUID?
+    public let activeTabID: UUID?
+    public let createdID: UUID?
 
     public init(entries: [EntryDigest]? = nil,
                 entry: EntryDetail? = nil,
                 opened: Bool? = nil,
-                pong: String? = nil) {
+                pong: String? = nil,
+                tree: [CLITabNode]? = nil, spaceID: UUID? = nil,
+                activeTabID: UUID? = nil, createdID: UUID? = nil) {
         self.entries = entries
         self.entry = entry
         self.opened = opened
         self.pong = pong
+        self.tree = tree
+        self.spaceID = spaceID
+        self.activeTabID = activeTabID
+        self.createdID = createdID
+    }
+}
+
+/// A sidebar node. `path` identifies the pinned page; `currentPath` is its
+/// current reading location, which may differ after following a link.
+public struct CLITabNode: Codable, Sendable {
+    public let id: UUID
+    public let kind: String
+    public let title: String
+    public let path: String?
+    public let currentPath: String?
+    public let pinned: Bool?
+    public let children: [CLITabNode]?
+
+    public init(id: UUID, kind: String, title: String, path: String? = nil,
+                currentPath: String? = nil, pinned: Bool? = nil, children: [CLITabNode]? = nil) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.path = path
+        self.currentPath = currentPath
+        self.pinned = pinned
+        self.children = children
     }
 }
 

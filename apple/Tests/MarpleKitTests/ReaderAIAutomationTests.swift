@@ -333,6 +333,18 @@ import Testing
         #expect(script.contains("exec claude \"$marple_prompt\""))
     }
 
+    @Test func antigravityPresetStartsInteractiveSessionWithInitialPrompt() throws {
+        let command = try #require(ReaderAIAgentPreset.antigravity.command)
+        let script = ReaderAIRunner.runScript(
+            agent: command,
+            vaultRoot: "/tmp/my vault",
+            promptFilePath: "/tmp/pkg/prompt.md"
+        )
+
+        #expect(command == "agy --prompt-interactive")
+        #expect(script.contains("exec agy --prompt-interactive \"$marple_prompt\""))
+    }
+
     // Integration: really run the generated launcher through zsh with awkward
     // paths and prompt content — the check that fails if quoting breaks.
     @Test func runScriptExecutionSurvivesQuotesAndSpaces() async throws {

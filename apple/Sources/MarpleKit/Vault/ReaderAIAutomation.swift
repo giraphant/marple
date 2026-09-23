@@ -57,6 +57,22 @@ public enum ReaderAIAction: String, CaseIterable, Sendable, Equatable {
     }
 }
 
+public enum ReaderAIAgentPreset: String, CaseIterable, Sendable {
+    case claude
+    case codex
+    case antigravity
+    case custom
+
+    public var command: String? {
+        switch self {
+        case .claude: return "claude"
+        case .codex: return "codex"
+        case .antigravity: return "agy --prompt-interactive"
+        case .custom: return nil
+        }
+    }
+}
+
 /// Where AI actions get dispatched. Each preset is only a default command
 /// template — the template is the real mechanism, the picker just pre-fills it,
 /// so any terminal/agent combo is reachable by editing the template.

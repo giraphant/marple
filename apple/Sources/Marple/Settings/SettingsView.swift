@@ -364,18 +364,6 @@ private struct PromptTemplateEditor: View {
 /// nothing runs unless the user explicitly turns it on; toggling here flips
 /// the listener live (no relaunch needed).
 private struct AIBridgeSettings: View {
-    /// GUI-pickable agent CLIs; `custom` falls back to a free-text command.
-    private enum AgentChoice: String, CaseIterable {
-        case claude, codex, custom
-        var label: String {
-            switch self {
-            case .claude: return "Claude Code (claude)"
-            case .codex:  return "Codex (codex)"
-            case .custom: return String(localized: "自定义")
-            }
-        }
-    }
-
     @AppStorage(SettingsKeys.cliServerEnabled) private var enabled = false
     @AppStorage(SettingsKeys.aiDispatchTarget) private var dispatchTargetRaw = AIDispatchTarget.superset.rawValue
     @AppStorage(SettingsKeys.aiDispatchTemplate) private var dispatchTemplate = AIDispatchTarget.superset.defaultTemplate
@@ -412,19 +400,19 @@ private struct AIBridgeSettings: View {
                 // The choice is stored separately from the command text so typing
                 // a custom command that momentarily equals "claude" doesn't
                 // flip the picker and hide the field mid-edit.
-                let agentChoice = AgentChoice(rawValue: agentChoiceRaw)
-                    ?? AgentChoice(rawValue: readerAIAgent)
+                let agentChoice = ReaderAIAgentPreset(rawValue: agentChoiceRaw)
+                    ?? ReaderAIAgentPreset.allCases.first { $0.command == readerAIAgent }
                     ?? .custom
                 Picker("代理", selection: Binding(
                     get: { agentChoice },
                     set: { choice in
                         agentChoiceRaw = choice.rawValue
-                        if choice != .custom {
-                            readerAIAgent = choice.rawValue
-                        }
+                        if let command = choice.command { readerAIAgent = command }
                     }
                 )) {
-                    ForEach(AgentChoice.allCases, id: \.self) { Text($0.label).tag($0) }
+                    ForEach(ReaderAIAgentPreset.allCases, id: \.self) {
+                        Text(AppPresentation.readerAIAgentPresetLabel($0)).tag($0)
+                    }
                 }
                 if agentChoice == .custom {
                     TextField("代理命令（如 claude --model opus）", text: $readerAIAgent)

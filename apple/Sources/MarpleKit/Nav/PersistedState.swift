@@ -138,11 +138,12 @@ public struct PersistedState: Codable, Sendable, Equatable {
     public func makeSpaces() -> (spaces: [WorkspaceSpace], activeID: UUID?) {
         if let spaces, !spaces.isEmpty {
             let restored = spaces.map { space in
-                WorkspaceSpace(id: space.id, name: space.name,
-                               workspace: Self.makeWorkspace(tabs: space.tabs, activeIndex: space.activeIndex, space: space),
-                               isBrowsing: space.isBrowsing,
-                               iconName: space.iconName,
-                               isArchived: space.isArchived)
+                let workspace = Self.makeWorkspace(tabs: space.tabs, activeIndex: space.activeIndex, space: space)
+                return WorkspaceSpace(id: space.id, name: space.name,
+                                      workspace: workspace,
+                                      isBrowsing: workspace?.tabs.isEmpty != false ? true : space.isBrowsing,
+                                      iconName: space.iconName,
+                                      isArchived: space.isArchived)
             }
             // Never restore an archived Space as active — it isn't shown in the switcher.
             let active = activeSpaceID.flatMap { id in

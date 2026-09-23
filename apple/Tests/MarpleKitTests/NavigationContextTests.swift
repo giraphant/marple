@@ -125,6 +125,85 @@ import Testing
     }
 
     @MainActor
+    @Test func temporaryTabRepairsStoredTypeListThatCannotContainItsEntry() async throws {
+        let book = entry("books/context.md", type: .book, year: "2025")
+        let paper = entry("papers/autonomy.md", type: .paper, year: "1991")
+        let sort = [SortClause(field: .title, dir: .desc)]
+        let staleContext = ListContext(
+            searchText: "", filters: [FilterClause(field: .year, op: .gte, value: "2020")],
+            filterMatch: .all, sorts: sort)
+        let suite = "marple.test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        store.save(PersistedState(
+            browsePane: .type(.book),
+            isBrowsing: false,
+            tabs: [
+                PersistedTab(
+                    location: NavLocation(
+                        pane: .type(.book), openPath: book.path,
+                        listContext: ListContext(
+                            searchText: "", filters: [], filterMatch: .all, sorts: sort)),
+                    pinned: false, cachedType: .book),
+                PersistedTab(
+                    location: NavLocation(
+                        pane: .type(.chapter), openPath: paper.path,
+                        listContext: staleContext),
+                    pinned: false, cachedType: .paper),
+            ],
+            activeIndex: 0,
+            sortClauses: sort,
+            filterClauses: [],
+            filterMatch: .all,
+            browseMode: "list"))
+        let model = AppModel(
+            client: StubVaultClient(
+                entries: [book, paper],
+                texts: [book.path: "# Context", paper.path: "# Autonomy"]),
+            stateStore: store)
+        await model.loadIndex()
+
+        let paperTab = try #require(model.tabs.first {
+            $0.location.openPath == paper.path
+        })
+        await model.selectTab(paperTab.id)
+        await waitForEntries([paper.path], in: model)
+
+        let expected = ListContext(
+            searchText: "", filters: [], filterMatch: .all, sorts: sort)
+        #expect(model.pane == .type(.paper))
+        #expect(model.searchText.isEmpty)
+        #expect(model.activeFilterClauses.isEmpty)
+        #expect(model.activeSortClauses == sort)
+        #expect(model.visibleEntries.map(\.path) == [paper.path])
+        #expect(model.tabs.first { $0.id == paperTab.id }?.location.listContext == expected)
+    }
+
+    @MainActor
+    @Test func crossTypeNavigationStartsFromTheTargetObjectList() async throws {
+        let book = entry("books/context.md", type: .book)
+        let paper = entry("papers/autonomy.md", type: .paper)
+        let sort = [SortClause(field: .title, dir: .desc)]
+        let model = AppModel(client: StubVaultClient(
+            entries: [book, paper],
+            texts: [book.path: "# Context", paper.path: "# Autonomy"]))
+        await model.loadIndex()
+
+        model.select(pane: .type(.book))
+        model.setSort(sort)
+        await model.open(book.path)
+        await model.open(paper.path)
+        await waitForEntries([paper.path], in: model)
+
+        #expect(model.openPath == paper.path)
+        #expect(model.pane == .type(.paper))
+        #expect(model.visibleEntries.map(\.path) == [paper.path])
+        #expect(model.tabs.first?.location.listContext
+            == ListContext(searchText: "", filters: [], filterMatch: .all, sorts: sort))
+    }
+
+    @MainActor
     @Test func legacySavedViewTabKeepsSavedViewIdentity() async throws {
         let paper = entry("papers/context.md", type: .paper, year: "2025")
         let view = SavedView(
@@ -320,13 +399,14 @@ import Testing
         let secondID = try #require(model.activeTabID)
         model.togglePin(secondID)
         model.groupTab(secondID, onto: firstID)
-        #expect(model.tabGroups.count == 1)
+        let folderID = try #require(model.tabGroups.first?.id)
 
         model.togglePin(secondID)
 
-        #expect(model.tabGroups.isEmpty)
+        let folder = try #require(model.tabGroups.first { $0.id == folderID })
+        #expect(folder.tabIDs == [firstID])
         #expect(model.tabGroup(containing: secondID) == nil)
-        #expect(model.pinnedTabRootNodes == [.tab(firstID)])
+        #expect(model.pinnedTabRootNodes == [.group(folder)])
         #expect(model.temporaryTabs.map(\.id) == [secondID])
         #expect(model.tabs.filter(\.pinned).map(\.id) == [firstID])
         #expect(model.tabs.filter { !$0.pinned }.map(\.id) == [secondID])

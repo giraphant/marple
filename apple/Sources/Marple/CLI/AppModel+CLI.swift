@@ -14,6 +14,21 @@ extension AppModel {
         return hits.map(\.entry)
     }
 
+    func cliRelativePath(_ path: String) -> String? {
+        guard path.hasPrefix("/") else { return path }
+        guard !workspaceRoot.isEmpty else { return nil }
+
+        let rootComponents = URL(fileURLWithPath: workspaceRoot, isDirectory: true)
+            .standardizedFileURL.pathComponents
+        let targetComponents = URL(fileURLWithPath: path)
+            .standardizedFileURL.pathComponents
+        guard targetComponents.count > rootComponents.count,
+              targetComponents.prefix(rootComponents.count).elementsEqual(rootComponents) else {
+            return nil
+        }
+        return targetComponents.dropFirst(rootComponents.count).joined(separator: "/")
+    }
+
     func cliEntry(path: String) -> Entry? {
         entries.first { $0.path == path }
     }
@@ -24,9 +39,10 @@ extension AppModel {
         return (split.frontmatter ?? "", split.body)
     }
 
-    func cliOpenDocument(path: String) async throws {
-        guard await cliEnsureIndexed(path: path) else {
-            throw CLIBackendError.notFound(path)
+    func cliOpenDocument(path inputPath: String) async throws {
+        guard let path = cliRelativePath(inputPath),
+              await cliEnsureIndexed(path: path) else {
+            throw CLIBackendError.notFound(inputPath)
         }
         if let existing = tabs.first(where: { $0.location.openPath == path }) {
             await selectTab(existing.id)

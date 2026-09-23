@@ -160,6 +160,57 @@ struct VaultIndexerTests {
         #expect(try reader.loadEntries().first?.title == "After")
     }
 
+    @Test("buildFull safely publishes over a live WAL database")
+    func buildFullSafelyPublishesOverLiveWALDatabase() throws {
+        let ws = try makeTempWorkspace()
+        let firstPath = ws + "/vault/papers/a.md"
+        let removedPath = ws + "/vault/notes/b.md"
+        try write(at: firstPath, type: "paper", title: "Before")
+        try write(at: removedPath, type: "note", title: "Removed")
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+
+        let indexPath = ws + "/.marple/index.sqlite"
+        var config = Configuration()
+        config.busyMode = .timeout(5)
+        let livePool = try DatabasePool(path: indexPath, configuration: config)
+        try livePool.write { db in
+            try db.execute(sql: "CREATE TABLE stale_padding (id INTEGER PRIMARY KEY, payload BLOB)")
+            try db.execute(sql: """
+                WITH RECURSIVE seq(i) AS (
+                  SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < 512
+                )
+                INSERT INTO stale_padding(id, payload)
+                SELECT i, zeroblob(4096) FROM seq
+                """)
+        }
+        let walSize = try FileManager.default.attributesOfItem(
+            atPath: indexPath + "-wal")[.size] as? NSNumber
+        #expect((walSize?.intValue ?? 0) > 32)
+        let oldPageCount = try livePool.read {
+            try Int.fetchOne($0, sql: "PRAGMA page_count") ?? 0
+        }
+        let reader = openDB(ws)
+        #expect(try reader.loadEntries().count == 2)
+
+        try write(at: firstPath, type: "paper", title: "After")
+        try FileManager.default.removeItem(atPath: removedPath)
+        _ = try indexer.buildFull()
+
+        let entries = try reader.loadEntries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.title == "After")
+        let newPageCount = try livePool.read {
+            try Int.fetchOne($0, sql: "PRAGMA page_count") ?? 0
+        }
+        #expect(newPageCount < oldPageCount)
+        let quickCheck = try livePool.read {
+            try String.fetchOne($0, sql: "PRAGMA quick_check")
+        }
+        #expect(quickCheck == "ok")
+    }
+
     @Test("buildFull leaves the live DB in WAL mode")
     func buildFullLeavesWALMode() throws {
         let ws = try makeTempWorkspace()

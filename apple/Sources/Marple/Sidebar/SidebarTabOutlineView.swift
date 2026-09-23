@@ -227,6 +227,7 @@ struct SidebarOutlineView: NSViewRepresentable {
         private var isRestoringExpansion = false
         private var pendingReload = false
         private var lastReloadSignature: ReloadSignature?
+        private var lastSelectionPayload: String?
         /// Collapsed sidebar sections by `SidebarOutlineSection.key`, persisted
         /// across launches. Lives here (not AppModel) — pure view chrome, the
         /// same way NSOutlineView owns its own scroll position.
@@ -234,6 +235,10 @@ struct SidebarOutlineView: NSViewRepresentable {
             Set(UserDefaults.standard.stringArray(forKey: "marple.collapsedSidebarSections") ?? [])
         private var lastReloadSpaceID: WorkspaceSpace.ID?
         private var stickyRowDropTarget: SidebarOutlineNode?
+        private struct ViewportAnchor {
+            let key: String
+            let offset: CGFloat
+        }
         // Row split for tab-on-tab grouping: top/bottom edge bands reorder, the
         // narrow center band triggers grouping. Exit ratio is the hysteresis that
         // keeps a sticky target latched while the cursor jitters.
@@ -279,6 +284,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 _ = model.tabRootNodes
                 _ = model.spaces
                 _ = model.activeSpaceID
+                _ = model.pendingFolderRenameID
             } onChange: { [weak self] in
                 Task { @MainActor in
                     guard let self else { return }
@@ -300,6 +306,9 @@ struct SidebarOutlineView: NSViewRepresentable {
             // selection that covers the active row across no-op reloads — this
             // extends the same guarantee to structural reloads (QUA-98).
             let preservedPayloads = capturedMultiSelectionPayloads(in: outline)
+            let spaceChanged = lastReloadSignature != nil
+                && lastReloadSpaceID != model.activeSpaceID
+            let viewportAnchor = spaceChanged ? nil : captureViewportAnchor(in: outline)
             let spaceTransition = sidebarSpaceTransition(in: outline)
             let previousSignature = lastReloadSignature
             lastReloadSignature = signature
@@ -322,8 +331,44 @@ struct SidebarOutlineView: NSViewRepresentable {
             // Temporary pages are root siblings of the divider, not its children.
             outline.reloadData()
             restoreExpansion(in: outline)
+            restoreViewportAnchor(viewportAnchor, in: outline)
             restoreMultiSelection(payloads: preservedPayloads, in: outline)
             selectCurrentItem(in: outline)
+            beginPendingFolderRename(in: outline)
+        }
+
+        private func captureViewportAnchor(in outline: NSOutlineView) -> ViewportAnchor? {
+            let visibleRows = outline.rows(in: outline.visibleRect)
+            guard visibleRows.location != NSNotFound, visibleRows.length > 0 else { return nil }
+            let row = visibleRows.location
+            guard let node = outline.item(atRow: row) as? SidebarOutlineNode,
+                  let key = viewportKey(for: node) else { return nil }
+            return ViewportAnchor(
+                key: key,
+                offset: outline.visibleRect.minY - outline.rect(ofRow: row).minY)
+        }
+
+        private func restoreViewportAnchor(_ anchor: ViewportAnchor?, in outline: NSOutlineView) {
+            guard let anchor,
+                  let scrollView = outline.enclosingScrollView else { return }
+            for row in 0..<outline.numberOfRows {
+                guard let node = outline.item(atRow: row) as? SidebarOutlineNode,
+                      viewportKey(for: node) == anchor.key else { continue }
+                let clipView = scrollView.contentView
+                clipView.scroll(to: NSPoint(
+                    x: clipView.bounds.minX,
+                    y: outline.rect(ofRow: row).minY + anchor.offset))
+                scrollView.reflectScrolledClipView(clipView)
+                return
+            }
+        }
+
+        private func viewportKey(for node: SidebarOutlineNode) -> String? {
+            if let payload = node.payload { return payload }
+            if case .section(let section) = node.kind {
+                return "section:\(section.key)"
+            }
+            return nil
         }
 
         /// Payload set of a multi-row selection (>=2 rows). Returns empty for a
@@ -620,6 +665,7 @@ struct SidebarOutlineView: NSViewRepresentable {
                 return findTabNode(active, in: rootItems)
             }()
             guard let target else {
+                lastSelectionPayload = nil
                 outline.deselectAll(nil)
                 return
             }
@@ -630,6 +676,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 if outline.selectedRowIndexes.count <= 1 { outline.deselectAll(nil) }
                 return
             }
+            let shouldReveal = target.payload != lastSelectionPayload
+            lastSelectionPayload = target.payload
             // Any multi-row selection (>=2 rows) wins over the single-active
             // default. This covers both the no-op-reload case (selection
             // already on screen) and the structural-reload case where
@@ -638,14 +686,14 @@ struct SidebarOutlineView: NSViewRepresentable {
             // already a member of the multi-selection — otherwise nudging
             // the viewport to a non-selected row is a surprise.
             if outline.selectedRowIndexes.count > 1 {
-                if outline.selectedRowIndexes.contains(row) {
+                if shouldReveal, outline.selectedRowIndexes.contains(row) {
                     scrollRowIntoViewIfOffscreen(row, in: outline)
                 }
                 return
             }
             isUpdatingSelection = true
             outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-            scrollRowIntoViewIfOffscreen(row, in: outline)
+            if shouldReveal { scrollRowIntoViewIfOffscreen(row, in: outline) }
             isUpdatingSelection = false
         }
 
@@ -767,16 +815,31 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         // MARK: - Rename
 
-        fileprivate func beginRename(_ node: SidebarOutlineNode, in outlineView: NSOutlineView? = nil) {
-            guard canRename(node) else { return }
+        @discardableResult
+        fileprivate func beginRename(_ node: SidebarOutlineNode, in outlineView: NSOutlineView? = nil) -> Bool {
+            guard canRename(node) else { return false }
             let target = liveNode(matching: node) ?? node
             let outline = outlineView ?? self.outlineView
             guard let outline, let row = rowForItem(target, in: outline),
-                  let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarOutlineCellView else { return }
+                  let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarOutlineCellView else { return false }
             editingNode = target
             editingField = cell.titleField
             cancelingRename = false
             cell.beginEditing(delegate: self)
+            return true
+        }
+
+        private func beginPendingFolderRename(in outline: NSOutlineView) {
+            guard let id = model.pendingFolderRenameID,
+                  let node = findGroupNode(id, in: rootItems) else { return }
+            if let pinnedSection { outline.expandItem(pinnedSection) }
+            guard let row = rowForItem(node, in: outline) else { return }
+            _ = outline.view(atColumn: 0, row: row, makeIfNecessary: true)
+            isUpdatingSelection = true
+            outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            isUpdatingSelection = false
+            guard beginRename(node, in: outline) else { return }
+            model.finishFolderRenameRequest(id)
         }
 
         private func liveNode(matching node: SidebarOutlineNode) -> SidebarOutlineNode? {
@@ -887,8 +950,8 @@ struct SidebarOutlineView: NSViewRepresentable {
             for item in items { contextMenu.addItem(item) }
         }
 
-        /// Build the multi-selection context menu. Always offers "关闭这 N 个";
-        /// the new-group action is only shown for a pure-tab selection because the
+        /// Build the multi-selection context menu. Sharing and closing apply to
+        /// mixed selections; the new-group action is only shown for pure tabs because the
         /// semantics of grouping a mixed tab/group selection are ambiguous (see
         /// QUA-94 拍板项).
         fileprivate func batchMenuItems(for nodes: [SidebarOutlineNode]) -> [NSMenuItem] {
@@ -897,13 +960,20 @@ struct SidebarOutlineView: NSViewRepresentable {
             let tabIDs = collectTabIDs(in: nodes)
             var items: [NSMenuItem] = []
 
+            let shareItem = NSMenuItem(
+                title: String(localized: "复制分享清单"),
+                action: #selector(copyShareManifestFromMenu(_:)), keyEquivalent: "")
+            shareItem.target = self
+            shareItem.representedObject = nodes
+            items.append(shareItem)
+            items.append(.separator())
+
             let closeItem = NSMenuItem(title: String(localized: "关闭这 \(n) 个"), action: #selector(closeBatchFromMenu(_:)), keyEquivalent: "")
             closeItem.target = self
             closeItem.representedObject = Array(tabIDs) as NSArray
             // Pin-only selection has no actionable closes; reflect that visually.
             let pinned = Set(model.tabs.filter(\.pinned).map(\.id))
             closeItem.isEnabled = !tabIDs.allSatisfy { pinned.contains($0) }
-            items.append(closeItem)
 
             if allTabs {
                 let groupItem = NSMenuItem(title: String(localized: "把这 \(n) 个合成一个新组"),
@@ -915,7 +985,9 @@ struct SidebarOutlineView: NSViewRepresentable {
                 }
                 groupItem.representedObject = pureTabIDs as NSArray
                 items.append(groupItem)
+                items.append(.separator())
             }
+            items.append(closeItem)
             return items
         }
 
@@ -971,7 +1043,7 @@ struct SidebarOutlineView: NSViewRepresentable {
             switch node.kind {
             case .group(let id):
                 var items = [menuItem(String(localized: "重命名"), action: #selector(renameFromMenu(_:)), node: node)]
-                if let group = model.tabGroups.first(where: { $0.id == id }) {
+                if let group = model.tabGroups.first(where: { $0.id == id }), !group.children.isEmpty {
                     items.append(menuItem(group.isCollapsed
                         ? String(localized: "展开页面组")
                         : String(localized: "折叠页面组"),
@@ -979,6 +1051,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 }
                 items.append(.separator())
                 items.append(menuItem(String(localized: "复制分享清单"), action: #selector(copyShareManifestFromMenu(_:)), node: node))
+                items.append(.separator())
+                items.append(menuItem(String(localized: "解散文件夹"), action: #selector(dissolveFolderFromMenu(_:)), node: node))
                 return items
             case .tab(let id):
                 guard let tab = model.tabs.first(where: { $0.id == id }) else { return [] }
@@ -1025,12 +1099,24 @@ struct SidebarOutlineView: NSViewRepresentable {
         }
 
         @objc private func copyShareManifestFromMenu(_ sender: NSMenuItem) {
-            guard let node = sender.representedObject as? SidebarOutlineNode else { return }
             let markdown: String?
-            switch node.kind {
-            case .tab(let id):   markdown = model.shareManifest(forTab: id)
-            case .group(let id): markdown = model.shareManifest(forGroup: id)
-            default:             markdown = nil
+            if let node = sender.representedObject as? SidebarOutlineNode {
+                switch node.kind {
+                case .tab(let id):   markdown = model.shareManifest(forTab: id)
+                case .group(let id): markdown = model.shareManifest(forGroup: id)
+                default:             markdown = nil
+                }
+            } else if let nodes = sender.representedObject as? [SidebarOutlineNode] {
+                markdown = model.shareManifest(for: nodes.compactMap { node in
+                    switch node.kind {
+                    case .tab(let id): return .tab(id)
+                    case .group(let id):
+                        return model.tabGroups.first { $0.id == id }.map(TabNode.group)
+                    case .section, .pane: return nil
+                    }
+                })
+            } else {
+                markdown = nil
             }
             guard let markdown else { return }
             NSPasteboard.general.clearContents()
@@ -1042,6 +1128,12 @@ struct SidebarOutlineView: NSViewRepresentable {
             guard let node = sender.representedObject as? SidebarOutlineNode,
                   case .group(let id) = node.kind else { return }
             model.toggleTabGroup(id)
+        }
+
+        @objc private func dissolveFolderFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode,
+                  case .group(let id) = node.kind else { return }
+            model.dissolveFolder(id)
         }
 
         @objc private func togglePinFromMenu(_ sender: NSMenuItem) {
@@ -2073,7 +2165,8 @@ private final class SidebarOutlineCellView: NSTableCellView {
         } else if let iconName = node.iconName {
             let isGroup: Bool
             if case .group = node.kind { isGroup = true } else { isGroup = false }
-            symbolImageView.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
+            symbolImageView.image = NSImage(
+                systemSymbolName: iconName, accessibilityDescription: nil)
             symbolImageView.symbolConfiguration = .init(pointSize: 16, weight: .regular)
             symbolImageView.contentTintColor = .labelColor
             iconCenterYConstraint.constant = isGroup ? 1.5 : 0

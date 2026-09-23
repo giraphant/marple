@@ -244,8 +244,14 @@ public struct WorkspaceCloseRecord: Sendable {
 /// Invariant: every live tab id appears exactly once as a leaf in `root`.
 public struct Workspace: Sendable {
     public private(set) var tabs: [NavTab]
-    public private(set) var activeID: NavTab.ID
+    public private(set) var activeID: NavTab.ID?
     public private(set) var root: [TabNode]
+
+    public init() {
+        tabs = []
+        activeID = nil
+        root = []
+    }
 
     public init(initial: NavLocation) {
         let t = NavTab(location: initial)
@@ -297,23 +303,23 @@ public struct Workspace: Sendable {
                                    cachedType: EntryType?)],
                  activeIndex: Int,
                  tree: WorkspaceTreeSnapshot) {
-        guard !tabs.isEmpty else { return nil }
         let built = tabs.map {
             NavTab(location: $0.location, pinned: $0.pinned,
                    customTitle: $0.customTitle,
                    cachedTitle: $0.cachedTitle,
                    cachedType: $0.cachedType)
         }
+        let builtRoot = Self.buildRoot(treeNodes: tree.roots, tabs: built)
+        guard !built.isEmpty || !builtRoot.isEmpty else { return nil }
         self.tabs = built
-        let idx = built.indices.contains(activeIndex) ? activeIndex : 0
-        self.activeID = built[idx].id
-        self.root = Self.buildRoot(treeNodes: tree.roots, tabs: built)
+        self.activeID = built.isEmpty ? nil : built[built.indices.contains(activeIndex) ? activeIndex : 0].id
+        self.root = builtRoot
         normalize()
     }
 
-    public var activeTab: NavTab { tabs.first { $0.id == activeID } ?? tabs[0] }
+    public var activeTab: NavTab? { tabs.first { $0.id == activeID } }
 
-    public var isEmpty: Bool { tabs.isEmpty }
+    public var isEmpty: Bool { tabs.isEmpty && root.isEmpty }
 
     /// The recursive 页面 forest, for view code that renders nesting directly.
     public var rootNodes: [TabNode] { root }
@@ -380,7 +386,7 @@ public struct Workspace: Sendable {
         return WorkspaceTreeSnapshot(roots: convert(root))
     }
 
-    private var activeIndex: Int { tabs.firstIndex { $0.id == activeID } ?? 0 }
+    private var activeIndex: Int? { tabs.firstIndex { $0.id == activeID } }
 
     /// The innermost group that directly contains `tabID`, if any.
     public func group(containing tabID: NavTab.ID) -> TabGroup? {
@@ -434,17 +440,27 @@ public struct Workspace: Sendable {
     // MARK: navigation on the active tab
 
     public mutating func navigateActive(to loc: NavLocation) {
+        guard let activeIndex else { return }
         tabs[activeIndex].history.push(loc)
     }
 
     public mutating func replaceActiveLocation(with location: NavLocation) {
+        guard let activeIndex else { return }
         tabs[activeIndex].history.replaceCurrent(with: location)
     }
 
-    public mutating func backActive() { tabs[activeIndex].history.back() }
-    public mutating func forwardActive() { tabs[activeIndex].history.forward() }
+    public mutating func backActive() {
+        guard let activeIndex else { return }
+        tabs[activeIndex].history.back()
+    }
+
+    public mutating func forwardActive() {
+        guard let activeIndex else { return }
+        tabs[activeIndex].history.forward()
+    }
 
     public mutating func withdrawActivePinnedNavigation() -> Bool {
+        guard let activeIndex else { return false }
         guard tabs[activeIndex].pinned,
               let anchor = tabs[activeIndex].pinnedLocation,
               tabs[activeIndex].location != anchor else { return false }
@@ -459,7 +475,7 @@ public struct Workspace: Sendable {
         let t = NavTab(location: loc)
         tabs.append(t)
         root.append(.tab(t.id))
-        if activate { activeID = t.id }
+        if activate || activeID == nil { activeID = t.id }
         return t.id
     }
 
@@ -473,7 +489,7 @@ public struct Workspace: Sendable {
         _ = Self.removeTab(id, from: &root)
         normalize()
         guard !tabs.isEmpty else {
-            root = []
+            activeID = nil
             return
         }
         if wasActive {
@@ -525,7 +541,7 @@ public struct Workspace: Sendable {
 
     /// Move the active selection by `delta`, wrapping around the ends.
     public mutating func selectRelative(_ delta: Int) {
-        guard !tabs.isEmpty else { return }
+        guard let activeIndex, !tabs.isEmpty else { return }
         let next = ((activeIndex + delta) % tabs.count + tabs.count) % tabs.count
         activeID = tabs[next].id
     }
@@ -543,8 +559,8 @@ public struct Workspace: Sendable {
     }
 
     /// Sidebar policy helper: fixed pages keep the tree; temporary pages are a
-    /// flat run at the end. Moving every unpinned leaf out also dissolves folders
-    /// that no longer have enough fixed children through the normal normalize path.
+    /// flat run at the end. Folders remain in place even when every temporary page
+    /// leaves them.
     public mutating func flattenTemporaryTabs() {
         let temporary = tabs.filter { !$0.pinned }.map(\.id)
         guard !temporary.isEmpty else { return }
@@ -563,6 +579,18 @@ public struct Workspace: Sendable {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         Self.mutateGroup(id, in: &root) { $0.name = trimmed }
+    }
+
+    @discardableResult
+    public mutating func createFolder() -> TabGroup.ID {
+        let folder = TabGroup(name: nextFolderName(), children: [])
+        root.append(.group(folder))
+        return folder.id
+    }
+
+    public mutating func dissolveFolder(_ id: TabGroup.ID) {
+        _ = Self.dissolveGroup(id, in: &root)
+        normalize()
     }
 
     // MARK: grouping
@@ -745,6 +773,8 @@ public struct Workspace: Sendable {
         tabs.removeAll { movedSet.contains($0.id) }
         if let first = tabs.first, !tabs.contains(where: { $0.id == activeID }) {
             activeID = first.id
+        } else if tabs.isEmpty {
+            activeID = nil
         }
         normalize()
         return WorkspaceTransferBundle(tabs: movedTabs, nodes: nodes)
@@ -1001,6 +1031,17 @@ public struct Workspace: Sendable {
         return "\(prefix)\(n)"
     }
 
+    private func nextFolderName() -> String {
+        let prefix = "文件夹 "
+        let used = Set(Self.allGroups(in: root).compactMap { group -> Int? in
+            guard group.name.hasPrefix(prefix) else { return nil }
+            return Int(group.name.dropFirst(prefix.count))
+        })
+        var n = 1
+        while used.contains(n) { n += 1 }
+        return "\(prefix)\(n)"
+    }
+
     private static func migratedGroupName(_ name: String) -> String {
         let oldPrefix = "标签组 "
         let newPrefix = "页面组 "
@@ -1019,8 +1060,12 @@ public struct Workspace: Sendable {
         root = Self.prune(root, valid: valid, seen: &seen)
         let missing = tabs.map(\.id).filter { !seen.contains($0) }
         root.append(contentsOf: missing.map { TabNode.tab($0) })
-        root = Self.dissolveSmall(root)
         syncTabsToTree()
+        if tabs.isEmpty {
+            activeID = nil
+        } else if !tabs.contains(where: { $0.id == activeID }) {
+            activeID = tabs[0].id
+        }
     }
 
     /// Drop leaves with no backing tab and any duplicate occurrences (keeping the
@@ -1036,27 +1081,6 @@ public struct Workspace: Sendable {
                 return .group(g)
             }
         }
-    }
-
-    /// Bottom-up, dissolve any group with fewer than two children by promoting its
-    /// remaining children into the parent's position. Cascades naturally.
-    private static func dissolveSmall(_ nodes: [TabNode]) -> [TabNode] {
-        var out: [TabNode] = []
-        for node in nodes {
-            switch node {
-            case .tab:
-                out.append(node)
-            case .group(var g):
-                let resolved = dissolveSmall(g.children)
-                if resolved.count < 2 {
-                    out.append(contentsOf: resolved)
-                } else {
-                    g.children = resolved
-                    out.append(.group(g))
-                }
-            }
-        }
-        return out
     }
 
     private mutating func syncTabsToTree() {
@@ -1140,6 +1164,22 @@ public struct Workspace: Sendable {
             }
         }
         return found
+    }
+
+    @discardableResult
+    private static func dissolveGroup(_ id: TabGroup.ID, in nodes: inout [TabNode]) -> Bool {
+        for index in nodes.indices {
+            guard case .group(var group) = nodes[index] else { continue }
+            if group.id == id {
+                nodes.replaceSubrange(index...index, with: group.children)
+                return true
+            }
+            if dissolveGroup(id, in: &group.children) {
+                nodes[index] = .group(group)
+                return true
+            }
+        }
+        return false
     }
 
     /// Insert `node` into `parentID`'s children at `index`, or at root when `parentID`

@@ -1,0 +1,50 @@
+--- a/Sources/Marple/CLI/CLIServer.swift
++++ b/Sources/Marple/CLI/CLIServer.swift
+@@ -124,36 +124,26 @@
+         var noSigpipe: Int32 = 1
+         _ = setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
+ 
+-        // A serial queue can make progress even when cooperative workers are
+-        // blocked. Keep reads off acceptQueue too: a silent peer must not delay
+-        // accepting the next health probe.
+-        let ioQueue = DispatchQueue(label: "marple.cli.client", qos: .userInitiated)
+-        ioQueue.async { [weak self] in
+-            guard let self else { close(clientFD); return }
+-            self.handle(clientFD: clientFD, ioQueue: ioQueue)
+-        }
+-    }
+-
+-    private func handle(clientFD: Int32, ioQueue: DispatchQueue) {
++        Task.detached(priority: .userInitiated) { [weak self] in
++            await self?.handle(clientFD: clientFD)
++        }
++    }
++
++    private func handle(clientFD: Int32) async {
++        defer { close(clientFD) }
+         guard let line = Self.readLine(fd: clientFD) else {
+-            Self.replyAndClose(fd: clientFD, response: .failure(code: CLIErrorCode.badRequest, message: "empty request"))
++            _ = Self.writeResponse(fd: clientFD, response: .failure(code: CLIErrorCode.badRequest, message: "empty request"))
+             return
+         }
+         let req: CLIRequest
+         do {
+             req = try JSONDecoder().decode(CLIRequest.self, from: line)
+         } catch {
+-            Self.replyAndClose(fd: clientFD, response: .failure(code: CLIErrorCode.badRequest, message: "malformed request: \(error)"))
++            _ = Self.writeResponse(fd: clientFD, response: .failure(code: CLIErrorCode.badRequest, message: "malformed request: \(error)"))
+             return
+         }
+-        if req.method == CLIMethod.ping {
+-            Self.replyAndClose(fd: clientFD, response: .success(CLIResponseData(pong: "marple")))
+-            return
+-        }
+-        Task {
+-            let response = await dispatchOnMain(req)
+-            ioQueue.async { Self.replyAndClose(fd: clientFD, response: response) }
+-        }
++        let response = await dispatchOnMain(req)
++        _ = Self.writeResponse(fd: clientFD, response: response)
+     }
+ 
+     @MainActor

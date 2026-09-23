@@ -110,7 +110,7 @@ final class AppModel {
     }
 
     /// User-initiated recovery for the ordinary SQLite index. `buildFull` writes
-    /// a temporary DB and atomically swaps it over the live file, so a failed
+    /// a temporary DB and publishes it in a SQLite transaction, so a failed
     /// rebuild leaves the previous readable index intact.
     func rebuildGeneralIndex() async -> GeneralIndexRebuildResult {
         guard !isRebuildingGeneralIndex else { return .alreadyRunning }
@@ -166,6 +166,7 @@ final class AppModel {
     // single-workspace call sites by pointing them at the active Space.
     private(set) var spaces: [WorkspaceSpace] = [] { didSet { persist() } }
     private(set) var activeSpaceID: WorkspaceSpace.ID? { didSet { persist() } }
+    private(set) var pendingFolderRenameID: TabGroup.ID?
 
     private var activeSpaceIndex: Int? {
         guard let activeSpaceID else { return spaces.indices.first }
@@ -198,7 +199,7 @@ final class AppModel {
     }
 
     var pane: Pane { browsePane }
-    var openPath: String? { isBrowsing ? nil : workspace?.activeTab.location.openPath }
+    var openPath: String? { isBrowsing ? nil : workspace?.activeTab?.location.openPath }
     var tabs: [NavTab] { workspace?.tabs ?? [] }
     var tabGroups: [TabGroup] { workspace?.tabGroups ?? [] }
     var tabRootNodes: [TabNode] { workspace?.rootNodes ?? [] }
@@ -211,15 +212,15 @@ final class AppModel {
                 return pinnedIDs.contains(id) ? node : nil
             case .group(var group):
                 group.children = group.children.compactMap(pinnedOnly)
-                return group.children.isEmpty ? nil : .group(group)
+                return .group(group)
             }
         }
         return tabRootNodes.compactMap(pinnedOnly)
     }
     var activeTabID: NavTab.ID? { isBrowsing ? nil : workspace?.activeID }
-    var canGoBack: Bool { !isBrowsing && (workspace?.activeTab.history.canGoBack ?? false) }
-    var canGoForward: Bool { !isBrowsing && (workspace?.activeTab.history.canGoForward ?? false) }
-    var isPinnedListContext: Bool { !isBrowsing && (workspace?.activeTab.pinned ?? false) }
+    var canGoBack: Bool { !isBrowsing && (workspace?.activeTab?.history.canGoBack ?? false) }
+    var canGoForward: Bool { !isBrowsing && (workspace?.activeTab?.history.canGoForward ?? false) }
+    var isPinnedListContext: Bool { !isBrowsing && (workspace?.activeTab?.pinned ?? false) }
 
     @ObservationIgnored weak var undoManager: UndoManager?
 
@@ -242,23 +243,42 @@ final class AppModel {
         registerSidebarUndo(before, actionName: actionName)
     }
 
-    private func registerSidebarUndo(_ state: WorkspaceSidebarState, actionName: String) {
-        guard let undoManager else { return }
+    private func registerSidebarUndo(_ state: WorkspaceSidebarState, actionName: String,
+                                     spaceID: WorkspaceSpace.ID? = nil) {
+        guard let undoManager, let spaceID = spaceID ?? activeSpaceID else { return }
         undoManager.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated {
-                model.restoreSidebarState(state, actionName: actionName)
+                model.restoreSidebarState(state, actionName: actionName, spaceID: spaceID)
             }
         }
         undoManager.setActionName(actionName)
     }
 
-    private func restoreSidebarState(_ state: WorkspaceSidebarState, actionName: String) {
-        guard var workspace else { return }
+    /// Publish a validated CLI edit as one persisted, undoable sidebar operation.
+    func cliApplyWorkspace(_ updated: Workspace, actionName: String) {
+        let before = (workspace ?? Workspace()).sidebarState
+        let previousPinnedContext = isPinnedListContext
+        var updated = updated
+        updated.flattenTemporaryTabs()
+        guard updated.sidebarState != before else { return }
+        workspace = updated.isEmpty ? nil : updated
+        if workspace?.tabs.isEmpty != false { isBrowsing = true }
+        registerSidebarUndo(before, actionName: actionName)
+        if previousPinnedContext != isPinnedListContext {
+            applyActiveListContext(from: previousPinnedContext)
+        }
+    }
+
+    private func restoreSidebarState(_ state: WorkspaceSidebarState, actionName: String,
+                                     spaceID: WorkspaceSpace.ID) {
+        guard let index = spaces.firstIndex(where: { $0.id == spaceID }) else { return }
+        var workspace = spaces[index].workspace ?? Workspace()
         let redo = workspace.sidebarState
         let previousPinnedContext = isPinnedListContext
         workspace.restoreSidebarState(state)
-        self.workspace = workspace
-        registerSidebarUndo(redo, actionName: actionName)
+        spaces[index].workspace = workspace.isEmpty ? nil : workspace
+        if spaces[index].workspace?.tabs.isEmpty != false { spaces[index].isBrowsing = true }
+        registerSidebarUndo(redo, actionName: actionName, spaceID: spaceID)
         if previousPinnedContext != isPinnedListContext {
             applyActiveListContext(from: previousPinnedContext)
         }
@@ -653,10 +673,12 @@ final class AppModel {
         let savedSpaces = spaces.map { space -> PersistedWorkspaceSpace in
             let ws = space.workspace
             let savedTabs = ws?.tabs.map(persistedTab) ?? []
-            let idx = ws.flatMap { w in w.tabs.firstIndex { $0.id == w.activeID } } ?? 0
+            let idx = ws.flatMap { w in
+                w.activeID.flatMap { activeID in w.tabs.firstIndex { $0.id == activeID } }
+            } ?? 0
             return PersistedWorkspaceSpace(id: space.id,
                                            name: space.name,
-                                           isBrowsing: ws == nil ? true : space.isBrowsing,
+                                           isBrowsing: ws?.tabs.isEmpty != false ? true : space.isBrowsing,
                                            tabs: savedTabs,
                                            activeIndex: idx,
                                            iconName: space.iconName,
@@ -1021,13 +1043,12 @@ final class AppModel {
             guard var ws = source.workspace else { return }
             bundle = ws.extractItemsForTransfer(items)
             source.workspace = ws.isEmpty ? nil : ws
-            if source.workspace == nil { source.isBrowsing = true }
+            if source.workspace?.tabs.isEmpty != false { source.isBrowsing = true }
         }
         guard !bundle.tabs.isEmpty else { return }
         mutateSpace(destinationID) { destination in
-            if destination.workspace == nil, let first = bundle.tabs.first {
-                var ws = Workspace(initial: first.location)
-                _ = ws.extractItemsForTransfer([.tab(ws.activeID)])
+            if destination.workspace == nil {
+                var ws = Workspace()
                 ws.insertTransferBundleToRoot(bundle, at: index)
                 destination.workspace = ws
             } else {
@@ -1051,7 +1072,7 @@ final class AppModel {
             guard var ws = source.workspace else { return }
             bundle = ws.extractItemsForTransfer(items)
             source.workspace = ws.isEmpty ? nil : ws
-            if source.workspace == nil { source.isBrowsing = true }
+            if source.workspace?.tabs.isEmpty != false { source.isBrowsing = true }
         }
         guard !bundle.tabs.isEmpty else { return }
         mutateSpace(destinationID) { destination in
@@ -1397,6 +1418,7 @@ final class AppModel {
             let location = sourceLocation(for: path)
             mutateWorkspace { $0.navigateActive(to: location) }
             isBrowsing = false
+            if location.pane != browsePane { applyActiveListContext() }
             await loadDoc(path)
         }
     }
@@ -1520,7 +1542,18 @@ final class AppModel {
             return
         }
 
-        let location = active.location
+        let storedLocation = active.location
+        let entryType = storedLocation.openPath.flatMap { path in
+            entries.first { $0.path == path }?.type
+        } ?? active.cachedType
+        // A page explicitly spawned from the shared pinned list inherits that
+        // list by design. Ordinary temporary locations must remain revealable.
+        let location = previousPinnedContext == true
+            ? storedLocation
+            : locationCompatibleWithEntryType(storedLocation, entryType: entryType)
+        if location != storedLocation {
+            mutateWorkspace { $0.replaceActiveLocation(with: location) }
+        }
         browsePane = location.pane
         if let context = location.listContext {
             if case .savedView = location.pane {
@@ -1577,12 +1610,31 @@ final class AppModel {
     }
 
     private func sourceLocation(for path: String) -> NavLocation {
-        if isPinnedListContext, let location = workspace?.activeTab.location {
+        if isPinnedListContext, let location = workspace?.activeTab?.location {
             return NavLocation(pane: location.pane, openPath: path,
                                listContext: location.listContext)
         }
-        return NavLocation(pane: browsePane, openPath: path,
-                           listContext: currentBrowseListContext)
+        let location = NavLocation(pane: browsePane, openPath: path,
+                                   listContext: currentBrowseListContext)
+        let entryType = entries.first { $0.path == path }?.type
+        return locationCompatibleWithEntryType(location, entryType: entryType)
+    }
+
+    /// A type list cannot reveal a document of another type. This repairs stale
+    /// persisted locations and prevents new cross-type navigation from creating
+    /// the same impossible state. Named views keep their own list semantics.
+    private func locationCompatibleWithEntryType(
+        _ location: NavLocation, entryType: EntryType?
+    ) -> NavLocation {
+        guard let entryType,
+              case .type(let listType) = location.pane,
+              listType != entryType else { return location }
+        return NavLocation(
+            pane: .type(entryType),
+            openPath: location.openPath,
+            listContext: ListContext(
+                searchText: "", filters: [], filterMatch: .all,
+                sorts: location.listContext?.sorts ?? sortClauses))
     }
 
     func reloadOpen() async {
@@ -1603,6 +1655,7 @@ final class AppModel {
         if !isBrowsing, workspace != nil {
             let location = sourceLocation(for: hit.path)
             mutateWorkspace { $0.navigateActive(to: location) }
+            if location.pane != browsePane { applyActiveListContext() }
             await loadDoc(hit.path)
         } else {
             await open(hit.path)
@@ -1834,7 +1887,7 @@ final class AppModel {
         for id in ordered { workspace.closeTab(id) }
         if let selectAfterClose { workspace.select(selectAfterClose) }
         self.workspace = workspace.isEmpty ? nil : workspace
-        if self.workspace == nil { isBrowsing = true }
+        if self.workspace?.tabs.isEmpty != false { isBrowsing = true }
         registerCloseUndo(record, actionName: actionName,
                           selectAfterClose: selectAfterClose)
         return (previousPinnedContext, activeTabID != previousActiveID)
@@ -1850,8 +1903,8 @@ final class AppModel {
 
     /// Close the active tab (⌘W). A pinned tab withdraws to its anchor.
     func closeActiveTab() async {
-        guard !isBrowsing, var workspace else { return }
-        if workspace.activeTab.pinned {
+        guard !isBrowsing, var workspace, let active = workspace.activeTab else { return }
+        if active.pinned {
             guard workspace.withdrawActivePinnedNavigation() else { return }
             self.workspace = workspace
             await syncToActiveLocation(from: true)
@@ -1962,6 +2015,28 @@ final class AppModel {
         }
     }
 
+    func createFolder() {
+        var workspace = self.workspace ?? Workspace()
+        let before = workspace.sidebarState
+        let id = workspace.createFolder()
+        workspace.flattenTemporaryTabs()
+        self.workspace = workspace
+        if workspace.tabs.isEmpty { isBrowsing = true }
+        pendingFolderRenameID = id
+        registerSidebarUndo(before, actionName: String(localized: "新建文件夹"))
+    }
+
+    func finishFolderRenameRequest(_ id: TabGroup.ID) {
+        if pendingFolderRenameID == id { pendingFolderRenameID = nil }
+    }
+
+    func dissolveFolder(_ id: TabGroup.ID) {
+        if pendingFolderRenameID == id { pendingFolderRenameID = nil }
+        mutateSidebarWorkspace(actionName: String(localized: "解散文件夹")) {
+            $0.dissolveFolder(id)
+        }
+    }
+
     func setTabOrder(_ ids: [NavTab.ID]) {
         mutateSidebarWorkspace(actionName: String(localized: "移动页面")) { $0.reorder(ids) }
     }
@@ -2068,15 +2143,21 @@ final class AppModel {
 
     /// Markdown manifest for a single tab (one bullet, no header). Nil if the tab is gone.
     func shareManifest(forTab id: NavTab.ID) -> String? {
-        guard let tab = tabs.first(where: { $0.id == id }) else { return nil }
-        return renderTabShareManifest([shareNode(for: tab)])
+        shareManifest(for: [.tab(id)])
     }
 
     /// Markdown manifest for a group: an H1 of the group name plus a nested bullet list
     /// mirroring the folder structure. Nil if the group is gone.
     func shareManifest(forGroup id: TabGroup.ID) -> String? {
         guard let group = tabGroups.first(where: { $0.id == id }) else { return nil }
-        return renderTabShareManifest([shareNode(for: group)])
+        return shareManifest(for: [.group(group)])
+    }
+
+    /// Markdown manifest for an ordered mixed selection of tabs and groups.
+    func shareManifest(for roots: [TabNode]) -> String? {
+        let nodes = roots.compactMap(shareChild)
+        guard !nodes.isEmpty else { return nil }
+        return renderTabShareManifest(nodes)
     }
 
     private func shareNode(for group: TabGroup) -> TabShareNode {

@@ -140,6 +140,15 @@ enum AppPresentation {
         }
     }
 
+    static func readerAIAgentPresetLabel(_ preset: ReaderAIAgentPreset) -> String {
+        switch preset {
+        case .claude: return "Claude Code (claude)"
+        case .codex: return "Codex (codex)"
+        case .antigravity: return "Antigravity (agy)"
+        case .custom: return String(localized: "自定义")
+        }
+    }
+
     static func inspectorLabel(_ label: String) -> String {
         switch label {
         case "信息": return String(localized: "信息")
