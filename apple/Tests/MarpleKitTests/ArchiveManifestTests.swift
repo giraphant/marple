@@ -105,6 +105,51 @@ import Testing
                                         mediaType: "audio/wav") == nil)
     }
 
+    @Test func readerArrowKeysStayInsideArchiveAndRespectFocus() async throws {
+        _ = NSApplication.shared
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try VaultIndexer(workspaceRoot: root.path).buildFull()
+        let model = AppModel(client: LocalVaultClient(workspaceRoot: root.path,
+            index: IndexDatabase(indexDBPath: root.appendingPathComponent(".marple/index.sqlite").path)), workspaceRoot: root.path)
+        await model.loadIndex()
+        await model.open(path)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let reader = NSView(frame: NSRect(x: 200, y: 0, width: 400, height: 400))
+        let text = NSTextView(frame: reader.bounds)
+        text.isEditable = false
+        reader.addSubview(text)
+        window.contentView?.addSubview(reader)
+        let keyboard = ArchiveReaderKeyboard(model: model, reader: reader)
+        func key(_ code: UInt16, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code)!
+        }
+        window.makeFirstResponder(text)
+        #expect(!keyboard.handle(key(124, .shift)))
+        #expect(model.attachmentPreviewURL == nil)
+        #expect(keyboard.handle(key(124)))
+        #expect(model.selectedArchiveFile?.path == "originals/001-screen.png")
+        #expect(keyboard.handle(key(124)))
+        #expect(model.selectedArchiveFile?.path == "originals/002-demo.bin")
+        #expect(keyboard.handle(key(124))) // Missing PDF skipped; stop at end.
+        #expect(model.selectedArchiveFile?.path == "originals/002-demo.bin")
+        #expect(keyboard.handle(key(123)))
+        #expect(keyboard.handle(key(123)))
+        #expect(model.attachmentPreviewURL == nil)
+        #expect(keyboard.handle(key(123))) // Stop at body.
+        #expect(model.openPath == path)
+        let outside = NSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 400))
+        window.contentView?.addSubview(outside)
+        window.makeFirstResponder(outside)
+        #expect(!keyboard.handle(key(124)))
+        text.isEditable = true
+        window.makeFirstResponder(text)
+        #expect(!keyboard.handle(key(124)))
+        #expect(model.attachmentPreviewURL == nil)
+    }
+
     @Test func readerImagesInspectorRefreshAndNavigation() async throws {
         _ = NSApplication.shared
         let root = try fixture()

@@ -11,7 +11,7 @@ public enum SortField: String, Sendable, CaseIterable, Hashable, Codable {
         case .updated: return "更新时间"
         case .title:   return "标题"
         case .author:  return "作者"
-        case .memberCount: return "成员数"
+        case .memberCount: return "数量"
         }
     }
 

@@ -13,6 +13,7 @@ final class MarpleSplitViewController: NSSplitViewController {
     private var sidebarItem: NSSplitViewItem?
     private var listItem: NSSplitViewItem?
     private var inspectorItem: NSSplitViewItem?
+    private var readerKeyboard: ArchiveReaderKeyboard?
     private var inspectorObs: NSKeyValueObservation?
 
     init(model: AppModel) {
@@ -61,6 +62,7 @@ final class MarpleSplitViewController: NSSplitViewController {
         detail.minimumThickness = 400
         detail.holdingPriority = NSLayoutConstraint.Priority(248)   // reader absorbs freed space
         addSplitViewItem(detail)
+        readerKeyboard = ArchiveReaderKeyboard(model: model, reader: detail.viewController.view)
 
         let inspector = NSSplitViewItem(inspectorWithViewController:
             host(Chrome { InspectorView(model: model) }))
