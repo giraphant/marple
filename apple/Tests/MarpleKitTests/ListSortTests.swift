@@ -9,6 +9,16 @@ import Testing
               mtime: mtime, added: added)
     }
 
+    @Test func memberCountsSortBothDirectionsAndBreakTiesByTitle() {
+        let entries = [e("single", title: "B"), e("large", title: "C"), e("empty", title: "A"), e("small", title: "D")]
+        let counts = ["large": 12, "small": 2, "empty": 0]
+        let descending = sortEntries(entries, by: [.init(field: .memberCount, dir: .desc), .init(field: .title, dir: .asc)], memberCounts: counts)
+        #expect(descending.map(\.path) == ["large", "small", "empty", "single"])
+        let ascending = sortEntries(entries, by: [.init(field: .memberCount, dir: .asc)], memberCounts: counts)
+        #expect(ascending.map(\.path) == ["single", "empty", "small", "large"])
+        #expect(SortField.memberCount.defaultDir == .desc)
+    }
+
     @Test func testEmptyClausesPreserveOrder() {
         let list = [e("a"), e("b"), e("c")]
         #expect(sortEntries(list, by: []).map(\.path) == ["a", "b", "c"])

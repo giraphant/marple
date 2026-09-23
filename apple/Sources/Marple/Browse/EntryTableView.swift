@@ -33,14 +33,14 @@ struct EntryTableView: NSViewRepresentable {
             table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
             let menu = NSMenu()
             menu.delegate = self
-            for (field, width) in [(SortField.title, 300.0), (.author, 132), (.year, 60), (.rating, 64), (.added, 110)] {
+            for (field, width) in [(SortField.title, 300.0), (.author, 132), (.year, 60), (.rating, 64), (.added, 110), (.memberCount, 80)] {
                 let column = NSTableColumn(identifier: .init(field.rawValue))
                 column.title = AppPresentation.sortFieldLabel(field)
                 column.width = width
                 column.minWidth = field == .title ? 180 : 54
                 column.resizingMask = field == .title ? [.autoresizingMask, .userResizingMask] : [.userResizingMask]
                 column.sortDescriptorPrototype = NSSortDescriptor(key: field.rawValue, ascending: field.defaultDir == .asc)
-                column.isHidden = field == .rating || field == .added
+                column.isHidden = field == .rating || field == .added || field == .memberCount
                 table.addTableColumn(column)
                 if field != .title {
                     let item = NSMenuItem(title: column.title, action: #selector(toggleColumn(_:)), keyEquivalent: "")
@@ -160,6 +160,7 @@ struct EntryTableView: NSViewRepresentable {
                 if let group = model.archiveCollection(at: entry.path) {
                     value = (model.expandedArchiveCollections.contains(group.path) ? "▾  " : "▸  ") + group.title + "  (" + String(group.members.count) + ")"
                 } else { value = (model.archiveMemberIndent(entry.path) ? "      " : "") + (entry.title ?? (entry.path as NSString).lastPathComponent) }
+            case .memberCount: value = String(model.archiveCollection(at: entry.path)?.members.count ?? 0)
             case .author: value = entry.author.joined(separator: ", ")
             case .year: value = entry.year ?? ""
             case .rating: value = entry.ratingScore == 0 ? "" : entry.ratingScore.formatted()

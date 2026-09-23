@@ -378,7 +378,8 @@ final class AppModel {
                     themes: [], preview: String(localized: "\(group.members.count) 个档案"),
                     hasPDF: false)
             }
-            let roots = sortEntries(visible.filter { !grouped.contains($0.path) } + folders, by: activeSortClauses)
+            let counts = Dictionary(uniqueKeysWithValues: archiveCollections.map { ($0.path + "/collection.md", $0.members.count) })
+            let roots = sortEntries(visible.filter { !grouped.contains($0.path) } + folders, by: activeSortClauses, memberCounts: counts)
             return roots.flatMap { entry -> [Entry] in
                 guard let group = archiveCollection(at: entry.path), expandedArchiveCollections.contains(group.path) else { return [entry] }
                 return [entry] + sortEntries(visible.filter { group.members.contains($0.path) }, by: activeSortClauses)

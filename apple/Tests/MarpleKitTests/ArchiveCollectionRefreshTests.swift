@@ -13,6 +13,10 @@ struct ArchiveCollectionRefreshTests {
         let scroll = coordinator.makeScrollView()
         let table = try #require(scroll.documentView as? NSTableView)
         try await waitUntil { table.numberOfRows == 2 }
+        let countColumn = try #require(table.tableColumns.first { $0.identifier.rawValue == "memberCount" })
+        #expect(countColumn.isHidden)
+        table.sortDescriptors = [NSSortDescriptor(key: "memberCount", ascending: false)]
+        #expect(model.activeSortClauses.first?.field == .memberCount)
         let old = "vault/archives/a/archive.md"
         await model.open(old)
         _ = try await model.performArchiveCollection(.init(action: "move", paths: [old], destination: "vault/archives/group"))
@@ -25,6 +29,9 @@ struct ArchiveCollectionRefreshTests {
         _ = try await model.performArchiveCollection(.init(action: "move", paths: [grouped], destination: "vault/archives"))
         try await waitUntil { table.numberOfRows == 2 }
         #expect(model.visibleEntries.contains { $0.path == old })
+        // Member count changes re-sort roots without leaving the current view.
+        _ = try await model.performArchiveCollection(.init(action: "move", paths: [old], destination: "vault/archives/group"))
+        try await waitUntil { coordinator.dropEntry(at: 0)?.isArchiveCollection == true }
     }
 
     @Test func expandsInPlaceAndRefreshesMembersWithoutNavigation() async throws {

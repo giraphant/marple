@@ -1,7 +1,7 @@
 import Foundation
 
 public enum SortField: String, Sendable, CaseIterable, Hashable, Codable {
-    case rating, year, added, updated, title, author
+    case rating, year, added, updated, title, author, memberCount
 
     public var label: String {
         switch self {
@@ -11,6 +11,7 @@ public enum SortField: String, Sendable, CaseIterable, Hashable, Codable {
         case .updated: return "更新时间"
         case .title:   return "标题"
         case .author:  return "作者"
+        case .memberCount: return "成员数"
         }
     }
 
@@ -50,7 +51,7 @@ private func toNum(_ s: String?) -> Double? {
     return Double(s)
 }
 
-private func comparator(_ field: SortField, _ dir: SortDir) -> (Entry, Entry) -> Int {
+private func comparator(_ field: SortField, _ dir: SortDir, memberCounts: [String: Int]) -> (Entry, Entry) -> Int {
     switch field {
     case .title:   return { textCmp($0.title, $1.title, dir) }
     // Sort by first author — matches the user's mental model of "show me
@@ -63,14 +64,15 @@ private func comparator(_ field: SortField, _ dir: SortDir) -> (Entry, Entry) ->
                                    $1.ratingScore == 0 ? nil : $1.ratingScore, dir) }
     case .updated: return { numCmp($0.mtime, $1.mtime, dir) }
     case .added:   return { numCmp($0.added, $1.added, dir) }
+    case .memberCount: return { numCmp(Double(memberCounts[$0.path] ?? 0), Double(memberCounts[$1.path] ?? 0), dir) }
     }
 }
 
 /// Multi-level stable sort. Empty clause list returns the input unchanged.
 /// Ties fall through to the next clause, then to original index.
-public func sortEntries(_ list: [Entry], by clauses: [SortClause]) -> [Entry] {
+public func sortEntries(_ list: [Entry], by clauses: [SortClause], memberCounts: [String: Int] = [:]) -> [Entry] {
     guard !clauses.isEmpty else { return list }
-    let cmps = clauses.map { comparator($0.field, $0.dir) }
+    let cmps = clauses.map { comparator($0.field, $0.dir, memberCounts: memberCounts) }
     return list.enumerated().sorted { lhs, rhs in
         for cmp in cmps {
             let r = cmp(lhs.element, rhs.element)

@@ -118,6 +118,7 @@ enum AppPresentation {
         case .updated: return String(localized: "更新时间")
         case .title: return String(localized: "标题")
         case .author: return String(localized: "作者")
+        case .memberCount: return String(localized: "成员数")
         }
     }
 
