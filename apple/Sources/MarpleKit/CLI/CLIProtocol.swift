@@ -12,6 +12,7 @@ import Foundation
 /// Single-method JSON-RPC-flavoured request.
 public struct CLIRequest: Codable, Sendable {
     public let method: String
+    public let collection: ArchiveCollectionCommand?
     public let path: String?
     public let query: String?
     public let limit: Int?
@@ -27,7 +28,7 @@ public struct CLIRequest: Codable, Sendable {
     public let requestID: String?
     public let retryOnly: Bool?
 
-    public init(method: String,
+    public init(method: String, collection: ArchiveCollectionCommand? = nil,
                 path: String? = nil,
                 query: String? = nil,
                 limit: Int? = nil,
@@ -37,6 +38,7 @@ public struct CLIRequest: Codable, Sendable {
                 after: String? = nil, root: Bool? = nil,
                 operation: String? = nil, requestID: String? = nil, retryOnly: Bool? = nil) {
         self.method = method
+        self.collection = collection
         self.path = path
         self.query = query
         self.limit = limit
@@ -128,6 +130,7 @@ public enum CLIErrorCode {
 /// All optional — populated per method. Loose by design so the wire format
 /// stays one JSON object per line without union-tagging overhead.
 public struct CLIResponseData: Codable, Sendable {
+    public let collection: ArchiveCollectionResult?
     public let entries: [EntryDigest]?
     public let entry: EntryDetail?
     public let opened: Bool?
@@ -137,12 +140,13 @@ public struct CLIResponseData: Codable, Sendable {
     public let activeTabID: UUID?
     public let createdID: UUID?
 
-    public init(entries: [EntryDigest]? = nil,
+    public init(collection: ArchiveCollectionResult? = nil, entries: [EntryDigest]? = nil,
                 entry: EntryDetail? = nil,
                 opened: Bool? = nil,
                 pong: String? = nil,
                 tree: [CLITabNode]? = nil, spaceID: UUID? = nil,
                 activeTabID: UUID? = nil, createdID: UUID? = nil) {
+        self.collection = collection
         self.entries = entries
         self.entry = entry
         self.opened = opened

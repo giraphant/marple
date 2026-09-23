@@ -94,7 +94,7 @@ final class AppModel {
     /// refresh generation, threaded into loadIndex for stale-publish dropping.
     /// No-op when no indexer is wired (stub-backed tests).
     func refreshBody(_ myPass: Int) async {
-        guard let indexer = cliIndexer else { return }
+        guard !archiveCollectionBusy, let indexer = cliIndexer else { return }
         beginRefreshing()
         defer { endRefreshing() }
         let stats: ReconcileStats?
@@ -104,6 +104,8 @@ final class AppModel {
             print("[marple] reconcile failed: \(error)")
             stats = nil
         }
+        guard !archiveCollectionBusy else { return }
+        await reloadArchiveCollections()
         guard let stats, stats.upserted + stats.removed > 0 else { return }
         await loadIndex(pass: myPass)
         await reloadOpen()
@@ -164,6 +166,11 @@ final class AppModel {
     // Arc-style Spaces: each Space owns an independent document-tab workspace.
     // The computed workspace/isBrowsing properties below preserve the previous
     // single-workspace call sites by pointing them at the active Space.
+    var archiveCollections: [ArchiveCollection] = []
+    var archiveCollectionPath: String?
+    var archiveCollectionBusy = false
+    var archiveCollectionError: String?
+
     private(set) var spaces: [WorkspaceSpace] = [] { didSet { persist() } }
     private(set) var activeSpaceID: WorkspaceSpace.ID? { didSet { persist() } }
     private(set) var pendingFolderRenameID: TabGroup.ID?
@@ -353,7 +360,16 @@ final class AppModel {
     var themeIndex: [ThemeCount] { catalog.themeIndex }
     var topicMembership: TopicMembership { catalog.topicMembership }
     var visibleEntries: [Entry] {
-        guard isPinnedListContext else { return catalog.visibleEntries }
+        guard isPinnedListContext else {
+            let visible = catalog.visibleEntries
+            guard pane == .type(.archive) else { return visible }
+            if let directory = archiveCollectionPath {
+                return visible.filter { ($0.path as NSString).deletingLastPathComponent.hasPrefix(directory + "/") }
+            }
+            if !searchText.trimmingCharacters(in: .whitespaces).isEmpty { return visible }
+            let grouped = Set(archiveCollections.flatMap(\.members))
+            return visible.filter { !grouped.contains($0.path) }
+        }
         let paths = tabs.filter(\.pinned).compactMap { $0.identityLocation.openPath }
         if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
             return catalog.entries(inPathOrder: paths)
@@ -1114,10 +1130,11 @@ final class AppModel {
             }
             return
         }
-        guard catalog.publish(fetched, pass: myPass) else {
+        guard !archiveCollectionBusy, catalog.publish(fetched, pass: myPass) else {
             print("[marple] loadIndex pass \(myPass) stale after index() (latest \(catalog.pass)), dropping")
             return
         }
+        await reloadArchiveCollections()
         isBootstrapping = false
         status = String(localized: "已索引 \(entries.count) 个条目")
         // Refresh the conformance snapshot on the same cadence as the index. The
@@ -2855,5 +2872,57 @@ final class AppModel {
     private func normalize(_ text: String?) -> String? {
         let t = text?.trimmingCharacters(in: .whitespaces)
         return (t?.isEmpty ?? true) ? nil : t
+    }
+}
+
+// Archive collections are physical directories, independent of sidebar folders.
+extension AppModel {
+    func reloadArchiveCollections() async {
+        let store = ArchiveCollections(workspaceRoot: workspaceRoot)
+        do {
+            let inventory = try await Task.detached { try store.inventory() }.value
+            archiveCollections = inventory.collections
+            archiveCollectionError = inventory.issues.isEmpty ? nil : inventory.issues.joined(separator: "\n")
+            if let path = archiveCollectionPath, !archiveCollections.contains(where: { $0.path == path }) {
+                archiveCollectionPath = nil
+            }
+        } catch { archiveCollectionError = String(describing: error) }
+    }
+
+    func performArchiveCollection(_ supplied: ArchiveCollectionCommand) async throws -> ArchiveCollectionResult {
+        guard !archiveCollectionBusy else { throw ArchiveCollectionError("busy", "An Archive operation is running") }
+        var command = supplied
+        if !command.dryRun && !["list", "status"].contains(command.action) && command.requestID == nil {
+            command.requestID = UUID().uuidString
+        }
+        let writes = !command.dryRun && !["list", "status"].contains(command.action)
+        archiveCollectionBusy = true
+        defer { archiveCollectionBusy = false }
+        if writes { await flushAllInspectorNoteSaves() }
+        let store = ArchiveCollections(workspaceRoot: workspaceRoot)
+        let request = command
+        let result = try await Task.detached(priority: .userInitiated) { try store.execute(request) }.value
+        if writes && !result.replayed {
+            withPersistenceBatch {
+                for i in spaces.indices { spaces[i].workspace?.remapArchivePaths(result.moves) }
+            }
+            if let path = archiveCollectionPath {
+                archiveCollectionPath = result.moves.reduce(path) { $1.remap($0) }
+            }
+            archiveCollections = result.inventory.collections
+            attachmentPreviewURL = nil
+            loadedDocPath = nil
+            archiveCollectionBusy = false
+            await cliRefreshIndex()
+            await reloadOpen()
+        }
+        return result
+    }
+
+    func moveArchives(_ paths: [String], to directory: String) {
+        Task {
+            do { _ = try await performArchiveCollection(.init(action: "move", paths: paths, destination: directory)) }
+            catch { archiveCollectionError = String(describing: error) }
+        }
     }
 }

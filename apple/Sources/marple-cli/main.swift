@@ -189,7 +189,7 @@ struct MarpleCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "marple-cli",
         abstract: "Search, read, open, and organize Marple documents from agent workflows.",
-        subcommands: [Search.self, Read.self, Open.self, Ping.self, Tabs.self, Folders.self]
+        subcommands: [Search.self, Read.self, Open.self, Ping.self, Tabs.self, Folders.self, Collections.self]
     )
 }
 

@@ -6,6 +6,10 @@ enum CLIHandlers {
     static func handle(_ req: CLIRequest, model: AppModel, indexer: VaultIndexer) async -> CLIResponse {
         do {
             switch req.method {
+            case "collections":
+                guard let command = req.collection else { return .failure(code: CLIErrorCode.badRequest, message: "missing collection command") }
+                let result = try await model.performArchiveCollection(command)
+                return .success(CLIResponseData(collection: result))
             case CLIMethod.ping:
                 return .success(CLIResponseData(pong: "marple"))
             case CLIMethod.search:
@@ -21,6 +25,8 @@ enum CLIHandlers {
             default:
                 return .failure(code: CLIErrorCode.badRequest, message: "unknown method: \(req.method)")
             }
+        } catch let error as ArchiveCollectionError {
+            return .failure(code: error.code, message: error.description)
         } catch let e as CLIBackendError {
             switch e {
             case .notFound(let p):

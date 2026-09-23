@@ -42,6 +42,7 @@ struct EntryListTable: NSViewRepresentable {
         table.usesAutomaticRowHeights = false
         table.rowSizeStyle = .custom
         table.delegate = context.coordinator
+        table.setDraggingSourceOperationMask(.move, forLocal: true)
         table.dataSource = context.coordinator
 
         table.menuForRows = { [weak coordinator = context.coordinator] rows in
@@ -464,6 +465,13 @@ struct EntryListTable: NSViewRepresentable {
             if entry.ratingScore > 0 { return true }
             if entry.hasPDF { return true }
             return false
+        }
+
+        func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+            guard items.indices.contains(row), case .entryHeader(let entry) = items[row], entry.type == .archive else { return nil }
+            let item = NSPasteboardItem()
+            item.setString("entry:\(entry.path)", forType: SidebarDragPasteboard.tabItem)
+            return item
         }
 
         func contextMenu(for rows: IndexSet) -> NSMenu? {

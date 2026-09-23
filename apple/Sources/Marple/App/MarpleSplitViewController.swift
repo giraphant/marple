@@ -167,7 +167,11 @@ struct IndexLoadingPresentation {
 struct BrowseColumn: View {
     @Bindable var model: AppModel
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            if model.pane == .type(.archive) && !model.isPinnedListContext {
+                ArchiveCollectionsView(model: model)
+                Divider()
+            }
             if model.isPinnedListContext {
                 EntryListView(model: model)
             } else {

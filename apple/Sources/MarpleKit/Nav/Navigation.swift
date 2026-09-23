@@ -1380,3 +1380,24 @@ public struct Workspace: Sendable {
         }
     }
 }
+
+public extension NavHistory {
+    mutating func remapArchivePaths(_ moves: [ArchiveCollectionChange]) {
+        for i in entries.indices {
+            if let path = entries[i].openPath {
+                entries[i].openPath = ArchiveCollectionReferences.remap(path, moves: moves)
+            }
+        }
+    }
+}
+
+public extension Workspace {
+    mutating func remapArchivePaths(_ moves: [ArchiveCollectionChange]) {
+        for i in tabs.indices {
+            tabs[i].history.remapArchivePaths(moves)
+            if let path = tabs[i].pinnedLocation?.openPath {
+                tabs[i].pinnedLocation?.openPath = ArchiveCollectionReferences.remap(path, moves: moves)
+            }
+        }
+    }
+}
