@@ -12,9 +12,10 @@ struct Collections: ParsableCommand {
     }
     struct Create: ParsableCommand {
         @Argument(help: "New collection directory name and title.") var name: String
+        @Option(name: .long, parsing: .upToNextOption, help: "Archive paths to group in the same operation.") var items: [String] = []
         @Flag(name: .long) var dryRun = false
         @Option(name: .long, help: "UUID for replay-safe requests; generated if absent.") var requestID: String?
-        func run() throws { try send(.init(action: "create", name: name, dryRun: dryRun, requestID: requestID)) }
+        func run() throws { try send(.init(action: "create", paths: items, name: name, dryRun: dryRun, requestID: requestID)) }
     }
     struct Rename: ParsableCommand {
         @Argument(help: "Absolute or workspace-relative collection directory.") var path: String

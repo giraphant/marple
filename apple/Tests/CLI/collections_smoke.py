@@ -15,6 +15,7 @@ cases = [
     (["collections", "create", "维修资料", "--request-id", key], {"action": "create", "paths": [], "name": "维修资料", "dryRun": False, "requestID": key}),
     (["collections", "rename", "vault/archives/旧", "新", "--dry-run"], {"action": "rename", "paths": ["vault/archives/旧"], "name": "新", "dryRun": True}),
     (["collections", "move", "vault/archives/a", "vault/archives/b/archive.md", "--to", "vault/archives/新", "--dry-run"], {"action": "move", "paths": ["vault/archives/a", "vault/archives/b/archive.md"], "destination": "vault/archives/新", "dryRun": True}),
+    (["collections", "create", "合并资料", "--items", "vault/archives/a", "vault/archives/b", "--dry-run"], {"action": "create", "paths": ["vault/archives/a", "vault/archives/b"], "name": "合并资料", "dryRun": True}),
     (["collections", "status", key], {"action": "status", "paths": [], "dryRun": False, "requestID": key}),
 ]
 with tempfile.TemporaryDirectory(prefix="collection-cli-", dir="/tmp") as home:

@@ -145,6 +145,7 @@ extension ArchiveCollections {
             let target = Self.base + "/" + name
             try ensureAbsent(target)
             edits.append(.init(path: target + "/collection.md", before: nil, after: Data("# \(name)\n".utf8)))
+            moves = try memberMoves(command.paths, to: target, members: members, newCollection: true)
         case "rename":
             guard command.paths.count == 1 else { throw ArchiveCollectionError("bad_request", "Rename requires one collection directory") }
             let source = relative(try checkedURL(command.paths[0]))
@@ -158,18 +159,7 @@ extension ArchiveCollections {
             guard !command.paths.isEmpty, let destination = command.destination else { throw ArchiveCollectionError("bad_request", "Move requires Archive paths and a destination") }
             let dest = relative(try checkedURL(destination))
             guard dest == Self.base || groups.contains(dest) else { throw ArchiveCollectionError("not_found", "Destination is not a collection or archive root: \(dest)") }
-            var sources = Set<String>(), destinations = Set<String>()
-            for path in command.paths {
-                var url = try checkedURL(path)
-                if url.lastPathComponent == "archive.md" { url.deleteLastPathComponent() }
-                let source = relative(url)
-                guard members.contains(source + "/archive.md"), sources.insert(source).inserted else { throw ArchiveCollectionError("bad_request", "Not a unique Archive: \(path)") }
-                let target = dest + "/" + url.lastPathComponent
-                guard target != source else { continue }
-                guard destinations.insert(target.lowercased()).inserted else { throw ArchiveCollectionError("name_conflict", "Duplicate destination: \(target)") }
-                try ensureAbsent(target)
-                moves.append(.init(from: source, to: target))
-            }
+            moves = try memberMoves(command.paths, to: dest, members: members)
         default: throw ArchiveCollectionError("bad_request", "Unknown collection action: \(command.action)")
         }
         if !moves.isEmpty {
@@ -191,6 +181,23 @@ extension ArchiveCollections {
             }
         }
         return (.init(inventory: inventory, moves: moves, updatedReferences: edits.map(\.path), dryRun: command.dryRun, requestID: command.requestID), edits)
+    }
+
+    private func memberMoves(_ paths: [String], to dest: String, members: Set<String>, newCollection: Bool = false) throws -> [ArchiveCollectionChange] {
+        var moves: [ArchiveCollectionChange] = []
+        var sources = Set<String>(), destinations = Set<String>()
+        for path in paths {
+            var url = try checkedURL(path)
+            if url.lastPathComponent == "archive.md" { url.deleteLastPathComponent() }
+            let source = relative(url)
+            guard members.contains(source + "/archive.md"), sources.insert(source).inserted else { throw ArchiveCollectionError("bad_request", "Not a unique Archive: \(path)") }
+            let target = dest + "/" + url.lastPathComponent
+            guard target != source else { continue }
+            guard destinations.insert(target.lowercased()).inserted else { throw ArchiveCollectionError("name_conflict", "Duplicate destination: \(target)") }
+            if !newCollection { try ensureAbsent(target) }
+            moves.append(.init(from: source, to: target))
+        }
+        return moves
     }
 
     private func ensureAbsent(_ path: String) throws {

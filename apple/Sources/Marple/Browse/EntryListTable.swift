@@ -42,9 +42,17 @@ struct EntryListTable: NSViewRepresentable {
         table.usesAutomaticRowHeights = false
         table.rowSizeStyle = .custom
         table.delegate = context.coordinator
+        table.registerForDraggedTypes([SidebarDragPasteboard.tabItem])
+        table.onOpenRow = { [weak coordinator = context.coordinator] row in
+            guard let coordinator, let entry = coordinator.dropEntry(at: row) else { return }
+            Task { await coordinator.model.open(entry.path) }
+        }
         table.setDraggingSourceOperationMask(.move, forLocal: true)
         table.dataSource = context.coordinator
 
+        table.menuForBackground = { [weak coordinator = context.coordinator] in
+            coordinator.flatMap { BrowseEntryMenu.background(model: $0.model) }
+        }
         table.menuForRows = { [weak coordinator = context.coordinator] rows in
             coordinator?.contextMenu(for: rows)
         }
@@ -316,7 +324,10 @@ struct EntryListTable: NSViewRepresentable {
             isUpdatingSelection = true
             defer { isUpdatingSelection = false }
             if target >= 0 {
-                if !table.selectedRowIndexes.contains(target) || jumpedToMatch || reveal {
+                // A click may finish opening a tab after the user has already
+                // extended the selection. Revealing that same selected item
+                // must not collapse the user's multi-selection.
+                if !table.selectedRowIndexes.contains(target) || jumpedToMatch || (reveal && table.selectedRowIndexes.count <= 1) {
                     table.selectRowIndexes(IndexSet(integer: target), byExtendingSelection: false)
                     table.scrollRowToVisible(target)
                 } else if reveal {
@@ -342,7 +353,7 @@ struct EntryListTable: NSViewRepresentable {
                     ?? EntryHeaderCell()
                 cell.identifier = Self.headerCellID
                 cell.configure(entry: entry,
-                               nonConforming: model.conformance(for: entry)?.isConforming == false)
+                               nonConforming: !entry.isArchiveCollection && model.conformance(for: entry)?.isConforming == false)
                 return cell
             case .match(_, let line):
                 let cell = tableView.makeView(withIdentifier: Self.matchCellID, owner: self) as? MatchLineCell
@@ -465,6 +476,23 @@ struct EntryListTable: NSViewRepresentable {
             if entry.ratingScore > 0 { return true }
             if entry.hasPDF { return true }
             return false
+        }
+
+        func dropEntry(at row: Int) -> Entry? {
+            guard items.indices.contains(row), case .entryHeader(let entry) = items[row] else { return nil }
+            return entry
+        }
+
+        func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation operation: NSTableView.DropOperation) -> NSDragOperation {
+            let targetRow = tableView.row(at: tableView.convert(info.draggingLocation, from: nil))
+            guard let entry = dropEntry(at: targetRow), ArchiveEntryDrop.paths(info.draggingPasteboard, onto: entry, model: model) != nil else { return [] }
+            tableView.setDropRow(targetRow, dropOperation: .on)
+            return .move
+        }
+
+        func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+            guard let entry = dropEntry(at: row) else { return false }
+            return ArchiveEntryDrop.accept(info.draggingPasteboard, onto: entry, model: model)
         }
 
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {

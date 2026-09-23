@@ -28,6 +28,7 @@ struct EntryRow: View {
         VStack(alignment: .leading, spacing: Space.s3) {
             VStack(alignment: .leading, spacing: Space.s3) {
                 HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                    if entry.isArchiveCollection { Image(systemName: "folder").foregroundStyle(.secondary) }
                     Text(entry.title ?? String(localized: "(untitled)"))
                         .font(Typo.headline)
                         .foregroundStyle(.primary)
@@ -72,6 +73,7 @@ struct EntryRow: View {
                 .foregroundStyle(.tertiary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, Space.s5)
     }
 

@@ -15,6 +15,7 @@ struct CollectionGridVariant: NSViewRepresentable {
         let collectionView = ClickableCollectionView()
         collectionView.dataSource = coordinator
         collectionView.delegate = coordinator
+        collectionView.registerForDraggedTypes([SidebarDragPasteboard.tabItem])
         collectionView.isSelectable = true
         collectionView.allowsMultipleSelection = true
         collectionView.allowsEmptySelection = true
@@ -26,6 +27,9 @@ struct CollectionGridVariant: NSViewRepresentable {
         }
         collectionView.onDragPath = { [weak coordinator] item in
             coordinator?.entries[safe: item]?.path
+        }
+        collectionView.menuForBackground = { [weak coordinator] in
+            coordinator.flatMap { BrowseEntryMenu.background(model: $0.model) }
         }
         collectionView.menuForItem = { [weak coordinator] item in
             coordinator?.contextMenu(forItem: item)
@@ -114,7 +118,7 @@ struct CollectionGridVariant: NSViewRepresentable {
                             itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
             let item = collectionView.makeItem(withIdentifier: .init("EntryCard"), for: indexPath) as! EntryCardItem
             guard let entry = entries[safe: indexPath.item] else { return item }
-            let nonConforming = model.conformance(for: entry)?.isConforming == false
+            let nonConforming = !entry.isArchiveCollection && model.conformance(for: entry)?.isConforming == false
             // Decode the thumbnail only as large as this card can show it (column width ×
             // backing scale), not at the source resolution — see ThumbnailLoader (QUA-219).
             let columnWidth = (collectionView.collectionViewLayout as? EntryGridLayout)?.preferredItemWidth ?? 136
@@ -126,11 +130,30 @@ struct CollectionGridVariant: NSViewRepresentable {
             return item
         }
 
+        func collectionView(_ collectionView: NSCollectionView, validateDrop info: NSDraggingInfo,
+                            proposedIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>,
+                            dropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
+            guard let index = collectionView.indexPathForItem(at: collectionView.convert(info.draggingLocation, from: nil)),
+                  let entry = entries[safe: index.item], ArchiveEntryDrop.paths(info.draggingPasteboard, onto: entry, model: model) != nil else { return [] }
+            proposedIndexPath.pointee = index as NSIndexPath
+            dropOperation.pointee = .on
+            return .move
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, acceptDrop info: NSDraggingInfo,
+                            indexPath: IndexPath, dropOperation: NSCollectionView.DropOperation) -> Bool {
+            guard let entry = entries[safe: indexPath.item] else { return false }
+            return ArchiveEntryDrop.accept(info.draggingPasteboard, onto: entry, model: model)
+        }
+
         /// Right-click menu for a card: open, open in new tab, and "open in Space →"
         /// (the same `openInSpace` the drag uses — a reliable, drag-free trigger).
         func contextMenu(forItem index: Int) -> NSMenu? {
             guard let entry = entries[safe: index] else { return nil }
+            let selected = collectionView?.selectionIndexPaths.sorted().compactMap { entries[safe: $0.item] } ?? [entry]
+            if selected.contains(where: \.isArchiveCollection) { return BrowseEntryMenu.make(entries: selected, model: model) }
             let menu = NSMenu()
+            BrowseEntryMenu.appendArchiveActions(to: menu, entries: selected, model: model)
             menu.addItem(ClosureMenuItem(title: String(localized: "打开")) { [weak self] in
                 Task { await self?.model.open(entry.path) } })
             menu.addItem(ClosureMenuItem(title: String(localized: "新标签打开")) { [weak self] in
@@ -173,6 +196,7 @@ private final class ClosureMenuItem: NSMenuItem {
 final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
     var onOpen: ((Int) -> Void)?
     var onDragPath: ((Int) -> String?)?
+    var menuForBackground: (() -> NSMenu?)?
     var menuForItem: ((Int) -> NSMenu?)?
     /// Resolve the file URL to Quick Look for an item (image original / vault .md).
     var previewURL: ((Int) async -> URL?)?
@@ -199,7 +223,9 @@ final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDataSource,
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
-        guard let index = indexPathForItem(at: point)?.item else { return nil }
+        guard let index = indexPathForItem(at: point)?.item else { return menuForBackground?() }
+        let path = IndexPath(item: index, section: 0)
+        if !selectionIndexPaths.contains(path) { selectionIndexPaths = [path] }
         return menuForItem?(index)
     }
 

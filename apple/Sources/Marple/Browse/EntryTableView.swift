@@ -50,6 +50,9 @@ struct EntryTableView: NSViewRepresentable {
                 }
             }
             table.headerView?.menu = menu
+            table.menuForBackground = { [weak coordinator = self] in
+                coordinator.flatMap { BrowseEntryMenu.background(model: $0.model) }
+            }
             table.menuForRows = { [weak self] rows in
                 guard let self else { return nil }
                 return BrowseEntryMenu.make(entries: rows.compactMap {
@@ -60,6 +63,11 @@ struct EntryTableView: NSViewRepresentable {
             table.autosaveTableColumns = true
             table.delegate = self
             table.dataSource = self
+            table.registerForDraggedTypes([SidebarDragPasteboard.tabItem])
+            table.onOpenRow = { [weak coordinator = self] row in
+                guard let coordinator, let entry = coordinator.dropEntry(at: row) else { return }
+                Task { await coordinator.model.open(entry.path) }
+            }
             table.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
             table.setAccessibilityLabel(String(localized: "资料表格"))
             self.table = table
@@ -142,7 +150,11 @@ struct EntryTableView: NSViewRepresentable {
             let entry = entries[row]
             let value: String
             switch field {
-            case .title: value = entry.title ?? (entry.path as NSString).lastPathComponent
+            case .title:
+                if let group = model.archiveCollection(at: entry.path) {
+                    value = "▸ " + group.title + "  (" + String(group.members.count) + ")"
+                        + (group.members.first.flatMap { path in model.entries.first { $0.path == path }?.title }.map { " · " + $0 } ?? "")
+                } else { value = entry.title ?? (entry.path as NSString).lastPathComponent }
             case .author: value = entry.author.joined(separator: ", ")
             case .year: value = entry.year ?? ""
             case .rating: value = entry.ratingScore == 0 ? "" : entry.ratingScore.formatted()
@@ -170,6 +182,22 @@ struct EntryTableView: NSViewRepresentable {
                 guard let key = descriptor.key, let field = SortField(rawValue: key) else { return nil }
                 return SortClause(field: field, dir: descriptor.ascending ? .asc : .desc)
             })
+        }
+
+        func dropEntry(at row: Int) -> Entry? {
+            entries.indices.contains(row) ? entries[row] : nil
+        }
+
+        func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation operation: NSTableView.DropOperation) -> NSDragOperation {
+            let targetRow = tableView.row(at: tableView.convert(info.draggingLocation, from: nil))
+            guard let entry = dropEntry(at: targetRow), ArchiveEntryDrop.paths(info.draggingPasteboard, onto: entry, model: model) != nil else { return [] }
+            tableView.setDropRow(targetRow, dropOperation: .on)
+            return .move
+        }
+
+        func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+            guard let entry = dropEntry(at: row) else { return false }
+            return ArchiveEntryDrop.accept(info.draggingPasteboard, onto: entry, model: model)
         }
 
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {

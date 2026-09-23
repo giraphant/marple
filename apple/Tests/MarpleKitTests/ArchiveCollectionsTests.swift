@@ -46,6 +46,20 @@ struct ArchiveCollectionsTests {
         #expect(try store.inventory().ungrouped == initial.ungrouped)
         #expect(try String(contentsOf: root.appendingPathComponent("vault/archives/a/originals/photo.png"), encoding: .utf8) == "original bytes")
     }
+    @Test func createWithMembersIsOnePreflightedOperation() throws {
+        let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = ArchiveCollections(workspaceRoot: root.path)
+        #expect(throws: (any Error).self) {
+            try store.execute(.init(action: "create", paths: ["vault/archives/a", "vault/archives/missing"], name: "Bad", requestID: UUID().uuidString))
+        }
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("vault/archives/Bad").path))
+        let command = ArchiveCollectionCommand(action: "create", paths: ["vault/archives/a"], name: "Combined", requestID: UUID().uuidString)
+        let result = try store.execute(command)
+        #expect(result.inventory.collections.first { $0.title == "Combined" }?.members == ["vault/archives/Combined/a/archive.md"])
+        #expect(try store.execute(command).replayed)
+        #expect(try String(contentsOf: root.appendingPathComponent("vault/notes/n.md"), encoding: .utf8).contains("vault/archives/Combined/a/archive.md"))
+    }
+
     @Test func pendingJournalAndActiveWriterBlockMutations() throws {
         let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
         let store = ArchiveCollections(workspaceRoot: root.path)

@@ -24,6 +24,9 @@ final class EntryCardItem: NSCollectionViewItem {
 
 /// A bounded preview followed by two title lines and one metadata line.
 private final class CardCellView: NSView {
+    private let stackBack = NSView()
+    private let stackMiddle = NSView()
+    private var isCollection = false
     private let thumbnail = NSImageView()
     private let placeholder = NSImageView()
     private let titleField = NSTextField(wrappingLabelWithString: "")
@@ -58,7 +61,12 @@ private final class CardCellView: NSView {
         conformanceDot.wantsLayer = true
         conformanceDot.layer?.cornerRadius = dotSize / 2
         conformanceDot.toolTip = String(localized: "缺少必填字段")
-        for view in [thumbnail, placeholder, titleField, metaField, previewField, conformanceDot] {
+        for sheet in [stackBack, stackMiddle] {
+            sheet.wantsLayer = true
+            sheet.layer?.cornerRadius = 6
+            sheet.layer?.borderWidth = 1
+        }
+        for view in [stackBack, stackMiddle, thumbnail, placeholder, titleField, metaField, previewField, conformanceDot] {
             addSubview(view)
         }
     }
@@ -78,12 +86,15 @@ private final class CardCellView: NSView {
                    resolveURL: @escaping (String) async -> URL?) {
         resetForReuse()
         entryPath = entry.path
+        isCollection = entry.isArchiveCollection
+        stackBack.isHidden = !isCollection
+        stackMiddle.isHidden = !isCollection
         titleField.stringValue = entry.title ?? (entry.path as NSString).lastPathComponent
             .replacingOccurrences(of: ".md", with: "")
         metaField.stringValue = CardLayout.meta(entry)
         previewField.stringValue = String(entry.preview.prefix(300))
         previewField.isHidden = entry.type == .image || entry.preview.isEmpty
-        placeholder.image = NSImage(systemSymbolName: entry.type == .image ? "photo" : "doc.text",
+        placeholder.image = NSImage(systemSymbolName: entry.isArchiveCollection ? "folder" : entry.type == .image ? "photo" : "doc.text",
                                     accessibilityDescription: AppPresentation.entryTypeLabel(entry.type))
         placeholder.isHidden = !previewField.isHidden
         conformanceDot.isHidden = !nonConforming
@@ -120,6 +131,10 @@ private final class CardCellView: NSView {
         layer?.borderColor = (selected ? NSColor.controlAccentColor : .clear).cgColor
         layer?.borderWidth = selected ? 2 : 0
         thumbnail.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.08).cgColor
+        for sheet in [stackBack, stackMiddle] {
+            sheet.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+            sheet.layer?.borderColor = NSColor.separatorColor.cgColor
+        }
         conformanceDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
     }
 
@@ -128,9 +143,11 @@ private final class CardCellView: NSView {
         let inset = CardLayout.inset
         let width = max(0, bounds.width - inset * 2)
         let previewHeight = CardLayout.previewHeight(width: bounds.width)
-        thumbnail.frame = NSRect(x: inset, y: inset, width: width, height: previewHeight)
+        stackBack.frame = NSRect(x: inset + 8, y: inset, width: max(0, width - 16), height: previewHeight - 8)
+        stackMiddle.frame = NSRect(x: inset + 4, y: inset + 4, width: max(0, width - 8), height: previewHeight - 8)
+        thumbnail.frame = NSRect(x: inset, y: inset + (isCollection ? 8 : 0), width: width, height: previewHeight - (isCollection ? 8 : 0))
         placeholder.frame = thumbnail.frame
-        previewField.frame = NSRect(x: inset + 8, y: inset + 8, width: max(0, width - 16),
+        previewField.frame = NSRect(x: inset + 8, y: inset + (isCollection ? 16 : 8), width: max(0, width - 16),
                                    height: CardLayout.lineHeight(CardLayout.previewFont) * CGFloat(CardLayout.previewMaxLines))
         let titleY = thumbnail.frame.maxY + CardLayout.gap
         let dotReserve = conformanceDot.isHidden ? 0 : dotSize + CardLayout.gap

@@ -168,6 +168,8 @@ final class AppModel {
     // single-workspace call sites by pointing them at the active Space.
     var archiveCollections: [ArchiveCollection] = []
     var archiveCollectionPath: String?
+    var archiveCollectionRenamePath: String?
+    var archiveCollectionRenameName = ""
     var archiveCollectionBusy = false
     var archiveCollectionError: String?
 
@@ -366,9 +368,18 @@ final class AppModel {
             if let directory = archiveCollectionPath {
                 return visible.filter { ($0.path as NSString).deletingLastPathComponent.hasPrefix(directory + "/") }
             }
-            if !searchText.trimmingCharacters(in: .whitespaces).isEmpty { return visible }
             let grouped = Set(archiveCollections.flatMap(\.members))
-            return visible.filter { !grouped.contains($0.path) }
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let folders = archiveCollections.compactMap { group -> Entry? in
+                let member = visible.first { group.members.contains($0.path) }
+                guard query.isEmpty || member != nil || group.title.localizedCaseInsensitiveContains(query) else { return nil }
+                let representative = member ?? group.members.lazy.compactMap { self.catalog.entry(at: $0) }.first
+                return Entry(path: group.path + "/collection.md", type: .archive, title: group.title,
+                    author: representative?.author ?? [], year: representative?.year, ratingScore: representative?.ratingScore ?? 0,
+                    themes: [], preview: String(localized: "\(group.members.count) 个档案") + "\n" + [representative?.title, representative?.preview].compactMap { $0 }.joined(separator: " — "),
+                    hasPDF: false, mtime: representative?.mtime, added: representative?.added)
+            }
+            return sortEntries(visible.filter { !grouped.contains($0.path) } + folders, by: activeSortClauses)
         }
         let paths = tabs.filter(\.pinned).compactMap { $0.identityLocation.openPath }
         if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -1428,6 +1439,7 @@ final class AppModel {
     /// (pushes history, so ◀ returns) instead of piling up tabs. Explicit "open in new
     /// tab" always spawns one.
     func open(_ path: String) async {
+        if openArchiveCollection(path) { return }
         clearReaderHighlight()
         if isBrowsing || workspace == nil {
             await openNewTab(path)
@@ -1707,7 +1719,10 @@ final class AppModel {
     func newTab() async { await newIdeaNote() }
 
     /// Always open `path` in a new tab (right-click / ⌘-click).
-    func openInNewTab(_ path: String) async { await openNewTab(path) }
+    func openInNewTab(_ path: String) async {
+        if openArchiveCollection(path) { return }
+        await openNewTab(path)
+    }
 
     /// Open `path` as a new tab in the active space and return the new tab's id, so
     /// a drop handler can then position it (root index / group). QUA-114.
@@ -1807,6 +1822,7 @@ final class AppModel {
     /// The pinned middle list switches existing tabs; object lists keep their
     /// browser-style open behavior.
     func activateVisibleEntry(_ path: String) async {
+        if archiveCollection(at: path) != nil { return } // Folders open on double-click or Return.
         guard isPinnedListContext,
               let id = tabs.first(where: { $0.pinned && $0.identityLocation.openPath == path })?.id
         else {

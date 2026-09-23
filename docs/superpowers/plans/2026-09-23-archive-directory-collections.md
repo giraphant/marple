@@ -27,9 +27,12 @@ the same directory is invalid. Books and mixed collections are outside this chan
 5. Add `marple-cli collections list/create/rename/move`, with `--dry-run`, JSON
    output, and stable operation identity for inspecting/retrying lost responses.
    Use the same service as GUI; do not confuse these with sidebar `folders`.
-6. Show collections in Archive browsing, open a collection's member list, provide
-   back-to-root navigation and creation/rename actions. Native selected Archive
-   drags move directories onto collection targets or the archive root target.
+6. Collections and standalone Archives share the same native browse rows and sorting.
+   Grid cards use a stack, list/table rows show the group and representative content.
+   No separate folder strip or create button. Blank-area context menu creates an
+   empty collection; selection menu groups/moves members. Drop onto an Archive to
+   group, or onto an existing collection to move. Single-click selects; double-click
+   or Return opens a group. Context menu moves members back to the archive root.
 7. Regression: parser/index/reader/CLI/navigation suites, real temporary-vault
    create → move → rename → move out; never reorganize the user's live vault for
    testing. Build/sign/install after verification using existing signing config.
