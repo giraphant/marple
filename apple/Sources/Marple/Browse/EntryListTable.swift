@@ -43,6 +43,10 @@ struct EntryListTable: NSViewRepresentable {
         table.rowSizeStyle = .custom
         table.delegate = context.coordinator
         table.registerForDraggedTypes([SidebarDragPasteboard.tabItem])
+        table.onClickRow = { [weak coordinator = context.coordinator] row in
+            guard let coordinator, let entry = coordinator.dropEntry(at: row) else { return }
+            coordinator.model.toggleArchiveCollection(entry.path)
+        }
         table.onOpenRow = { [weak coordinator = context.coordinator] row in
             guard let coordinator, let entry = coordinator.dropEntry(at: row) else { return }
             Task { await coordinator.model.open(entry.path) }
@@ -175,6 +179,8 @@ struct EntryListTable: NSViewRepresentable {
             }
         }
 
+        private var lastExpanded: Set<String> = []
+
         func reload(_ table: NSTableView) {
             let newItems = buildItems()
             let newSearchMode = isInSearchMode
@@ -192,7 +198,8 @@ struct EntryListTable: NSViewRepresentable {
             // entries must still repaint, so force a reload on snapshot drift.
             let snapshotChanged = model.schemaSnapshot != lastSnapshot
 
-            if itemsChanged || searchModeFlipped || snapshotChanged {
+            if itemsChanged || searchModeFlipped || snapshotChanged || lastExpanded != model.expandedArchiveCollections {
+                lastExpanded = model.expandedArchiveCollections
                 let wasSearchMode = lastSearchMode
                 let selected = Set(table.selectedRowIndexes.compactMap { row in
                     items.indices.contains(row) ? selectionKey(items[row]) : nil
@@ -352,7 +359,7 @@ struct EntryListTable: NSViewRepresentable {
                 let cell = tableView.makeView(withIdentifier: Self.headerCellID, owner: self) as? EntryHeaderCell
                     ?? EntryHeaderCell()
                 cell.identifier = Self.headerCellID
-                cell.configure(entry: entry,
+                cell.configure(entry: entry, collectionExpanded: model.archiveCollection(at: entry.path).map { model.expandedArchiveCollections.contains($0.path) } ?? false, indented: model.archiveMemberIndent(entry.path),
                                nonConforming: !entry.isArchiveCollection && model.conformance(for: entry)?.isConforming == false)
                 return cell
             case .match(_, let line):
@@ -639,8 +646,8 @@ private final class EntryGroupRowView: NSTableRowView {
 private final class EntryHeaderCell: NSTableCellView {
     private var hostingView: NSHostingView<EntryRow>?
 
-    func configure(entry: Entry, nonConforming: Bool) {
-        let root = EntryRow(entry: entry, nonConforming: nonConforming)
+    func configure(entry: Entry, collectionExpanded: Bool, indented: Bool, nonConforming: Bool) {
+        let root = EntryRow(entry: entry, nonConforming: nonConforming, collectionExpanded: collectionExpanded, indented: indented)
         if let view = hostingView {
             view.rootView = root
         } else {

@@ -52,14 +52,14 @@ struct ArchiveCollectionBrowseTests {
         #expect(!folderMenu.items.contains { $0.title == String(localized: "移到回收站") })
         #expect(folderMenu.items.contains { $0.title == String(localized: "重命名合集") })
         await model.activateVisibleEntry(folder.path)
-        #expect(model.archiveCollectionPath == nil) // Single click only selects.
+        #expect(model.expandedArchiveCollections.isEmpty) // Single click only selects.
         await model.open(folder.path)
-        #expect(model.archiveCollectionPath == group.path)
-        #expect(model.visibleEntries.count == 3)
-        let moved = model.visibleEntries
+        #expect(model.expandedArchiveCollections.contains(group.path))
+        #expect(model.visibleEntries.count == 5)
+        let moved = model.visibleEntries.filter { !$0.isArchiveCollection }
         let insideMenu = try #require(BrowseEntryMenu.make(entries: moved, model: model))
         #expect(insideMenu.items.contains { $0.title == String(localized: "移出合集") })
-        model.archiveCollectionPath = nil
+        model.expandedArchiveCollections.removeAll()
         let destination = try #require(model.visibleEntries.first { $0.title == "维修资料" })
         drag(moved)
         #expect(ArchiveEntryDrop.accept(board, onto: destination, model: model))
@@ -70,6 +70,7 @@ struct ArchiveCollectionBrowseTests {
         _ = try await model.performArchiveCollection(.init(action: "move", paths: [path], destination: ArchiveCollections.base))
         if let output = ProcessInfo.processInfo.environment["MARPLE_INLINE_COLLECTION_SNAPSHOT"] {
             _ = NSApplication.shared
+            model.expandedArchiveCollections = Set(model.archiveCollections.filter { !$0.members.isEmpty }.map(\.path))
             let host = NSHostingView(rootView: HStack(spacing: 0) {
                 EntryListTable(model: model).frame(width: 330)
                 Divider()

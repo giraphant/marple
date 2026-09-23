@@ -16,6 +16,8 @@ struct EntryRow: View {
     /// for its type, per `.quasi/schema.json`. Defaults false so the row is
     /// identical when no schema snapshot exists. See [[VaultConformance]].
     var nonConforming: Bool = false
+    var collectionExpanded: Bool = false
+    var indented: Bool = false
 
     /// Title+preview area sized to ~4 lines of mixed type (headline 15pt + subheadline 13pt).
     /// `.layoutPriority(1)` on the title lets it claim its natural 1–2 lines first;
@@ -28,7 +30,10 @@ struct EntryRow: View {
         VStack(alignment: .leading, spacing: Space.s3) {
             VStack(alignment: .leading, spacing: Space.s3) {
                 HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-                    if entry.isArchiveCollection { Image(systemName: "folder").foregroundStyle(.secondary) }
+                    if entry.isArchiveCollection {
+                        Image(systemName: collectionExpanded ? "chevron.down" : "chevron.right").font(.caption)
+                        Image(systemName: "folder").foregroundStyle(.secondary)
+                    }
                     Text(entry.title ?? String(localized: "(untitled)"))
                         .font(Typo.headline)
                         .foregroundStyle(.primary)
@@ -74,6 +79,7 @@ struct EntryRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, indented ? 24 : 0)
         .padding(.vertical, Space.s5)
     }
 

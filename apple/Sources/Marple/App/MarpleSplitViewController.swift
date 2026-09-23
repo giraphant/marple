@@ -170,7 +170,6 @@ struct BrowseColumn: View {
         VStack(spacing: 0) {
             if model.pane == .type(.archive) && !model.isPinnedListContext {
                 ArchiveCollectionsView(model: model)
-                if model.archiveCollectionPath != nil { Divider() }
             }
             if model.isPinnedListContext {
                 EntryListView(model: model)

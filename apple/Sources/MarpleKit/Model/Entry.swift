@@ -268,11 +268,11 @@ public extension Entry {
     /// caller clear a field (`.some(nil)`) vs leave it unchanged (omit).
     /// `author` uses single-optional because the value type itself
     /// (`[String]`) already encodes "empty" — pass `[]` to clear.
-    func with(title: String?? = nil, author: [String]? = nil,
+    func with(path: String? = nil, title: String?? = nil, author: [String]? = nil,
               ratingScore: Double? = nil, year: String?? = nil, source: String?? = nil,
               doi: String?? = nil, themes: [String]? = nil, topics: [String]? = nil,
               preview: String? = nil, created: String?? = nil) -> Entry {
-        Entry(path: path, type: type, title: title ?? self.title,
+        Entry(path: path ?? self.path, type: type, title: title ?? self.title,
               author: author ?? self.author,
               year: year ?? self.year, ratingScore: ratingScore ?? self.ratingScore,
               themes: themes ?? self.themes, topics: topics ?? self.topics,

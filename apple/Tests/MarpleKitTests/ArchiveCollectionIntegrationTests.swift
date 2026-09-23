@@ -48,7 +48,7 @@ struct ArchiveCollectionIntegrationTests {
         let status = await CLIHandlers.handle(.init(method: "collections", collection: .init(action: "status", requestID: command.requestID)), model: model, indexer: indexer)
         #expect(status.ok && status.data?.collection?.moves.first?.to == group + "/example")
         model.select(pane: .type(.archive))
-        model.archiveCollectionPath = group
+        model.expandedArchiveCollections.insert(group)
         await model.openInNewTab(moved)
         #expect(model.openEntry?.path == moved)
         #expect(model.openBody.contains("档案正文"))

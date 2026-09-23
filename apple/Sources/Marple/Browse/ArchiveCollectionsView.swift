@@ -1,19 +1,11 @@
 import SwiftUI
 import MarpleKit
 
-/// Only navigation within a collection; collections themselves are browse rows.
+/// Collection operation feedback and rename prompt.
 struct ArchiveCollectionsView: View {
     @Bindable var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let group = model.archiveCollections.first(where: { $0.path == model.archiveCollectionPath }) {
-                HStack {
-                    Button { model.select(pane: .type(.archive)); model.archiveCollectionPath = nil } label: { Label("档案", systemImage: "chevron.left") }
-                    Text(group.title).lineLimit(1)
-                    Spacer()
-                    Text("\(group.members.count) 个档案").foregroundStyle(.secondary)
-                }.padding(8)
-            }
             if let error = model.archiveCollectionError {
                 HStack {
                     Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)

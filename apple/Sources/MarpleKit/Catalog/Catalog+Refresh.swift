@@ -58,6 +58,24 @@ extension Catalog {
         return true
     }
 
+    /// Apply confirmed filesystem moves immediately, including the currently
+    /// displayed snapshot. Pending derivations must not restore old paths.
+    public func remapArchivePaths(_ moves: [ArchiveCollectionChange]) {
+        guard !moves.isEmpty else { return }
+        _ = beginStandalonePass()
+        recomputeTask?.cancel()
+        matchTask?.cancel()
+        func path(_ value: String) -> String { ArchiveCollectionReferences.remap(value, moves: moves) }
+        func entry(_ value: Entry) -> Entry {
+            let next = path(value.path)
+            return next == value.path ? value : value.with(path: next)
+        }
+        entries = entries.map(entry)
+        visibleEntries = visibleEntries.map(entry)
+        searchMatches = Dictionary(searchMatches.map { (path($0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
+        matchExpanded = Set(matchExpanded.map(path))
+    }
+
     /// 乐观单条编辑 / 建删条目(QUA-229)：壳侧**同步**用户动作直接改 entries(无 staleness
     /// ——这些不经 refresh pass)。`entries` 是 `internal(set)`,故壳必须经此入口改。
     public func mutateEntries(_ body: (inout [Entry]) -> Void) {

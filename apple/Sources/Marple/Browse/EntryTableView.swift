@@ -16,6 +16,7 @@ struct EntryTableView: NSViewRepresentable {
         private var entries: [Entry] = []
         private var updating = false
         private var lastOpenPath: String?
+        private var lastExpanded: Set<String> = []
         weak var table: NSTableView?
 
         init(model: AppModel) { self.model = model }
@@ -64,6 +65,10 @@ struct EntryTableView: NSViewRepresentable {
             table.delegate = self
             table.dataSource = self
             table.registerForDraggedTypes([SidebarDragPasteboard.tabItem])
+            table.onClickRow = { [weak coordinator = self] row in
+                guard let coordinator, let entry = coordinator.dropEntry(at: row) else { return }
+                coordinator.model.toggleArchiveCollection(entry.path)
+            }
             table.onOpenRow = { [weak coordinator = self] row in
                 guard let coordinator, let entry = coordinator.dropEntry(at: row) else { return }
                 Task { await coordinator.model.open(entry.path) }
@@ -108,7 +113,8 @@ struct EntryTableView: NSViewRepresentable {
                 lastOpenPath = openPath
             }
             let next = model.visibleEntries
-            if entries != next {
+            if entries != next || lastExpanded != model.expandedArchiveCollections {
+                lastExpanded = model.expandedArchiveCollections
                 entries = next
                 table.reloadData()
             }
@@ -152,9 +158,8 @@ struct EntryTableView: NSViewRepresentable {
             switch field {
             case .title:
                 if let group = model.archiveCollection(at: entry.path) {
-                    value = "▸ " + group.title + "  (" + String(group.members.count) + ")"
-                        + (group.members.first.flatMap { path in model.entries.first { $0.path == path }?.title }.map { " · " + $0 } ?? "")
-                } else { value = entry.title ?? (entry.path as NSString).lastPathComponent }
+                    value = (model.expandedArchiveCollections.contains(group.path) ? "▾  " : "▸  ") + group.title + "  (" + String(group.members.count) + ")"
+                } else { value = (model.archiveMemberIndent(entry.path) ? "      " : "") + (entry.title ?? (entry.path as NSString).lastPathComponent) }
             case .author: value = entry.author.joined(separator: ", ")
             case .year: value = entry.year ?? ""
             case .rating: value = entry.ratingScore == 0 ? "" : entry.ratingScore.formatted()
@@ -163,7 +168,17 @@ struct EntryTableView: NSViewRepresentable {
                     Date(timeIntervalSince1970: $0).formatted(date: .numeric, time: .omitted)
                 } ?? ""
             }
+            cell.textField?.font = .systemFont(ofSize: 13, weight: entry.isArchiveCollection ? .semibold : .regular)
             cell.textField?.stringValue = value
+            if field == .title, entry.isArchiveCollection {
+                let label = NSMutableAttributedString(string: value)
+                let folder = NSTextAttachment()
+                folder.image = NSImage(systemSymbolName: "folder", accessibilityDescription: String(localized: "合集"))
+                folder.bounds = NSRect(x: 0, y: -2, width: 16, height: 14)
+                label.insert(NSAttributedString(attachment: folder), at: 3)
+                label.insert(NSAttributedString(string: "  "), at: 4)
+                cell.textField?.attributedStringValue = label
+            }
             cell.toolTip = value
             return cell
         }

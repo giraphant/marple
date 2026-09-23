@@ -21,6 +21,10 @@ struct CollectionGridVariant: NSViewRepresentable {
         collectionView.allowsEmptySelection = true
         collectionView.backgroundColors = [.clear]
         collectionView.setAccessibilityLabel(String(localized: "资料网格"))
+        collectionView.onClick = { [weak coordinator] item in
+            guard let coordinator, let entry = coordinator.entries[safe: item] else { return }
+            coordinator.model.toggleArchiveCollection(entry.path)
+        }
         collectionView.onOpen = { [weak coordinator] item in
             guard let entry = coordinator?.entries[safe: item] else { return }
             Task { await coordinator?.model.open(entry.path) }
@@ -194,6 +198,7 @@ private final class ClosureMenuItem: NSMenuItem {
 /// reorder uses, which does deliver), suppressing the built-in one by not
 /// forwarding `mouseDragged` to super. QUA-114.
 final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+    var onClick: ((Int) -> Void)?
     var onOpen: ((Int) -> Void)?
     var onDragPath: ((Int) -> String?)?
     var menuForBackground: (() -> NSMenu?)?
@@ -263,6 +268,7 @@ final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDataSource,
         while let next = window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
             if next.type == .leftMouseUp {
                 if collapseOnMouseUp { selectClick(index, modifiers: event.modifierFlags) }
+                if event.modifierFlags.intersection([.command, .shift]).isEmpty { onClick?(index) }
                 return
             }
             let p = next.locationInWindow

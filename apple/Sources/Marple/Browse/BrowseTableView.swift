@@ -4,6 +4,13 @@ import MarpleKit
 /// Match Finder/FSNotes: right-click within the selection operates on the group;
 /// right-click elsewhere first selects the clicked row. Header menus stay separate.
 final class BrowseTableView: NSTableView {
+    var onClickRow: ((Int) -> Void)? {
+        didSet { target = self; action = #selector(clickRow) }
+    }
+    @objc private func clickRow() {
+        guard clickedRow >= 0, NSApp.currentEvent?.modifierFlags.intersection([.command, .shift]).isEmpty != false else { return }
+        onClickRow?(clickedRow)
+    }
     var onOpenRow: ((Int) -> Void)? {
         didSet { target = self; doubleAction = #selector(openClickedRow) }
     }
@@ -40,7 +47,7 @@ final class BrowseTableView: NSTableView {
         let menu = NSMenu()
         if entries.contains(where: \.isArchiveCollection) {
             guard entries.count == 1, let group = model.archiveCollection(at: entries[0].path) else { return nil }
-            menu.addItem(ActionItem(title: String(localized: "打开合集")) { model.openArchiveCollection(entries[0].path) })
+            menu.addItem(ActionItem(title: model.expandedArchiveCollections.contains(group.path) ? String(localized: "收起合集") : String(localized: "展开合集")) { model.toggleArchiveCollection(entries[0].path) })
             menu.addItem(ActionItem(title: String(localized: "重命名合集")) { model.renameArchiveCollection(group) })
             menu.addItem(ActionItem(title: String(localized: "编辑合集说明")) {
                 Task { try? await model.client.openInEditor(path: entries[0].path, app: "") }

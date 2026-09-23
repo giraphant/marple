@@ -12,9 +12,20 @@ extension AppModel {
 
     @discardableResult func openArchiveCollection(_ path: String) -> Bool {
         guard let group = archiveCollection(at: path) else { return false }
-        select(pane: .type(.archive))
-        archiveCollectionPath = group.path
+        if pane != .type(.archive) { select(pane: .type(.archive)) }
+        expandedArchiveCollections.insert(group.path)
         return true
+    }
+
+    func toggleArchiveCollection(_ path: String) {
+        guard let group = archiveCollection(at: path) else { return }
+        if !expandedArchiveCollections.insert(group.path).inserted {
+            expandedArchiveCollections.remove(group.path)
+        }
+    }
+
+    func archiveMemberIndent(_ path: String) -> Bool {
+        pane == .type(.archive) && !isPinnedListContext && archiveCollections.contains { $0.members.contains(path) }
     }
 
     func formArchiveCollection(_ paths: [String]) {
@@ -28,7 +39,6 @@ extension AppModel {
                     name = "\(base) \(suffix)"; suffix += 1
                 }
                 _ = try await performArchiveCollection(.init(action: "create", paths: paths, name: name))
-                archiveCollectionPath = nil
             } catch { archiveCollectionError = String(describing: error) }
         }
     }

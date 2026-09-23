@@ -106,7 +106,9 @@ final class AppModel {
         }
         guard !archiveCollectionBusy else { return }
         await reloadArchiveCollections()
-        guard let stats, stats.upserted + stats.removed > 0 else { return }
+        // A watcher may already have reconciled a collection move while UI
+        // publication was suppressed. A zero-change pass still owes a reload.
+        guard let stats, archiveCollectionNeedsIndexReload || stats.upserted + stats.removed > 0 else { return }
         await loadIndex(pass: myPass)
         await reloadOpen()
     }
@@ -167,9 +169,10 @@ final class AppModel {
     // The computed workspace/isBrowsing properties below preserve the previous
     // single-workspace call sites by pointing them at the active Space.
     var archiveCollections: [ArchiveCollection] = []
-    var archiveCollectionPath: String?
+    var expandedArchiveCollections: Set<String> = []
     var archiveCollectionRenamePath: String?
     var archiveCollectionRenameName = ""
+    var archiveCollectionNeedsIndexReload = false
     var archiveCollectionBusy = false
     var archiveCollectionError: String?
 
@@ -365,21 +368,21 @@ final class AppModel {
         guard isPinnedListContext else {
             let visible = catalog.visibleEntries
             guard pane == .type(.archive) else { return visible }
-            if let directory = archiveCollectionPath {
-                return visible.filter { ($0.path as NSString).deletingLastPathComponent.hasPrefix(directory + "/") }
-            }
             let grouped = Set(archiveCollections.flatMap(\.members))
             let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             let folders = archiveCollections.compactMap { group -> Entry? in
                 let member = visible.first { group.members.contains($0.path) }
                 guard query.isEmpty || member != nil || group.title.localizedCaseInsensitiveContains(query) else { return nil }
-                let representative = member ?? group.members.lazy.compactMap { self.catalog.entry(at: $0) }.first
                 return Entry(path: group.path + "/collection.md", type: .archive, title: group.title,
-                    author: representative?.author ?? [], year: representative?.year, ratingScore: representative?.ratingScore ?? 0,
-                    themes: [], preview: String(localized: "\(group.members.count) 个档案") + "\n" + [representative?.title, representative?.preview].compactMap { $0 }.joined(separator: " — "),
-                    hasPDF: false, mtime: representative?.mtime, added: representative?.added)
+                    author: [], year: nil, ratingScore: 0,
+                    themes: [], preview: String(localized: "\(group.members.count) 个档案"),
+                    hasPDF: false)
             }
-            return sortEntries(visible.filter { !grouped.contains($0.path) } + folders, by: activeSortClauses)
+            let roots = sortEntries(visible.filter { !grouped.contains($0.path) } + folders, by: activeSortClauses)
+            return roots.flatMap { entry -> [Entry] in
+                guard let group = archiveCollection(at: entry.path), expandedArchiveCollections.contains(group.path) else { return [entry] }
+                return [entry] + sortEntries(visible.filter { group.members.contains($0.path) }, by: activeSortClauses)
+            }
         }
         let paths = tabs.filter(\.pinned).compactMap { $0.identityLocation.openPath }
         if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -1145,6 +1148,7 @@ final class AppModel {
             print("[marple] loadIndex pass \(myPass) stale after index() (latest \(catalog.pass)), dropping")
             return
         }
+        archiveCollectionNeedsIndexReload = false
         await reloadArchiveCollections()
         isBootstrapping = false
         status = String(localized: "已索引 \(entries.count) 个条目")
@@ -1822,7 +1826,7 @@ final class AppModel {
     /// The pinned middle list switches existing tabs; object lists keep their
     /// browser-style open behavior.
     func activateVisibleEntry(_ path: String) async {
-        if archiveCollection(at: path) != nil { return } // Folders open on double-click or Return.
+        if archiveCollection(at: path) != nil { return } // Selection alone must not expand folders (e.g. right-click or range selection).
         guard isPinnedListContext,
               let id = tabs.first(where: { $0.pinned && $0.identityLocation.openPath == path })?.id
         else {
@@ -2899,9 +2903,7 @@ extension AppModel {
             let inventory = try await Task.detached { try store.inventory() }.value
             archiveCollections = inventory.collections
             archiveCollectionError = inventory.issues.isEmpty ? nil : inventory.issues.joined(separator: "\n")
-            if let path = archiveCollectionPath, !archiveCollections.contains(where: { $0.path == path }) {
-                archiveCollectionPath = nil
-            }
+            expandedArchiveCollections.formIntersection(archiveCollections.map(\.path))
         } catch { archiveCollectionError = String(describing: error) }
     }
 
@@ -2919,12 +2921,20 @@ extension AppModel {
         let request = command
         let result = try await Task.detached(priority: .userInitiated) { try store.execute(request) }.value
         if writes && !result.replayed {
+            archiveCollectionNeedsIndexReload = true
+            searchTask?.cancel()
+            catalog.remapArchivePaths(result.moves)
+            searchHits = searchHits.map { hit in
+                let path = result.moves.first(where: { $0.remap(hit.entry.path) != hit.entry.path })?.remap(hit.entry.path) ?? hit.entry.path
+                return SearchHit(entry: hit.entry.with(path: path), score: hit.score, snippet: hit.snippet, source: hit.source)
+            }
+            rebuildIndexDerived()
             withPersistenceBatch {
                 for i in spaces.indices { spaces[i].workspace?.remapArchivePaths(result.moves) }
             }
-            if let path = archiveCollectionPath {
-                archiveCollectionPath = result.moves.reduce(path) { $1.remap($0) }
-            }
+            expandedArchiveCollections = Set(expandedArchiveCollections.map { path in
+                result.moves.reduce(path) { $1.remap($0) }
+            })
             archiveCollections = result.inventory.collections
             attachmentPreviewURL = nil
             loadedDocPath = nil
