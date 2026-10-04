@@ -25,19 +25,19 @@ struct EntryListView: View {
 
     private var title: String {
         if model.isPinnedListContext {
-            return String(localized: "固定页面 (\(model.visibleEntries.count))")
+            return String(localized: "固定页面 (\(model.visibleEntryCount))")
         }
         switch model.pane {
         case .type(let type):
-            return String(localized: "\(AppPresentation.entryTypeLabel(type)) (\(model.visibleEntries.count))")
+            return String(localized: "\(AppPresentation.entryTypeLabel(type)) (\(model.visibleEntryCount))")
         case .theme(let name):
-            return String(localized: "标签：\(name) (\(model.visibleEntries.count))")
+            return String(localized: "标签：\(name) (\(model.visibleEntryCount))")
         case .themesIndex:
             return String(localized: "标签")
         case .trash:
             return String(localized: "回收站")
         case .savedView(let id):
-            return String(localized: "\(model.savedView(id)?.name ?? String(localized: "视图")) (\(model.visibleEntries.count))")
+            return String(localized: "\(model.savedView(id)?.name ?? String(localized: "视图")) (\(model.visibleEntryCount))")
         }
     }
 
@@ -47,6 +47,7 @@ struct EntryListView: View {
             if !model.isPinnedListContext {
                 sortButton
                 filterButton
+                ArchiveGroupingMenu(model: model)
             }
         }
         .padding(8)

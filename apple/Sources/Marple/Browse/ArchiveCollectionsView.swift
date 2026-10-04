@@ -14,18 +14,20 @@ struct ArchiveCollectionsView: View {
             }
         }
         .buttonStyle(.borderless)
-        .alert("重命名合集", isPresented: Binding(get: { model.archiveCollectionRenamePath != nil }, set: { if !$0 { model.archiveCollectionRenamePath = nil } })) {
+        .alert(model.archiveCollectionAssignPaths == nil ? String(localized: "重命名合集") : String(localized: "设置合集"), isPresented: Binding(get: { model.archiveCollectionRenamePath != nil || model.archiveCollectionAssignPaths != nil }, set: { if !$0 { model.archiveCollectionRenamePath = nil; model.archiveCollectionAssignPaths = nil } })) {
             TextField("名称", text: $model.archiveCollectionRenameName)
-            Button("取消", role: .cancel) { model.archiveCollectionRenamePath = nil }
+            Button("取消", role: .cancel) { model.archiveCollectionRenamePath = nil; model.archiveCollectionAssignPaths = nil }
             Button("保存") {
-                guard let path = model.archiveCollectionRenamePath else { return }
+                let paths = model.archiveCollectionAssignPaths ?? model.archiveCollectionRenamePath.map { [$0] } ?? []
+                let action = model.archiveCollectionAssignPaths == nil ? "rename" : "assign"
                 let name = model.archiveCollectionRenameName
                 model.archiveCollectionRenamePath = nil
+                model.archiveCollectionAssignPaths = nil
                 Task {
-                    do { _ = try await model.performArchiveCollection(.init(action: "rename", paths: [path], name: name)) }
+                    do { _ = try await model.performArchiveCollection(.init(action: action, paths: paths, name: name)) }
                     catch { model.archiveCollectionError = String(describing: error) }
                 }
-            }
+            }.disabled(model.archiveCollectionRenameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 }

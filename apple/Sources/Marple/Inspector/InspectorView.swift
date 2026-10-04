@@ -462,6 +462,19 @@ private struct InspectorInfoRowsView: View {
     let entry: Entry
 
     var body: some View {
+        if entry.type == .archive {
+            FieldRow("合集") {
+                Menu(model.archiveFields[entry.path]?["collection"]?.first ?? String(localized: "未填写")) {
+                    Button("移出合集") { model.moveArchives([entry.path], to: nil) }
+                    ForEach(model.archiveCollections) { group in
+                        Button(group.title) { model.moveArchives([entry.path], to: group.title) }
+                    }
+                    Divider()
+                    Button("组成新合集") { model.formArchiveCollection([entry.path]) }
+                }
+                .disabled(model.archiveCollectionBusy)
+            }
+        }
         ForEach(Array(inspectorInfoRows(for: entry, in: model.entries, localise: model.localisation, archiveManifest: model.openArchiveManifest).enumerated()), id: \.offset) { _, row in
             switch row {
             case .rating:

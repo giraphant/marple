@@ -107,6 +107,7 @@ public struct PersistedState: Codable, Sendable, Equatable {
     /// Saved smart-folder views (QUA-127). App state like workspaces/tabs —
     /// UserDefaults, never SQLite. Optional so blobs predating the field decode.
     public var savedViews: [SavedView]?
+    public var archiveGrouping: String?
 
     public init(browsePane: Pane, isBrowsing: Bool, tabs: [PersistedTab], activeIndex: Int,
                 sortClauses: [SortClause], filterClauses: [FilterClause],
@@ -115,7 +116,7 @@ public struct PersistedState: Codable, Sendable, Equatable {
                 spaces: [PersistedWorkspaceSpace]? = nil,
                 activeSpaceID: UUID? = nil,
                 counts: [EntryType: Int]? = nil,
-                savedViews: [SavedView]? = nil) {
+                savedViews: [SavedView]? = nil, archiveGrouping: String? = nil) {
         self.browsePane = browsePane; self.isBrowsing = isBrowsing
         self.tabs = tabs; self.activeIndex = activeIndex
         self.sortClauses = sortClauses; self.filterClauses = filterClauses
@@ -125,6 +126,7 @@ public struct PersistedState: Codable, Sendable, Equatable {
         self.activeSpaceID = activeSpaceID
         self.counts = counts
         self.savedViews = savedViews
+        self.archiveGrouping = archiveGrouping
     }
 
     public func makeWorkspace() -> Workspace? {

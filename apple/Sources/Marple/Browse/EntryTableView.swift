@@ -51,9 +51,6 @@ struct EntryTableView: NSViewRepresentable {
                 }
             }
             table.headerView?.menu = menu
-            table.menuForBackground = { [weak coordinator = self] in
-                coordinator.flatMap { BrowseEntryMenu.background(model: $0.model) }
-            }
             table.menuForRows = { [weak self] rows in
                 guard let self else { return nil }
                 return BrowseEntryMenu.make(entries: rows.compactMap {
@@ -217,7 +214,7 @@ struct EntryTableView: NSViewRepresentable {
         }
 
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-            guard entries.indices.contains(row) else { return nil }
+            guard entries.indices.contains(row), !entries[row].isArchiveCollection else { return nil }
             let item = NSPasteboardItem()
             item.setString("entry:\(entries[row].path)", forType: SidebarDragPasteboard.tabItem)
             return item

@@ -39,6 +39,7 @@ struct EntryGridView: View {
 
     private var header: some View {
         HStack(spacing: Space.s5) {
+            ArchiveGroupingMenu(model: model)
             Spacer(minLength: Space.s4)
 
             HStack(spacing: Space.s2) {
@@ -49,7 +50,7 @@ struct EntryGridView: View {
                 Image(systemName: "rectangle.grid.1x2").foregroundStyle(.secondary)
             }
 
-            Text("\(model.visibleEntries.count)")
+            Text("\(model.visibleEntryCount)")
                 .font(Typo.caption)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()

@@ -114,7 +114,8 @@ runtime responsibilities (indexer, search, semantic search included).
 
 ## Archive collections
 
-Archive membership can be managed through physical directories marked by `collection.md`.
-Use mixed Archive/collection rows, selection context menus and drag-to-group, or `marple-cli collections list/create/rename/move/status`.
-See [the collection contract and CLI examples](docs/archive-collections.md) for dry runs,
-reference updates, concurrency and recovery. These are independent of sidebar folders.
+Archive membership is a single optional `collection` field in each `archive.md`.
+Use the grouping menu, selection context menus, inspector or `marple-cli collections
+list/create/assign/remove/rename/status`. Membership edits keep document paths and originals unchanged.
+See [the collection contract and CLI examples](docs/archive-collections.md) for grouping,
+legacy vaults, dry runs, concurrency and recovery.

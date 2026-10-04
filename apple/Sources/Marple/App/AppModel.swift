@@ -106,7 +106,7 @@ final class AppModel {
         }
         guard !archiveCollectionBusy else { return }
         await reloadArchiveCollections()
-        // A watcher may already have reconciled a collection move while UI
+        // A watcher may already have reconciled a collection edit while UI
         // publication was suppressed. A zero-change pass still owes a reload.
         guard let stats, archiveCollectionNeedsIndexReload || stats.upserted + stats.removed > 0 else { return }
         await loadIndex(pass: myPass)
@@ -169,6 +169,13 @@ final class AppModel {
     // The computed workspace/isBrowsing properties below preserve the previous
     // single-workspace call sites by pointing them at the active Space.
     var archiveCollections: [ArchiveCollection] = []
+    var archiveFields: [String: [String: [String]]] = [:]
+    var archiveGrouping: String? = "collection" {
+        didSet {
+            if archiveGrouping != oldValue { expandedArchiveCollections.removeAll(); persist() }
+        }
+    }
+    var archiveCollectionAssignPaths: [String]?
     var expandedArchiveCollections: Set<String> = []
     var archiveCollectionRenamePath: String?
     var archiveCollectionRenameName = ""
@@ -367,22 +374,20 @@ final class AppModel {
     var visibleEntries: [Entry] {
         guard isPinnedListContext else {
             let visible = catalog.visibleEntries
-            guard pane == .type(.archive) else { return visible }
-            let grouped = Set(archiveCollections.flatMap(\.members))
-            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-            let folders = archiveCollections.compactMap { group -> Entry? in
-                let member = visible.first { group.members.contains($0.path) }
-                guard query.isEmpty || member != nil || group.title.localizedCaseInsensitiveContains(query) else { return nil }
-                return Entry(path: group.path + "/collection.md", type: .archive, title: group.title,
+            guard pane == .type(.archive), archiveGrouping != nil else { return visible }
+            let groups = archiveBrowseGroups
+            let byPath = Dictionary(uniqueKeysWithValues: visible.map { ($0.path, $0) })
+            let headers = groups.map { group in
+                Entry(path: group.entryPath, type: .archive, title: group.title,
                     author: [], year: nil, ratingScore: 0,
-                    themes: [], preview: String(localized: "\(group.members.count) 个档案"),
-                    hasPDF: false)
+                    themes: [], preview: String(localized: "\(group.members.count) 个档案"), hasPDF: false)
             }
-            let counts = Dictionary(uniqueKeysWithValues: archiveCollections.map { ($0.path + "/collection.md", $0.members.count) })
-            let roots = sortEntries(visible.filter { !grouped.contains($0.path) } + folders, by: activeSortClauses, memberCounts: counts)
-            return roots.flatMap { entry -> [Entry] in
-                guard let group = archiveCollection(at: entry.path), expandedArchiveCollections.contains(group.path) else { return [entry] }
-                return [entry] + sortEntries(visible.filter { group.members.contains($0.path) }, by: activeSortClauses)
+            let counts = Dictionary(uniqueKeysWithValues: groups.map { ($0.entryPath, $0.members.count) })
+            let groupsByPath = Dictionary(uniqueKeysWithValues: groups.map { ($0.entryPath, $0) })
+            let roots = headers + visible.filter { $0.type != .archive }
+            return sortEntries(roots, by: activeSortClauses, memberCounts: counts).flatMap { header -> [Entry] in
+                guard let group = groupsByPath[header.path], expandedArchiveCollections.contains(group.id) else { return [header] }
+                return [header] + group.members.compactMap { byPath[$0] }
             }
         }
         let paths = tabs.filter(\.pinned).compactMap { $0.identityLocation.openPath }
@@ -644,6 +649,7 @@ final class AppModel {
             filterClauses = s.filterClauses
             filterMatch = s.filterMatch
             browseMode = BrowseMode(rawValue: s.browseMode) ?? .grid
+            if let grouping = s.archiveGrouping { archiveGrouping = grouping.isEmpty ? nil : grouping }
         }
         if spaces.isEmpty {
             let initial = WorkspaceSpace(name: String(localized: "空间 1"), workspace: nil, isBrowsing: true)
@@ -738,7 +744,7 @@ final class AppModel {
             spaces: savedSpaces,
             activeSpaceID: activeSavedSpace?.id,
             counts: persistedCounts,
-            savedViews: savedViews))
+            savedViews: savedViews, archiveGrouping: archiveGrouping ?? ""))
     }
 
     // MARK: type order persistence
@@ -2896,15 +2902,13 @@ final class AppModel {
     }
 }
 
-// Archive collections are physical directories, independent of sidebar folders.
+// Archive collection membership is stored in each document, independent of its path.
 extension AppModel {
     func reloadArchiveCollections() async {
         let store = ArchiveCollections(workspaceRoot: workspaceRoot)
         do {
             let inventory = try await Task.detached { try store.inventory() }.value
-            archiveCollections = inventory.collections
-            archiveCollectionError = inventory.issues.isEmpty ? nil : inventory.issues.joined(separator: "\n")
-            expandedArchiveCollections.formIntersection(archiveCollections.map(\.path))
+            applyArchiveInventory(inventory)
         } catch { archiveCollectionError = String(describing: error) }
     }
 
@@ -2923,22 +2927,13 @@ extension AppModel {
         let result = try await Task.detached(priority: .userInitiated) { try store.execute(request) }.value
         if writes && !result.replayed {
             archiveCollectionNeedsIndexReload = true
-            searchTask?.cancel()
-            catalog.remapArchivePaths(result.moves)
-            searchHits = searchHits.map { hit in
-                let path = result.moves.first(where: { $0.remap(hit.entry.path) != hit.entry.path })?.remap(hit.entry.path) ?? hit.entry.path
-                return SearchHit(entry: hit.entry.with(path: path), score: hit.score, snippet: hit.snippet, source: hit.source)
+            let wasExpanded = archiveBrowseGroups.first { $0.value == command.paths.first }
+                .map { expandedArchiveCollections.contains($0.id) } ?? false
+            applyArchiveInventory(result.inventory)
+            if command.action == "rename", wasExpanded,
+               let renamed = archiveBrowseGroups.first(where: { $0.value == command.name }) {
+                expandedArchiveCollections.insert(renamed.id)
             }
-            rebuildIndexDerived()
-            withPersistenceBatch {
-                for i in spaces.indices { spaces[i].workspace?.remapArchivePaths(result.moves) }
-            }
-            expandedArchiveCollections = Set(expandedArchiveCollections.map { path in
-                result.moves.reduce(path) { $1.remap($0) }
-            })
-            archiveCollections = result.inventory.collections
-            attachmentPreviewURL = nil
-            loadedDocPath = nil
             archiveCollectionBusy = false
             await cliRefreshIndex()
             await reloadOpen()
@@ -2946,9 +2941,9 @@ extension AppModel {
         return result
     }
 
-    func moveArchives(_ paths: [String], to directory: String) {
+    func moveArchives(_ paths: [String], to collection: String?) {
         Task {
-            do { _ = try await performArchiveCollection(.init(action: "move", paths: paths, destination: directory)) }
+            do { _ = try await performArchiveCollection(.init(action: collection == nil ? "remove" : "assign", paths: paths, name: collection)) }
             catch { archiveCollectionError = String(describing: error) }
         }
     }

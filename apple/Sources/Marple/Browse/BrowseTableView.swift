@@ -19,13 +19,12 @@ final class BrowseTableView: NSTableView {
         if event.keyCode == 36, selectedRow >= 0 { onOpenRow?(selectedRow); return }
         super.keyDown(with: event)
     }
-    var menuForBackground: (() -> NSMenu?)?
     var menuForRows: ((IndexSet) -> NSMenu?)?
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let clicked = row(at: convert(event.locationInWindow, from: nil))
         guard clicked >= 0, clicked < numberOfRows,
-              delegate?.tableView?(self, shouldSelectRow: clicked) != false else { return menuForBackground?() }
+              delegate?.tableView?(self, shouldSelectRow: clicked) != false else { return nil }
         window?.makeFirstResponder(self)
         if !selectedRowIndexes.contains(clicked) {
             selectRowIndexes(IndexSet(integer: clicked), byExtendingSelection: false)
@@ -35,22 +34,22 @@ final class BrowseTableView: NSTableView {
 }
 
 @MainActor enum BrowseEntryMenu {
-    static func background(model: AppModel) -> NSMenu? {
-        guard model.pane == .type(.archive), !model.isPinnedListContext else { return nil }
-        let menu = NSMenu()
-        menu.addItem(ActionItem(title: String(localized: "新建空合集")) { model.formArchiveCollection([]) })
-        return menu
-    }
-
     static func make(entries: [Entry], model: AppModel) -> NSMenu? {
+        var seen = Set<String>()
+        let entries = entries.filter { seen.insert($0.path).inserted }
         guard !entries.isEmpty else { return nil }
         let menu = NSMenu()
         if entries.contains(where: \.isArchiveCollection) {
             guard entries.count == 1, let group = model.archiveCollection(at: entries[0].path) else { return nil }
-            menu.addItem(ActionItem(title: model.expandedArchiveCollections.contains(group.path) ? String(localized: "收起合集") : String(localized: "展开合集")) { model.toggleArchiveCollection(entries[0].path) })
-            menu.addItem(ActionItem(title: String(localized: "重命名合集")) { model.renameArchiveCollection(group) })
-            menu.addItem(ActionItem(title: String(localized: "编辑合集说明")) {
-                Task { try? await model.client.openInEditor(path: entries[0].path, app: "") }
+            menu.addItem(ActionItem(title: model.expandedArchiveCollections.contains(group.id) ? String(localized: "收起分组") : String(localized: "展开分组")) { model.toggleArchiveCollection(entries[0].path) })
+            if group.field == "collection", group.value != nil {
+                menu.addItem(ActionItem(title: String(localized: "重命名合集")) { model.renameArchiveCollection(group) })
+            }
+            let paths = Set(group.members)
+            let members = model.entries.filter { paths.contains($0.path) }
+            appendArchiveActions(to: menu, entries: members, model: model)
+            menu.addItem(ActionItem(title: String(localized: "在新页面页打开")) {
+                Task { for entry in members { await model.openInNewTab(entry.path) } }
             })
             return menu
         }
@@ -72,7 +71,7 @@ final class BrowseTableView: NSTableView {
 
     static func appendArchiveActions(to menu: NSMenu, entries: [Entry], model: AppModel) {
         guard !entries.isEmpty, entries.allSatisfy({ $0.type == .archive && !$0.isArchiveCollection }) else { return }
-        let paths = entries.map(\.path)
+        let paths = Array(Set(entries.map(\.path))).sorted()
         let create = ActionItem(title: String(localized: "组成新合集")) { model.formArchiveCollection(paths) }
         create.isEnabled = !model.archiveCollectionBusy
         menu.addItem(create)
@@ -87,7 +86,7 @@ final class BrowseTableView: NSTableView {
             move.submenu = submenu; menu.addItem(move)
         }
         if paths.contains(where: { path in model.archiveCollections.contains { $0.members.contains(path) } }) {
-            let item = ActionItem(title: String(localized: "移出合集")) { model.moveArchives(paths, to: ArchiveCollections.base) }
+            let item = ActionItem(title: String(localized: "移出合集")) { model.moveArchives(paths, to: nil) }
             item.isEnabled = !model.archiveCollectionBusy; menu.addItem(item)
         }
         menu.addItem(.separator())

@@ -94,6 +94,25 @@ public enum FrontmatterPatch {
         setSequence(raw, key: "themes", values: themes)
     }
 
+    /// Single-choice collection. Replace the whole field, including a folded
+    /// scalar, while keeping other metadata and the document body untouched.
+    public static func setCollection(_ raw: String, value: String?) -> String {
+        guard var p = parse(raw) else { return raw }
+        let newline = p.lines[0].hasSuffix("\r") ? "\r" : ""
+        let replacement = value.map { ["collection: \(yamlScalar($0))" + newline] } ?? []
+        if let start = lineIndex(of: "collection", in: p) {
+            var end = start + 1
+            while end < p.closeIdx,
+                  p.lines[end].hasPrefix(" ") || p.lines[end].hasPrefix("\t") {
+                end += 1
+            }
+            p.lines.replaceSubrange(start..<end, with: replacement)
+        } else {
+            p.lines.insert(contentsOf: replacement, at: p.closeIdx)
+        }
+        return reassemble(p)
+    }
+
     /// Rewrite (or insert) `key:` as a YAML block list. Empty values remove
     /// the field entirely (and any block-list continuation lines).
     ///

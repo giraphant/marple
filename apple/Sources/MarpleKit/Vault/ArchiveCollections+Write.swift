@@ -54,32 +54,21 @@ extension ArchiveCollections {
         let planned = try plan(command)
         var journal = Journal(command: command, moves: planned.result.moves, edits: planned.edits, result: nil)
         try JSONEncoder().encode(journal).write(to: journalURL, options: .atomic)
-        var moved: [ArchiveCollectionChange] = [], written: [Edit] = []
-        var created: URL?
+        var written: [Edit] = []
         do {
-            // Recheck text before moving any directories. Writers that use our
+            // Recheck text before writing. Writers that use our
             // lock cannot race; uncoordinated edits are checked again per write.
             for edit in planned.edits {
                 let url = root.appendingPathComponent(edit.path)
                 guard (try? Data(contentsOf: url)) == edit.before else { throw ArchiveCollectionError("conflict", "File changed: \(edit.path)") }
             }
-            if command.action == "create" {
-                let target = try checkedURL(Self.base + "/" + validateName(command.name))
-                try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
-                try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
-                created = target
-            }
-            for move in planned.result.moves {
-                try FileManager.default.moveItem(at: try checkedURL(move.from), to: try checkedURL(move.to))
-                moved.append(move)
-            }
             for edit in planned.edits {
-                let url = root.appendingPathComponent(ArchiveCollectionReferences.remap(edit.path, moves: moved))
+                let url = root.appendingPathComponent(edit.path)
                 guard (try? Data(contentsOf: url)) == edit.before else { throw ArchiveCollectionError("conflict", "File changed: \(edit.path)") }
                 try edit.after.write(to: url, options: .atomic)
                 written.append(edit)
             }
-            let result = ArchiveCollectionResult(inventory: try inventory(), moves: moved,
+            let result = ArchiveCollectionResult(inventory: try inventory(), moves: [],
                 updatedReferences: planned.result.updatedReferences, dryRun: false, requestID: command.requestID)
             journal.result = result
             try JSONEncoder().encode(journal).write(to: journalURL, options: .atomic)
@@ -89,25 +78,11 @@ extension ArchiveCollections {
             // external edit to make a failed operation appear transactional.
             var rollbackOK = true
             for edit in written.reversed() {
-                let url = root.appendingPathComponent(ArchiveCollectionReferences.remap(edit.path, moves: moved))
+                let url = root.appendingPathComponent(edit.path)
                 do {
                     guard try Data(contentsOf: url) == edit.after else { rollbackOK = false; continue }
                     if let before = edit.before { try before.write(to: url, options: .atomic) }
                     else { try FileManager.default.removeItem(at: url) }
-                } catch { rollbackOK = false }
-            }
-            if rollbackOK {
-                for move in moved.reversed() {
-                    do { try FileManager.default.moveItem(at: try checkedURL(move.to), to: try checkedURL(move.from)) }
-                    catch { rollbackOK = false; break }
-                }
-            }
-            if rollbackOK, let created {
-                do {
-                    guard try FileManager.default.contentsOfDirectory(atPath: created.path).isEmpty else {
-                        throw ArchiveCollectionError("conflict", "New collection received external files")
-                    }
-                    try FileManager.default.removeItem(at: created)
                 } catch { rollbackOK = false }
             }
             if rollbackOK { try FileManager.default.removeItem(at: journalURL); throw error }
@@ -134,79 +109,64 @@ extension ArchiveCollections {
 
     private func plan(_ command: ArchiveCollectionCommand) throws -> (result: ArchiveCollectionResult, edits: [Edit]) {
         let inventory = try inventory()
-        guard inventory.issues.isEmpty else { throw ArchiveCollectionError("invalid_structure", inventory.issues.joined(separator: "\n")) }
-        let fm = FileManager.default
-        var moves: [ArchiveCollectionChange] = [], edits: [Edit] = []
-        let groups = Set(inventory.collections.map(\.path))
         let members = Set(inventory.ungrouped + inventory.collections.flatMap(\.members))
+        let paths: [String]
+        let value: String?
         switch command.action {
-        case "create":
-            let name = try validateName(command.name)
-            let target = Self.base + "/" + name
-            try ensureAbsent(target)
-            edits.append(.init(path: target + "/collection.md", before: nil, after: Data("# \(name)\n".utf8)))
-            moves = try memberMoves(command.paths, to: target, members: members, newCollection: true)
+        case "create", "assign":
+            value = try validateName(command.name ?? command.destination)
+            paths = command.paths
         case "rename":
-            guard command.paths.count == 1 else { throw ArchiveCollectionError("bad_request", "Rename requires one collection directory") }
-            let source = relative(try checkedURL(command.paths[0]))
-            guard groups.contains(source) else { throw ArchiveCollectionError("not_found", "Not a collection: \(source)") }
-            let name = try validateName(command.name)
-            let target = Self.base + "/" + name
-            guard target != source else { throw ArchiveCollectionError("bad_request", "Collection already has this directory name") }
-            try ensureAbsent(target)
-            moves = [.init(from: source, to: target)]
-        case "move":
-            guard !command.paths.isEmpty, let destination = command.destination else { throw ArchiveCollectionError("bad_request", "Move requires Archive paths and a destination") }
-            let dest = relative(try checkedURL(destination))
-            guard dest == Self.base || groups.contains(dest) else { throw ArchiveCollectionError("not_found", "Destination is not a collection or archive root: \(dest)") }
-            moves = try memberMoves(command.paths, to: dest, members: members)
-        default: throw ArchiveCollectionError("bad_request", "Unknown collection action: \(command.action)")
-        }
-        if !moves.isEmpty {
-            guard let walker = fm.enumerator(at: root.appendingPathComponent("vault"), includingPropertiesForKeys: [.isSymbolicLinkKey], options: [.skipsHiddenFiles]) else { throw ArchiveCollectionError("not_found", "Vault missing") }
-            for case let url as URL in walker {
-                if url.lastPathComponent == "originals" || (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true { walker.skipDescendants(); continue }
-                guard url.pathExtension == "md", regular(url) else { continue }
-                let before = try Data(contentsOf: url)
-                guard let text = String(data: before, encoding: .utf8) else { continue }
-                let path = relative(url)
-                var changed = ArchiveCollectionReferences.rewrite(text, at: path, moves: moves)
-                if command.action == "rename", path == moves[0].from + "/collection.md" {
-                    let regex = try! NSRegularExpression(pattern: #"(?m)^# [^\r\n]*"#)
-                    if let match = regex.firstMatch(in: changed, range: NSRange(changed.startIndex..., in: changed)), let range = Range(match.range, in: changed) {
-                        changed.replaceSubrange(range, with: "# " + (try validateName(command.name)))
-                    } else { changed = "# \(try validateName(command.name))\n\n" + changed }
-                }
-                if changed != text { edits.append(.init(path: path, before: before, after: Data(changed.utf8))) }
+            guard command.paths.count == 1,
+                  let group = inventory.collections.first(where: { $0.path == command.paths[0] }) else {
+                throw ArchiveCollectionError("not_found", "Rename requires an existing collection name")
             }
+            value = try validateName(command.name)
+            paths = group.members
+        case "remove":
+            value = nil
+            paths = command.paths
+        case "move":
+            // A previous client must never mistake a filesystem destination for
+            // a new field value. New callers use assign/remove explicitly.
+            throw ArchiveCollectionError("bad_request", "Directory collections have been replaced by collection fields; use assign or remove")
+        default:
+            throw ArchiveCollectionError("bad_request", "Unknown collection action: \(command.action)")
         }
-        return (.init(inventory: inventory, moves: moves, updatedReferences: edits.map(\.path), dryRun: command.dryRun, requestID: command.requestID), edits)
-    }
-
-    private func memberMoves(_ paths: [String], to dest: String, members: Set<String>, newCollection: Bool = false) throws -> [ArchiveCollectionChange] {
-        var moves: [ArchiveCollectionChange] = []
-        var sources = Set<String>(), destinations = Set<String>()
-        for path in paths {
-            var url = try checkedURL(path)
-            if url.lastPathComponent == "archive.md" { url.deleteLastPathComponent() }
-            let source = relative(url)
-            guard members.contains(source + "/archive.md"), sources.insert(source).inserted else { throw ArchiveCollectionError("bad_request", "Not a unique Archive: \(path)") }
-            let target = dest + "/" + url.lastPathComponent
-            guard target != source else { continue }
-            guard destinations.insert(target.lowercased()).inserted else { throw ArchiveCollectionError("name_conflict", "Duplicate destination: \(target)") }
-            if !newCollection { try ensureAbsent(target) }
-            moves.append(.init(from: source, to: target))
+        guard !paths.isEmpty else {
+            throw ArchiveCollectionError("bad_request", "Choose at least one Archive; empty collections are not stored")
         }
-        return moves
-    }
-
-    private func ensureAbsent(_ path: String) throws {
-        let url = try checkedURL(path)
-        let parent = url.deletingLastPathComponent()
-        if parent.path == baseURL.path && !FileManager.default.fileExists(atPath: parent.path) { return }
-        let siblings = try FileManager.default.contentsOfDirectory(atPath: parent.path)
-        guard !siblings.contains(where: { $0.compare(url.lastPathComponent, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) else {
-            throw ArchiveCollectionError("name_conflict", "Destination exists: \(path)")
+        var edits: [Edit] = [], seen = Set<String>()
+        for supplied in paths {
+            var url = try checkedURL(supplied)
+            if url.lastPathComponent != "archive.md" { url.appendPathComponent("archive.md") }
+            let path = relative(url)
+            guard members.contains(path), seen.insert(path).inserted else {
+                throw ArchiveCollectionError("bad_request", "Not a unique Archive: \(supplied)")
+            }
+            let before = try Data(contentsOf: url)
+            guard let raw = String(data: before, encoding: .utf8),
+                  let frontmatter = Frontmatter.split(raw).frontmatter else {
+                throw ArchiveCollectionError("invalid_metadata", "Archive needs YAML frontmatter: \(path)")
+            }
+            let pairs = YamlFrontmatter.parseMapping(frontmatter)
+            guard pairs.filter({ $0.0 == "collection" }).count <= 1 else {
+                throw ArchiveCollectionError("invalid_metadata", "Duplicate collection field: \(path)")
+            }
+            if let old = field(pairs, "collection") {
+                switch old {
+                case .string, .null: break
+                default: throw ArchiveCollectionError("invalid_metadata", "collection must be a single text value: \(path)")
+                }
+            }
+            let after = FrontmatterPatch.setCollection(raw, value: value)
+            // Validate the surgical patch before any file in the batch is written.
+            let parsed = YamlFrontmatter.parseMapping(Frontmatter.split(after).frontmatter ?? "")
+            guard truthyText(parsed, "collection") == value else {
+                throw ArchiveCollectionError("invalid_metadata", "Cannot update collection: \(path)")
+            }
+            if after != raw { edits.append(.init(path: path, before: before, after: Data(after.utf8))) }
         }
+        return (.init(inventory: inventory, moves: [], updatedReferences: edits.map(\.path), dryRun: command.dryRun, requestID: command.requestID), edits)
     }
 }

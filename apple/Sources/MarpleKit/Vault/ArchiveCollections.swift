@@ -1,7 +1,7 @@
 import Foundation
 
-/// Folder-backed groups. Only direct children of vault/archives may be groups;
-/// neither a group manifest nor a second membership list is stored.
+/// A collection is a single optional frontmatter value, independent of file location.
+/// `path` is retained as the wire identifier; its value is now the collection name.
 public struct ArchiveCollection: Codable, Equatable, Sendable, Identifiable {
     public var id: String { path }
     public let path: String
@@ -13,6 +13,7 @@ public struct ArchiveCollectionInventory: Codable, Equatable, Sendable {
     public let collections: [ArchiveCollection]
     public let ungrouped: [String]
     public let issues: [String]
+    public var fields: [String: [String: [String]]]? = nil
 }
 
 public struct ArchiveCollectionCommand: Codable, Equatable, Sendable {
@@ -33,9 +34,6 @@ public struct ArchiveCollectionCommand: Codable, Equatable, Sendable {
 public struct ArchiveCollectionChange: Codable, Equatable, Sendable {
     public let from: String
     public let to: String
-    public func remap(_ path: String) -> String {
-        path == from ? to : path.hasPrefix(from + "/") ? to + path.dropFirst(from.count) : path
-    }
 }
 
 public struct ArchiveCollectionResult: Codable, Sendable {
@@ -90,41 +88,53 @@ public struct ArchiveCollections: Sendable {
     }
     public func inventory() throws -> ArchiveCollectionInventory {
         guard FileManager.default.fileExists(atPath: baseURL.path) else {
-            return .init(collections: [], ungrouped: [], issues: [])
+            return .init(collections: [], ungrouped: [], issues: [], fields: [:])
         }
         _ = try checkedURL(Self.base)
-        var collections: [ArchiveCollection] = [], ungrouped: [String] = [], issues: [String] = []
-        for directory in try directories(baseURL) {
-            let archive = regular(directory.appendingPathComponent("archive.md"))
-            let collection = regular(directory.appendingPathComponent("collection.md"))
-            if archive && collection {
-                issues.append("Ambiguous Archive/Collection: \(relative(directory))"); continue
-            }
-            if archive { ungrouped.append(relative(directory.appendingPathComponent("archive.md"))); continue }
-            guard collection else { continue }
-            var members: [String] = []
-            for child in try directories(directory) {
-                if regular(child.appendingPathComponent("collection.md")) {
-                    issues.append("Nested collection is unsupported: \(relative(child))")
-                } else if regular(child.appendingPathComponent("archive.md")) {
-                    members.append(relative(child.appendingPathComponent("archive.md")))
+        var metadata: [String: [String: [String]]] = [:]
+        var issues: [String] = []
+        // Read legacy nested archives too. Directory names and collection.md never
+        // contribute membership; only each archive's own collection field does.
+        func visit(_ directory: URL) throws {
+            let archive = directory.appendingPathComponent("archive.md")
+            if regular(archive) {
+                let raw = try String(contentsOf: archive, encoding: .utf8)
+                let pairs = YamlFrontmatter.parseMapping(Frontmatter.split(raw).frontmatter ?? "")
+                let path = relative(archive)
+                var fields: [String: [String]] = [:]
+                for (key, value) in pairs {
+                    if key == "collection" {
+                        switch value {
+                        case .string, .null: break
+                        default:
+                            issues.append("collection must be a single text value: \(path)")
+                            continue
+                        }
+                    }
+                    fields[key] = ArchiveFieldGroup.values(value)
                 }
+                metadata[path] = fields
+                return
             }
-            let text = try String(contentsOf: directory.appendingPathComponent("collection.md"), encoding: .utf8)
-            let title = Frontmatter.split(text).body.split(separator: "\n").first { $0.hasPrefix("# ") }
-                .map { String($0.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines) }
-            collections.append(.init(path: relative(directory), title: title?.isEmpty == false ? title! : directory.lastPathComponent, members: members))
+            for child in try directories(directory) where child.lastPathComponent != "originals" {
+                try visit(child)
+            }
         }
-        let pages = ungrouped + collections.flatMap(\.members)
-        let slugs = Dictionary(grouping: pages, by: { ($0 as NSString).deletingLastPathComponent.components(separatedBy: "/").last!.lowercased() })
-        for (slug, paths) in slugs where paths.count > 1 { issues.append("Duplicate Archive slug: \(slug)") }
-        return .init(collections: collections, ungrouped: ungrouped, issues: issues)
+        try visit(baseURL)
+        var members: [String: [String]] = [:], ungrouped: [String] = []
+        for path in metadata.keys.sorted() {
+            if let name = metadata[path]?["collection"]?.first { members[name, default: []].append(path) }
+            else { ungrouped.append(path) }
+        }
+        let collections = members.keys.sorted().map {
+            ArchiveCollection(path: $0, title: $0, members: members[$0]!)
+        }
+        return .init(collections: collections, ungrouped: ungrouped, issues: issues, fields: metadata)
     }
     func validateName(_ name: String?) throws -> String {
         guard let value = name?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty,
-              !value.hasPrefix("."), !value.contains("/"), !value.contains(":"), !value.contains("\\"),
               !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
-            throw ArchiveCollectionError("invalid_name", "A collection needs a nonempty, single directory name")
+            throw ArchiveCollectionError("invalid_name", "A collection needs a nonempty, single-line name")
         }
         return value
     }

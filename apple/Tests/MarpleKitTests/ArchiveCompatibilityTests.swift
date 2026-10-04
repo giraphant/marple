@@ -136,6 +136,7 @@ import Testing
         #expect(VaultConformance.check(archive.with(created: .some(nil)), against: schema)?.missingRequired == ["created"])
         let client = StubVaultClient(entries: [archive], texts: [path: full])
         let model = AppModel(client: client)
+        model.archiveGrouping = nil
         await model.loadIndex()
         model.select(pane: .type(.archive))
         for _ in 0..<200 where model.visibleEntries.isEmpty {

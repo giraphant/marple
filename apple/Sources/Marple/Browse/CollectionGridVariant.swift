@@ -30,16 +30,14 @@ struct CollectionGridVariant: NSViewRepresentable {
             Task { await coordinator?.model.open(entry.path) }
         }
         collectionView.onDragPath = { [weak coordinator] item in
-            coordinator?.entries[safe: item]?.path
-        }
-        collectionView.menuForBackground = { [weak coordinator] in
-            coordinator.flatMap { BrowseEntryMenu.background(model: $0.model) }
+            guard let entry = coordinator?.entries[safe: item], !entry.isArchiveCollection else { return nil }
+            return entry.path
         }
         collectionView.menuForItem = { [weak coordinator] item in
             coordinator?.contextMenu(forItem: item)
         }
         collectionView.previewURL = { [weak coordinator] item in
-            guard let coordinator, let entry = coordinator.entries[safe: item] else { return nil }
+            guard let coordinator, let entry = coordinator.entries[safe: item], !entry.isArchiveCollection else { return nil }
             if entry.type == .image {
                 return try? await coordinator.model.client.imageOriginalURL(forImageEntryPath: entry.path)
             }
@@ -154,7 +152,9 @@ struct CollectionGridVariant: NSViewRepresentable {
         /// (the same `openInSpace` the drag uses — a reliable, drag-free trigger).
         func contextMenu(forItem index: Int) -> NSMenu? {
             guard let entry = entries[safe: index] else { return nil }
-            let selected = collectionView?.selectionIndexPaths.sorted().compactMap { entries[safe: $0.item] } ?? [entry]
+            var seen = Set<String>()
+            let selected = (collectionView?.selectionIndexPaths.sorted().compactMap { entries[safe: $0.item] } ?? [entry])
+                .filter { seen.insert($0.path).inserted }
             if selected.contains(where: \.isArchiveCollection) { return BrowseEntryMenu.make(entries: selected, model: model) }
             let menu = NSMenu()
             BrowseEntryMenu.appendArchiveActions(to: menu, entries: selected, model: model)
@@ -201,7 +201,6 @@ final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDataSource,
     var onClick: ((Int) -> Void)?
     var onOpen: ((Int) -> Void)?
     var onDragPath: ((Int) -> String?)?
-    var menuForBackground: (() -> NSMenu?)?
     var menuForItem: ((Int) -> NSMenu?)?
     /// Resolve the file URL to Quick Look for an item (image original / vault .md).
     var previewURL: ((Int) async -> URL?)?
@@ -228,7 +227,7 @@ final class ClickableCollectionView: NSCollectionView, QLPreviewPanelDataSource,
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
-        guard let index = indexPathForItem(at: point)?.item else { return menuForBackground?() }
+        guard let index = indexPathForItem(at: point)?.item else { return nil }
         let path = IndexPath(item: index, section: 0)
         if !selectionIndexPaths.contains(path) { selectionIndexPaths = [path] }
         return menuForItem?(index)

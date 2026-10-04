@@ -54,9 +54,6 @@ struct EntryListTable: NSViewRepresentable {
         table.setDraggingSourceOperationMask(.move, forLocal: true)
         table.dataSource = context.coordinator
 
-        table.menuForBackground = { [weak coordinator = context.coordinator] in
-            coordinator.flatMap { BrowseEntryMenu.background(model: $0.model) }
-        }
         table.menuForRows = { [weak coordinator = context.coordinator] rows in
             coordinator?.contextMenu(for: rows)
         }
@@ -503,7 +500,7 @@ struct EntryListTable: NSViewRepresentable {
         }
 
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-            guard items.indices.contains(row), case .entryHeader(let entry) = items[row], entry.type == .archive else { return nil }
+            guard items.indices.contains(row), case .entryHeader(let entry) = items[row], entry.type == .archive, !entry.isArchiveCollection else { return nil }
             let item = NSPasteboardItem()
             item.setString("entry:\(entry.path)", forType: SidebarDragPasteboard.tabItem)
             return item
