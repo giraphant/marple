@@ -17,16 +17,20 @@ The full app and library live in [`apple/`](./apple/). See
 
 ```sh
 cd apple
-swift build
-swift run Marple
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+xcrun swift build --build-system native
+xcrun swift run --build-system native Marple
 ```
 
-Tests (this Mac has Command Line Tools, not full Xcode — swift-testing needs
-the explicit framework path):
+macOS 27 builds require full Xcode for the SwiftUI macro plugins. The bundle
+script selects the installed Xcode when the global selection still points to
+Command Line Tools. The native SwiftPM backend preserves the bundle script's
+product paths. Tests on this Mac also need the explicit Testing framework path:
 
 ```sh
 cd apple
-swift test -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift test --build-system native \
+  -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks
 ```
 
 Build a proper `.app` bundle (so the Dock icon shows up):
@@ -104,6 +108,56 @@ protection.
 `ping` reports socket-server liveness independently of the main thread. A
 successful ping with a timed-out `tabs list` identifies an unavailable model
 request path, rather than proving the UI/indexer healthy.
+
+## Terminology index
+
+Marple builds `.marple/terms.sqlite` in each vault workspace in the background
+and updates it when Markdown documents change. Settings → Index → Terminology
+Index shows term, correspondence and source counts, with refresh and rebuild
+actions. Rebuilding the ordinary or vector index does not replace this file.
+
+The index extracts Chinese–English pairs from tables under 关键概念, 关键术语,
+术语表, Key Concepts, Key Terms or Glossary headings. A row is skipped entirely
+if either term cell contains a slash (/ or ／), semicolon, 、, or a line break
+(including HTML br tags). Compound rows are never split or cross-paired.
+Multiple translations from separate single-term rows are preserved, together
+with definitions, original cell text and source paths/line numbers. Case and
+whitespace are normalized for lookup. Parser version changes automatically
+rebuild the terminology index on its next refresh, removing previously split pairs.
+
+Settings → Search has separate experimental terminology-expansion switches for
+balanced (full-text) and deep (semantic) search, both **off by default**. The current
+index stores unverified candidates: even a single concept label may describe a
+context rather than translate the foreign term. These records must not be treated
+as a validated synonym dictionary.
+When explicitly enabled, expansion defaults to two hops, adjustable from one to five.
+At each hop, each term keeps at most five counterparts ranked by the number of
+distinct source documents, with normalized term order breaking ties. If a term has
+multiple counterparts, each retained pair must occur in at least two documents;
+a sole counterpart may occur once. This check includes already visited terms,
+and an empty selection stops that branch. Repeated rows in one document count once.
+The raw index and CLI lookup retain all accepted single-term candidates and sources;
+frequency filtering only applies to search expansion.
+Broader depths can produce hundreds of queries and unrelated results. Fast search is unchanged.
+Original and expanded queries run separately, preserving surrounding query text;
+multiple matched concepts are substituted one at a time. Results are deduplicated
+by path and merged using reciprocal rank fusion. Each query keeps the existing
+300 full-text / 80 semantic candidate limits and semantic similarity threshold.
+“View all” reuses the full palette result set and preserves its search mode.
+
+With the app running and its CLI server enabled:
+
+```sh
+marple-cli terms status
+marple-cli terms lookup '惯习'
+marple-cli terms lookup 'habitus'
+marple-cli terms refresh
+marple-cli terms refresh --rebuild
+```
+
+Lookup returns deduplicated direct counterparts with all document sources. It
+refreshes changed documents first. A failed refresh/rebuild retains the previous
+committed index. To correct an extracted correspondence, edit its source table.
 
 ## Legacy
 

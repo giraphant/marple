@@ -18,6 +18,8 @@ enum CLIHandlers {
                 return try await read(req: req, model: model)
             case CLIMethod.open:
                 return try await open(req: req, model: model)
+            case CLIMethod.termsStatus, CLIMethod.termsLookup, CLIMethod.termsRefresh:
+                return try await terms(req: req, model: model)
             case CLIMethod.tabsList, CLIMethod.tabsRename, CLIMethod.tabsMove,
                  CLIMethod.foldersCreate, CLIMethod.foldersRename,
                  CLIMethod.foldersMove, CLIMethod.foldersDissolve:
@@ -54,6 +56,23 @@ enum CLIHandlers {
         }
         let hits = try await model.cliSearch(query: q, limit: req.limit ?? 20)
         return .success(CLIResponseData(entries: hits.map(toDigest)))
+    }
+
+    private static func terms(req: CLIRequest, model: AppModel) async throws -> CLIResponse {
+        guard let controller = model.termIndexController else {
+            return .failure(code: CLIErrorCode.internalError, message: "term index is unavailable")
+        }
+        if req.method == CLIMethod.termsStatus {
+            return .success(CLIResponseData(termStatus: try await controller.index.status()))
+        }
+        if req.method == CLIMethod.termsLookup {
+            guard let query = req.query, !TermParser.key(query).isEmpty else {
+                return .failure(code: CLIErrorCode.badRequest, message: "missing query")
+            }
+            _ = try await controller.refresh()
+            return .success(CLIResponseData(termMatches: try await controller.index.lookup(query)))
+        }
+        return .success(CLIResponseData(termStatus: try await controller.refresh(rebuild: req.reset == true)))
     }
 
     private static func read(req: CLIRequest, model: AppModel) async throws -> CLIResponse {

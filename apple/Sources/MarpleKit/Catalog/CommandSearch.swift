@@ -4,7 +4,7 @@ import Foundation
 /// (and `reader_core::SearchMode`). 快速 = in-memory metadata ranker;
 /// 平衡 = native FTS full-text; 深度 = semantic vectors (wired once the
 /// vector index is built).
-public enum SearchMode: String, CaseIterable, Sendable {
+public enum SearchMode: String, CaseIterable, Sendable, Codable {
     case fast, balanced, deep
 
     /// Short segment label.

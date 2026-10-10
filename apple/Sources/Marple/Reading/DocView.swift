@@ -80,6 +80,7 @@ struct DocView: View {
                     highlightQuery: model.openSearchQuery,
                     jump: model.matchJump,
                     imageURLs: model.archiveImageURLs,
+                    headingJump: model.headingJump,
                     onLinkClick: { url in
                         if let seconds = SeekURL.seconds(from: url) {
                             model.playTalk(seconds: seconds)
@@ -89,7 +90,15 @@ struct DocView: View {
                             Task { await model.follow(target) }
                             return true
                         }
-                        return model.previewAttachment(url.absoluteString)
+                        if model.previewAttachment(url.absoluteString) { return true }
+                        switch ReaderLink.resolve(url, from: model.openPath ?? "",
+                                                  workspaceRoot: model.workspaceRoot) {
+                        case .document(let path, let fragment):
+                            Task { await model.followDocumentLink(path: path, fragment: fragment) }
+                        case .external(let destination):
+                            NSWorkspace.shared.open(destination)
+                        }
+                        return true
                     }
                 )
             }

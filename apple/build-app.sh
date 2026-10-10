@@ -3,6 +3,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# macOS 27 SwiftUI uses macro plugins shipped with full Xcode, not CLT.
+# Select it for this build only; honor an explicit developer-directory override.
+if [ -z "${DEVELOPER_DIR:-}" ] && [ "$(xcode-select -p)" = "/Library/Developer/CommandLineTools" ] \
+    && [ -d /Applications/Xcode.app/Contents/Developer ]; then
+    export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+
 # CONFIG=debug (default, dev) or release. Selects the swift build flag and the
 # matching .build output dir. SIGN=1 enables Developer ID + hardened-runtime
 # codesigning (release/dist); unset keeps the old unsigned dev bundle.
@@ -47,9 +54,9 @@ SDK_BUILD_FLAGS=(--sdk "$MACOS_SDK_PATH"
 
 echo "Building ($CONFIG)..."
 if [ "$CONFIG" = "release" ]; then
-    xcrun --sdk macosx swift build -c release "${SDK_BUILD_FLAGS[@]}"
+    xcrun --sdk macosx swift build --build-system native -c release "${SDK_BUILD_FLAGS[@]}"
 else
-    xcrun --sdk macosx swift build "${SDK_BUILD_FLAGS[@]}"
+    xcrun --sdk macosx swift build --build-system native "${SDK_BUILD_FLAGS[@]}"
 fi
 
 BUILT_SDK_VERSION="$(xcrun vtool -show-build "$PKG_ROOT/Marple" | awk '$1 == "sdk" {print $2; exit}')"
@@ -252,7 +259,8 @@ echo "Run with:  open \"$APP_DIR\""
 
 # Release builds are distributed via the DMG / Homebrew cask, which puts
 # marple-cli on PATH — so only the dev (debug) flow self-symlinks here.
-if [ "$CONFIG" = "release" ]; then
+# Validation bundles can also leave the installed CLI untouched.
+if [ "$CONFIG" = "release" ] || [ "${MARPLE_SKIP_CLI_INSTALL:-}" = "1" ]; then
     exit 0
 fi
 

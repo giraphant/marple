@@ -4,16 +4,31 @@ import Foundation
 /// position and presentation mode deliberately remain view-owned.
 public struct ListContext: Hashable, Sendable, Codable {
     public var searchText: String
+    public var searchMode: SearchMode
     public var filters: [FilterClause]
     public var filterMatch: FilterMatch
     public var sorts: [SortClause]
 
     public init(searchText: String, filters: [FilterClause],
-                filterMatch: FilterMatch, sorts: [SortClause]) {
+                filterMatch: FilterMatch, sorts: [SortClause], searchMode: SearchMode = .balanced) {
         self.searchText = searchText
+        self.searchMode = searchMode
         self.filters = filters
         self.filterMatch = filterMatch
         self.sorts = sorts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case searchText, searchMode, filters, filterMatch, sorts
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        searchText = try values.decode(String.self, forKey: .searchText)
+        searchMode = try values.decodeIfPresent(SearchMode.self, forKey: .searchMode) ?? .balanced
+        filters = try values.decode([FilterClause].self, forKey: .filters)
+        filterMatch = try values.decode(FilterMatch.self, forKey: .filterMatch)
+        sorts = try values.decode([SortClause].self, forKey: .sorts)
     }
 }
 

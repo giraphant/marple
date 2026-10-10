@@ -53,6 +53,7 @@ final class AppState: ObservableObject {
                          workspaceRoot: paths.workspaceRoot)
         self.model = m
         m.cliIndexer = indexer
+        m.termIndexController = TermIndexController(workspaceRoot: paths.workspaceRoot)
         if semanticRuntimeAvailable {
             let semanticIndexController = SemanticIndexRefreshController(
                 workspaceRoot: paths.workspaceRoot,
@@ -124,6 +125,7 @@ final class AppState: ObservableObject {
                 }
             }
             await m?.loadIndex()
+            m?.termIndexController?.scheduleRefresh()
             // Now safe to expose the CLI surface — entries is published.
             self?.applyCLISetting()
             self?.cliSettingObserver = NotificationCenter.default.addObserver(

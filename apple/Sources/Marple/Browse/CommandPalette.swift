@@ -22,6 +22,7 @@ struct CommandPalette: View {
 
     @State private var query = ""
     @State private var mode: SearchMode = .fast
+    @State private var searchResults: [PaletteResult] = []
     // Computed once per (debounced) search, NOT per keystroke render — sectioning
     // over *all* matches in `body` made typing janky.
     @State private var sections: [PaletteSection] = []
@@ -244,7 +245,7 @@ struct CommandPalette: View {
             if section.total > section.top.count {
                 Button {
                     onClose()
-                    model.paletteViewAll(type: section.type, query: query)
+                    model.paletteViewAll(type: section.type, query: query, mode: mode, results: searchResults)
                 } label: {
                     Text(String(localized: "在「\(AppPresentation.entryTypeLabel(section.type))」中查看全部 \(section.total) 条 →"))
                         .font(Typo.caption)
@@ -254,6 +255,7 @@ struct CommandPalette: View {
                         .padding(.vertical, Space.s3)
                 }
                 .buttonStyle(.plain)
+                .disabled(loading)
             }
         } header: {
             HStack(spacing: Space.s3) {
@@ -327,6 +329,7 @@ struct CommandPalette: View {
     // MARK: Behavior
 
     private func clearResults() {
+        searchResults = []
         sections = []
         openMatches = []
         sourceByPath = [:]
@@ -359,6 +362,7 @@ struct CommandPalette: View {
                 openSet.contains($0.entry.path) && seenOpen.insert($0.entry.path).inserted
             }
             let rest = openSet.isEmpty ? result : result.filter { !openSet.contains($0.entry.path) }
+            searchResults = rest
             let secs = paletteSections(rest.map { (entry: $0.entry, score: $0.score) },
                                        order: model.typeOrder, promote: promote, perType: perType,
                                        minimumInlineScoreRatio: currentMode.paletteInlineScoreFloorRatio)

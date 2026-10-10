@@ -18,6 +18,8 @@ struct SettingsView: View {
                 .tabItem { Label("类型", systemImage: "tablecells") }
             SpacesSettings()
                 .tabItem { Label("空间", systemImage: "square.stack") }
+            SearchSettings()
+                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
             IndexSettings()
                 .tabItem { Label("索引", systemImage: "externaldrive") }
             AIBridgeSettings()
@@ -26,6 +28,29 @@ struct SettingsView: View {
                 .tabItem { Label("备份", systemImage: "clock.arrow.circlepath") }
         }
         .frame(width: 620, height: 560)
+    }
+}
+
+private struct SearchSettings: View {
+    @AppStorage(SettingsKeys.balancedTermExpansion) private var balanced = false
+    @AppStorage(SettingsKeys.deepTermExpansion) private var deep = false
+    @AppStorage(SettingsKeys.termExpansionDepth) private var depth = 2
+
+    var body: some View {
+        Form {
+            Section("术语扩展（实验性）") {
+                Toggle("平衡搜索：扩展全文检索", isOn: $balanced)
+                Toggle("深度搜索：扩展语义检索", isOn: $deep)
+                Stepper("扩展层数：\(depth)", value: $depth, in: 1...5)
+                Text("默认关闭。概念表可能包含语境描述和并列概念，当前索引尚未验证翻译对应关系，启用后可能引入无关结果。")
+                    .foregroundStyle(.secondary)
+                Text("每层对每个词按来源文档数取前 5 个对应词；有多个对应词时，只保留至少出现于两篇文档的词。唯一对应词可保留一次记录。")
+                    .foregroundStyle(.secondary)
+                Text("层数越多，关联越宽，搜索越慢；深度搜索需要逐个计算扩展查询。快速搜索不使用扩展。")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 
@@ -66,6 +91,15 @@ private struct IndexSettings: View {
                     Text("从 vault 文件重新建立普通索引。新索引完整生成后才会替换当前索引；重建失败时保留当前索引。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else {
+                    Text("主窗口尚未就绪。")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("术语索引") {
+                if let controller = ActiveModel.current?.termIndexController {
+                    TermIndexSettings(controller: controller)
                 } else {
                     Text("主窗口尚未就绪。")
                         .foregroundStyle(.secondary)

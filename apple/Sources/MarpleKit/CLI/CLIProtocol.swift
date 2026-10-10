@@ -72,6 +72,9 @@ public enum CLIMethod {
     public static let read = "read"
     public static let open = "open"
     public static let ping = "ping"
+    public static let termsStatus = "terms.status"
+    public static let termsLookup = "terms.lookup"
+    public static let termsRefresh = "terms.refresh"
     public static let tabsList = "tabs.list"
     public static let tabsRename = "tabs.rename"
     public static let tabsMove = "tabs.move"
@@ -131,6 +134,8 @@ public enum CLIErrorCode {
 /// stays one JSON object per line without union-tagging overhead.
 public struct CLIResponseData: Codable, Sendable {
     public let collection: ArchiveCollectionResult?
+    public let termStatus: TermIndexStatus?
+    public let termMatches: [TermMatch]?
     public let entries: [EntryDigest]?
     public let entry: EntryDetail?
     public let opened: Bool?
@@ -145,7 +150,10 @@ public struct CLIResponseData: Codable, Sendable {
                 opened: Bool? = nil,
                 pong: String? = nil,
                 tree: [CLITabNode]? = nil, spaceID: UUID? = nil,
-                activeTabID: UUID? = nil, createdID: UUID? = nil) {
+                activeTabID: UUID? = nil, createdID: UUID? = nil,
+                termStatus: TermIndexStatus? = nil, termMatches: [TermMatch]? = nil) {
+        self.termStatus = termStatus
+        self.termMatches = termMatches
         self.collection = collection
         self.entries = entries
         self.entry = entry

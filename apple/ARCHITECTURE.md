@@ -29,6 +29,7 @@ Sources/MarpleKit/
 │                  VaultChangeSource(变更契约)· VaultWatcher(Mac FSEvents 实现)
 │                  FrontmatterPatch · NoteBuilder(写侧 helper)
 │                  SemanticSearcher · SemanticBackend · VectorStore(语义检索查侧)
+│                  TermIndex(actor:独立 terms.sqlite 的增量维护、统计与双向查词) · TermExpansion(独立读连接,可取消的有限层扩展)
 │                  TalkMedia/SRT(transcript 媒体)
 │                  Superset{Log,Runner,Automation}(外部 agent 派发 + 上下文打包)
 ├── Indexer/       写侧:扫库 → 建 SQLite 索引(从 rust/reader-core 移植)
@@ -36,13 +37,14 @@ Sources/MarpleKit/
 │                  IndexTitles · IndexBody · YamlFrontmatter · GitDates
 │                  SourceResolver(PDF 源解析,含 Jaccard 模糊匹配)· ImageProbe
 │                  SemanticIndexer · TextEmbedder · HFTokenizer(语义写侧)
+│                  TermParser(术语表提取,保留直接对应关系与出处)
 ├── Catalog/       L2:派生编目层(唯一派生 owner)。"图书馆目录"隐喻:从馆藏派生、可重编、多路检索、带交叉引用。
 │                  Catalog(@Observable 派生状态本体)
 │                  Catalog+IndexDerived/+DeferredDerived/+Visible/+OpenDoc/+Refresh(按关注点拆的重算扩展)
 │                  RefreshAuthority(actor:统一 generation/单飞)· RefreshAuthority 之上的 pass + 独立 derivedGeneration 轴
 │                  NameResolver(规则①解析端:统一两级名字归一)· RelationGraph · RelationsIndex(annotationAnchor 章→书 remap 例外)
 │                  Containers(规则②:同 slug 容器)· BookContext · TopicContext · TopicIndex · ThemeIndex
-│                  SearchRanker · CommandSearch · SearchIndex · BodyMatching/BodyLineMatches · Citation
+│                  SearchRanker · CommandSearch · SearchFusion · SearchIndex · BodyMatching/BodyLineMatches · Citation
 │                  ListSort · ListFilter · SavedView · Browse · CardMetrics · DocStats · DocOutline
 ├── Markdown/      L3:渲染模型
 │                  MarkdownModel · MarkdownLine · AttributedStringRenderer
@@ -65,6 +67,7 @@ Sources/Marple/
 │                  MarpleApp(@main + 组装点)· AppModel(@Observable 中枢)· SetupView(首次选文库)
 │                  MarpleWindowController · MarpleSplitViewController(AppKit split 外壳)
 │                  MainToolbar · CommandPalettePanel · MemoryWatchdog
+│                  TermIndexController(启动/文件变更/CLI/设置的术语刷新合流与状态)
 ├── Sidebar/       左轨:类型 + 主题 + 回收站
 │                  SidebarView · SidebarTabOutlineView
 ├── Browse/        中列:列表 / 表格 / 卡片 / 主题 / 回收站
@@ -78,7 +81,7 @@ Sources/Marple/
 ├── Tabs/          标签栏 + 快捷键
 │                  TabStripView · TabCommands
 ├── Settings/      设置面板
-│                  SettingsView · AppSettings
+│                  SettingsView · AppSettings · TermIndexSettings
 ├── CLI/           CLI socket host(消费 MarpleKit/CLI 协议)
 │                  CLIServer · CLIHandlers · AppModel+CLI
 ├── Backup/        备份 UI + 调度
@@ -103,7 +106,7 @@ Mobile/MarpleiOS/
 
 `Model/` 在最底。`Schema/`·`Vault/`·`Indexer/`·`Catalog/`·`Markdown/`·`Nav/`·`Session/` 只往下依赖 `Model/`,横向之间基本不互引。两层壳 `import MarpleKit`,核绝不反向依赖任何 UI。
 
-**唯一具名横向例外**:`Schema/VaultSchema` 复用 `Indexer/` 的 `YamlFrontmatter` 解析 schema 覆盖文件。
+**具名横向复用**:`Schema/VaultSchema` 复用 `Indexer/` 的 `YamlFrontmatter` 解析 schema 覆盖文件。`Vault/TermIndex` 调用 `Indexer/TermParser` 提取术语；后者复用 `Markdown/Wikilink` 的纯文本转换,不依赖渲染器或 UI。
 
 > Swift 机制提醒:同一 target 内文件互相自动可见、无需 import;只有跨 target 才写 `import MarpleKit`。子文件夹纯粹是给人看的组织,SwiftPM 递归编译 `Sources/<target>/` 下所有 `.swift`。所以"层级单向"是君子协定、编译器不强制;真要强制某条边界(违规即编译报错),再把那块拆成独立 target。
 

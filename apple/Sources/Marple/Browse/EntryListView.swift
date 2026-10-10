@@ -492,11 +492,16 @@ private struct SearchField: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            if model.listSearchMode != .balanced {
+                Text(LocalizedStringKey(model.listSearchMode.label))
+                    .font(Typo.caption2).foregroundStyle(.secondary)
+            }
             TextField("搜索", text: Binding(
                 get: { model.searchText },
                 set: { model.setSearchText($0) }
             ))
             .textFieldStyle(.plain)
+            if model.isSearching { ProgressView().controlSize(.mini) }
             if !model.searchText.isEmpty {
                 Button { model.setSearchText("") } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)

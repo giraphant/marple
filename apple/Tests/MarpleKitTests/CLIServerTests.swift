@@ -6,6 +6,27 @@ import Darwin
 
 @Suite struct CLIServerTests {
     @MainActor
+    @Test func terminologyLookupRoundTripsWithSources() async throws {
+        let root = try TermIndexTests().workspace()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try TermIndexTests().write(root, "a.md", "| 惯习 | Habitus | 倾向 |")
+        let socketPath = "/tmp/terms-\(UUID().uuidString).sock"
+        let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
+        model.termIndexController = TermIndexController(workspaceRoot: root.path)
+        let server = CLIServer(socketPath: socketPath)
+        try server.start(model: model, indexer: VaultIndexer(workspaceRoot: root.path))
+        defer { server.stop() }
+        let response = try await Task.detached {
+            try Self.roundTrip(CLIRequest(method: CLIMethod.termsLookup, query: "HABITUS"), socketPath: socketPath)
+        }.value
+        #expect(response.ok)
+        let match = try #require(response.data?.termMatches?.first)
+        #expect(match.term == "惯习")
+        #expect(match.sources.first?.path == "vault/a.md")
+        #expect(match.sources.first?.line == 5)
+    }
+
+    @MainActor
     @Test func replaySurvivesLostResponseAndRejectsChangedPayload() async throws {
         let dir = URL(fileURLWithPath: "/tmp/cli-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

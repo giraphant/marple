@@ -44,6 +44,7 @@ final class AppModel {
     /// yet, so the just-written file is absent from `entries`/the index. The CLI
     /// handlers trigger a synchronous reconcile through this. nil in stub tests.
     var cliIndexer: VaultIndexer?
+    var termIndexController: TermIndexController?
 
     /// L2 编目层派生状态 owner (QUA-218 PR3a). 持全部派生缓存 + vault-变更管线的
     /// 统一 generation/单飞权威 (QUA-198/QUA-212 的 RefreshAuthority 合流单飞 +
@@ -94,6 +95,7 @@ final class AppModel {
     /// refresh generation, threaded into loadIndex for stale-publish dropping.
     /// No-op when no indexer is wired (stub-backed tests).
     func refreshBody(_ myPass: Int) async {
+        termIndexController?.scheduleRefresh()
         guard !archiveCollectionBusy, let indexer = cliIndexer else { return }
         beginRefreshing()
         defer { endRefreshing() }
@@ -341,10 +343,13 @@ final class AppModel {
         ListContext(searchText: searchText,
                     filters: activeFilterClauses,
                     filterMatch: activeFilterMatch,
-                    sorts: activeSortClauses)
+                    sorts: activeSortClauses, searchMode: listSearchMode)
     }
 
     private(set) var searchText: String = ""
+    private(set) var listSearchMode: SearchMode = .balanced
+    private(set) var isSearching = false
+    @ObservationIgnored private let searchDefaults: UserDefaults
     private var browseSearchText = ""
     private var pinnedSearchText = ""
     private var searchHits: [SearchHit] = []
@@ -456,6 +461,13 @@ final class AppModel {
 
     // Inspector → reader scroll channel; an outline tap sets this, DocView observes.
     var scrollTarget: Int?
+
+    struct HeadingJump: Equatable {
+        let id = UUID()
+        let path: String
+        let fragment: String
+    }
+    private(set) var headingJump: HeadingJump?
 
     /// Query whose matches are highlighted in the open document. Set when a search
     /// matched-line is clicked; cleared on any other navigation.
@@ -602,8 +614,10 @@ final class AppModel {
     init(client: VaultClient, stateStore: StateStore? = nil,
          semantic: (any SemanticBackend)? = nil, isFirstRun: Bool = false,
          workspaceRoot: String = "",
+         searchDefaults: UserDefaults = .standard,
          readerAIRunner: ReaderAIRunner = ReaderAIRunner()) {
         self.client = client
+        self.searchDefaults = searchDefaults
         self.metadataWriter = MetadataWriter(client: client)
         self.workspaceRoot = workspaceRoot
         self.stateStore = stateStore
@@ -1388,7 +1402,9 @@ final class AppModel {
     private func runSearch() {
         searchTask?.cancel()
         let q = searchText.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { searchHits = []; clearSearchMatches(); recomputeVisible(); return }
+        let mode = listSearchMode
+        guard !q.isEmpty else { isSearching = false; searchHits = []; clearSearchMatches(); recomputeVisible(); return }
+        isSearching = true
         let type: EntryType? = {
             if !isPinnedListContext, case .type(let t) = pane { return t }
             return nil
@@ -1397,8 +1413,9 @@ final class AppModel {
             try? await Task.sleep(nanoseconds: 200_000_000)
             if Task.isCancelled { return }
             do {
-                let hits = try await self?.client.search(SearchQuery(q: q, type: type)) ?? []
+                let hits = try await self?.performSearch(q, mode: mode, type: type) ?? []
                 if Task.isCancelled { return }
+                self?.isSearching = false
                 self?.searchHits = hits
                 self?.recomputeVisible()
                 guard let self else { return }
@@ -1407,6 +1424,8 @@ final class AppModel {
                     currentSearchText: { [weak self] in self?.searchText ?? "" })
                 print("[marple] search '\(q)' -> \(hits.count) hits")
             } catch {
+                if Task.isCancelled { return }
+                self?.isSearching = false
                 self?.status = String(localized: "搜索失败：\(error)")
                 print("[marple] search FAILED '\(q)': \(error)")
             }
@@ -1437,6 +1456,7 @@ final class AppModel {
         // QUA-151: drop any outline scroll target left over from the previous doc,
         // so a stale block index can't hijack the next document's scroll position.
         scrollTarget = nil
+        headingJump = nil
     }
 
     /// Open `path`. Context-dependent (browser-style): from the browse list (browsing)
@@ -1598,7 +1618,7 @@ final class AppModel {
                 sortClauses = context.sorts
             }
             browseSearchText = context.searchText
-            resetSearch(to: context.searchText)
+            resetSearch(to: context.searchText, mode: context.searchMode)
         } else {
             if case .savedView(let id) = location.pane, savedView(id) != nil {
                 browseSearchText = ""
@@ -1634,8 +1654,10 @@ final class AppModel {
         mutateWorkspace { $0.replaceActiveLocation(with: location) }
     }
 
-    private func resetSearch(to text: String) {
+    private func resetSearch(to text: String, mode: SearchMode = .balanced) {
         searchTask?.cancel()
+        isSearching = false
+        listSearchMode = mode
         searchText = text
         searchHits = []
         clearSearchMatches()
@@ -1673,6 +1695,17 @@ final class AppModel {
 
     func reloadOpen() async {
         if let p = openPath { print("[marple] watcher reload \(p)"); await loadDoc(p) }
+    }
+
+    func followDocumentLink(path: String, fragment: String?) async {
+        guard path == openPath || entries.contains(where: { $0.path == path }) else {
+            flash(String(localized: "未找到链接文档：\(path)"), symbol: "exclamationmark.triangle")
+            return
+        }
+        if path != openPath { await open(path) }
+        else { clearReaderHighlight() }
+        guard openPath == path else { return }
+        if let fragment { headingJump = HeadingJump(path: path, fragment: fragment) }
     }
 
     func follow(_ target: String) async {
@@ -1744,39 +1777,72 @@ final class AppModel {
     func commandSearch(_ query: String, mode: SearchMode) async -> [PaletteResult] {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
-        switch mode {
-        case .fast:
-            // Rank ~15k docs OFF the main actor so typing never hitches. Trigram
-            // prefilter inside `searchDocuments` typically narrows to <300 docs
-            // before scoring (QUA-96).
+        do {
+            return try await performSearch(q, mode: mode).map {
+                PaletteResult(entry: $0.entry, score: $0.score, source: $0.source)
+            }
+        } catch {
+            if !Task.isCancelled { print("[marple] palette search FAILED '\(q)': \(error)") }
+            return []
+        }
+    }
+
+    private func performSearch(_ q: String, mode: SearchMode, type: EntryType? = nil) async throws -> [SearchHit] {
+        try Task.checkCancellation()
+        if mode == .fast {
             let index = searchIndex
             let ranked = await Task.detached(priority: .userInitiated) {
                 searchDocuments(index, q)
             }.value
-            return ranked.map { PaletteResult(entry: $0.entry, score: $0.score, source: nil) }
-        case .balanced:
+            try Task.checkCancellation()
+            return ranked.filter { type == nil || $0.entry.type == type }.map {
+                SearchHit(entry: $0.entry, score: $0.score, snippet: nil, source: "metadata")
+            }
+        }
+        var queries = [q]
+        let key = mode == .balanced ? SettingsKeys.balancedTermExpansion : SettingsKeys.deepTermExpansion
+        if searchDefaults.object(forKey: key) as? Bool ?? false, let terms = termIndexController?.index {
+            let depth = min(5, max(1, searchDefaults.object(forKey: SettingsKeys.termExpansionDepth) as? Int ?? 2))
+            do { queries = try await terms.expandedQueries(q, depth: depth) }
+            catch {
+                try Task.checkCancellation()
+                // An unavailable terminology index must not disable ordinary search.
+                print("[marple] term expansion unavailable: \(error)")
+            }
+        }
+        var lists: [[SearchHit]] = []
+        for query in queries {
+            try Task.checkCancellation()
             do {
-                let hits = try await client.search(SearchQuery(q: q, type: nil, limit: 300))
-                return hits.enumerated().map {
-                    PaletteResult(entry: $0.element.entry,
-                                  score: Double(hits.count - $0.offset),
-                                  source: $0.element.source)
-                }
+                lists.append(try await retrieve(query, mode: mode, type: type))
             } catch {
-                print("[marple] palette balanced search FAILED '\(q)': \(error)")
-                return []
+                try Task.checkCancellation()
+                // Keep successful queries when one translated query fails.
+                if lists.isEmpty { throw error }
+                print("[marple] expanded search FAILED '\(query)': \(error)")
+            }
+        }
+        try Task.checkCancellation()
+        return fuseSearchHits(lists)
+    }
+
+    private func retrieve(_ q: String, mode: SearchMode, type: EntryType?) async throws -> [SearchHit] {
+        switch mode {
+        case .fast:
+            return [] // Handled by the in-memory ranker before expansion.
+        case .balanced:
+            let hits = try await client.search(SearchQuery(q: q, type: type, limit: 300))
+            return hits.enumerated().map {
+                SearchHit(entry: $0.element.entry, score: Double(hits.count - $0.offset),
+                          snippet: $0.element.snippet, source: $0.element.source)
             }
         case .deep:
             guard let semantic else { return [] }
-            do {
-                let hits = try await semantic.search(q, topK: 80)
-                let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
-                return hits.compactMap { hit in
-                    byPath[hit.path].map { PaletteResult(entry: $0, score: hit.score, source: "vec") }
-                }
-            } catch {
-                print("[marple] palette deep search FAILED '\(q)': \(error)")
-                return []
+            let hits = try await semantic.search(q, topK: 80)
+            let byPath = Dictionary(entries.filter { type == nil || $0.type == type }
+                .map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
+            return hits.compactMap { hit in
+                byPath[hit.path].map { SearchHit(entry: $0, score: hit.score, snippet: nil, source: "vec") }
             }
         }
     }
@@ -1792,10 +1858,20 @@ final class AppModel {
         await openNewTab(entry.path, location: location)
     }
 
-    /// "查看全部 N 条 →": jump to that type's browse list, seed its search box.
-    func paletteViewAll(type: EntryType, query: String) {
+    /// Reuse the completed palette search, including rows hidden by its score floor.
+    func paletteViewAll(type: EntryType, query: String, mode: SearchMode, results: [PaletteResult]) {
         select(pane: .type(type))
-        setSearchText(query)
+        searchTask?.cancel()
+        isSearching = false
+        searchText = query
+        browseSearchText = query
+        listSearchMode = mode
+        searchHits = results.filter { $0.entry.type == type }.map {
+            SearchHit(entry: $0.entry, score: $0.score, snippet: nil, source: $0.source ?? "metadata")
+        }
+        clearSearchMatches()
+        recomputeVisible()
+        updateActiveTemporaryListContext()
     }
 
     /// Active-Space document paths currently open in a tab, minus the one already

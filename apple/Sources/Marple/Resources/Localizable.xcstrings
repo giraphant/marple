@@ -1,6 +1,310 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "术语扩展（实验性）": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminology Expansion (Experimental)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "术语扩展（实验性）"
+          }
+        }
+      }
+    },
+    "平衡搜索：扩展全文检索": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Balanced: expand full-text search"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "平衡搜索：扩展全文检索"
+          }
+        }
+      }
+    },
+    "深度搜索：扩展语义检索": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deep: expand semantic search"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "深度搜索：扩展语义检索"
+          }
+        }
+      }
+    },
+    "扩展层数：%lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expansion depth: %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "扩展层数：%lld"
+          }
+        }
+      }
+    },
+    "默认关闭。概念表可能包含语境描述和并列概念，当前索引尚未验证翻译对应关系，启用后可能引入无关结果。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off by default. Concept tables may contain contextual descriptions and multiple concepts. Translation correspondences have not been verified, so enabling expansion may introduce unrelated results."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认关闭。概念表可能包含语境描述和并列概念，当前索引尚未验证翻译对应关系，启用后可能引入无关结果。"
+          }
+        }
+      }
+    },
+    "每层对每个词按来源文档数取前 5 个对应词；有多个对应词时，只保留至少出现于两篇文档的词。唯一对应词可保留一次记录。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "At each hop, keep up to five counterparts per term, ranked by source document count. When several counterparts exist, each must appear in at least two documents. A sole counterpart may appear just once."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每层对每个词按来源文档数取前 5 个对应词；有多个对应词时，只保留至少出现于两篇文档的词。唯一对应词可保留一次记录。"
+          }
+        }
+      }
+    },
+    "层数越多，关联越宽，搜索越慢；深度搜索需要逐个计算扩展查询。快速搜索不使用扩展。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Greater depth broadens associations and slows search. Deep search computes each expanded query separately. Fast search does not use expansion."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "层数越多，关联越宽，搜索越慢；深度搜索需要逐个计算扩展查询。快速搜索不使用扩展。"
+          }
+        }
+      }
+    },
+    "术语索引": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminology Index"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "术语索引"
+          }
+        }
+      }
+    },
+    "正在更新术语索引": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updating terminology index"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在更新术语索引"
+          }
+        }
+      }
+    },
+    "更新失败": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update failed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新失败"
+          }
+        }
+      }
+    },
+    "尚未建立": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not built yet"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未建立"
+          }
+        }
+      }
+    },
+    "术语": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terms"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "术语"
+          }
+        }
+      }
+    },
+    "对应关系": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Correspondences"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对应关系"
+          }
+        }
+      }
+    },
+    "来源文档": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source documents"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来源文档"
+          }
+        }
+      }
+    },
+    "已扫描文档": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scanned documents"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已扫描文档"
+          }
+        }
+      }
+    },
+    "最近更新": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last updated"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近更新"
+          }
+        }
+      }
+    },
+    "刷新术语索引": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh Terminology Index"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新术语索引"
+          }
+        }
+      }
+    },
+    "重建术语索引": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rebuild Terminology Index"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重建术语索引"
+          }
+        }
+      }
+    },
+    "从文库术语表提取中英文对应关系。文档变化后自动更新；重建失败时保留原有索引。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extract Chinese–English correspondences from document glossaries. Updates automatically when documents change; a failed rebuild preserves the previous index."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从文库术语表提取中英文对应关系。文档变化后自动更新；重建失败时保留原有索引。"
+          }
+        }
+      }
+    },
     "新建空合集" : {
       "localizations" : {
         "en" : {

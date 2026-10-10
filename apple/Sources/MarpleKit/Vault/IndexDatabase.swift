@@ -347,7 +347,7 @@ public final class IndexDatabase: @unchecked Sendable {
                    e.pdf_slug AS pdf_slug,
                    e.mtime AS mtime, e.preview AS preview, e.added AS added,
                    bm25(entry_trigram) AS score,
-                   snippet(entry_trigram, 2, '〔', '〕', '…', 8) AS snip
+                   entry_trigram.text AS search_text
             FROM entry_trigram
             JOIN entries e ON e.path = entry_trigram.path
             WHERE entry_trigram MATCH ?
@@ -359,12 +359,13 @@ public final class IndexDatabase: @unchecked Sendable {
             sql += "\n  AND e.path IN (SELECT path FROM entry_themes WHERE theme = ?)"
             args.append(theme)
         }
-        sql += "\nORDER BY score\nLIMIT ?"
+        appendSearchOrder(terms: terms, to: &sql, args: &args)
+        sql += "\nLIMIT ?"
         args.append(limit)
         let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
         return rows.map { row in
             let score: Double = row["score"] ?? 0
-            let snip: String? = row["snip"]
+            let snip = searchSnippet(in: row["search_text"], terms: terms)
             return SearchHit(entry: Self.entry(from: row), score: score,
                              snippet: snip, source: "trigram")
         }
@@ -396,7 +397,7 @@ public final class IndexDatabase: @unchecked Sendable {
                    e.pdf_slug AS pdf_slug,
                    e.mtime AS mtime, e.preview AS preview, e.added AS added,
                    0.0 AS score,
-                   NULL AS snip
+                   t.text AS search_text
             FROM entry_trigram t
             JOIN entries e ON e.path = t.path
             WHERE \(likeClause)
@@ -408,14 +409,42 @@ public final class IndexDatabase: @unchecked Sendable {
             sql += "\n  AND e.path IN (SELECT path FROM entry_themes WHERE theme = ?)"
             args.append(theme)
         }
+        appendSearchOrder(terms: terms, to: &sql, args: &args)
         sql += "\nLIMIT ?"
         args.append(limit)
         let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
         return rows.map { row in
-            let snip: String? = row["snip"]
+            let snip = searchSnippet(in: row["search_text"], terms: terms)
             return SearchHit(entry: Self.entry(from: row), score: 0,
                              snippet: snip, source: "trigram-like")
         }
+    }
+
+    private static func searchSnippet(in text: String, terms: [String]) -> String? {
+        // IndexedEntry/searchText stores each metadata field on a separate line,
+        // followed by the whitespace-collapsed body. Prefer body context even
+        // when the title or path also matches; fall back for metadata-only hits.
+        let body = text.split(separator: "\n").last.map(String.init) ?? text
+        let query = terms.joined(separator: " ")
+        guard let line = bodyLineMatches(body: body, query: query, leadContext: 24, maxExcerpt: 130).lines.first
+                ?? bodyLineMatches(body: text, query: query, leadContext: 24, maxExcerpt: 130).lines.first else { return nil }
+        let marked = NSMutableString(string: line.excerpt)
+        for span in line.spans.reversed() {
+            marked.insert("〕", at: span.location + span.length)
+            marked.insert("〔", at: span.location)
+        }
+        return marked as String
+    }
+
+    /// Apply title priority before LIMIT so a popular body term cannot crowd its
+    /// own titled entry out of the returned set. INSTR treats %, _ literally.
+    private static func appendSearchOrder(terms: [String], to sql: inout String,
+                                           args: inout [(any DatabaseValueConvertible)?]) {
+        let titleTerms = terms.map { _ in "instr(lower(e.title), lower(?)) > 0" }
+            .joined(separator: " AND ")
+        sql += "\nORDER BY CASE WHEN e.title = ? COLLATE NOCASE THEN 0 WHEN \(titleTerms) THEN 1 ELSE 2 END, score, e.path"
+        args.append(terms.joined(separator: " "))
+        args.append(contentsOf: terms.map { $0 as (any DatabaseValueConvertible)? })
     }
 
     private static func appendTypeFilter(_ type: EntryType?, to sql: inout String,

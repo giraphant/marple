@@ -17,6 +17,7 @@ struct MarkdownTextView: NSViewRepresentable {
     /// One-shot scroll-to-match request (a clicked search line); nil = none.
     var jump: AppModel.MatchJump?
     var imageURLs: [String: URL] = [:]
+    var headingJump: AppModel.HeadingJump?
     let onLinkClick: (URL) -> Bool
 
     private static let matchColor = NSColor.controlAccentColor.withAlphaComponent(0.22)
@@ -98,6 +99,7 @@ struct MarkdownTextView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
         let co = context.coordinator
+        co.onLinkClick = onLinkClick
 
         let contentChanged = markdown != co.lastMarkdown
         // A doc switch is a content change to a *different* identity. (A same-id
@@ -162,6 +164,13 @@ struct MarkdownTextView: NSViewRepresentable {
         if let jump, jump.id != co.lastJumpID {
             co.lastJumpID = jump.id
             scrollToMatch(jump, in: scrollView, textView: textView, co: co)
+        }
+        if let headingJump, headingJump.path == documentID, headingJump.id != co.lastHeadingJumpID {
+            co.lastHeadingJumpID = headingJump.id
+            if let range = ReaderLink.headingRange(for: headingJump.fragment, in: co.headings) {
+                scrollRangeNearTop(range, in: scrollView, textView: textView,
+                                   topPadding: textView.textContainerInset.height)
+            }
         }
     }
 
@@ -278,7 +287,7 @@ struct MarkdownTextView: NSViewRepresentable {
 
     class Coordinator: NSObject, NSTextViewDelegate {
         var imageURLs: [String: URL] = [:]
-    let onLinkClick: (URL) -> Bool
+        var onLinkClick: (URL) -> Bool
         weak var textView: NSTextView?
 
         var lastMarkdown: String = ""
@@ -299,6 +308,7 @@ struct MarkdownTextView: NSViewRepresentable {
         var matchRanges: [NSRange] = []
         var currentMatch: NSRange?
         var lastJumpID: UUID?
+        var lastHeadingJumpID: UUID?
 
         init(onLinkClick: @escaping (URL) -> Bool) {
             self.onLinkClick = onLinkClick
@@ -309,7 +319,7 @@ struct MarkdownTextView: NSViewRepresentable {
             // delegate may receive either an NSURL or an NSString depending on
             // AppKit's coercion. Accept both so wikilink and `marple://seek`
             // clicks reliably reach `onLinkClick`.
-            let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
+            let url = (link as? URL) ?? (link as? String).flatMap(ReaderLink.url(from:))
             guard let url else { return false }
             return onLinkClick(url)
         }
