@@ -1,6 +1,22 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "任务" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Task"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务"
+          }
+        }
+      }
+    },
     "术语扩展（实验性）": {
       "localizations": {
         "en": {

@@ -2593,12 +2593,12 @@ final class AppModel {
 
         let defaults = UserDefaults.standard
         let config = ReaderAIDispatchConfig(
-            workspaceID: defaults.string(forKey: SettingsKeys.supersetWorkspaceID) ?? "",
-            agent: defaults.string(forKey: SettingsKeys.readerAIAgent) ?? "claude",
-            cliPath: defaults.string(forKey: SettingsKeys.supersetCLIPath) ?? "superset",
+            workspaceID: SettingsKeys.readerAIValue(SettingsKeys.supersetWorkspaceID, for: action, defaults: defaults) ?? "",
+            agent: SettingsKeys.readerAIValue(SettingsKeys.readerAIAgent, for: action, defaults: defaults) ?? "claude",
+            cliPath: SettingsKeys.readerAIValue(SettingsKeys.supersetCLIPath, for: action, defaults: defaults) ?? "superset",
             commandTemplate: AIDispatchTarget.resolveTemplate(
-                targetRawValue: defaults.string(forKey: SettingsKeys.aiDispatchTarget),
-                storedTemplate: defaults.string(forKey: SettingsKeys.aiDispatchTemplate)
+                targetRawValue: SettingsKeys.readerAIValue(SettingsKeys.aiDispatchTarget, for: action, defaults: defaults),
+                storedTemplate: SettingsKeys.readerAIValue(SettingsKeys.aiDispatchTemplate, for: action, defaults: defaults)
             ),
             reanalyzePrompt: defaults.string(forKey: SettingsKeys.readerAIReanalyzePrompt),
             formatPrompt: defaults.string(forKey: SettingsKeys.readerAIFormatPrompt),

@@ -31,6 +31,23 @@ enum SettingsKeys {
     static let readerAIFormatPrompt = "marple.supersetFormatPrompt"
     static let readerAITranslatePrompt = "marple.supersetTranslatePrompt"
     static let readerAIDiscussPrompt = "marple.supersetDiscussPrompt"
+    static func readerAIKey(_ key: String, for action: ReaderAIAction) -> String {
+        "\(key).\(action.rawValue)"
+    }
+
+    static func readerAIValue(_ key: String, for action: ReaderAIAction, defaults: UserDefaults = .standard) -> String? {
+        defaults.string(forKey: readerAIKey(key, for: action)) ?? defaults.string(forKey: key)
+    }
+
+    static func readerAIPromptKey(for action: ReaderAIAction) -> String {
+        switch action {
+        case .reanalyze: readerAIReanalyzePrompt
+        case .format: readerAIFormatPrompt
+        case .translate: readerAITranslatePrompt
+        case .discuss: readerAIDiscussPrompt
+        }
+    }
+
     // QUA-107: opt-in switch for the local CLI socket server (off by default).
     static let cliServerEnabled = "marple.cliServerEnabled"
     // QUA-106: local APFS-snapshot backups. Enabled by default (cheap + a safety

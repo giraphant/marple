@@ -398,17 +398,51 @@ private struct PromptTemplateEditor: View {
 /// nothing runs unless the user explicitly turns it on; toggling here flips
 /// the listener live (no relaunch needed).
 private struct AIBridgeSettings: View {
+    @State private var action = ReaderAIAction.reanalyze
+
+    var body: some View {
+        VStack {
+            Picker("任务", selection: $action) {
+                ForEach(ReaderAIAction.allCases, id: \.self) {
+                    Text(AppPresentation.readerAIActionLabel($0)).tag($0)
+                }
+            }
+            .padding([.horizontal, .top])
+            ReaderAIActionSettings(action: action)
+                .id(action)
+        }
+    }
+}
+
+private struct ReaderAIActionSettings: View {
+    let action: ReaderAIAction
     @AppStorage(SettingsKeys.cliServerEnabled) private var enabled = false
-    @AppStorage(SettingsKeys.aiDispatchTarget) private var dispatchTargetRaw = AIDispatchTarget.superset.rawValue
-    @AppStorage(SettingsKeys.aiDispatchTemplate) private var dispatchTemplate = AIDispatchTarget.superset.defaultTemplate
-    @AppStorage(SettingsKeys.aiAgentChoice) private var agentChoiceRaw = ""
-    @AppStorage(SettingsKeys.supersetWorkspaceID) private var supersetWorkspaceID = ""
-    @AppStorage(SettingsKeys.readerAIAgent) private var readerAIAgent = "claude"
-    @AppStorage(SettingsKeys.supersetCLIPath) private var supersetCLIPath = "superset"
-    @AppStorage(SettingsKeys.readerAIReanalyzePrompt) private var readerAIReanalyzePrompt = ""
-    @AppStorage(SettingsKeys.readerAIFormatPrompt) private var readerAIFormatPrompt = ""
-    @AppStorage(SettingsKeys.readerAITranslatePrompt) private var readerAITranslatePrompt = ""
-    @AppStorage(SettingsKeys.readerAIDiscussPrompt) private var readerAIDiscussPrompt = ""
+    @AppStorage private var dispatchTargetRaw: String
+    @AppStorage private var dispatchTemplate: String
+    @AppStorage private var agentChoiceRaw: String
+    @AppStorage private var supersetWorkspaceID: String
+    @AppStorage private var readerAIAgent: String
+    @AppStorage private var supersetCLIPath: String
+    @AppStorage private var prompt: String
+
+    init(action: ReaderAIAction) {
+        self.action = action
+        func storage(_ key: String, fallback: String) -> AppStorage<String> {
+            AppStorage(wrappedValue: SettingsKeys.readerAIValue(key, for: action) ?? fallback,
+                       SettingsKeys.readerAIKey(key, for: action))
+        }
+        _dispatchTargetRaw = storage(SettingsKeys.aiDispatchTarget, fallback: AIDispatchTarget.superset.rawValue)
+        _dispatchTemplate = storage(SettingsKeys.aiDispatchTemplate, fallback: AIDispatchTarget.resolveTemplate(
+            targetRawValue: SettingsKeys.readerAIValue(SettingsKeys.aiDispatchTarget, for: action),
+            storedTemplate: nil
+        ))
+        _agentChoiceRaw = storage(SettingsKeys.aiAgentChoice, fallback: "")
+        _supersetWorkspaceID = storage(SettingsKeys.supersetWorkspaceID, fallback: "")
+        _readerAIAgent = storage(SettingsKeys.readerAIAgent, fallback: "claude")
+        _supersetCLIPath = storage(SettingsKeys.supersetCLIPath, fallback: "superset")
+        _prompt = AppStorage(wrappedValue: "", SettingsKeys.readerAIPromptKey(for: action))
+    }
+
     @State private var discoveredWorkspaces: [SupersetWorkspace] = []
     @State private var workspaceLookupMessage: String?
     @State private var workspaceLookupIsError = false
@@ -498,24 +532,9 @@ private struct AIBridgeSettings: View {
 
             Section("提示词模板") {
                 PromptTemplateEditor(
-                    title: AppPresentation.readerAIActionLabel(.reanalyze),
-                    prompt: $readerAIReanalyzePrompt,
-                    defaultPrompt: ReaderAIAction.reanalyze.defaultPromptIntent
-                )
-                PromptTemplateEditor(
-                    title: AppPresentation.readerAIActionLabel(.format),
-                    prompt: $readerAIFormatPrompt,
-                    defaultPrompt: ReaderAIAction.format.defaultPromptIntent
-                )
-                PromptTemplateEditor(
-                    title: AppPresentation.readerAIActionLabel(.translate),
-                    prompt: $readerAITranslatePrompt,
-                    defaultPrompt: ReaderAIAction.translate.defaultPromptIntent
-                )
-                PromptTemplateEditor(
-                    title: AppPresentation.readerAIActionLabel(.discuss),
-                    prompt: $readerAIDiscussPrompt,
-                    defaultPrompt: ReaderAIAction.discuss.defaultPromptIntent
+                    title: AppPresentation.readerAIActionLabel(action),
+                    prompt: $prompt,
+                    defaultPrompt: action.defaultPromptIntent
                 )
                 Text("支持变量：`{{action}}`、`{{target_relative_path}}`、`{{target_absolute_path}}`、`{{context_package_path}}`。Marple 会固定追加安全边界；格式整理会额外强制使用 quasi:audit-agent / quasi-audit。")
                     .font(.caption)
