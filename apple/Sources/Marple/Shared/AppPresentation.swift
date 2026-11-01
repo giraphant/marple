@@ -135,6 +135,7 @@ enum AppPresentation {
         switch target {
         case .superset: return "Superset"
         case .orca: return "Orca"
+        case .rex: return "Rex"
         case .otty: return "Otty"
         case .terminal: return String(localized: "终端 (Terminal)")
         case .custom: return String(localized: "自定义")

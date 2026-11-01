@@ -290,6 +290,7 @@ public struct ReaderAIRunner: Sendable {
         var directories = defaultSearchDirectories
         directories.append("\(home)/.local/bin")
         directories.append("/Applications/Orca.app/Contents/Resources/bin")
+        directories.append("\(home)/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS")
         directories.append("/Applications/Otty.app/Contents/MacOS")
         directories.append("\(home)/Applications/Otty.app/Contents/MacOS")
         if cliPath.contains("/") {

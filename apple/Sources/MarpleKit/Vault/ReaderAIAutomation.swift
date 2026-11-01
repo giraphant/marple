@@ -79,6 +79,7 @@ public enum ReaderAIAgentPreset: String, CaseIterable, Sendable {
 public enum AIDispatchTarget: String, CaseIterable, Sendable {
     case superset
     case orca
+    case rex
     case otty
     case terminal
     case custom
@@ -87,6 +88,7 @@ public enum AIDispatchTarget: String, CaseIterable, Sendable {
         switch self {
         case .superset: return "Superset"
         case .orca: return "Orca"
+        case .rex: return "Rex"
         case .otty: return "Otty"
         case .terminal: return "终端 (Terminal)"
         case .custom: return "自定义"
@@ -104,6 +106,8 @@ public enum AIDispatchTarget: String, CaseIterable, Sendable {
             return #""$MARPLE_SUPERSET_CLI" agents create --workspace "$MARPLE_WORKSPACE" --agent "$MARPLE_AGENT" --prompt "$(cat "$MARPLE_PROMPT_FILE")" --attachment "$MARPLE_CONTEXT_FILE""#
         case .orca:
             return #"orca terminal create --worktree "path:$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" --command "$MARPLE_RUN_SCRIPT" --focus"#
+        case .rex:
+            return #"rex new "$MARPLE_TITLE" -c "$MARPLE_VAULT_ROOT" --keep-open --shell=none -- /bin/zsh "$MARPLE_RUN_SCRIPT""#
         case .otty:
             return #"(otty tab new --window current --cwd "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" || otty open "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE") && otty pane send-text "exec /bin/zsh \"$MARPLE_RUN_SCRIPT\"\n""#
         case .terminal:

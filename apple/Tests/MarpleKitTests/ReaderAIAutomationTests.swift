@@ -316,6 +316,7 @@ import Testing
         #expect(path.hasPrefix("/opt/bin:"))
         #expect(path.contains("/.superset/bin"))
         #expect(path.contains("/Applications/Orca.app/Contents/Resources/bin"))
+        #expect(path.contains("/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS"))
         #expect(path.contains("/Applications/Otty.app/Contents/MacOS"))
         #expect(path.hasSuffix(":/usr/bin:/bin"))
     }
@@ -442,6 +443,31 @@ import Testing
 
     @Test func shellQuoteEscapesSingleQuotes() {
         #expect(ReaderAIRunner.shellQuote("it's") == "'it'\\''s'")
+    }
+
+    @Test func rexTemplatePassesLiteralArgumentsAndPreservesFailure() async throws {
+        let target = try #require(AIDispatchTarget(rawValue: "rex"))
+        #expect(target.label == "Rex")
+        #expect(AIDispatchTarget.resolveTemplate(targetRawValue: "rex", storedTemplate: nil)
+            == target.defaultTemplate)
+        let title = #"对话 · "quoted" $title 'test'.md"#
+        let vault = #"/tmp/my vault's $notes"#
+        let script = #"/tmp/AI package's $prompt/run.command"#
+        let invocation = ReaderAIRunner.templateInvocation(
+            template: "rex() { printf '%s\\n' \"$@\"; return 37; }; " + target.defaultTemplate,
+            environment: [
+                "MARPLE_TITLE": title,
+                "MARPLE_VAULT_ROOT": vault,
+                "MARPLE_RUN_SCRIPT": script,
+            ]
+        )
+
+        let result = try await ReaderAIRunner.defaultExecute(invocation)
+
+        #expect(result.terminationStatus == 37)
+        #expect(result.stdout.hasSuffix([
+            "new", title, "-c", vault, "--keep-open", "--shell=none", "--", "/bin/zsh", script, "",
+        ].joined(separator: "\n")))
     }
 
     @Test func defaultTemplatesCoverKnownTargets() {
@@ -801,7 +827,9 @@ import Testing
         #expect(FileManager.default.isExecutableFile(atPath: runScriptPath))
     }
 
-    @Test func runnerSkipsWorkspaceRequirementWhenTemplateOmitsIt() async throws {
+    @Test(arguments: ["terminal", "rex"])
+    func runnerSkipsWorkspaceRequirementWhenTemplateOmitsIt(targetRawValue: String) async throws {
+        let target = try #require(AIDispatchTarget(rawValue: targetRawValue))
         let context = try ReaderAIDispatchContext(
             workspaceRoot: "/tmp/marple-workspace",
             targetPath: "vault/papers/a.md",
@@ -822,13 +850,13 @@ import Testing
             action: .discuss,
             config: ReaderAIDispatchConfig(
                 workspaceID: "",
-                commandTemplate: AIDispatchTarget.terminal.defaultTemplate
+                commandTemplate: target.defaultTemplate
             ),
             context: context
         )
 
         let invocation = try #require(box.invocation)
-        #expect(invocation.arguments.last == AIDispatchTarget.terminal.defaultTemplate)
+        #expect(invocation.arguments.last == target.defaultTemplate)
         #expect(invocation.environment["MARPLE_WORKSPACE"] == "")
         if let contextPath = invocation.environment["MARPLE_CONTEXT_FILE"] {
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: contextPath).deletingLastPathComponent())
