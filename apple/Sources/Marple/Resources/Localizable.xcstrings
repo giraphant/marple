@@ -4561,18 +4561,18 @@
         }
       }
     },
-    "支持变量：`{{action}}`、`{{target_relative_path}}`、`{{target_absolute_path}}`、`{{context_package_path}}`。Marple 会固定追加安全边界；格式整理会额外强制使用 quasi:audit-agent / quasi-audit。" : {
+    "支持变量：`{{action}}`、`{{target_relative_path}}`、`{{target_absolute_path}}`、`{{context_package_path}}`。Marple 会固定追加安全边界；格式整理会额外强制按 quasi 技能说明调用 scripts/quasi audit。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Supported variables: `{{action}}`, `{{target_relative_path}}`, `{{target_absolute_path}}`, and `{{context_package_path}}`. Marple always adds safety boundaries; formatting additionally requires quasi:audit-agent / quasi-audit."
+            "value" : "Supported variables: `{{action}}`, `{{target_relative_path}}`, `{{target_absolute_path}}`, and `{{context_package_path}}`. Marple always adds safety boundaries; formatting additionally requires scripts/quasi audit as described by the quasi skill."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "支持变量：`{{action}}`、`{{target_relative_path}}`、`{{target_absolute_path}}`、`{{context_package_path}}`。Marple 会固定追加安全边界；格式整理会额外强制使用 quasi:audit-agent / quasi-audit。"
+            "value" : "支持变量：`{{action}}`、`{{target_relative_path}}`、`{{target_absolute_path}}`、`{{context_package_path}}`。Marple 会固定追加安全边界；格式整理会额外强制按 quasi 技能说明调用 scripts/quasi audit。"
           }
         }
       }

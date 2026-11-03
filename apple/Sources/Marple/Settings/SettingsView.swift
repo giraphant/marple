@@ -538,7 +538,7 @@ private struct ReaderAIActionSettings: View {
                     prompt: $prompt,
                     defaultPrompt: action.defaultPromptIntent
                 )
-                Text("支持变量：`{{action}}`、`{{target_relative_path}}`、`{{target_absolute_path}}`、`{{context_package_path}}`。Marple 会固定追加安全边界；格式整理会额外强制使用 quasi:audit-agent / quasi-audit。")
+                Text("支持变量：`{{action}}`、`{{target_relative_path}}`、`{{target_absolute_path}}`、`{{context_package_path}}`。Marple 会固定追加安全边界；格式整理会额外强制按 quasi 技能说明调用 scripts/quasi audit。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
