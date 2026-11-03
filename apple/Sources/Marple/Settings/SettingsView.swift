@@ -433,7 +433,7 @@ private struct ReaderAIActionSettings: View {
             AppStorage(wrappedValue: SettingsKeys.readerAIValue(key, for: action) ?? fallback,
                        SettingsKeys.readerAIKey(key, for: action))
         }
-        _dispatchTargetRaw = storage(SettingsKeys.aiDispatchTarget, fallback: AIDispatchTarget.superset.rawValue)
+        _dispatchTargetRaw = storage(SettingsKeys.aiDispatchTarget, fallback: AIDispatchTarget.terminal.rawValue)
         _dispatchTemplate = storage(SettingsKeys.aiDispatchTemplate, fallback: AIDispatchTarget.resolveTemplate(
             targetRawValue: SettingsKeys.readerAIValue(SettingsKeys.aiDispatchTarget, for: action),
             storedTemplate: nil
@@ -454,7 +454,7 @@ private struct ReaderAIActionSettings: View {
         Form {
             Section("阅读助手") {
                 Picker("分发目标", selection: Binding(
-                    get: { AIDispatchTarget(rawValue: dispatchTargetRaw) ?? .superset },
+                    get: { AIDispatchTarget(rawValue: dispatchTargetRaw) ?? .terminal },
                     set: { newTarget in
                         dispatchTargetRaw = newTarget.rawValue
                         // Preset picked ⇒ pre-fill its template. 自定义 keeps the
@@ -464,7 +464,7 @@ private struct ReaderAIActionSettings: View {
                         dispatchTemplate = newTarget == .custom ? dispatchTemplate : newTarget.defaultTemplate
                     }
                 )) {
-                    ForEach(AIDispatchTarget.allCases, id: \.self) { Text(AppPresentation.aiDispatchTargetLabel($0)).tag($0) }
+                    ForEach([AIDispatchTarget.orca, .rex, .terminal, .custom], id: \.self) { Text(AppPresentation.aiDispatchTargetLabel($0)).tag($0) }
                 }
 
                 // The choice is stored separately from the command text so typing

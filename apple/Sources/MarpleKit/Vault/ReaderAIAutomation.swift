@@ -92,7 +92,7 @@ public enum AIDispatchTarget: String, CaseIterable, Sendable {
         case .orca: return "Orca"
         case .rex: return "Rex"
         case .otty: return "Otty"
-        case .terminal: return "终端 (Terminal)"
+        case .terminal: return "Terminal"
         case .custom: return "自定义"
         }
     }
@@ -132,10 +132,9 @@ public enum AIDispatchTarget: String, CaseIterable, Sendable {
     static let legacyOttyMixedCLINameTemplate = #"otty tab new --window current --cwd "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" --command "$MARPLE_RUN_SCRIPT" || otty-cli open "$MARPLE_VAULT_ROOT" --title "$MARPLE_TITLE" --command "$MARPLE_RUN_SCRIPT""#
 
     /// Resolves the effective dispatch template from the stored settings.
-    /// Unset/blank stored template falls back to the selected preset's default,
-    /// so legacy installs (nothing stored) keep the Superset flow unchanged.
+    /// Unset/blank stored template falls back to the selected preset's default.
     public static func resolveTemplate(targetRawValue: String?, storedTemplate: String?) -> String {
-        let target = AIDispatchTarget(rawValue: targetRawValue ?? "") ?? .superset
+        let target = AIDispatchTarget(rawValue: targetRawValue ?? "") ?? .terminal
         let stored = (storedTemplate ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if target == .otty,
            stored == legacyOttyTemplate

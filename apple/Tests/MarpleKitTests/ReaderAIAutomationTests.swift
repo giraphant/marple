@@ -428,9 +428,9 @@ import Testing
     }
 
     @Test func resolveTemplateFallsBackByStoredTarget() {
-        // Legacy install: nothing stored ⇒ unchanged Superset flow.
+        // Unconfigured dispatch opens Terminal.
         #expect(AIDispatchTarget.resolveTemplate(targetRawValue: nil, storedTemplate: nil)
-            == AIDispatchTarget.superset.defaultTemplate)
+            == AIDispatchTarget.terminal.defaultTemplate)
         #expect(AIDispatchTarget.resolveTemplate(targetRawValue: "orca", storedTemplate: " \n ")
             == AIDispatchTarget.orca.defaultTemplate)
         #expect(AIDispatchTarget.resolveTemplate(
@@ -455,7 +455,7 @@ import Testing
         // missing-template error instead of silently running a preset.
         #expect(AIDispatchTarget.resolveTemplate(targetRawValue: "custom", storedTemplate: nil).isEmpty)
         #expect(AIDispatchTarget.resolveTemplate(targetRawValue: "garbage", storedTemplate: nil)
-            == AIDispatchTarget.superset.defaultTemplate)
+            == AIDispatchTarget.terminal.defaultTemplate)
     }
 
     @Test func shellQuoteEscapesSingleQuotes() {
