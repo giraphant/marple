@@ -100,10 +100,11 @@ final class BackupScheduler: ObservableObject {
         snapshotInFlight = true
         let store = self.store
         let policy = self.policy
+        let persistedState = UserDefaults.standard.data(forKey: UserDefaultsStateStore.defaultKey)
         Task.detached {
             var succeeded = false
             do {
-                _ = try store.snapshot()
+                _ = try store.snapshot(persistedState: persistedState)
                 try store.prune(policy: policy)
                 succeeded = true
             } catch {

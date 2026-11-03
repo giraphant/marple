@@ -625,7 +625,10 @@ final class AppModel {
         self.readerAIRunner = readerAIRunner
         self.sessionWriter = workspaceRoot.isEmpty ? nil : SessionWriter(workspaceRoot: workspaceRoot)
         self.isFirstRun = isFirstRun
-        if let s = stateStore?.load() {
+        let loaded = stateStore?.loadResult()
+        // Set before the restore below: its property setters already persist.
+        allowsStateSaving = loaded?.allowsSaving ?? true
+        if let s = loaded?.state {
             // QUA-105: seed `loadedCountsSnapshot` BEFORE the property setters
             // below trigger `persist()` via didSet. Otherwise the first persist
             // (from `browsePane = ...`) writes `counts: nil` back to disk,
@@ -666,7 +669,18 @@ final class AppModel {
         }
         loadTypeOrder()
         loadHiddenTypes()
+        if let loaded, loaded.hadErrors {
+            let backup = loaded.backupURL?.path ?? String(localized: "（备份失败）")
+            flash(loaded.allowsSaving
+                  ? String(localized: "部分空间或页面无法读取，已跳过。原始数据备份：\(backup)")
+                  : String(localized: "无法读取已保存的空间，本次不会保存改动。原始数据备份：\(backup)"),
+                  symbol: "exclamationmark.triangle.fill")
+        }
     }
+
+    /// False when saved state could not be read: saving would replace it with
+    /// this (empty or partial) session, so the session is left unsaved instead.
+    @ObservationIgnored private var allowsStateSaving = true
 
     /// Last-session sidebar counts, restored from PersistedState in init. Kept
     /// so `persist()` can round-trip them during the bootstrap window — without
@@ -695,7 +709,7 @@ final class AppModel {
     /// Save the current place (browse category + Spaces + doc tabs + controls).
     /// Only retain metadata for open tabs, not a copy of the entire vault index.
     private func persist() {
-        guard let stateStore else { return }
+        guard allowsStateSaving, let stateStore else { return }
         guard persistenceDepth == 0 else {
             persistencePending = true
             return

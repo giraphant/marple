@@ -111,8 +111,12 @@ public final class SnapshotStore: Sendable {
 
     /// Clone the vault into a temp dir, then atomically rename to the timestamped
     /// name so a crash mid-clone never leaves a valid-looking partial snapshot.
+    /// Copy of the app's Spaces/tabs state, stored beside the vault clone: it lives in
+    /// UserDefaults, outside the vault, and was otherwise not backed up anywhere.
+    public static let persistedStateFilename = ".marple-persistedState.json"
+
     @discardableResult
-    public func snapshot(now: Date = Date()) throws -> Snapshot {
+    public func snapshot(now: Date = Date(), persistedState: Data? = nil) throws -> Snapshot {
         let fm = FileManager.default
         try fm.createDirectory(at: backupRoot, withIntermediateDirectories: true)
 
@@ -121,6 +125,9 @@ public final class SnapshotStore: Sendable {
         let tmp = backupRoot.appendingPathComponent(".tmp-\(UUID().uuidString)")
 
         try CloneCopy.snapshotTree(from: workspaceRoot, to: tmp)
+        if let persistedState {
+            try persistedState.write(to: tmp.appendingPathComponent(Self.persistedStateFilename))
+        }
         if fm.fileExists(atPath: final.path) {
             try fm.removeItem(at: final)  // same-second re-snapshot: replace
         }

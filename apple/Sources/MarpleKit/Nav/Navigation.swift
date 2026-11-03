@@ -25,10 +25,10 @@ public struct ListContext: Hashable, Sendable, Codable {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         searchText = try values.decode(String.self, forKey: .searchText)
-        searchMode = try values.decodeIfPresent(SearchMode.self, forKey: .searchMode) ?? .balanced
-        filters = try values.decode([FilterClause].self, forKey: .filters)
-        filterMatch = try values.decode(FilterMatch.self, forKey: .filterMatch)
-        sorts = try values.decode([SortClause].self, forKey: .sorts)
+        searchMode = values.lenient(SearchMode.self, forKey: .searchMode, in: decoder) ?? .balanced
+        filters = values.lossyArray(FilterClause.self, forKey: .filters, in: decoder)?.values ?? []
+        filterMatch = values.lenient(FilterMatch.self, forKey: .filterMatch, in: decoder) ?? .all
+        sorts = values.lossyArray(SortClause.self, forKey: .sorts, in: decoder)?.values ?? []
     }
 }
 
@@ -44,6 +44,16 @@ public struct NavLocation: Hashable, Sendable, Codable {
         self.pane = pane
         self.openPath = openPath
         self.listContext = listContext
+    }
+
+    private enum CodingKeys: String, CodingKey { case pane, openPath, listContext }
+
+    // An unreadable list context must not cost the tab itself.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pane = try c.decode(Pane.self, forKey: .pane)
+        openPath = try c.decodeIfPresent(String.self, forKey: .openPath)
+        listContext = c.lenient(ListContext.self, forKey: .listContext, in: decoder)
     }
 }
 
@@ -185,11 +195,27 @@ public struct WorkspaceTreeSnapshot: Codable, Sendable, Equatable {
             self.isCollapsed = isCollapsed
             self.children = children
         }
+
+        private enum CodingKeys: String, CodingKey { case name, isCollapsed, children }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decode(String.self, forKey: .name)
+            isCollapsed = try c.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? false
+            children = c.lossyArray(Node.self, forKey: .children, in: decoder)?.values ?? []
+        }
     }
 
     public var roots: [Node]
 
     public init(roots: [Node]) { self.roots = roots }
+
+    private enum CodingKeys: String, CodingKey { case roots }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        roots = c.lossyArray(Node.self, forKey: .roots, in: decoder)?.values ?? []
+    }
 }
 
 public struct WorkspaceSpace: Identifiable, Sendable {

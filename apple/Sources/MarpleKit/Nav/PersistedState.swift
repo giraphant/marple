@@ -66,18 +66,26 @@ public struct PersistedWorkspaceSpace: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey { case id, name, isBrowsing, tabs, activeIndex, iconName, isArchived, groups, tree }
 
     // Tolerant decode: a v2 blob may omit `groups`; a v1 blob omits `tree`. Neither
-    // should fail the whole persisted-state decode.
+    // should fail the whole persisted-state decode. An unreadable tab is skipped and
+    // the index references to the remaining tabs are re-pointed.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? "默认 Space"
         isBrowsing = try c.decodeIfPresent(Bool.self, forKey: .isBrowsing) ?? false
-        tabs = try c.decodeIfPresent([PersistedTab].self, forKey: .tabs) ?? []
+        let decodedTabs = c.lossyArray(PersistedTab.self, forKey: .tabs, in: decoder)
+        tabs = decodedTabs?.values ?? []
         activeIndex = try c.decodeIfPresent(Int.self, forKey: .activeIndex) ?? 0
         iconName = try c.decodeIfPresent(String.self, forKey: .iconName)
         isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
-        groups = try c.decodeIfPresent([WorkspaceGroupSnapshot].self, forKey: .groups) ?? []
-        tree = try c.decodeIfPresent(WorkspaceTreeSnapshot.self, forKey: .tree)
+        groups = c.lossyArray(WorkspaceGroupSnapshot.self, forKey: .groups, in: decoder)?.values ?? []
+        tree = c.lenient(WorkspaceTreeSnapshot.self, forKey: .tree, in: decoder)
+        if let decodedTabs, decodedTabs.droppedAny {
+            let map = decodedTabs.indexMap
+            activeIndex = map[activeIndex] ?? 0
+            for i in groups.indices { groups[i].tabIndices = groups[i].tabIndices.compactMap { map[$0] } }
+            tree = tree?.remappingTabs(map)
+        }
     }
 }
 
@@ -127,6 +135,32 @@ public struct PersistedState: Codable, Sendable, Equatable {
         self.savedViews = savedViews
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case browsePane, isBrowsing, tabs, activeIndex, sortClauses, filterClauses,
+             filterMatch, browseMode, currentSpace, spaces, activeSpaceID, counts, savedViews
+    }
+
+    // Every field degrades on its own (see StateDecoding.swift): another build's
+    // schema must never cost the user their Spaces.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        browsePane = c.lenient(Pane.self, forKey: .browsePane, in: decoder) ?? .type(.paper)
+        isBrowsing = c.lenient(Bool.self, forKey: .isBrowsing, in: decoder) ?? true
+        let decodedTabs = c.lossyArray(PersistedTab.self, forKey: .tabs, in: decoder)
+        tabs = decodedTabs?.values ?? []
+        let savedIndex = c.lenient(Int.self, forKey: .activeIndex, in: decoder) ?? 0
+        activeIndex = decodedTabs?.indexMap[savedIndex] ?? 0
+        sortClauses = c.lossyArray(SortClause.self, forKey: .sortClauses, in: decoder)?.values ?? []
+        filterClauses = c.lossyArray(FilterClause.self, forKey: .filterClauses, in: decoder)?.values ?? []
+        filterMatch = c.lenient(FilterMatch.self, forKey: .filterMatch, in: decoder) ?? .all
+        browseMode = c.lenient(String.self, forKey: .browseMode, in: decoder) ?? ""
+        currentSpace = c.lenient(PersistedWorkspaceSpace.self, forKey: .currentSpace, in: decoder)
+        spaces = c.lossyArray(PersistedWorkspaceSpace.self, forKey: .spaces, in: decoder)?.values
+        activeSpaceID = c.lenient(UUID.self, forKey: .activeSpaceID, in: decoder)
+        counts = c.lenient([EntryType: Int].self, forKey: .counts, in: decoder)
+        savedViews = c.lossyArray(SavedView.self, forKey: .savedViews, in: decoder)?.values
+    }
+
     public func makeWorkspace() -> Workspace? {
         if let spaces, !spaces.isEmpty {
             let active = activeSpaceID.flatMap { id in spaces.first { $0.id == id } } ?? spaces.first
@@ -172,24 +206,87 @@ public struct PersistedState: Codable, Sendable, Equatable {
     }
 }
 
+/// The outcome of reading saved state. "Nothing saved yet" and "saved but
+/// unreadable" must not look alike: the second used to be overwritten silently.
+public struct StateLoadResult: Sendable {
+    public var state: PersistedState?
+    /// True when some or all of the saved state could not be read.
+    public var hadErrors: Bool
+    /// Copy of the original bytes, written before anything could overwrite them.
+    public var backupURL: URL?
+    /// False when saving would replace state this build could not read at all, or
+    /// when the backup failed — the caller must then not save this session.
+    public var allowsSaving: Bool
+
+    public init(state: PersistedState?, hadErrors: Bool = false,
+                backupURL: URL? = nil, allowsSaving: Bool = true) {
+        self.state = state
+        self.hadErrors = hadErrors
+        self.backupURL = backupURL
+        self.allowsSaving = allowsSaving
+    }
+}
+
 /// Where persisted state lives. App uses UserDefaults; tests can substitute.
 public protocol StateStore: Sendable {
     func load() -> PersistedState?
+    func loadResult() -> StateLoadResult
     func save(_ state: PersistedState)
 }
 
+public extension StateStore {
+    func loadResult() -> StateLoadResult { StateLoadResult(state: load()) }
+}
+
 public struct UserDefaultsStateStore: StateStore, @unchecked Sendable {
+    public static let defaultKey = "marple.persistedState"
+
     private let defaults: UserDefaults
     private let key: String
-    public init(defaults: UserDefaults = .standard, key: String = "marple.persistedState") {
+    private let backupDirectory: URL
+
+    public init(defaults: UserDefaults = .standard, key: String = Self.defaultKey,
+                backupDirectory: URL? = nil) {
         self.defaults = defaults; self.key = key
+        self.backupDirectory = backupDirectory ?? FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Marple/StateBackups", isDirectory: true)
     }
-    public func load() -> PersistedState? {
-        guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(PersistedState.self, from: data)
+
+    public func load() -> PersistedState? { loadResult().state }
+
+    public func loadResult() -> StateLoadResult {
+        guard let data = defaults.data(forKey: key) else { return StateLoadResult(state: nil) }
+        let log = StateDecodeLog()
+        let decoder = JSONDecoder()
+        decoder.userInfo[.stateDecodeLog] = log
+        var state: PersistedState?
+        do { state = try decoder.decode(PersistedState.self, from: data) } catch {
+            NSLog("[marple] persisted state unreadable: %@", String(describing: error))
+            log.record(error)
+        }
+        guard !log.errors.isEmpty else { return StateLoadResult(state: state) }
+        do {
+            let url = try backUp(data)
+            return StateLoadResult(state: state, hadErrors: true, backupURL: url,
+                                   allowsSaving: state != nil)
+        } catch {
+            NSLog("[marple] persisted state backup failed: %@", String(describing: error))
+            return StateLoadResult(state: state, hadErrors: true, allowsSaving: false)
+        }
     }
+
     public func save(_ state: PersistedState) {
         guard let data = try? JSONEncoder().encode(state) else { return }
         defaults.set(data, forKey: key)
+    }
+
+    private func backUp(_ data: Data) throws -> URL {
+        try FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let url = backupDirectory.appendingPathComponent(
+            "persistedState-\(stamp)-\(UUID().uuidString.prefix(8)).json")
+        try data.write(to: url, options: .withoutOverwriting)
+        return url
     }
 }
