@@ -146,6 +146,7 @@ enum AppPresentation {
         switch preset {
         case .claude: return "Claude Code (claude)"
         case .codex: return "Codex (codex)"
+        case .pi: return "Pi Agent (pi)"
         case .antigravity: return "Antigravity (agy)"
         case .custom: return String(localized: "自定义")
         }

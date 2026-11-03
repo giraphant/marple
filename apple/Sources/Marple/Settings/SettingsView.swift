@@ -25,7 +25,7 @@ struct SettingsView: View {
             AIBridgeSettings()
                 .tabItem { Label("智能", systemImage: "sparkles") }
             QuasiSettings()
-                .tabItem { Label("Quasi", systemImage: "slider.horizontal.3") }
+                .tabItem { Label("技能", systemImage: "slider.horizontal.3") }
             BackupSettings()
                 .tabItem { Label("备份", systemImage: "clock.arrow.circlepath") }
         }

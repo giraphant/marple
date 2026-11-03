@@ -336,6 +336,21 @@ import Testing
         #expect(script.contains("exec claude \"$marple_prompt\""))
     }
 
+    @Test func piPresetStartsInteractiveSessionWithInitialPrompt() throws {
+        let preset = try #require(ReaderAIAgentPreset(rawValue: "pi"))
+        #expect(ReaderAIAgentPreset.allCases.contains(preset))
+        let command = try #require(preset.command)
+        let script = ReaderAIRunner.runScript(
+            agent: command,
+            vaultRoot: "/tmp/my vault",
+            promptFilePath: "/tmp/pkg/prompt.md"
+        )
+
+        #expect(command == "pi")
+        #expect(script.contains("cd '/tmp/my vault'"))
+        #expect(script.contains("exec pi \"$marple_prompt\""))
+    }
+
     @Test func antigravityPresetStartsInteractiveSessionWithInitialPrompt() throws {
         let command = try #require(ReaderAIAgentPreset.antigravity.command)
         let script = ReaderAIRunner.runScript(

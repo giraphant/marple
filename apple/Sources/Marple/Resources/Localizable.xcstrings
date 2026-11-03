@@ -17,18 +17,18 @@
       }
     }
   },
-  "Quasi": {
+  "技能": {
     "localizations": {
       "en": {
         "stringUnit": {
           "state": "translated",
-          "value": "Quasi"
+          "value": "Skills"
         }
       },
       "zh-Hans": {
         "stringUnit": {
           "state": "translated",
-          "value": "Quasi"
+          "value": "技能"
         }
       }
     }

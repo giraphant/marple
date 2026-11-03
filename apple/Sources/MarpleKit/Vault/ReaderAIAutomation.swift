@@ -60,6 +60,7 @@ public enum ReaderAIAction: String, CaseIterable, Sendable, Equatable {
 public enum ReaderAIAgentPreset: String, CaseIterable, Sendable {
     case claude
     case codex
+    case pi
     case antigravity
     case custom
 
@@ -67,6 +68,7 @@ public enum ReaderAIAgentPreset: String, CaseIterable, Sendable {
         switch self {
         case .claude: return "claude"
         case .codex: return "codex"
+        case .pi: return "pi"
         case .antigravity: return "agy --prompt-interactive"
         case .custom: return nil
         }
