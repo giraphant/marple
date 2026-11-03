@@ -5,6 +5,7 @@ import MarpleKit
 /// UserDefaults keys for user settings. Plain `@AppStorage` rather than a Codable
 /// blob: the set is small and each control binds to one key directly.
 enum SettingsKeys {
+    static let quasiExecutablePath = "marple.quasiExecutablePath"
     static let balancedTermExpansion = "marple.balancedTermExpansion"
     static let deepTermExpansion = "marple.deepTermExpansion"
     static let termExpansionDepth = "marple.termExpansionDepth"

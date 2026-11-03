@@ -24,6 +24,8 @@ struct SettingsView: View {
                 .tabItem { Label("索引", systemImage: "externaldrive") }
             AIBridgeSettings()
                 .tabItem { Label("智能", systemImage: "sparkles") }
+            QuasiSettings()
+                .tabItem { Label("Quasi", systemImage: "slider.horizontal.3") }
             BackupSettings()
                 .tabItem { Label("备份", systemImage: "clock.arrow.circlepath") }
         }

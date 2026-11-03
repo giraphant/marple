@@ -81,7 +81,7 @@ Sources/Marple/
 ├── Tabs/          标签栏 + 快捷键
 │                  TabStripView · TabCommands
 ├── Settings/      设置面板
-│                  SettingsView · AppSettings · TermIndexSettings
+│                  SettingsView · AppSettings · TermIndexSettings · QuasiSettings/QuasiConfigClient(外部配置 CLI)
 ├── CLI/           CLI socket host(消费 MarpleKit/CLI 协议)
 │                  CLIServer · CLIHandlers · AppModel+CLI
 ├── Backup/        备份 UI + 调度

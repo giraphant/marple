@@ -1,6 +1,294 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+  "清除": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Clear"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "清除"
+        }
+      }
+    }
+  },
+  "Quasi": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Quasi"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Quasi"
+        }
+      }
+    }
+  },
+  "Quasi 入口": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Quasi Entry Point"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Quasi 入口"
+        }
+      }
+    }
+  },
+  "scripts/quasi 的绝对路径": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Absolute path to scripts/quasi"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "scripts/quasi 的绝对路径"
+        }
+      }
+    }
+  },
+  "保存路径并重新加载": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Save Path and Reload"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "保存路径并重新加载"
+        }
+      }
+    }
+  },
+  "配置已清除。": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Configuration cleared."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "配置已清除。"
+        }
+      }
+    }
+  },
+  "配置已保存。": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Configuration saved."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "配置已保存。"
+        }
+      }
+    }
+  },
+  "已设": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Set"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "已设"
+        }
+      }
+    }
+  },
+  "未设": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Not set"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "未设"
+        }
+      }
+    }
+  },
+  "输入新值": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Enter a new value"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "输入新值"
+        }
+      }
+    }
+  },
+  "配置值": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Configuration value"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "配置值"
+        }
+      }
+    }
+  },
+  "默认值：%@": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Default: %@"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "默认值：%@"
+        }
+      }
+    }
+  },
+  "当前由环境变量 %@ 覆盖，这里改了暂时不生效": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Currently overridden by environment variable %@; changes here will not take effect yet."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "当前由环境变量 %@ 覆盖，这里改了暂时不生效"
+        }
+      }
+    }
+  },
+  "无法解析 Quasi 配置 JSON，请检查入口路径和 quasi 版本。": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Could not parse Quasi configuration JSON. Check the entry point and quasi version."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "无法解析 Quasi 配置 JSON，请检查入口路径和 quasi 版本。"
+        }
+      }
+    }
+  },
+  "找不到可执行的 Quasi 入口，请填写 scripts/quasi 的绝对路径。": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Quasi executable not found. Enter the absolute path to scripts/quasi."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "找不到可执行的 Quasi 入口，请填写 scripts/quasi 的绝对路径。"
+        }
+      }
+    }
+  },
+  "无法启动 Quasi：%@": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Could not start Quasi: %@"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "无法启动 Quasi：%@"
+        }
+      }
+    }
+  },
+  "Quasi 命令失败（退出码 %d）。": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Quasi command failed (exit code %d)."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Quasi 命令失败（退出码 %d）。"
+        }
+      }
+    }
+  },
+  "无法向 Quasi 写入配置：%@": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Could not write configuration to Quasi: %@"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "无法向 Quasi 写入配置：%@"
+        }
+      }
+    }
+  },
     "任务" : {
       "localizations" : {
         "en" : {
