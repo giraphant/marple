@@ -49,7 +49,7 @@ import Testing
         let book = entry("books/context.md", type: .book, year: "2025")
         let chapter = entry("books/context/ch01.md", type: .chapter, year: "1997")
         let sort = [SortClause(field: .title, dir: .desc)]
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -95,7 +95,7 @@ import Testing
     @MainActor
     @Test func activeLegacyTemporaryTabReconstructsContextAfterIndexLoad() async throws {
         let chapter = entry("books/context/ch01.md", type: .chapter, year: "1997")
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -132,7 +132,7 @@ import Testing
         let staleContext = ListContext(
             searchText: "", filters: [FilterClause(field: .year, op: .gte, value: "2020")],
             filterMatch: .all, sorts: sort)
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -211,7 +211,7 @@ import Testing
             clauses: [FilterClause(field: .year, op: .gte, value: "2020")],
             match: .all,
             sorts: [SortClause(field: .year, dir: .desc)])
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)

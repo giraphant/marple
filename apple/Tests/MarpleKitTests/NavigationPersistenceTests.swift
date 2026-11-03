@@ -7,7 +7,7 @@ import Testing
 @Suite struct NavigationPersistenceTests {
     @MainActor
     @Test func navigationSavesCompleteListContextOnceBeforeReading() async throws {
-        let suite = "marple-navigation-context-\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple-navigation-context-")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = CountingStateStore(backing: UserDefaultsStateStore(defaults: defaults))
@@ -68,7 +68,7 @@ import Testing
 
     @MainActor
     @Test func switchingTabsAndSpacesSavesOnlyChangedState() async throws {
-        let suite = "marple-navigation-\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple-navigation-")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = CountingStateStore(backing: UserDefaultsStateStore(defaults: defaults))

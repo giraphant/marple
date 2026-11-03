@@ -5,7 +5,7 @@ import MarpleKit
 
 struct ReaderAISettingsTests {
     @Test func taskSettingsKeepLegacyDefaultsAndRemainIndependent() throws {
-        let suite = "ReaderAISettingsTests.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("ReaderAISettingsTests.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 

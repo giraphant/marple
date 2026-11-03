@@ -220,7 +220,7 @@ import Testing
         // lookup fails. tabTitle() must return the cached title rather than
         // the filename basename.
         let path = "vault/notes/long-filename.md"
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -249,7 +249,7 @@ import Testing
         // Once loadIndex publishes, the live entry's title should win over
         // the cached one — cachedTitle is fallback only.
         let path = "vault/notes/n.md"
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -286,7 +286,7 @@ import Testing
         // fires while the app simply finishes loading. This regression test
         // pins the post-publish persist.
         let path = "vault/notes/n.md"
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -329,7 +329,7 @@ import Testing
             path: "books/freedom/ch04.md", type: .chapter, title: "Chapter 4",
             author: [], year: "1999", ratingScore: 0, themes: [], preview: "",
             hasPDF: false)
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -361,7 +361,7 @@ import Testing
         // counts dict over the user's previously-saved type counts — and the
         // *next* launch (no entries published yet) would then show all zeros
         // permanently, defeating the whole point of persisting counts.
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -385,7 +385,7 @@ import Testing
 
     @MainActor
     @Test func countsSeedFromPersistedStateOnInit() throws {
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -456,7 +456,7 @@ import Testing
     @Test func restoresMultipleSpacesAndSwitchesActiveSpace() async throws {
         let firstID = UUID()
         let secondID = UUID()
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -558,7 +558,7 @@ import Testing
 
     @MainActor
     @Test func persistWritesAllSpacesWithActiveSpace() async throws {
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -579,7 +579,7 @@ import Testing
 
     @MainActor
     @Test func reorderSpacesPreservesActiveSpaceAndPersistsOrder() async throws {
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)
@@ -604,7 +604,7 @@ import Testing
 
     @MainActor
     @Test func setSpaceIconPersistsIcon() throws {
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)

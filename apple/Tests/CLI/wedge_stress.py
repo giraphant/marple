@@ -216,6 +216,10 @@ def main():
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+        # cfprefsd still writes the isolated bundle ID's domain into the real
+        # ~/Library/Preferences despite CFFIXED_USER_HOME; remove it again.
+        subprocess.run(['/usr/bin/defaults', 'delete', bundle_id], capture_output=True, check=False)
+        (Path.home() / 'Library/Preferences' / f'{bundle_id}.plist').unlink(missing_ok=True)
         log.close()
         launch_log.close()
 

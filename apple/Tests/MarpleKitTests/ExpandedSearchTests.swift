@@ -139,7 +139,7 @@ import MarpleEmbeddings
         try await indexer.reconcile()
         let client = LocalVaultClient(workspaceRoot: root.path,
             index: IndexDatabase(indexDBPath: root.appendingPathComponent(".marple/index.sqlite").path))
-        let defaults = UserDefaults(suiteName: "search-tests-\(UUID().uuidString)")!
+        let defaults = UserDefaults(suiteName: testDefaultsSuite("search-tests-"))!
         if enableExpansion {
             defaults.set(true, forKey: SettingsKeys.balancedTermExpansion)
             defaults.set(true, forKey: SettingsKeys.deepTermExpansion)

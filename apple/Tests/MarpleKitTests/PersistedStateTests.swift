@@ -377,7 +377,7 @@ private struct LegacyNavLocation: Encodable {
     }
 
     @Test func userDefaultsStoreRoundTrips() throws {
-        let suite = "marple.test.\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple.test.")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)

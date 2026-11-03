@@ -216,7 +216,7 @@ struct CLIOrganizationTests {
     }
 
     @Test func editsAreOneUndoStepAndRestoreAfterRestart() async throws {
-        let suite = "cli-organization-\(UUID().uuidString)"
+        let suite = testDefaultsSuite("cli-organization-")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = UserDefaultsStateStore(defaults: defaults)

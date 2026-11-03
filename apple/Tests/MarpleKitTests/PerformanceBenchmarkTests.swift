@@ -81,7 +81,7 @@ import Testing
         // Real tab state and index, fixed short bodies: isolate navigation/state
         // costs from file downloads, Markdown rendering and on-screen layout.
         let texts = Dictionary(uniqueKeysWithValues: paths.map { ($0, "# Benchmark\n\nShort document.") })
-        let suite = "marple-session-performance-\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple-session-performance-")
         let defaults = try #require(UserDefaults(suiteName: suite))
         let temporaryRoot = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
         defer {
@@ -453,7 +453,7 @@ import Testing
         scroll.documentView = reader
         measure("reader unchanged layout") { MarkdownTextView.sizeDocumentView(in: scroll) }
 
-        let suite = "marple-performance-\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple-performance-")
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let docs = Array(corpus.prefix(2))

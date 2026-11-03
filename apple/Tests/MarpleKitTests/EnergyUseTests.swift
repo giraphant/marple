@@ -6,7 +6,7 @@ import Testing
 @Suite struct EnergyUseTests {
     @MainActor
     @Test func memoryWatchdogIsOptIn() {
-        let suite = "marple-memory-watchdog-\(UUID().uuidString)"
+        let suite = testDefaultsSuite("marple-memory-watchdog-")
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
 
