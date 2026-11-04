@@ -204,7 +204,6 @@ struct EntryListTable: NSViewRepresentable {
             lastActiveTabID = model.activeTabID
             lastPinnedListContext = model.isPinnedListContext
 
-            let itemsChanged = items != newItems
             // search-mode flip swaps row-view classes (default ↔ group),
             // require a full reloadData even if items happen to compare equal
             let searchModeFlipped = newSearchMode != lastSearchMode
@@ -212,31 +211,28 @@ struct EntryListTable: NSViewRepresentable {
             // RowItem; a snapshot nil→present/version change with unchanged
             // entries must still repaint, so force a reload on snapshot drift.
             let snapshotChanged = model.schemaSnapshot != lastSnapshot
+            let archiveExpansionChanged = lastExpanded != model.expandedArchiveCollections
 
-            if itemsChanged, !searchModeFlipped, !snapshotChanged,
-               lastExpanded == model.expandedArchiveCollections,
-               items.count == newItems.count,
-               zip(items, newItems).allSatisfy({ $0.hasSameIdentity(as: $1) }) {
-                let changedRows = IndexSet(items.indices.filter { items[$0] != newItems[$0] })
-                let heightChanges = IndexSet(changedRows.filter { row in
-                    if case .entryHeader(let old) = items[row],
-                       case .entryHeader(let new) = newItems[row] {
-                        return rowHasMeta(old) != rowHasMeta(new)
+            // One pass over old/new rows: a single synthesized payload compare
+            // per row (fast path for equal rows), identity classification only
+            // for rows whose payload differs. Replaces the previous whole-array
+            // Equatable compare plus zip identity scan plus per-row re-compare
+            // (three passes → one).
+            var identityPreserved = items.count == newItems.count
+            var changedRows = IndexSet()
+            if identityPreserved {
+                for row in items.indices {
+                    if items[row] != newItems[row] {
+                        guard items[row].hasSameIdentity(as: newItems[row]) else {
+                            identityPreserved = false
+                            break
+                        }
+                        changedRows.insert(row)
                     }
-                    return false
-                })
-                items = newItems
-                // Keep selection and unaffected rows intact. Offscreen rows use
-                // the new payload when AppKit next asks for their cell.
-                if !heightChanges.isEmpty {
-                    table.noteHeightOfRows(withIndexesChanged: heightChanges)
                 }
-                table.reloadData(forRowIndexes: changedRows, columnIndexes: IndexSet(integer: 0))
-                syncSelection(in: table, reveal: contextChanged)
-                return
             }
 
-            if itemsChanged || searchModeFlipped || snapshotChanged || lastExpanded != model.expandedArchiveCollections {
+            if !identityPreserved || searchModeFlipped || snapshotChanged || archiveExpansionChanged {
                 lastExpanded = model.expandedArchiveCollections
                 let wasSearchMode = lastSearchMode
                 let selected = Set(table.selectedRowIndexes.compactMap { row in
@@ -261,6 +257,26 @@ struct EntryListTable: NSViewRepresentable {
                 return
             }
 
+            if !changedRows.isEmpty {
+                var heightChanges = IndexSet()
+                for row in changedRows {
+                    if case .entryHeader(let old) = items[row],
+                       case .entryHeader(let new) = newItems[row],
+                       rowHasMeta(old) != rowHasMeta(new) {
+                        heightChanges.insert(row)
+                    }
+                }
+                items = newItems
+                // Keep selection and unaffected rows intact. Offscreen rows use
+                // the new payload when AppKit next asks for their cell.
+                if !heightChanges.isEmpty {
+                    table.noteHeightOfRows(withIndexesChanged: heightChanges)
+                }
+                table.reloadData(forRowIndexes: changedRows, columnIndexes: IndexSet(integer: 0))
+                syncSelection(in: table, reveal: contextChanged)
+                return
+            }
+
             // Items unchanged. Just sync selection — that triggers
             // tableViewSelectionDidChange → refreshGroupHighlight if the
             // selection target actually moves.
@@ -271,8 +287,9 @@ struct EntryListTable: NSViewRepresentable {
             !model.searchMatches.isEmpty
         }
 
-        private func buildItems() -> [RowItem] {
+        func buildItems() -> [RowItem] {
             var result: [RowItem] = []
+            result.reserveCapacity(model.visibleEntries.count * 2)
             for (idx, entry) in model.visibleEntries.enumerated() {
                 if idx > 0 { result.append(.spacer) }  // gap between adjacent groups
                 result.append(.entryHeader(entry))

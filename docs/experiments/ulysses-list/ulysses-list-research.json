@@ -444,6 +444,36 @@
       "test": "PerformanceBenchmarkTests/searchExcerptMainActorResponsiveness",
       "interpretation": "验证耗时计算离开主 actor；不代表总搜索时间缩短相同比例，不用于外推实际库的 FPS 或吞吐。"
     },
+    "list_scale_measurement": {
+      "date": "2026-11-04",
+      "host": "RamuX（笔记本，Apple silicon），Debug，无窗口 NSTableView（600pt 视口）",
+      "test": "PerformanceBenchmarkTests/entryListScale（本轮新增，MARPLE_PERFORMANCE_LIST=1 门控）：500/5,000/15,000 行，搜索模式每 4 行一条带 8 个匹配行",
+      "numbers_ms": {
+        "noop_reload": "0.68 / 7.23 / 21.38（500/5k/15k）",
+        "partial_row_refresh": "1.97 / 18.63 / 54.64",
+        "search_mode_enter": "2.26 / 8.08 / 23.36",
+        "match_expand_collapse": "1.27 / 7.75 / 22.01"
+      },
+      "real_scale": "本机 vault 37,161 条：chapter 29,742 / paper 3,951 / book 2,246 / author 333；章节分类是可达的整库级面板",
+      "interpretation": "所有路径都随结果集线性增长（每行每遍 ≈1.4µs，Debug）。no-op reload 本身就是 buildItems 全量投影 + items != newItems 全数组 Equatable 比较；partial 路径再叠加 zip 身份扫描和 changedRows 过滤的第二遍全量比较，放大约 2.5×。500 行内全部 ≤2.3ms 达标；paper 量级（4k）partial 18.6ms 超单帧；章节量级（30k）每次 reload 都在 40–110ms 量级（线性外推），每个搜索键入/选中变化都会掉帧。展开/收起的成本 ≈ no-op 地板（AppKit 无窗口 reloadData 本身不贵），说明结构差分的主要收益是稳定性（滚动/选中/动画）而非 CPU。",
+      "next_lever_order": [
+        "1. 单遍扫描：把 items != newItems、zip 身份、changedRows 三遍合并为一遍，并用每 entry 的版本戳代替深比较 preview/author 字符串 —— 无架构变化，预计 partial 54.6→≈25ms@15k",
+        "2. 匹配展开/收起走 SidebarChildDiff 式插入/删除（对齐 F07/F08）—— CPU 收益小，稳定性收益大",
+        "3. 若章节/全库面板要求流畅：持久行模型（按 path 键控 + 只观察已物化行，对齐 F04）或只投影可见窗口 —— 大改，待 1 之后复测再定"
+      ],
+      "round3_implementation": {
+        "date": "2026-11-04",
+        "change": "EntryListTable.reload 单遍扫描：每行先做一次合成 != 快速跳过相等行，仅对 payload 变化的行做 hasSameIdentity 分类，结构变化即时 break；三遍（全数组 Equatable + zip 身份 + changedRows 重扫）合一。buildItems 预留容量。行为分支语义与旧代码逐分支对齐，无断言/测试改动。",
+        "attribution_note": "归因拆分（15k）：buildItems 6.9ms、合成 Array== 一逆 11.5ms、旧 partial 额外两逆 +31ms、AppKit layout ≤1ms 可忽略。曾尝试身份优先的循环，相等行上双重枚举开关反而比合成 == 慢 2×（scratch 实测 21.4 vs 11.5ms），改为 != 优先。",
+        "numbers_after_ms": {
+          "partial_row_refresh": "0.77 / 7.90 / 24.14（500/5k/15k，原 1.97/18.63/54.64，2.2–2.3×）",
+          "noop_reload": "0.79 / 7.87 / 24.25（原地，噪声内）",
+          "search_mode_enter": "2.12 / 8.03 / 22.19（不变）",
+          "match_expand_collapse": "0.76 / 6.79 / 20.71（不变，结构路径）"
+        },
+        "remaining_floor": "no-op 地板 = buildItems 7ms + 一逆合成 == 11.5ms + syncSelection，仍是 O(结果集)。版本戳（ lever 1 后半）与持久行模型（lever 3）未做：前者有 mtime/本地评分等失效风险或需 Catalog 代数计数，后者是大改。5k 量级（paper 4k 面板）已入帧预算；章节 30k 面板每次事件仍 ≈45ms 级。"
+      }
+    },
     "remaining": [
       "buildItems 与行比较仍遍历当前筛选结果，尚未实现结构增量投影。",
       "改变 schema、搜索模式、档案展开状态、行身份或顺序时仍采用全量 fallback。",

@@ -71,6 +71,92 @@ import Testing
         report("reconcile delete 600 entries / \(600 * text.utf8.count) text bytes", samples: samples)
     }
 
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["MARPLE_PERFORMANCE_LIST"] != nil))
+    func entryListScale() throws {
+        _ = NSApplication.shared
+        for count in [500, 5_000, 15_000] {
+            let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
+            model.catalog.visibleEntries = (0..<count).map {
+                Entry(path: "paper-\($0).md", type: .paper, title: "Paper \($0)", author: [],
+                      year: nil, ratingScore: 0, themes: [], preview: "Preview text \($0)", hasPDF: false)
+            }
+            let coordinator = EntryListTable.Coordinator(model: model)
+            let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 300, height: 600))
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("entry"))
+            column.width = 300
+            table.addTableColumn(column)
+            table.headerView = nil
+            table.style = .inset
+            table.intercellSpacing = .zero
+            table.usesAutomaticRowHeights = false
+            table.rowSizeStyle = .custom
+            table.dataSource = coordinator
+            table.delegate = coordinator
+            coordinator.tableView = table
+            let scroll = NSScrollView(frame: table.frame)
+            scroll.documentView = table
+            coordinator.reload(table)
+
+            // No-op reload: buildItems projection + full-array compare floor.
+            var samples: [Double] = []
+            for _ in 0..<6 {
+                let start = ContinuousClock.now
+                coordinator.reload(table)
+                samples.append(milliseconds(start.duration(to: .now)))
+            }
+            report("list no-op reload, \(count) rows", samples: Array(samples.dropFirst(2)))
+            measure("list buildItems projection, \(count) rows") { _ = coordinator.buildItems() }
+
+            // Single-row content change: partial row-refresh path.
+            samples = []
+            var layoutSamples: [Double] = []
+            for i in 0..<6 {
+                model.catalog.visibleEntries[count / 2] =
+                    model.catalog.visibleEntries[count / 2].with(title: "Renamed \(i)")
+                let start = ContinuousClock.now
+                coordinator.reload(table)
+                samples.append(milliseconds(start.duration(to: .now)))
+                let layoutStart = ContinuousClock.now
+                scroll.layoutSubtreeIfNeeded()
+                layoutSamples.append(milliseconds(layoutStart.duration(to: .now)))
+            }
+            report("list partial row refresh, \(count) rows", samples: Array(samples.dropFirst(2)))
+            report("list partial row layout, \(count) rows", samples: Array(layoutSamples.dropFirst(2)))
+
+            // Search mode: every 4th entry carries 8 match lines (cap 3 + toggle).
+            var matches: [String: BodyMatches] = [:]
+            for index in stride(from: 0, to: count, by: 4) {
+                let path = model.catalog.visibleEntries[index].path
+                matches[path] = BodyMatches(lines: (0..<8).map { line in
+                    BodyMatchLine(lineIndex: line, excerpt: "match line \(line) keywords 中文",
+                                  spans: [], matchOrdinal: line, anchor: "keywords")
+                }, totalMatches: 8)
+            }
+            let enter = ContinuousClock.now
+            model.catalog.searchMatches = matches
+            coordinator.reload(table)
+            scroll.layoutSubtreeIfNeeded()
+            report("list search-mode enter + layout, \(count) rows", samples: [milliseconds(enter.duration(to: .now))])
+
+            // Expand/collapse one middle entry: structural full-reload path.
+            let target = model.catalog.visibleEntries[(count / 2 / 4) * 4].path
+            samples = []
+            layoutSamples = []
+            for i in 0..<8 {
+                if i.isMultiple(of: 2) { model.catalog.matchExpanded.insert(target) }
+                else { model.catalog.matchExpanded.remove(target) }
+                let start = ContinuousClock.now
+                coordinator.reload(table)
+                samples.append(milliseconds(start.duration(to: .now)))
+                let layoutStart = ContinuousClock.now
+                scroll.layoutSubtreeIfNeeded()
+                layoutSamples.append(milliseconds(layoutStart.duration(to: .now)))
+            }
+            report("list match expand/collapse, \(count) rows", samples: Array(samples.dropFirst(2)))
+            report("list match expand/collapse layout, \(count) rows", samples: Array(layoutSamples.dropFirst(2)))
+        }
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["MARPLE_PERFORMANCE_STATE"] != nil))
     func savedSessionEncodingComponents() throws {
         let path = try #require(ProcessInfo.processInfo.environment["MARPLE_PERFORMANCE_STATE"])
