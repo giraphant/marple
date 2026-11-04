@@ -69,7 +69,7 @@ public enum ReaderAIAgentPreset: String, CaseIterable, Sendable {
         case .claude: return "claude"
         case .codex: return "codex"
         case .pi: return "pi"
-        case .antigravity: return "agy --prompt-interactive"
+        case .antigravity: return "agy --mode=auto --prompt-interactive"
         case .custom: return nil
         }
     }

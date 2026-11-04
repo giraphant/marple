@@ -351,7 +351,7 @@ import Testing
         #expect(script.contains("exec pi \"$marple_prompt\""))
     }
 
-    @Test func antigravityPresetStartsInteractiveSessionWithInitialPrompt() throws {
+    @Test func antigravityPresetStartsAutoModeWithInteractivePrompt() throws {
         let command = try #require(ReaderAIAgentPreset.antigravity.command)
         let script = ReaderAIRunner.runScript(
             agent: command,
@@ -359,8 +359,8 @@ import Testing
             promptFilePath: "/tmp/pkg/prompt.md"
         )
 
-        #expect(command == "agy --prompt-interactive")
-        #expect(script.contains("exec agy --prompt-interactive \"$marple_prompt\""))
+        #expect(command == "agy --mode=auto --prompt-interactive")
+        #expect(script.contains("exec agy --mode=auto --prompt-interactive \"$marple_prompt\""))
     }
 
     // Integration: really run the generated launcher through zsh with awkward

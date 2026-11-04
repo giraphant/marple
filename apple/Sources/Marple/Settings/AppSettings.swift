@@ -37,7 +37,16 @@ enum SettingsKeys {
     }
 
     static func readerAIValue(_ key: String, for action: ReaderAIAction, defaults: UserDefaults = .standard) -> String? {
-        defaults.string(forKey: readerAIKey(key, for: action)) ?? defaults.string(forKey: key)
+        let scopedKey = readerAIKey(key, for: action)
+        let value = defaults.string(forKey: scopedKey) ?? defaults.string(forKey: key)
+        // Upgrade only the old preset; explicitly custom commands stay editable.
+        if key == readerAIAgent, value == "agy --prompt-interactive",
+           readerAIValue(aiAgentChoice, for: action, defaults: defaults) != ReaderAIAgentPreset.custom.rawValue {
+            let command = ReaderAIAgentPreset.antigravity.command
+            defaults.set(command, forKey: scopedKey)
+            return command
+        }
+        return value
     }
 
     static func readerAIPromptKey(for action: ReaderAIAction) -> String {

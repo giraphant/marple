@@ -4,6 +4,30 @@ import Testing
 import MarpleKit
 
 struct ReaderAISettingsTests {
+    @Test func antigravityLegacyPresetUpgradesPerActionButCustomCommandsStayIntact() throws {
+        let suite = testDefaultsSuite("AntigravitySettingsTests.")
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let old = "agy --prompt-interactive"
+        defaults.set(old, forKey: SettingsKeys.readerAIAgent)
+        defaults.set("custom", forKey: SettingsKeys.readerAIKey(SettingsKeys.aiAgentChoice, for: .translate))
+        defaults.set("agy --mode=plan --prompt-interactive",
+                     forKey: SettingsKeys.readerAIKey(SettingsKeys.readerAIAgent, for: .discuss))
+        // An explicit preset with an old, action-scoped command also upgrades.
+        defaults.set(old, forKey: SettingsKeys.readerAIKey(SettingsKeys.readerAIAgent, for: .format))
+        defaults.set("antigravity", forKey: SettingsKeys.readerAIKey(SettingsKeys.aiAgentChoice, for: .format))
+        for action in [ReaderAIAction.reanalyze, .format] {
+            #expect(SettingsKeys.readerAIValue(SettingsKeys.readerAIAgent, for: action, defaults: defaults)
+                    == ReaderAIAgentPreset.antigravity.command)
+            #expect(defaults.string(forKey: SettingsKeys.readerAIKey(SettingsKeys.readerAIAgent, for: action))
+                    == ReaderAIAgentPreset.antigravity.command)
+        }
+        #expect(SettingsKeys.readerAIValue(SettingsKeys.readerAIAgent, for: .translate, defaults: defaults) == old)
+        #expect(SettingsKeys.readerAIValue(SettingsKeys.readerAIAgent, for: .discuss, defaults: defaults)
+                == "agy --mode=plan --prompt-interactive")
+        #expect(defaults.string(forKey: SettingsKeys.readerAIAgent) == old)
+    }
+
     @Test func taskSettingsKeepLegacyDefaultsAndRemainIndependent() throws {
         let suite = testDefaultsSuite("ReaderAISettingsTests.")
         let defaults = try #require(UserDefaults(suiteName: suite))
