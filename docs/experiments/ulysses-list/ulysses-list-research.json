@@ -1,0 +1,367 @@
+{
+  "title": "Ulysses 文稿列表：静态逆向与 Marple 优化对照",
+  "date": "2026-11-04",
+  "scope": "中间文稿列表及搜索匹配行。静态分析安装包，不启动 Ulysses，不读取用户文稿，不使用 Computer Use。网格缩略图和编辑器性能不在本轮结论范围内。",
+  "status": "侧边栏改动与索引启动修复已推送 origin/main；本报告仅为列表调查，未修改列表生产代码。",
+  "marple_commit": "5830a853cd28119940e98b2b5fbbb14bfac42a1a",
+  "delivered_commits": [
+    "a364a2f",
+    "5830a85"
+  ],
+  "integration_tests": "推送前 189 项测试、11 个 suite 通过；这些测试验证前一轮代码，不是本轮列表性能基准。",
+  "binary": {
+    "version": "42",
+    "build": "84473",
+    "architecture": "arm64",
+    "sha256": {
+      "app": "8cae5b764483e9c1fe6baabd786125669a1ce5f972a1d459cdf2f07bd07f0b88",
+      "core": "72c6fec1e2c634e69a3e06b5478e43dcce68b8d97e436be2a4fd95a4a073240b"
+    }
+  },
+  "method": "Objective-C 元数据 + arm64 调用/分支检查。提取 app 1018、core 544 个候选方法区间；这是候选提取量，不代表逐个完整审阅。结论以表内具体方法为依据。地址未加 ASLR slide，且各镜像独立。next-IMP 区间可能含 block helper，不能仅凭区间归属推断调用。",
+  "summary": "优先处理搜索摘要的主线程计算和内容变化引发的整表刷新。Marple 已有原生复用、固定行高、有界普通预览、搜索防抖、过期结果检查和前三条匹配折叠；不需要重写整个列表。",
+  "findings": [
+    {
+      "id": "F01",
+      "title": "原生行复用是基础，布局类型决定 cell",
+      "observed": "makeViewForModelNode: 根据 displayStyle 分支，并调用 outlineView.makeViewWithIdentifier:owner:，随后配置 delegate、预览行数及元数据样式。",
+      "implication": "复用已有视图，避免为全部文稿创建常驻视图。静态调用不能给出实际复用命中率。",
+      "marple": "EntryListTable 已使用 NSTableView.makeView 和稳定的 cell identifier；EntryHeaderCell 也复用 NSHostingView，仅替换 rootView。没有证据支持立即重写为纯 AppKit。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULSheetTableViewController",
+          "selector": "makeViewForModelNode:",
+          "address": "0x10008d930"
+        },
+        {
+          "image": "app",
+          "class_name": "ULSheetTableViewController",
+          "selector": "configureSheetCell:forModelNode:",
+          "address": "0x10008e620"
+        }
+      ]
+    },
+    {
+      "id": "F02",
+      "title": "行高按显示样式缓存，失效仍有整表后备路径",
+      "observed": "heightForViewOfModelNode: 以 displayStyle 的 NSNumber 为键查询行高。缺失时创建/配置样本 view 并读取 contentSize 或 frame。invalidateCachedSheetTableRowHeight 清除相应缓存；窗口可见时通知全部行重新计算高度，不可见时调用 reloadData。",
+      "implication": "避免每份文稿都测量内容；不能把它描述为“永不全量刷新”。",
+      "marple": "Marple 的各类行高已经是常量（header 100/124、match/toggle 24、spacer 10），比引入测量缓存更简单，应保留。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULSheetTableViewController",
+          "selector": "heightForViewOfModelNode:",
+          "address": "0x10008dac0"
+        },
+        {
+          "image": "app",
+          "class_name": "ULSheetTableViewController",
+          "selector": "invalidateCachedSheetTableRowHeight",
+          "address": "0x10008e418"
+        }
+      ]
+    },
+    {
+      "id": "F03",
+      "title": "同一轮事件中的文本更新合并",
+      "observed": "needsUpdateTexts 通过 isUpdatingTexts 阻止重复安排，在主 run loop 的 NSRunLoopCommonModes 安排 updateTexts；updateTexts 先复位标志。",
+      "implication": "多次模型通知可合并为一次行文本更新。这里没有证据表明存在固定毫秒级 debounce。",
+      "marple": "scheduleReload 已有 pendingReload + main.async 合并，但合并后的工作仍可能是 buildItems + reloadData。下一步应缩小工作范围，而不是再叠一层 debounce。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULSheetHandleTableCellView",
+          "selector": "needsUpdateTexts",
+          "address": "0x10007e570"
+        },
+        {
+          "image": "app",
+          "class_name": "ULSheetHandleTableCellView",
+          "selector": "updateTexts",
+          "address": "0x10007e650"
+        }
+      ]
+    },
+    {
+      "id": "F04",
+      "title": "观察生命周期跟随物化的行，离窗暂停通知",
+      "observed": "didAddRowView/didRemoveRowView 对 contentNodes 添加/移除观察。cell.viewDidMoveToWindow 以 window == nil 设置 nodeObserver.suspended。暂停期间事件类型在串行队列中的数组里 removeObject 后 addObject，恢复时发送记录的事件。group row 另观察 floating。",
+      "implication": "通知可以去重并延后投递。这证明的是离开窗口后的通知管理，不等于所有不在可见矩形内的行停止工作，也不证明后台 IO 已取消。",
+      "marple": "observeModel 每轮遍历 visibleEntries 的匹配行数；这里的 visibleEntries 是筛选后的结果集，可能远大于屏幕上的行数。应区分数据集观察与实际 cell 更新。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULSheetTableViewController",
+          "selector": "didAddRowView:forModelNode:",
+          "address": "0x1000902b4"
+        },
+        {
+          "image": "app",
+          "class_name": "ULSheetTableViewController",
+          "selector": "didRemoveRowView:forModelNode:",
+          "address": "0x100090424"
+        },
+        {
+          "image": "app",
+          "class_name": "ULSheetHandleTableCellView",
+          "selector": "viewDidMoveToWindow",
+          "address": "0x10007cc7c"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetHandleNodeObserver",
+          "selector": "setSuspended:",
+          "address": "0x156848"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetHandleNodeObserver",
+          "selector": "recordChangeForEventType:",
+          "address": "0x159704"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetHandleNodeObserver",
+          "selector": "flushRecordedChangeNotifications",
+          "address": "0x159800"
+        }
+      ]
+    },
+    {
+      "id": "F05",
+      "title": "异步文稿加载有身份校验",
+      "observed": "setSheetHandleNode: 重新绑定观察对象，已有 sheet 时直接使用，否则安排加载。loadSheetHandle 包含向全局队列派发的调用；sheetHandleFinishedLoading: 比较返回 sheet 的 handle 与当前 handle，不匹配就不更新。",
+      "implication": "复用行或快速切换后，旧请求不能覆盖新文稿。scheduleSheetLoadingForHandle: 使用 common modes 安排加载；加载指示的 afterDelay 参数为 0，不能称为已验证的延迟 spinner 优化。",
+      "marple": "AppModel 搜索已有取消检查；Catalog 匹配加载也有取消与当前 query 校验。应保留这些守卫，未来如增加 cell 级异步预览，再增加该 cell 的身份/版本校验。",
+      "evidence": [
+        {
+          "image": "core",
+          "class_name": "ULSheetHandleNodeObserver",
+          "selector": "setSheetHandleNode:",
+          "address": "0x156f7c"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetHandleNodeObserver",
+          "selector": "scheduleSheetLoadingForHandle:",
+          "address": "0x1589a4"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetHandleNodeObserver",
+          "selector": "loadSheetHandle",
+          "address": "0x158ad8"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetHandleNodeObserver",
+          "selector": "sheetHandleFinishedLoading:",
+          "address": "0x158dc0"
+        }
+      ]
+    },
+    {
+      "id": "F06",
+      "title": "预览长度有限，元数据缓存带新鲜度检查",
+      "observed": "cell.maximumPreviewTextLength 返回 previewLineCount × 50。observer 的预览格式化调用传入最大长度。ULSheetHandle 的 contentPrefix 在 isIndexUpToDateForSheet 为真时返回 cachedContentPrefix，否则 loadSheetForReading 后重新提取。",
+      "implication": "存在有上限的显示预览和缓存快路径，但 stale/cold 路径仍可能读取正文；不能断言列表永远不加载全文。该元数据 getter 不是已证明的 cell 首帧调用链。",
+      "marple": "普通 EntryRow 直接使用已索引的 entry.preview；firstParagraph 的输出上限为 800 字符。普通预览已有边界，搜索摘要的全文扫描是另一条路径。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULSheetHandleTableCellView",
+          "selector": "maximumPreviewTextLength",
+          "address": "0x10007d0d8"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetHandleNodeObserver",
+          "selector": "previewStringWithAttributes:headingAttributes:highlightRanges:highlightAttributes:showFirstHighlight:",
+          "address": "0x157bc8"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetHandle(MetadataAccess)",
+          "selector": "contentPrefix",
+          "address": "0x24a3c8"
+        }
+      ]
+    },
+    {
+      "id": "F07",
+      "title": "搜索匹配折叠限制展示节点，不等于限制搜索计算",
+      "observed": "ULSheetHandleNode.setSearchResult: 在匹配子节点数 >= 6 且未展开时，保留完整集合，展示前 3 个节点加 placeholder；少于 6 或曾展开则展示完整集合。expandContentNodes 以完整集合替换并发送 contentNodes KVO。",
+      "implication": "限制可见结构规模，但之前仍枚举并构建匹配节点，不能声称只计算前三条。阈值 6、可见前缀 3 是本版本的实现细节。",
+      "marple": "已采用前 3 条 + 展开按钮，且从第 4 条开始折叠。无需为性能复制 Ulysses 的阈值 6；更值得让展开/收起只改变当前文稿对应的行。",
+      "evidence": [
+        {
+          "image": "core",
+          "class_name": "ULSheetHandleNode",
+          "selector": "setSearchResult:",
+          "address": "0x16f734"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetHandleNode",
+          "selector": "expandContentNodes",
+          "address": "0x16f698"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetHandleNode",
+          "selector": "numberOfCollapsedContentNodes",
+          "address": "0x16f5ec"
+        }
+      ]
+    },
+    {
+      "id": "F08",
+      "title": "局部匹配变化只重配受影响的边界行",
+      "observed": "_updateViewsForSheetNode:oldMatches:newMatches: 更新文稿行的 separator；比较旧、新末尾匹配节点，仅在不同且非空时分别 reloadCellsForModelNode。",
+      "implication": "这是具体的局部刷新路径，不能由此推出所有结构更新都没有全量 fallback。",
+      "marple": "目前 RowItem 携带完整 Entry，items != newItems 会走 reloadData。可以把稳定行身份与展示 payload 分开，对内容变化重配已有 cell，对小规模结构变化插入/删除/移动。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULSheetTableViewController",
+          "selector": "_updateViewsForSheetNode:oldMatches:newMatches:",
+          "address": "0x10008e6d0"
+        }
+      ]
+    },
+    {
+      "id": "F09",
+      "title": "搜索索引区分新增、替换与失效结果",
+      "observed": "notifyQuery:didFindNewResults:replacedResults:invalidatedResults: 的关联 block 分别调用 delegate 的 didFindResults、didReplaceResult:withNewResult:、didInvalidateResults。performNotification: 尾调用 dispatch_async。",
+      "implication": "结果协议表达增量语义。这里只确认通知通道，没有测出合并频率、队列吞吐或并发上限。",
+      "marple": "Catalog.computeSearchMatches 先清空旧字典，串行遍历命中文稿，最后整体发布。可评估按查询版本保留/分批发布摘要，但要先解决 UI 局部刷新，避免每个批次再触发整表刷新。",
+      "evidence": [
+        {
+          "image": "core",
+          "class_name": "ULSearchIndex(PrivateResultsHandling)",
+          "selector": "notifyQuery:didFindNewResults:replacedResults:invalidatedResults:",
+          "address": "0x230020"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSearchIndex(PrivateResultsHandling)",
+          "selector": "performNotification:",
+          "address": "0x23085c"
+        }
+      ]
+    },
+    {
+      "id": "F10",
+      "title": "单容器滚动位置以持久对象为键保存",
+      "observed": "preserveInterfaceStateForCurrentContainer 仅在单容器且有 persistentObject 时，将 clipView.bounds.origin.y 写入 preservedScrollPosition。restore 读取该值，经 restoreLastScrollState: 调用 outlineView.scrollPoint:。",
+      "implication": "容器切换可以恢复位置。这条路径保存的是 y 坐标，不能称为已验证的稳定行身份锚点。",
+      "marple": "当前 reload 路径保存 SelectionKey 并恢复选中项，但没有捕获 top row identity + offset。结构增量更新时应验证滚动稳定；按身份恢复顶部锚点是 Marple 的设计建议，不是照抄上述 Ulysses 代码。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULSheetTableViewController",
+          "selector": "preserveInterfaceStateForCurrentContainer",
+          "address": "0x100092a98"
+        },
+        {
+          "image": "app",
+          "class_name": "ULSheetTableViewController",
+          "selector": "restoreInterfaceStateForCurrentContainer",
+          "address": "0x100092bf4"
+        },
+        {
+          "image": "app",
+          "class_name": "ULSheetTableViewController",
+          "selector": "restoreLastScrollState:",
+          "address": "0x100092cd8"
+        }
+      ]
+    }
+  ],
+  "marple_sources": [
+    {
+      "path": "apple/Sources/Marple/Browse/EntryListTable.swift",
+      "line": 150,
+      "note": "观察、刷新合并、全量 RowItem 投影和 reloadData 路径；后续 cell 复用实现也在此文件。"
+    },
+    {
+      "path": "apple/Sources/Marple/Browse/EntryRow.swift",
+      "line": 52,
+      "note": "普通行直接展示 entry.preview。"
+    },
+    {
+      "path": "apple/Sources/MarpleKit/Indexer/IndexBody.swift",
+      "line": 89,
+      "note": "索引预览 firstParagraph，maxChars = 800。"
+    },
+    {
+      "path": "apple/Sources/Marple/App/AppModel.swift",
+      "line": 1416,
+      "note": "200 ms 搜索防抖、取消检查和摘要调度。"
+    },
+    {
+      "path": "apple/Sources/MarpleKit/Catalog/Catalog.swift",
+      "line": 14,
+      "note": "Catalog 标为 @MainActor。"
+    },
+    {
+      "path": "apple/Sources/MarpleKit/Catalog/Catalog+Visible.swift",
+      "line": 53,
+      "note": "Task 继承 MainActor；await 读取后，Frontmatter.split 与 bodyLineMatches 同步执行。"
+    },
+    {
+      "path": "apple/Sources/MarpleKit/Catalog/BodyLineMatches.swift",
+      "line": 58,
+      "note": "枚举全文行、MarkdownLine.plainText、匹配及摘录窗口生成。"
+    }
+  ],
+  "open_source": {
+    "name": "FSNotes",
+    "commit": "e4ecd01d852a38b99fc717220bcc2415513de175",
+    "url": "https://github.com/glushchenko/fsnotes/blob/e4ecd01d852a38b99fc717220bcc2415513de175/FSNotes/View/NotesTableView.swift#L637",
+    "observation": "reloadRowSync 在后台失效并重算预览；performReload 在主线程先 noteHeightOfRows，再以 makeIfNecessary:false 获取已有 cell 并更新内容。屏幕外行也失效高度，但不强制创建 cell。可参照其更新粒度，线程安全须按 Marple 自身模型验证。"
+  },
+  "proposed_work": [
+    {
+      "priority": "P1",
+      "title": "搜索摘要计算移出 MainActor",
+      "reason": "Catalog 标记 @MainActor，computeSearchMatches 的 Task 继承隔离；await entryText 返回后，同步的正文解析与逐行匹配仍占用主 actor。文件读取是否阻塞其他 executor 需另测，不能仅凭 async 签名判断。",
+      "change": "对已读取的字符串快照，在后台执行 Frontmatter.split + bodyLineMatches；发布仍回主 actor，保留 query/取消守卫。先用串行后台工作避免大量文稿同时驻留；不要直接创建无上限 TaskGroup。",
+      "verify": "真实窗口记录主线程耗时和输入响应；覆盖 10 KB/1 MB 长文、多个搜索命中、快速改 query、清空搜索和离开页面。断言旧查询从不发布。"
+    },
+    {
+      "priority": "P1",
+      "title": "区分内容刷新与结构变化",
+      "reason": "当前单条 Entry payload 变化也可使 itemsChanged 为真，触发整表 reloadData；每次 reload 都重建投影。",
+      "change": "为 header/match/toggle/spacer 定义稳定身份（spacer 归属相邻文稿），分离 payload。结构不变时更新模型并只重配变动的已物化 cell；高度样式变化时精确失效行高。保留搜索模式切换等需要换 row class 的 fallback。",
+      "verify": "计数 buildItems、reloadData、cell 创建/配置、rootView 替换。单条同位置标题/评级/预览更新必须无整表 reload，保持多选与滚动，屏幕外行出现时使用新内容。"
+    },
+    {
+      "priority": "P2",
+      "title": "搜索展开及小规模结构变化使用增量行更新",
+      "reason": "现在展开单篇匹配仍会重投影整个结果集并 reloadData。",
+      "change": "在稳定身份的基础上做小差分并保留 fallback；同步恢复 SelectionKey，必要时保存顶部行身份与行内偏移。阈值通过测量确定，不直接移植侧边栏阈值。",
+      "verify": "覆盖首/中/末文稿展开收起、排序移动、删除被选中项、match ordinal 变化、连续键盘导航。记录 500/5,000/15,000 条结果的 p50/p95 主线程耗时。"
+    },
+    {
+      "priority": "P2",
+      "title": "摘要缓存与分批发布按测量结果决定",
+      "reason": "目前对命中集合逐文稿读取并全量发布；潜在首批结果延迟存在，但缓存收益尚未量化。",
+      "change": "先测 IO、解析、发布各阶段。确有重复工作再使用文稿身份 + 正文版本 + query 作为缓存键，并设置成本上限与失效规则。批次发布应与 UI 增量更新配套。",
+      "verify": "编辑后不能展示旧摘要，重复 query 应可统计命中率，冷/热缓存分别测量；持续滚动与多轮搜索后检查驻留内存。"
+    }
+  ],
+  "limits": [
+    "没有运行 Ulysses 动态 profiler，没有测量 Ulysses FPS、内存或缓存命中率；静态机制不等于已测出的性能收益。",
+    "未确定全文搜索缓存全部键空间、内存预算、并发度、动画时长及 GPU 工作量。未将发现名称的图片预览缓存归因于文稿列表。",
+    "原始反汇编、Objective-C 转储和包含指令的 evidence JSON 留在 /tmp/marple-ulysses-list-static，不进入仓库。仓库仅保存原创结论、定位信息和复现脚本。",
+    "本轮没有实施列表优化，也没有声称所有性能问题已经解决。"
+  ],
+  "reproduction": [
+    "python3 docs/experiments/ulysses-list/inspect-ulysses-list.py",
+    "python3 docs/experiments/ulysses-list/render-report.py",
+    "使用相同安装包版本和 SHA-256；extractor 对版本变化直接停止，须重新校验元数据布局。"
+  ]
+}
