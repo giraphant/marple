@@ -61,8 +61,13 @@ extension Catalog {
             for path in paths {
                 if Task.isCancelled { return }
                 guard let raw = try? await client.entryText(path: path) else { continue }
-                let body = Frontmatter.split(raw).body
-                let m = bodyLineMatches(body: body, query: query)
+                if Task.isCancelled { return }
+                // This Task inherits MainActor; keep the CPU work on a snapshot
+                // off that actor, with at most one document in flight per query.
+                let m = await Task.detached(priority: .userInitiated) {
+                    bodyLineMatches(body: Frontmatter.split(raw).body, query: query)
+                }.value
+                if Task.isCancelled { return }
                 if !m.lines.isEmpty { result[path] = m }
             }
             if Task.isCancelled { return }

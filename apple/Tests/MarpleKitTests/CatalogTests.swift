@@ -201,8 +201,7 @@ import Synchronization
         c.recomputeVisible(searchText: "", searchHits: [], pane: .type(.paper),
                            entries: [p1, p2, note],
                            filters: [], match: .all, sorts: [])
-        // Let the off-main task settle.
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        await c.recomputeTask?.value
         #expect(Set(c.visibleEntries.map(\.path)) == Set(["vault/papers/a.md", "vault/papers/b.md"]))
     }
 
@@ -218,6 +217,45 @@ import Synchronization
         #expect(c.searchMatches.isEmpty)
         #expect(c.searchMatchQuery.isEmpty)
         #expect(c.matchExpanded.isEmpty)
+    }
+
+    @Test func searchMatchesParseBodyAndRejectChangedQuery() async {
+        let c = Catalog()
+        let client = StubVaultClient(entries: [], texts: ["a": "---\ntitle: needle\n---\n# needle in body"])
+        c.computeSearchMatches(query: "needle", paths: ["missing", "a"], client: client,
+                               currentSearchText: { "needle" })
+        await c.matchTask?.value
+        #expect(c.searchMatchQuery == "needle")
+        #expect(c.searchMatches["a"]?.totalMatches == 1)
+        #expect(c.searchMatches["a"]?.lines.first?.anchor == "needle in body")
+        c.clearSearchMatches()
+        c.computeSearchMatches(query: "needle", paths: ["a"], client: client,
+                               currentSearchText: { "changed before publish" })
+        await c.matchTask?.value
+        #expect(c.searchMatches.isEmpty)
+        #expect(c.searchMatchQuery.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func cancelledSearchCannotOverwriteNewResults(clearOnly: Bool) async {
+        let c = Catalog()
+        let client = StubVaultClient(entries: [], texts: [
+            "old": String(repeating: "needle in **long text**\n", count: 5000),
+            "new": "needle in the new result"])
+        c.computeSearchMatches(query: "needle", paths: ["old"], client: client,
+                               currentSearchText: { "needle" })
+        let oldTask = c.matchTask
+        await Task.yield()
+        c.clearSearchMatches()
+        if !clearOnly {
+            // The query is identical: cancellation must also protect a new hit set.
+            c.computeSearchMatches(query: "needle", paths: ["new"], client: client,
+                                   currentSearchText: { "needle" })
+            await c.matchTask?.value
+        }
+        await oldTask?.value
+        #expect(Set(c.searchMatches.keys) == (clearOnly ? [] : ["new"]))
+        #expect(c.searchMatchQuery == (clearOnly ? "" : "needle"))
     }
 
     // MARK: - open-doc derive (QUA-218 PR3a Task 5)

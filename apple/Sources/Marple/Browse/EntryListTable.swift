@@ -95,6 +95,21 @@ struct EntryListTable: NSViewRepresentable {
         case match(entryPath: String, line: BodyMatchLine)
         case expandToggle(entryPath: String, expanded: Bool, hiddenCount: Int)
         case spacer
+
+        func hasSameIdentity(as other: Self) -> Bool {
+            switch (self, other) {
+            case (.entryHeader(let a), .entryHeader(let b)):
+                return a.path == b.path
+            case (.match(let a, let x), .match(let b, let y)):
+                return a == b && x.matchOrdinal == y.matchOrdinal
+            case (.expandToggle(let a, _, _), .expandToggle(let b, _, _)):
+                return a == b
+            case (.spacer, .spacer):
+                return true
+            default:
+                return false
+            }
+        }
     }
 
     @MainActor final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
@@ -197,6 +212,29 @@ struct EntryListTable: NSViewRepresentable {
             // RowItem; a snapshot nil→present/version change with unchanged
             // entries must still repaint, so force a reload on snapshot drift.
             let snapshotChanged = model.schemaSnapshot != lastSnapshot
+
+            if itemsChanged, !searchModeFlipped, !snapshotChanged,
+               lastExpanded == model.expandedArchiveCollections,
+               items.count == newItems.count,
+               zip(items, newItems).allSatisfy({ $0.hasSameIdentity(as: $1) }) {
+                let changedRows = IndexSet(items.indices.filter { items[$0] != newItems[$0] })
+                let heightChanges = IndexSet(changedRows.filter { row in
+                    if case .entryHeader(let old) = items[row],
+                       case .entryHeader(let new) = newItems[row] {
+                        return rowHasMeta(old) != rowHasMeta(new)
+                    }
+                    return false
+                })
+                items = newItems
+                // Keep selection and unaffected rows intact. Offscreen rows use
+                // the new payload when AppKit next asks for their cell.
+                if !heightChanges.isEmpty {
+                    table.noteHeightOfRows(withIndexesChanged: heightChanges)
+                }
+                table.reloadData(forRowIndexes: changedRows, columnIndexes: IndexSet(integer: 0))
+                syncSelection(in: table, reveal: contextChanged)
+                return
+            }
 
             if itemsChanged || searchModeFlipped || snapshotChanged || lastExpanded != model.expandedArchiveCollections {
                 lastExpanded = model.expandedArchiveCollections

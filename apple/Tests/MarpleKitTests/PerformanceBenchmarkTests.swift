@@ -8,6 +8,40 @@ import Testing
 /// Opt-in measurements, separate from correctness tests: run in release mode.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["MARPLE_PERFORMANCE_BENCH"] == "1"))
 @MainActor struct PerformanceBenchmarkTests {
+    @Test func searchExcerptMainActorResponsiveness() async throws {
+        let text = "---\ntitle: needle\n---\n" + String(repeating: "A **needle** in 中文 Markdown text.\n", count: 20_000)
+        let client = StubVaultClient(entries: [], texts: ["long.md": text])
+        for background in [false, true] {
+            var gaps: [Double] = []
+            for _ in 0..<3 {
+                let catalog = Catalog()
+                var finished = false
+                let work = Task {
+                    if background {
+                        catalog.computeSearchMatches(query: "needle", paths: ["long.md"], client: client,
+                                                     currentSearchText: { "needle" })
+                        await catalog.matchTask?.value
+                        #expect(catalog.searchMatches["long.md"]?.totalMatches == 20_000)
+                    } else {
+                        // Control: the same CPU work on the main actor, as before the fix.
+                        let matches = bodyLineMatches(body: Frontmatter.split(text).body, query: "needle")
+                        #expect(matches.totalMatches == 20_000)
+                    }
+                    finished = true
+                }
+                var maximumGap = 0.0
+                repeat {
+                    let start = ContinuousClock.now
+                    try await Task.sleep(for: .milliseconds(5))
+                    maximumGap = max(maximumGap, milliseconds(start.duration(to: .now)))
+                } while !finished
+                await work.value
+                gaps.append(maximumGap)
+            }
+            report("20k-line search / main-actor heartbeat max gap / \(background ? "background" : "main-actor control")", samples: gaps)
+        }
+    }
+
     @Test
     func reconcileBatchDeletion() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("marple-reconcile-\(UUID().uuidString)")
