@@ -62,23 +62,7 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-## 5. Linear (Issue Tracking)
-
-The `linear` CLI is the source of truth for tasks. Team key: **QUA** (Quasi Fish). Recent commits already reference issue IDs (e.g. QUA-89, QUA-78).
-
-**Start of session** — if the task references an existing issue, pull its context first:
-- `linear i get QUA-89` — full issue + description
-- `linear i comments QUA-89` — discussion thread
-- `linear i list` — your assigned issues
-- `linear search "<keyword>"` — find related issues
-
-**Before opening a PR or merging** — if any TODOs remain unfinished (deferred work, known limitations, follow-ups surfaced during the change), file them in Linear so they aren't lost in code comments or chat:
-- `linear i create "Short title" -t QUA -d "Why deferred + link to PR/commit" -p 3`
-- Reference the new issue ID in the PR body.
-
-Run `linear --help` for the full command reference. Don't create issues for trivial in-session steps — only for work that survives the PR.
-
-## 6. iOS Companion — Build & Release
+## 5. iOS Companion — Build & Release
 
 The read-only iPhone reader lives in `apple/Mobile/` (xcodegen project; the `.xcodeproj` is
 gitignored — always `xcodegen generate` first). It reuses `MarpleKit`. The macOS app
