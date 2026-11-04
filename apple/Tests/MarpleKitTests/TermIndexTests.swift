@@ -103,6 +103,32 @@ struct TermParserTests {
 
 @Suite("TermIndex")
 struct TermIndexTests {
+    @Test func unicodeEquivalentCachedPathsArePrunedWithoutDuplicateKeyTrap() async throws {
+        let root = try workspace()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write(root, "caf\u{00e9}.md", "| 惯习 | habitus | 倾向 |")
+        let index = TermIndex(workspaceRoot: root.path)
+        _ = try await index.refresh()
+        try await DatabaseQueue(path: index.databasePath).write { db in
+            let path = try #require(try String.fetchOne(db, sql: "SELECT path FROM files"))
+            let composed = path.precomposedStringWithCanonicalMapping
+            let alternate = Data(path.utf8) == Data(composed.utf8)
+                ? path.decomposedStringWithCanonicalMapping : composed
+            #expect(path == alternate)
+            #expect(Data(path.utf8) != Data(alternate.utf8))
+            try db.execute(sql: "INSERT INTO files SELECT ?, mtime, size FROM files WHERE path = ?",
+                           arguments: [alternate, path])
+            try db.execute(sql: """
+                INSERT INTO pairs SELECT ?, line, chinese, english, chinese_key, english_key,
+                    chinese_cell, english_cell, definition FROM pairs WHERE path = ?
+                """, arguments: [alternate, path])
+        }
+        let result = try await index.refresh()
+        #expect(result.scannedDocuments == 1)
+        #expect(result.sourceDocuments == 1)
+        #expect(try await index.lookup("habitus").first?.sources.count == 1)
+    }
+
     func workspace() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("terms-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("vault"), withIntermediateDirectories: true)

@@ -88,8 +88,11 @@ public actor TermIndex {
             let full = rebuild || version != String(TermParser.version)
             if full { try db.execute(sql: "DELETE FROM files") }
             let oldRows = try Row.fetchAll(db, sql: "SELECT path, mtime, size FROM files")
-            let old = Dictionary(uniqueKeysWithValues: oldRows.map { ($0["path"] as String, $0) })
-            var seen = Set<String>()
+            // SQLite's path primary key compares bytes; Swift String equality
+            // merges canonically equivalent Unicode spellings. Keep the same
+            // identity as SQLite so stale composed/decomposed paths cannot trap.
+            let old = Dictionary(uniqueKeysWithValues: oldRows.map { (Data(($0["path"] as String).utf8), $0) })
+            var seen = Set<Data>()
             var changed = full
             for url in files.sorted(by: { $0.path < $1.path }) {
                 try Task.checkCancellation()
@@ -99,7 +102,8 @@ public actor TermIndex {
                 let filePath = Self.filesystemPath(url)
                 guard filePath.hasPrefix(prefix) else { throw CocoaError(.fileReadInvalidFileName) }
                 let path = "vault/" + filePath.dropFirst(prefix.count)
-                seen.insert(path)
+                let pathKey = Data(path.utf8)
+                seen.insert(pathKey)
                 let isAlias = try url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true
                 let contentURL = isAlias ? url.resolvingSymlinksInPath() : url
                 let values = try contentURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
@@ -107,7 +111,7 @@ public actor TermIndex {
                     throw CocoaError(.fileReadUnknown)
                 }
                 let mtime = date.timeIntervalSince1970
-                if let row = old[path], row["mtime"] as Double == mtime, row["size"] as Int == size { continue }
+                if let row = old[pathKey], row["mtime"] as Double == mtime, row["size"] as Int == size { continue }
                 let text = try String(contentsOf: url, encoding: .utf8)
                 let records = TermParser.parse(text, path: path)
                 try db.execute(sql: "DELETE FROM files WHERE path = ?", arguments: [path])
@@ -121,7 +125,8 @@ public actor TermIndex {
                 }
                 changed = true
             }
-            for path in old.keys where !seen.contains(path) {
+            for (key, row) in old where !seen.contains(key) {
+                let path: String = row["path"]
                 try db.execute(sql: "DELETE FROM files WHERE path = ?", arguments: [path])
                 changed = true
             }
