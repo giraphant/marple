@@ -441,6 +441,8 @@ final class AppModel {
     var inspectorFocusedNotePath: String?
     @ObservationIgnored private var inspectorNoteSaveTask: Task<Void, Never>?
     @ObservationIgnored private var inspectorNoteSaveTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var inspectorNoteLoadTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var inspectorNoteLoadGeneration = 0
 
     var inspectorAnnotationNotes: [Entry] {
         var notes = (openRelations?.annotations ?? []).sorted(by: inspectorNoteComesBefore)
@@ -2349,19 +2351,45 @@ final class AppModel {
 
     func ensureInspectorNoteLoaded(_ note: Entry) async {
         guard canEditInspectorNote(note), inspectorNoteDrafts[note.path] == nil else { return }
-        inspectorNoteStatuses[note.path] = .loading
-        do {
-            let raw = try await client.entryText(path: note.path)
-            let body = Frontmatter.split(raw).body
-            inspectorNoteDrafts[note.path] = body
-            inspectorNoteOriginals[note.path] = body
-            inspectorNoteStatuses[note.path] = .idle
-            syncLegacyInspectorNoteState(path: note.path)
-        } catch {
-            inspectorNoteStatuses[note.path] = .failed("\(error)")
-            writeError = "\(error)"
-            print("[marple] load note FAILED \(note.path): \(error)")
+        let path = note.path
+        if let task = inspectorNoteLoadTasks[path] {
+            await task.value
+            return
         }
+        let generation = inspectorNoteLoadGeneration
+        inspectorNoteStatuses[path] = .loading
+        let task = Task {
+            defer {
+                if generation == inspectorNoteLoadGeneration { inspectorNoteLoadTasks[path] = nil }
+            }
+            do {
+                let raw = try await client.entryText(path: path)
+                guard generation == inspectorNoteLoadGeneration, !Task.isCancelled else { return }
+                // A save may already have established a newer disk baseline.
+                guard inspectorNoteOriginals[path] == nil else { return }
+                let body = Frontmatter.split(raw).body
+                inspectorNoteOriginals[path] = body
+                if let draft = inspectorNoteDrafts[path] {
+                    // Preserve edits made while reading, including clearing the note.
+                    if inspectorNoteStatuses[path] != .saving {
+                        inspectorNoteStatuses[path] = draft == body ? .saved : .dirty
+                        if draft != body { scheduleInspectorNoteSave(path: path) }
+                    }
+                } else {
+                    inspectorNoteDrafts[path] = body
+                    inspectorNoteStatuses[path] = .idle
+                }
+                syncLegacyInspectorNoteState(path: path)
+            } catch {
+                guard generation == inspectorNoteLoadGeneration, !Task.isCancelled,
+                      inspectorNoteDrafts[path] == nil else { return }
+                inspectorNoteStatuses[path] = .failed("\(error)")
+                writeError = "\(error)"
+                print("[marple] load note FAILED \(path): \(error)")
+            }
+        }
+        inspectorNoteLoadTasks[path] = task
+        await task.value
     }
 
     func inspectorNoteDraft(for path: String) -> String { inspectorNoteDrafts[path] ?? "" }
@@ -2504,6 +2532,9 @@ final class AppModel {
     }
 
     private func clearInspectorNoteSelection() {
+        inspectorNoteLoadGeneration += 1
+        inspectorNoteLoadTasks.values.forEach { $0.cancel() }
+        inspectorNoteLoadTasks = [:]
         inspectorNoteSaveTask?.cancel(); inspectorNoteSaveTask = nil
         inspectorNoteSaveTasks.values.forEach { $0.cancel() }
         inspectorNoteSaveTasks = [:]

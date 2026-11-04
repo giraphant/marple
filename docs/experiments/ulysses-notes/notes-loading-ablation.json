@@ -1,0 +1,102 @@
+{
+  "baseline_commit": "a5cdb32d91e1f3f23c5f30404aefc7b926d2f63f",
+  "command": [
+    "swift",
+    "test",
+    "--package-path",
+    "apple",
+    "--build-system",
+    "native",
+    "-Xlinker",
+    "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks/Testing.framework/Testing",
+    "--filter",
+    "InspectorNoteLoadingTests"
+  ],
+  "test_source_sha256": "2decc4144ca951868e589276df38c055fae01d681eed899d7c773d25b51cf47b",
+  "variants": [
+    {
+      "variant": "baseline",
+      "exit_code": 1,
+      "passed": [
+        "failedLoadCanBeRetried()"
+      ],
+      "failed": [
+        "loadingDoesNotOverwriteAnEditedDraft(_:)",
+        "oldFailureIsIgnoredAfterDocumentSwitch()",
+        "oldSuccessCannotRepopulateNotesAfterDocumentSwitch()",
+        "oldFailureCannotReplaceNewLoadStatus()",
+        "lateLoadDoesNotUndoACompletedSave()",
+        "concurrentLoadsShareOneReadAndBothAwaitPublication()"
+      ],
+      "source_sha256": "ee7cfc4ce7d4aaeea33b675b9cd092a661beb53455dc286bb1621f9da46b5db7"
+    },
+    {
+      "variant": "without_read_sharing",
+      "exit_code": 1,
+      "passed": [
+        "loadingDoesNotOverwriteAnEditedDraft(_:)",
+        "oldFailureIsIgnoredAfterDocumentSwitch()",
+        "oldSuccessCannotRepopulateNotesAfterDocumentSwitch()",
+        "failedLoadCanBeRetried()",
+        "oldFailureCannotReplaceNewLoadStatus()",
+        "lateLoadDoesNotUndoACompletedSave()"
+      ],
+      "failed": [
+        "concurrentLoadsShareOneReadAndBothAwaitPublication()"
+      ],
+      "source_sha256": "16457a16729a513967a4d91e0a343fdb6cbf8a06fb5edc39fabcc54b10937e4f"
+    },
+    {
+      "variant": "without_stale_result_guards",
+      "exit_code": 1,
+      "passed": [
+        "loadingDoesNotOverwriteAnEditedDraft(_:)",
+        "failedLoadCanBeRetried()",
+        "oldFailureCannotReplaceNewLoadStatus()",
+        "lateLoadDoesNotUndoACompletedSave()",
+        "concurrentLoadsShareOneReadAndBothAwaitPublication()"
+      ],
+      "failed": [
+        "oldFailureIsIgnoredAfterDocumentSwitch()",
+        "oldSuccessCannotRepopulateNotesAfterDocumentSwitch()"
+      ],
+      "source_sha256": "629f76863e28c3d15e374031c33e1da237166174a963ed632ec1b9e548d2594e"
+    },
+    {
+      "variant": "without_draft_and_saved_baseline_preservation",
+      "exit_code": 1,
+      "passed": [
+        "oldSuccessCannotRepopulateNotesAfterDocumentSwitch()",
+        "oldFailureIsIgnoredAfterDocumentSwitch()",
+        "failedLoadCanBeRetried()",
+        "oldFailureCannotReplaceNewLoadStatus()",
+        "concurrentLoadsShareOneReadAndBothAwaitPublication()"
+      ],
+      "failed": [
+        "loadingDoesNotOverwriteAnEditedDraft(_:)",
+        "lateLoadDoesNotUndoACompletedSave()"
+      ],
+      "source_sha256": "de6be3f77b6f4f31ef09062d8be346111a5fd21e19db0239b1ae21ab3b13c38a"
+    },
+    {
+      "variant": "full_fix",
+      "exit_code": 0,
+      "passed": [
+        "loadingDoesNotOverwriteAnEditedDraft(_:)",
+        "oldFailureIsIgnoredAfterDocumentSwitch()",
+        "oldSuccessCannotRepopulateNotesAfterDocumentSwitch()",
+        "failedLoadCanBeRetried()",
+        "oldFailureCannotReplaceNewLoadStatus()",
+        "lateLoadDoesNotUndoACompletedSave()",
+        "concurrentLoadsShareOneReadAndBothAwaitPublication()"
+      ],
+      "failed": [],
+      "source_sha256": "b6da22c95bd42499f277514f1a62d23b774f9fc70476f9aaf12c9c23f1704c2c"
+    }
+  ],
+  "limits": [
+    "Controlled stub I/O; no user files, real-disk latency, or full-app FPS.",
+    "Stale-result arm disables publication guards but retains task cancellation and cleanup.",
+    "Draft arm removes preservation of both local edits and a newer completed save."
+  ]
+}

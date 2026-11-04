@@ -1,0 +1,461 @@
+{
+  "title": "Ulysses 右侧 Notes 与窗口外壳：流畅感的静态证据",
+  "date": "2026-11-04",
+  "summary": "静态逆向与独立实验已完成，随后用消融验证并实现最小加载修复。最终只修改 AppModel.swift 的 Notes 加载与清理逻辑；测高缓存、布局合并和状态架构重写均未进入应用。",
+  "scope": "初次研究范围为 Ulysses 42 (84473) arm64 的 Notes/附件 Dashboard、常规附件分区及部分分栏外壳。未操作 Ulysses 界面、未读取用户文库。静态 Marple 对照保留初次审阅基线；后续实测与修复见本页第三轮记录。",
+  "marple_commit": "a5cdb32d91e1f3f23c5f30404aefc7b926d2f63f",
+  "binary": {
+    "app": {
+      "path": "/Applications/UlyssesMac.app/Contents/MacOS/UlyssesMac",
+      "sha256": "8cae5b764483e9c1fe6baabd786125669a1ce5f972a1d459cdf2f07bd07f0b88"
+    },
+    "core": {
+      "path": "/Applications/UlyssesMac.app/Contents/Frameworks/UlyssesCoreMac.framework/UlyssesCoreMac",
+      "sha256": "72c6fec1e2c634e69a3e06b5478e43dcce68b8d97e436be2a4fd95a4a073240b"
+    }
+  },
+  "findings": [
+    {
+      "id": "N01",
+      "title": "笔记编辑器延迟创建，并在视图内保留",
+      "observed": "ULNoteAttachmentView.textView 先检查缓存的实例变量，缺失时才创建 ULNoteAttachmentTextView；把 sectionItem.modelAttachment.text 交给 setMutableContent:，并为可变内容配置 NSUndoManager。文本视图继承 ULAttributeTextView。",
+      "implication": "已有附件视图可以保留同一个编辑器及其编辑上下文。这里确认的是对象生命周期与模型绑定；没有证明所有文档切换都复用同一个编辑器，也没有证明保存时机。",
+      "marple": "Marple 已用 NSTextView、稳定 Entry ID、撤销支持，以及外部文本相等检查和输入法组合保护；不需要仅为原生编辑器再重写一遍。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULNoteAttachmentView",
+          "selector": "textView",
+          "address": "0x10003e3e4"
+        },
+        {
+          "image": "core",
+          "class_name": "ULAttributeTextView",
+          "selector": "setMutableContent:",
+          "address": "0x31ea68"
+        }
+      ]
+    },
+    {
+      "id": "N02",
+      "title": "分区、条目、视图分别按身份复用",
+      "observed": "附件分区通过 modelAttachment 身份匹配旧 sectionItem；数据源比较 sheetSectionItems，相等时不继续通知。常规分区控制器先比较 arrangedSubviews 对应的 sectionItem 列表，未变即返回，发生增删才创建/移除相关视图。Dashboard 的分区控制器还按 section 身份复用。",
+      "implication": "一次局部修改不必拆掉整块面板。这是对列表和窗口外壳都适用的设计：内容变更、成员增删、排序变化分开处理。复用集合并不等于已经证明按可见范围虚拟化。",
+      "marple": "NotesSection 的 ForEach 已有稳定 ID；还需测量模型变化是否触发无变化的文本测高，不能仅因 SwiftUI body 被计算就断言原生视图重建。",
+      "evidence": [
+        {
+          "image": "core",
+          "class_name": "ULAttachmentDashboardSection",
+          "selector": "attachmentDataSource:sectionItemsForSheetNode:",
+          "address": "0x1055bc"
+        },
+        {
+          "image": "core",
+          "class_name": "ULAttachmentDashboardSectionDataSource",
+          "selector": "updateSectionItems:",
+          "address": "0x105fd8"
+        },
+        {
+          "image": "app",
+          "class_name": "ULRegularAttachmentsSectionViewController",
+          "selector": "updateStackViewAnimated:",
+          "address": "0x10003b138"
+        },
+        {
+          "image": "app",
+          "class_name": "ULDashboardViewController",
+          "selector": "updateSections",
+          "address": "0x10004fabc"
+        }
+      ]
+    },
+    {
+      "id": "N03",
+      "title": "未激活笔记有约两行的高度上限",
+      "observed": "constrainedItemViewHeight 计算 min(文本视图实际高度, ceil(2 × 默认行高 × 行高倍率 − 2))。附件 active 时，折叠容器收到 DBL_MAX（0x100518730 的 double 值为 1.7976931348623157e+308），走解除高度约束路径；其他状态使用受限高度。",
+      "implication": "把紧凑展示与展开状态分开，可控制面板的空间变化。但本方法仍调用 layoutSubtreeIfNeeded 和 ensureLayoutForTextContainer:，不能说它只排版两行或完全不计算折叠文本。也未证明 active 等同于唯一焦点笔记。",
+      "marple": "Marple 当前每张卡片按全文高度展示，最低 80 pt；紧凑预览属于需要另行决定的交互变化，不能包装成无行为变化的性能修复。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULNoteAttachmentView",
+          "selector": "constrainedItemViewHeight",
+          "address": "0x10003e748"
+        },
+        {
+          "image": "app",
+          "class_name": "ULAttachmentDashboardView",
+          "selector": "updateContentFoldingViewAnimated:",
+          "address": "0x10003cf54"
+        }
+      ]
+    },
+    {
+      "id": "N04",
+      "title": "展开收起通过高度约束动画，并处理重入",
+      "observed": "ULCollapsibleView 先完成必要布局，以当前高度建立约束，再在 NSAnimationContext 中通过 animator 改变约束常量，使用 EaseInEaseOut。新变化遇到正在进行的高度动画会设置 animationCancelled；完成回调检查此状态，跳过过期的收尾动作。高度为零时在完成路径隐藏视图。",
+      "implication": "连续操作的手感取决于中间状态和完成顺序。已核对动画 block 0x10001a87c、completion block 0x10001a920 在所属方法中的引用；本方法没有设定动画时长，不能据此编造毫秒值。",
+      "marple": "可以借鉴约束变化和收尾顺序；应先确定是否要引入卡片折叠，再设计快速重复操作时的行为。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULCollapsibleView",
+          "selector": "constrainHeight:animated:withCompletionHandler:",
+          "address": "0x10001a600"
+        }
+      ]
+    },
+    {
+      "id": "N05",
+      "title": "批量增删有完成协调，并可关闭动画",
+      "observed": "常规附件分区的 removeViews/addViews 使用 dispatch_group 协调各视图隐藏/显示的完成回调；动画路径 group_notify 到主队列，非动画路径直接调用完成逻辑。sectionItemsDidChange 根据 animationDisabled 决定是否动画。",
+      "implication": "界面过渡有明确的完成点，批量更新也有不播放动画的入口。不能据此认定它按笔记数量自动关闭动画。",
+      "marple": "适用于未来多笔记批量插入/删除及分区切换；先记录一次操作的布局和动画次数，避免每条更新各自驱动整块面板。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULRegularAttachmentsSectionViewController",
+          "selector": "removeViews:animated:withCompletionHandler:",
+          "address": "0x10003b8ec"
+        },
+        {
+          "image": "app",
+          "class_name": "ULRegularAttachmentsSectionViewController",
+          "selector": "addViews:animated:withCompletionHandler:",
+          "address": "0x10003bb38"
+        },
+        {
+          "image": "app",
+          "class_name": "ULRegularAttachmentsSectionViewController",
+          "selector": "sectionItemsDidChange",
+          "address": "0x10003bf90"
+        }
+      ]
+    },
+    {
+      "id": "N06",
+      "title": "滚动修正先比较位置，再异步提交",
+      "observed": "ULNoteAttachmentTextView.scrollRectToVisible: 把目标矩形转换到滚动容器坐标，计算所需位置，用 NSEqualPoints 检查是否已在该位置；只有不同才 dispatch_async_on_main_queue。其 block 0x10003e2f0 设置 boundsOrigin 并 reflectScrolledClipView。",
+      "implication": "避免无效滚动写入，并把位置修正推迟到主队列的后续执行机会。这可能减少编辑与滚动互相干扰；并非后台绘制，也不能保证每帧只提交一次。",
+      "marple": "高度回传已经异步并检查差值；仍可测量输入换行、调整面板宽度时滚动位置是否被多个来源反复修正。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "ULNoteAttachmentTextView",
+          "selector": "scrollRectToVisible:",
+          "address": "0x10003e180"
+        }
+      ]
+    },
+    {
+      "id": "N07",
+      "title": "尺寸未变时不继续使固有尺寸失效",
+      "observed": "ULAttributeTextView.setConstrainedFrameSize: 调用父类后比较新旧实际尺寸，只有不相等才 invalidateIntrinsicContentSize。intrinsicContentSize 本身仍 ensureLayoutForTextContainer:，然后读取 usedRect 并加上垂直内边距。",
+      "implication": "重点是限制无变化的布局传播，而不是禁止文本排版。存在 ensureLayout 调用不等于每次都从头排版；实际成本还取决于 TextKit 的失效范围和缓存。",
+      "marple": "NoteMarkdownEditor 的 updateNSView、原生 layout、textDidChange 都可能进入 remeasure；layout 与 remeasure 都会赋 containerSize。优先量化这些入口的重复率，再考虑按内容版本、宽度及排版参数去重。",
+      "evidence": [
+        {
+          "image": "core",
+          "class_name": "ULAttributeTextView",
+          "selector": "setConstrainedFrameSize:",
+          "address": "0x31e8b8"
+        },
+        {
+          "image": "core",
+          "class_name": "ULAttributeTextView",
+          "selector": "intrinsicContentSize",
+          "address": "0x31e94c"
+        }
+      ]
+    },
+    {
+      "id": "N08",
+      "title": "文档变更、编辑器选择和面板可见性分开管理",
+      "observed": "ULDashboardSection.setSheetNodes:editorSelection: 分别比较文档节点与编辑器选择再发对应更新。Dashboard 隐藏时记住原 activePane 并置空；重新显示时在合适条件下恢复。切换 activePane 的前后回调分别撤销、注册 sections/hasVisibleSections/actionItems 的观察。",
+      "implication": "光标或选择变化不必自动变成附件集合重建；隐藏面板会脱离当前 pane 的观察关系。不能推断隐藏时所有模型、磁盘或后台任务都停止。",
+      "marple": "Marple 外壳已经长期持有各列 NSHostingController，并清空 sizingOptions 以隔离内容与窗口几何。后续可测隐藏 Inspector 是否仍收到昂贵的计算，而不是重新搭整个外壳。",
+      "evidence": [
+        {
+          "image": "core",
+          "class_name": "ULDashboardSection",
+          "selector": "setSheetNodes:editorSelection:",
+          "address": "0x12a68c"
+        },
+        {
+          "image": "app",
+          "class_name": "ULDashboardViewController",
+          "selector": "noteDashboardVisible:",
+          "address": "0x1000507f4"
+        },
+        {
+          "image": "app",
+          "class_name": "ULDashboardViewController",
+          "selector": "noteWillUpdateActivePane",
+          "address": "0x100051d1c"
+        },
+        {
+          "image": "app",
+          "class_name": "ULDashboardViewController",
+          "selector": "noteDidUpdateActivePane",
+          "address": "0x100051e04"
+        }
+      ]
+    },
+    {
+      "id": "N09",
+      "title": "窗口分栏有批量折叠状态更新入口",
+      "observed": "ULSplitViewController 的 batchUpdateCollapsedStateAnimated:usingHandler: 进入 helper 0x100198a04，经 runBlock:completionHandler:animated: 执行，并在 completion 路径通知 splitViewControllerDidUpdateCollapsedState:。ULAnimationContext 的该包装器在 animated 为真时进入 NSAnimationContext，假时顺序调用工作与完成 block。",
+      "implication": "证据支持批量状态更新与统一完成通知的结构，不足以给整个窗口所有动画指定统一时长或推断每个分栏都走同一路径。",
+      "marple": "Marple 左侧和列表已统一动画组；Inspector 仍独立调用 animator().isCollapsed。可检查快速切换及 Reduce Motion 的一致性，这是交互一致性候选，不是已经测出的 CPU 瓶颈。",
+      "evidence": [
+        {
+          "image": "app",
+          "class_name": "_TtC7Ulysses21ULSplitViewController",
+          "selector": "batchUpdateCollapsedStateAnimated:usingHandler:",
+          "address": "0x100198d08"
+        },
+        {
+          "image": "app",
+          "class_name": "ULAnimationContext",
+          "selector": "runBlock:completionHandler:animated:",
+          "address": "0x1000fe260"
+        }
+      ]
+    }
+  ],
+  "next_checks": [
+    {
+      "priority": "1",
+      "title": "真实面板宽度变化负担",
+      "change": "先在真实面板记录拖动分隔线时，每次宽度变化导致多少卡片测高、多少次主线程长任务。确认后，在拖动期间合并待处理的最新宽度/高度更新，结束时确保最终布局；再评估非可见且未编辑卡片能否延后工作。",
+      "verify": "长文与多卡片连续拖动，无过期高度回写、裁切、滚动回跳；最终行高正确。不能用延迟输入或把现有 NSTextView 移到后台线程换取流畅。"
+    },
+    {
+      "priority": "3",
+      "title": "缩小观察范围的实际收益",
+      "change": "先统计一张卡片编辑时其余卡片的 body、updateNSView 和实际排版次数。若总体负担可见，再引入最小的每笔记状态对象或更窄的值输入，保留原编辑器身份。",
+      "verify": "20 条笔记中只编辑一条，未变卡片更新显著减少；光标、输入法组合、撤销与保存状态不回退。独立实验的 20→1 不当作应用性能倍数。"
+    }
+  ],
+  "marple_sources": [
+    {
+      "path": "apple/Sources/Marple/Inspector/NoteMarkdownEditor.swift",
+      "line": 53,
+      "note": "SwiftUI 更新入口与测高"
+    },
+    {
+      "path": "apple/Sources/Marple/Inspector/NoteMarkdownEditor.swift",
+      "line": 91,
+      "note": "原生 layout 入口"
+    },
+    {
+      "path": "apple/Sources/Marple/Inspector/NoteMarkdownEditor.swift",
+      "line": 200,
+      "note": "remeasure 与异步高度回传"
+    },
+    {
+      "path": "apple/Sources/Marple/Inspector/InspectorView.swift",
+      "line": 1157,
+      "note": "普通 VStack、稳定 Entry ID、逐卡加载"
+    },
+    {
+      "path": "apple/Sources/Marple/App/AppModel.swift",
+      "line": 2350,
+      "note": "笔记加载入口；已加载 draft 跳过读取"
+    },
+    {
+      "path": "apple/Sources/Marple/App/MarpleSplitViewController.swift",
+      "line": 125,
+      "note": "Inspector 展开/收起"
+    }
+  ],
+  "open_source": {
+    "name": "FSNotes",
+    "commit": "e4ecd01d852a38b99fc717220bcc2415513de175",
+    "url": "https://github.com/glushchenko/fsnotes/tree/e4ecd01d852a38b99fc717220bcc2415513de175",
+    "observation": "LayoutManager.swift:29/35 启用 allowsNonContiguousLayout，但 EditTextView.swift:233 按独立窗口与用户设置重新决定；EditorViewController+ScrollPosition.swift 也会在精确定位前 ensureLayout。开源对照说明排版策略要服务具体场景，不能把一个开关当通用性能补丁。"
+  },
+  "limits": [
+    "静态结构不能量化帧率、输入延迟、CPU 节省或当前 Marple 的实际瓶颈。",
+    "没有证明 Notes 按可见范围虚拟化、每次仅排版两行、隐藏后零开销，或每次更新都只影响一条笔记。",
+    "ULNoteAttachment 字符变化会调用 noteAttachmentChange 并转给 owner.attachmentDidChange；尚未追踪 owner 的持久化调度，不能对 Ulysses 的保存防抖作结论。",
+    "方法区间以相邻 IMP 为界，可能包含 helper/block；只有核对调用点后才归属。地址为未滑动 arm64 虚拟地址，Core 地址属于其独立镜像。",
+    "第三轮对 AppModel.swift 做了最小加载修复，106 项相关测试通过；未安装应用，也未测量整机帧率。"
+  ],
+  "reproduction": [
+    "python3 docs/experiments/ulysses-list/inspect-ulysses-list.py --output /tmp/marple-ulysses-notes-static --class-pattern '^(UL(NoteAttachment|AttachmentDashboard|AttachmentsSection|RegularAttachments|CompactAttachments|Dashboard|Collapsible|EditorSplit|SheetHandleNodeAttachment|ModelAttachment|ModelNoteAttachment|AttributeTextView|AnimationContext|TextView|LayoutManager)|_TtC7Ulysses(11ULSplitView|21ULSplitViewController|39ULAttachmentDashboardCollectionViewItem))'",
+    "原始反汇编与 list-evidence.json 仅写入 /tmp；仓库仅保存原创结论、方法定位和复现工具。",
+    "python3 docs/experiments/ulysses-notes/render-report.py"
+  ],
+  "comparison": {
+    "title": "对比研究：独立实验修正了优化优先级",
+    "conclusion": "优先调查长笔记在宽度变化时的真实排版负担；普通无变化测高暂不优化。加载生命周期需要补足正确性验证；按笔记隔离观察范围有机制证据，但尚未测得整块 SwiftUI 面板的收益。",
+    "method": "把未修改的 NoteMarkdownEditor.swift 与独立 Swift 探针一起用 swiftc -O 编译。在无窗口的 TextKit 1 容器内调用实际 Coordinator.remeasure；使用混合中英文合成文本，宽度在 300/301 pt 间切换。每场景 60 次、共 3 轮；表中为每轮中位数的中位数。每轮采样间运行主循环以消化异步高度回传，这部分不计入耗时。",
+    "measurements": [
+      {
+        "lines": 20,
+        "unchanged_remeasure": 0.002084,
+        "native_layout_then_remeasure": 0.008166,
+        "width_change_then_remeasure": 2.913042,
+        "append_character_then_remeasure": 0.451042
+      },
+      {
+        "lines": 500,
+        "unchanged_remeasure": 0.003542,
+        "native_layout_then_remeasure": 0.016,
+        "width_change_then_remeasure": 19.434583,
+        "append_character_then_remeasure": 0.080583
+      },
+      {
+        "lines": 2000,
+        "unchanged_remeasure": 0.002125,
+        "native_layout_then_remeasure": 0.008042,
+        "width_change_then_remeasure": 77.594875,
+        "append_character_then_remeasure": 0.106292
+      }
+    ],
+    "interpretation": "无变化测高的 540 次采样均未出现布局失效或完成回调；宽度变化的 540 次采样均各出现一次失效与完成回调。说明本样本中的同值 containerSize 赋值不会自动触发昂贵排版，单纯缓存这个调用的优先级应降低。回调计数不等于全文重排计数。尾部追加字符也明显便宜，不能把宽度变化成本泛化为每次打字的成本。",
+    "observation": "独立 Observation 对照：20 个观察者分别读同一字典的不同键，修改 1 个键时 20 个观察者均被通知；改为 20 个独立可观察对象后，同样只改 1 个对象，仅 1 个观察者被通知。Marple 的 NoteCard 读取共享 drafts/statuses 字典，存在相同的属性级依赖结构。此实验没有统计实际 SwiftUI body、updateNSView 或渲染帧数，不能称为 20 张卡片全部重绘。",
+    "decisions": [
+      {
+        "priority": "优先验证",
+        "topic": "调整宽度时的长笔记排版",
+        "evidence": "500 行约 19.43 ms；2000 行约 77.59 ms。Notes 卡片当前按全文高度展示，普通 VStack 没有显式可见范围预算。Ulysses 的两行高度约束仍会 ensureLayout，不能据此声称它避免了长文排版。",
+        "change": "先在真实面板记录拖动分隔线时，每次宽度变化导致多少卡片测高、多少次主线程长任务。确认后，在拖动期间合并待处理的最新宽度/高度更新，结束时确保最终布局；再评估非可见且未编辑卡片能否延后工作。",
+        "verify": "长文与多卡片连续拖动，无过期高度回写、裁切、滚动回跳；最终行高正确。不能用延迟输入或把现有 NSTextView 移到后台线程换取流畅。"
+      },
+      {
+        "priority": "小范围正确性补强",
+        "topic": "笔记加载的重复请求与过期返回",
+        "evidence": "ensureInspectorNoteLoaded 只检查 draft 是否存在，没有检查进行中的同路径读取；await 返回后也没有取消/版本检查。loadDoc 的正文读取已经有 generation 防护，Notes 路径尚未采用。",
+        "change": "验证同路径并发加载只读一次；切换文档或开始本地编辑后，旧加载结果不能覆盖新状态。用进行中任务去重和有效性检查处理，不先增加全局缓存框架。",
+        "verify": "受控延迟客户端测试：两次同路径调用、A→B→A 快速切换、读取期间本地编辑、取消后重试。当前是源码确认的防护缺口，尚未复现用户数据丢失。"
+      },
+      {
+        "priority": "测量后决定",
+        "topic": "草稿和保存状态的观察范围",
+        "evidence": "Observation 独立实验确认字典按属性失效；Ulysses 分别比较文档节点、编辑器选择和 sectionItems。Marple 已有稳定 ForEach ID，但稳定身份与缩小观察范围是两回事。",
+        "change": "先统计一张卡片编辑时其余卡片的 body、updateNSView 和实际排版次数。若总体负担可见，再引入最小的每笔记状态对象或更窄的值输入，保留原编辑器身份。",
+        "verify": "20 条笔记中只编辑一条，未变卡片更新显著减少；光标、输入法组合、撤销与保存状态不回退。独立实验的 20→1 不当作应用性能倍数。"
+      },
+      {
+        "priority": "低成本体验一致性",
+        "topic": "右侧分栏的动画与减少动态效果",
+        "evidence": "左侧/列表切换已检查 Reduce Motion 并使用统一动画组；Inspector.applyInspector 仍独立调用 animator().isCollapsed。",
+        "change": "沿用现有左侧处理方式统一右侧开关行为。",
+        "verify": "普通与 Reduce Motion 两种设置下，反复展开收起与拖动分隔线的最终状态一致。这是可访问性/体验一致性，不是已测得的速度提升。"
+      },
+      {
+        "priority": "暂缓",
+        "topic": "无变化测高缓存、整块 AppKit 重写、直接换 LazyVStack",
+        "evidence": "无变化测高约 0.002–0.004 ms；原生 layout 加重复测高约 0.008–0.016 ms。Marple 已有原生文本编辑器、稳定 ID、输入法保护和延迟保存。",
+        "change": "保留现有架构。折叠预览和可见范围加载只有在数量/长度测试支持时再做；它们可能改变编辑器生命周期和交互。",
+        "verify": "不为极小的合成开销加入复杂缓存；若以后引入懒加载，必须覆盖未保存草稿、编辑焦点、滚动位置与撤销。"
+      }
+    ],
+    "oss": "FSNotes 的布局开关按编辑场景决定，精确滚动也会 ensureLayout；其 textDidChange 还会调用 note.save 与 reSort，不能把该调用链未经验证地搬到 Marple。Marple 已修复自动保存导致重索引/排序跳动的问题，应保留这些保护。",
+    "limits": [
+      "这些数字是独立组件微基准，不是运行中 Marple 的帧率、整机响应速度或 Ulysses 对照基准。",
+      "合成文本没有图片、富文本附件和实际笔记分布；2000 行是压力场景，不代表日常笔记。",
+      "未测量真实面板的可见/隐藏卡片数量、首屏加载、鼠标拖动事件或 SwiftUI 更新次数。",
+      "本节描述第二轮独立实验；后续应用修改与消融结果见第三轮记录。"
+    ],
+    "reproduction": [
+      "xcrun swiftc -O apple/Sources/Marple/Inspector/NoteMarkdownEditor.swift docs/experiments/ulysses-notes/NotesLayoutProbe.swift -o /tmp/marple-notes-layout-probe",
+      "/tmp/marple-notes-layout-probe > /tmp/marple-notes-layout-probe.json",
+      "仓库 notes-layout-measurements.json 保存三轮原始结果、工具链版本与参与编译的应用源码 SHA-256。"
+    ]
+  },
+  "implementation": {
+    "title": "第三轮：消融实验与最小修复",
+    "summary": "最终只保留 Notes 加载入口的请求共享、过期结果拦截和本地状态保护。应用改动仅 AppModel.swift：新增 43 行、删除 12 行，净增 31 行。编辑器、布局、动画及共享状态结构没有修改。",
+    "changes": [
+      "同路径并发加载共享一个任务，调用者等待同一次读取及状态发布；两个并发调用的受控测试从两次读取变为一次。",
+      "切换文档清理 Notes 状态时取消进行中的加载并递增版本；即使底层读取忽略取消，旧成功/失败结果也不能回填。",
+      "保留加载期间的本地编辑，包括空文本；用读取到的原文校准是否有未保存内容。若较新的保存已完成，旧加载不能覆盖该保存建立的原文基线。",
+      "任务结束后释放进行中记录，当前读取失败仍可重试。"
+    ],
+    "loading_ablation": [
+      {
+        "variant": "baseline",
+        "passed": 1,
+        "failed": 6,
+        "failed_tests": [
+          "loadingDoesNotOverwriteAnEditedDraft(_:)",
+          "oldFailureIsIgnoredAfterDocumentSwitch()",
+          "oldSuccessCannotRepopulateNotesAfterDocumentSwitch()",
+          "oldFailureCannotReplaceNewLoadStatus()",
+          "lateLoadDoesNotUndoACompletedSave()",
+          "concurrentLoadsShareOneReadAndBothAwaitPublication()"
+        ]
+      },
+      {
+        "variant": "without_read_sharing",
+        "passed": 6,
+        "failed": 1,
+        "failed_tests": [
+          "concurrentLoadsShareOneReadAndBothAwaitPublication()"
+        ]
+      },
+      {
+        "variant": "without_stale_result_guards",
+        "passed": 5,
+        "failed": 2,
+        "failed_tests": [
+          "oldFailureIsIgnoredAfterDocumentSwitch()",
+          "oldSuccessCannotRepopulateNotesAfterDocumentSwitch()"
+        ]
+      },
+      {
+        "variant": "without_draft_and_saved_baseline_preservation",
+        "passed": 5,
+        "failed": 2,
+        "failed_tests": [
+          "loadingDoesNotOverwriteAnEditedDraft(_:)",
+          "lateLoadDoesNotUndoACompletedSave()"
+        ]
+      },
+      {
+        "variant": "full_fix",
+        "passed": 7,
+        "failed": 0,
+        "failed_tests": []
+      }
+    ],
+    "loading_interpretation": "所有消融使用同一组 7 个测试函数，其中草稿保护包含 3 组参数。基线 1 过/6 失败；完整修复 7 过/0 失败。每次只移除一类保护时，对应行为重新失败。分支只用于实验，工作区已恢复并核对完整修复的 SHA-256。",
+    "layout_ablation": [
+      {
+        "workload": "same_width_burst",
+        "baseline": 0.031,
+        "width_guard": 0.029,
+        "coalesced": 0.031
+      },
+      {
+        "workload": "four_widths_one_turn",
+        "baseline": 78.383,
+        "width_guard": 78.236,
+        "coalesced": 19.836
+      },
+      {
+        "workload": "one_width_per_turn",
+        "baseline": 78.578,
+        "width_guard": 79.218,
+        "coalesced": 79.114
+      }
+    ],
+    "layout_interpretation": "500 行合成笔记，每批 4 个宽度请求、每场景 12 批、3 轮并轮换方案顺序。表中为每轮批耗时中位数的中位数，包含原生 layout 与异步高度回传。合并只对同一轮事件里的中间宽度有效；请求分散到不同轮次时没有收益。所有实验的最终高度检查通过，但没有真实拖动事件分布证据，因此没有把该合成收益转成生产补丁。宽度缓存仅用于无文本修改的对照，不能直接用于编辑器。",
+    "not_adopted": [
+      "跳过同宽度测量：只减少已经很便宜的调用，收益不足以引入缓存失效逻辑。",
+      "异步合并布局：同一轮四次宽度变化约 78.38→19.84 ms，分轮到达约 78.58→79.11 ms；尚无真实面板事件分布支持。",
+      "每笔记可观察状态对象：已有属性级通知实验，尚无整块面板更新成本证据，本轮保持数据结构。"
+    ],
+    "validation": "106 项测试、6 个 suite 全部通过：InspectorNoteLoadingTests、InspectorNotesEditingTests、AppModelLoadIndexTests、InspectorMetadataRowsTests、NavigationContextTests、WorkspaceTests。应用与测试源码 SHA-256 与完整修复实验一致。编译使用 native 构建方式，并显式链接当前 Xcode 的 Testing.framework，以避开仓库遗留的 CLT Testing 链接路径；未修改 Package.swift。",
+    "delivery": "代码在工作区；未安装或重启 /Applications/Marple.app。本轮没有真实磁盘延迟、帧率或端到端输入延迟的改善数据。",
+    "reproduction": [
+      "python3 docs/experiments/ulysses-notes/run-loading-ablation.py（会临时替换 AppModel.swift，仅运行受控测试，finally 恢复完整修复；运行时不要并行编辑该文件）",
+      "xcrun swiftc -O -DNOTES_ABLATION apple/Sources/Marple/Inspector/NoteMarkdownEditor.swift docs/experiments/ulysses-notes/NotesLayoutProbe.swift docs/experiments/ulysses-notes/NotesLayoutAblation.swift -o /tmp/marple-notes-layout-ablation",
+      "/tmp/marple-notes-layout-ablation > /tmp/marple-notes-layout-ablation.json"
+    ],
+    "open_source": "FSNotesCore/Business/Note.swift:1004 的保存路径复制内容到 BlockOperation，并检查取消状态；本轮参考其显式任务生命周期处理，以及 Ulysses 的身份复用/局部更新。Marple 继续使用原有的延迟保存策略，没有照搬 FSNotes 的保存队列。"
+  }
+}

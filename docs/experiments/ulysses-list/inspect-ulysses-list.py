@@ -19,7 +19,7 @@ HASHES = {
 }
 
 
-def extract(image, binary, output):
+def extract(image, binary, output, class_pattern=None):
     data = binary.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     if digest != HASHES[image]:
@@ -95,6 +95,8 @@ def extract(image, binary, output):
                       name.startswith(('ULSheetHandle', 'ULSheetIndex', 'ULSearchIndex', 'ULSheetMatchNode'))
                       or name in ('ULModelTreeController', 'ULModelTreeRootNode', 'ULImageEntityPreviewCache',
                                   'ULImagePreviewCacheEntry', 'ULSearchResult', 'ULSearchQuery'))
+        if class_pattern is not None:
+            wanted = re.search(class_pattern, name) is not None
         if not wanted:
             continue
         start = method['address']
@@ -118,12 +120,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--app', type=Path, default=Path('/Applications/UlyssesMac.app'))
     parser.add_argument('--output', type=Path, default=Path('/tmp/marple-ulysses-list-static'))
+    parser.add_argument('--class-pattern', help='Optional class-name regex for another UI subsystem')
     args = parser.parse_args()
     images = {
         'app': args.app / 'Contents/MacOS/UlyssesMac',
         'core': args.app / 'Contents/Frameworks/UlyssesCoreMac.framework/UlyssesCoreMac',
     }
-    result = {name: extract(name, path, args.output) for name, path in images.items()}
+    result = {name: extract(name, path, args.output, args.class_pattern) for name, path in images.items()}
     result['range_note'] = 'Unslid arm64 virtual addresses, image-local. Next-IMP ranges can include helper blocks; verify call sites before attributing them.'
     (args.output / 'list-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
     for name in images:
