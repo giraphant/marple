@@ -1,0 +1,109 @@
+{
+  "title": "Ulysses 备份系统：静态逆向与 Marple 备份对照",
+  "date": "2026-11-04",
+  "scope": "Ulysses 42 (84473, Setapp) 的自动备份机制：调度、增量、保留策略、恢复入口。静态分析安装包，本机 Setapp 容器为空，无落盘验证、无运行时观测。中间列表/侧边栏/备注见同目录兄弟实验。",
+  "binary": {
+    "version": "42",
+    "build": "84473",
+    "variant": "Setapp",
+    "sha256": {
+      "app": "2b22c34158288f1b752bb67ddb7f5549683335bbbb66d8ba8a0b96b47d372b37",
+      "core": "355e41de3cace132f694bda21d7239650056f0fc520644d153f902aac31bdad0"
+    }
+  },
+  "method": "复用 ../ulysses-sidebar/inspect-ulysses-sidebar.py（--class-pattern 分别取 ULBackup|ULVersions|ULStorageBackup、^ULBackupStore$、ULStorageController、^ULStorageBackup|^ULBackup$），otool -ov 元数据 + arm64 反汇编 selector 注释。保留策略阈值/默认值为指令立即数直接读出；一个时间阈值为 __DATA 常量按段偏移读出。",
+  "summary": "机制层面 Marple（clonefile 快照 + 原子改名 + 分层保留 + 恢复为副本）与 Ulysses 同族且工程质量相当；差距在策略与恢复体验：Ulysses 有效节奏约每小时（timer 5 分钟 + 1 小时去重）、保留 24 小时档/14 天档/~13 周档/月档不限且支持用户手动钉住，恢复可整库只读浏览；Marple 默认每日、6 个月后全删、仅逐文档恢复。",
+  "findings": [
+    {
+      "id": "B01",
+      "title": "调度：5 分钟 GCD timer + 1 小时新鲜度去重，变更门控在存储级",
+      "observed": "setUpBackups 创建 dispatch timer（间隔立即数 0x45D964B800 = 300s，leeway 0），每次触发 performAutomatedBackup：automatedBackupsEnabled 关闭即返回；取备份列表 lastObject 的 date.timeIntervalSinceNow 与常量 -3600.0（__DATA @0x711018 按段偏移读出）比较，最新备份不足 1 小时则跳过；否则执行（内部按 storagesRequiringBackupFromStorages:usingPreviousBackup: 只备份有变化的 storage，无变化时为空操作）。手动入口 performBackupImmediatelyAsManualBackup: 随时可用。",
+      "implication": "有效自动节奏 ≈ 每小时（与应用在前台运行时长相关），与 24 个小时档保留正好衔接成一天的细粒度历史。",
+      "marple": "BackupScheduler 用 NSBackgroundActivityScheduler，默认 24h（容差 ±12h，系统可延迟到唤醒），FSEvents 置脏 + hasChanges(mtime 全树走查) 门控。对每日一备的定位是合适的选择，但最坏丢失窗口是 24 小时。",
+      "evidence": [
+        { "image": "core", "class_name": "ULStorageController(Backup)", "selector": "setUpBackups", "address": "0x1961b4" },
+        { "image": "core", "class_name": "ULStorageController(Backup)", "selector": "performAutomatedBackup", "address": "0x1965c0" }
+      ]
+    },
+    {
+      "id": "B02",
+      "title": "增量：上一份备份的硬链接 + 复制回退（Time Machine 式）",
+      "observed": "ULStorageBackup(PrivateFileOperations).backupFolderAtURL:toTargetAtURL:usingPreviousBackupAtURL:… 以旧备份为参照逐项处理；linkItemAtURL:toTargetAtURL: 先试 NSFileManager linkItemAtURL:（硬链接），失败回退 copyItemAtURL:。shouldCreateBackupForFolder… 用 NSMutableDictionary 索引新旧目录项（NSURLIsDirectoryKey 遍历）判定哪些子项需要真复制。备份包内含 info 文件（日期、preventAutomatedDeletion、manual、orderedStorageIdentifiers）。",
+      "implication": "每份备份外观完整、磁盘成本只付变化部分；跨卷或文件系统不支持时退化为复制。Marple 的 APFS clonefile 快照在现代 macOS 上达到同等效果（且与活库共享块），但仅限 APFS。",
+      "marple": "SnapshotStore 用 CloneCopy.snapshotTree（clonefile CoW）整树快照 + .tmp 前缀 + 原子改名；同等崩溃安全性下实现更简单。",
+      "evidence": [
+        { "image": "core", "class_name": "ULStorageBackup(PrivateFileOperations)", "selector": "linkItemAtURL:toTargetAtURL:error:", "address": "0x1a61a4" },
+        { "image": "core", "class_name": "ULStorageBackup(PrivateFileOperations)", "selector": "backupFolderAtURL:toTargetAtURL:usingPreviousBackupAtURL:operationHandle:coordinated:itemInclusionHandler:error:", "address": "0x1a5eb8" }
+      ]
+    },
+    {
+      "id": "B03",
+      "title": "保留：小时/天/周/月四档桶 + 最新永留 + 用户钉住",
+      "observed": "cleanUpBackupsByKeepingRecentBackups：先 _cleanUpIncompleteBackups；从新到旧枚举，最新一份直接保留；preventAutomatedDeletion（用户在备份浏览器钉住）豁免删除；其余依次尝试四个 _checkKeepingNextBackup:withKeptBackups:forCalendarUnit:maximumCount: 桶——NSCalendarUnitHour 上限 24、NSCalendarUnitDay 上限 14、YearForWeekOfYear（0x2000，正确处理跨年周）上限 = 6 个月 × 52 / 24 ≈ 13、NSCalendarUnitMonth 上限 -1（不限）。四档保留集求并后，不在其中的备份 _deleteBackup:useTrash:0 直接删除。",
+      "implication": "一小时档保住一天内任意时点、天档保两周、周档保约一个季度、月档永久。不是固定份数滚动窗口。",
+      "marple": "RetentionPolicy 注释即写明 mirroring Ulysses' tiered density，但只有两档：<7d 每天一份、7d–6mo 每周一档，>6 个月删除。没有小时档、没有月档、没有用户钉住单个备份的能力。",
+      "evidence": [
+        { "image": "core", "class_name": "ULBackupStore", "selector": "cleanUpBackupsByKeepingRecentBackups", "address": "0x1a3108" },
+        { "image": "core", "class_name": "ULBackupStore", "selector": "keptLastHourlyBackups", "address": "0x1a3738", "note": "立即数 0x18 = 24" },
+        { "image": "core", "class_name": "ULBackupStore", "selector": "keptLastDailyBackups", "address": "0x1a3740", "note": "立即数 0xe = 14" },
+        { "image": "core", "class_name": "ULBackupStore", "selector": "keptLastWeeklyBackupsForLastMonths", "address": "0x1a3748", "note": "立即数 6 个月；keptLastWeeklyBackups = ×52/24" }
+      ]
+    },
+    {
+      "id": "B04",
+      "title": "恢复：备份浏览器 + 整库只读呈现 + 原生 Versions 接入",
+      "observed": "ULBackupSelectionViewController 模态列出备份（日期/钉住/删除/在 Finder 显示/打开）；openBackup: 走 beginPresentingBackup:withCompletionHandler:，ULBackupStoragesProvider 把 presentedBackup 换成备份里的 storages，整个应用以只读方式浏览备份库（endPresentingBackup 退出）；另有 ULVersionsAdapterDocument/ULVersionsBrowserDocument（preservesVersions、browseVersionsWithWindowController:、revertToContentsOfURL:）把单篇文稿接入 macOS 原生 Versions UI。",
+      "implication": "恢复路径有三层：单文档原生版本浏览器、模态备份列表、整库时间点浏览。整库呈现让用户可以先验货再决定恢复什么。",
+      "marple": "BackupBrowserView：快照列表 + 文档列表 + restoreCopy 恢复为不覆盖的副本文件。只能逐文档恢复，无法浏览某时间点的整库视图。",
+      "evidence": [
+        { "image": "app", "class_name": "ULBackupSelectionViewController", "selector": "openBackup:" },
+        { "image": "core", "class_name": "ULStorageController(Backup)", "selector": "beginPresentingBackup:withCompletionHandler:", "address": "0x196c94" },
+        { "image": "app", "class_name": "ULVersionsAdapterDocument", "selector": "browseVersionsWithWindowController:" }
+      ]
+    },
+    {
+      "id": "B05",
+      "title": "健壮性：未完成备份清理、NSFilePresenter 协调、工作量预估",
+      "observed": "newIncompleteBackupURL/isIncompleteBackupAtURL: 写入完成后改名，清理时先移除未完成项；ULBackupStore 与备份包注册 NSFilePresenter（presentedItemDidChange/DidMoveToURL/presentedSubitemDidChangeAtURL），外部（iCloud/多窗口）改动会触发 reload/updateSubitem；ULBackup.isValid/updateValidityStatus 跟踪引用的旧备份是否仍存在；操作在专用串行队列（com.ulyssesapp.storage-controller.backup-presentation）+ lock 的 performStoreOperationUsingBlock: 内串行化；estimateWorkloadRequiredForBackupOfStorages 支撑进度指示（编辑器侧边的备份指示条 + updateBackupProgress）。",
+      "implication": "大部分复杂度服务于 iCloud 同步与多进程协调——Marple 单进程直读 vault 不需要。",
+      "marple": "崩溃安全靠 .tmp + 原子改名（等价）；snapshotInFlight 串行化（等价）；无 FilePresenter/进度预估（对 clonefile 秒级快照影响小）。",
+      "evidence": [
+        { "image": "core", "class_name": "ULBackupStore", "selector": "_cleanUpIncompleteBackups" },
+        { "image": "core", "class_name": "ULBackupStore", "selector": "restartFilePresenter" },
+        { "image": "core", "class_name": "ULBackup", "selector": "updateValidityStatus" }
+      ]
+    }
+  ],
+  "comparison": {
+    "mechanism_parity": [
+      "增量介质：硬链接+复制回退（任意 FS） vs clonefile CoW（APFS）——现代 mac 上等价，Marple 更简单",
+      "崩溃安全：未完成标记+清理 vs .tmp+原子改名——等价",
+      "并发串行化：专属队列+lock vs snapshotInFlight——等价",
+      "变更门控：storage 级 requiring-backups vs FSEvents 置脏+mtime 走查——等价意图",
+      "备份范围：内部 storage 包 vs 整个 vault 目录+持久化状态 JSON——Marple 还带上 app 状态"
+    ],
+    "marple_gaps": [
+      "节奏：每小时（5 分钟 timer + 1h 去重） vs 每日——最坏丢失窗口 24h vs ~1h",
+      "保留：四档（24h/14d/~13w/永久月档）+ 用户钉住 vs 两档（7d 天档、6mo 周档）+ 6 个月硬删",
+      "恢复：整库只读浏览 + 原生 Versions vs 仅逐文档恢复为副本"
+    ],
+    "ulysses_cost": "其实现规模大一个数量级（app+core 约 300 个方法区间），主要消耗在 iCloud/多窗口 FilePresenter 协调、进度预估与跨版本迁移——Marple 不需要照搬"
+  },
+  "runtime_findings": {
+    "date": "2026-11-04",
+    "disk_measurement": "本机 17 份快照：首份全量 88.7GB；无变化日边际 1–90MB；机制与硬链接等价（CoW 共享块实测有效）。真实历史块成本 ≈70GB，其中 41.6GB 来自 10-18 快照钉住的两个 mosaics 录像（23G+17G，活库已只剩 541M/684M 压缩版）。快照表面积 88GB = sources 52G + vault 22G + processing 9G + .orca 2.4G（.orca 属 agent 状态，与排除名单意图不符，判定为 bug）。",
+    "fix_applied": "CloneCopy.excludedNames 增加 .orca、.pytest_cache（用户确认 sources/processing 属资产，保留备份）。历史清理：删除 2026-10-18 快照，从其余 16 份中移除 .orca/.pytest_cache。释放的块由当日 APFS 本地 TM 快照引用，约 24h 内自动归还，未动 TM 快照。",
+    "du_caveat": "du 把 clone 当独立块计数（16 份显 1.2TB），真实占用看 df/边际"
+  },
+  "limits": [
+    "静态逆向，未运行 Ulysses；本机 Setapp 容器为空，备份目录布局未落盘验证",
+    "备份包内部结构（info 文件字段、storage 子目录命名）由方法名与选择器推断，未逐字节核对",
+    "_checkKeepingNextBackup 内部桶比较逻辑只核对了参数与整体结构，未逐指令验证 NSCalendar 取整细节",
+    "未测量两家备份的实际耗时/占用"
+  ],
+  "reproduction": [
+    "python3 docs/experiments/ulysses-sidebar/inspect-ulysses-sidebar.py --class-pattern 'ULBackup|ULVersions|ULStorageBackup'",
+    "python3 docs/experiments/ulysses-sidebar/inspect-ulysses-sidebar.py --class-pattern '^ULBackupStore$' / 'ULStorageController' / '^ULStorageBackup|^ULBackup$'",
+    "原始反汇编与 evidence JSON 留在 /tmp/marple-ulysses-sidebar-static，不进入仓库"
+  ]
+}

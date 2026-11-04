@@ -1,0 +1,137 @@
+{
+  "title": "Ulysses 侧边栏：静态逆向与 Marple 侧边栏对照",
+  "date": "2026-11-04",
+  "scope": "左侧边栏（组/过滤器树）的数据源、结构更新与行复用机制。静态分析 Setapp 安装包，不启动 Ulysses，不读取用户文稿。中间文稿列表见 ../ulysses-list/，编辑器备注见 ../ulysses-notes/。",
+  "binary": {
+    "version": "42",
+    "build": "84473",
+    "variant": "Setapp（与 ../ulysses-list 逆向的直发版同版本号、不同哈希）",
+    "architecture": "arm64",
+    "sha256": {
+      "app": "2b22c34158288f1b752bb67ddb7f5549683335bbbb66d8ba8a0b96b47d372b37",
+      "core": "355e41de3cace132f694bda21d7239650056f0fc520644d153f902aac31bdad0"
+    }
+  },
+  "method": "Objective-C 元数据（otool -ov）+ arm64 反汇编内 objc selector 注释，复用 ../ulysses-list 的提取机制，类选择器聚焦 ULContainerTable*/ULTree*/ULExtended*（app）与 ULContainer*/ULLibrary*（core）。app 412、core 595 个候选方法区间；结论以下列表内具体方法为据。地址未加 ASLR slide，各镜像独立；next-IMP 区间可能含 block helper。",
+  "conclusion": "同一架构家族：NSOutlineView + 按父节点的身份差分 → insertItems/removeItems/moveItem（beginUpdates/endUpdates + 动画编组）+ 标识符复用 cell + 仅重配已物化行。Marple 的 reconcileTree/SidebarChildDiff 与之逐点对应，且在差分算法复杂度、操作数上限、身份池、reduce-motion 上更防御。未发现 Ulysses 侧边栏有 Marple 缺失的结构性优点。",
+  "findings": [
+    {
+      "id": "S01",
+      "title": "侧边栏是 NSOutlineView 家族，双层子类",
+      "observed": "ULContainerTableOutlineView : ULExtendedOutlineView : NSOutlineView；行视图 ULContainerTableRowView : NSTableRowView。数据源与代理是 ULContainerTableViewController；树模型经 ULTreeController（NSObject，实现 NSOutlineViewDataSource）+ ULTreeNode 包装 ULContainerModelNode。",
+      "implication": "与 Marple 的 SidebarTabOutlineView（NSOutlineView + Coordinator 数据源 + SidebarOutlineNode）同族，无 SwiftUI 列表或自绘。",
+      "evidence": [
+        { "image": "app", "class_name": "ULContainerTableOutlineView", "note": "superclass 链经元数据解析：0x1007d2148 → ULExtendedOutlineView → NSOutlineView" },
+        { "image": "app", "class_name": "ULContainerTableRowView", "note": "superclass NSTableRowView" },
+        { "image": "app", "class_name": "ULTreeController", "selector": "outlineView:numberOfChildrenOfItem:" }
+      ]
+    },
+    {
+      "id": "S02",
+      "title": "结构更新 = 按父节点的双指针身份差分 → 插入/删除/移动",
+      "observed": "treeNode:replacedChildren:withChildren:animated:：拷贝旧子列表后双指针遍历；指针相等则跳过；旧项 containsObject: 不在新列表则 removeItemsAtIndexes:inParent:withAnimation:；新项 indexOfObject: 为 NSNotFound 则 insertItemsAtIndexes:inParent:withAnimation:，否则 moveItemAtIndex:inParent:toIndex:inParent:。整体包在 beginUpdates/endUpdates 与 NSAnimationContext 编组内（animated 时时长取常量，否则 0）。",
+      "implication": "这是与 Marple reconcileTree 相同的更新形态。Ulysses 用指针相等 + 线性查找，最坏 O(n²)；Marple 的 SidebarChildDiff 用 LIS，O(n log n)，且识别单元素移动。侧边栏兄弟列表规模小，两者实际都够用。",
+      "marple": "SidebarTabOutlineView.reconcileTree：逐父 SidebarChildDiff → removeItems/moveItem/insertItems，同样 beginUpdates/endUpdates + NSAnimationContext（0.12s 或 0）。",
+      "evidence": [
+        { "image": "app", "class_name": "ULTreeController", "selector": "treeNode:replacedChildren:withChildren:animated:", "address": "0x1002cdaec" },
+        { "image": "app", "class_name": "ULTreeController", "selector": "scheduleUpdateOfNode:oldChildren:newChildren:animated:", "address": "0x1002cd148" }
+      ]
+    },
+    {
+      "id": "S03",
+      "title": "同一轮多处变化按节点合并，父先子后应用",
+      "observed": "scheduleUpdateOfNode 以 NSMapTable 按节点存 {oldChildren, newChildren, animated}：已有条目保留最初的 oldChildren、替换为最新 newChildren（合并）。performOutlineViewUpdates 取走整表，先 sortTreeNodesByDescendancy:（父先于子）再逐个应用。",
+      "implication": "一次模型事件触发的多节点变化合并为一批；删除必须先于插入应用（父删除先算），Marple 的 reconcileTree 同样先逆序 remove 再按新顺序 insert/move。",
+      "marple": "Marple 以 ReloadSignature 短路无变化 reload；一次 reload 内统一算全部父节点差分。没有逐节点合并的必要，因为 Marple 的模型发布本身就是每轮一次。",
+      "evidence": [
+        { "image": "app", "class_name": "ULTreeController", "selector": "scheduleUpdateOfNode:oldChildren:newChildren:animated:", "address": "0x1002cd148" },
+        { "image": "app", "class_name": "ULTreeController", "selector": "performOutlineViewUpdates", "address": "0x1002cd3cc" }
+      ]
+    },
+    {
+      "id": "S04",
+      "title": "触发源是 childrenKeyPath 的 KVO，主线程校验",
+      "observed": "ULTreeNode 注册 representedObject 的 childrenKeyPath/hideChildrenKeyPath KVO；ULTreeController.observeValueForKeyPath: 检查 NSThread.isMainThread，取 NSKeyValueChangeOldKey/NewKey 后进入调度。ULTreeNode.refreshChildren 即 valueForKeyPath(childrenKeyPath) → noteNewChildren:（包装节点按需物化）。",
+      "implication": "树包装层是惰性构建的：只有被问到的节点才取 children。Marple 的 makeRootItems/reconcileTree 每轮全量投影，但侧边栏规模（百级标签）下投影成本已被基准覆盖（见 measurement），无需惰性化。",
+      "evidence": [
+        { "image": "app", "class_name": "ULTreeController", "selector": "observeValueForKeyPath:ofObject:change:context:", "address": "0x1002cecb4" },
+        { "image": "app", "class_name": "ULTreeNode", "selector": "refreshChildren", "address": "0x1002cfe7c" }
+      ]
+    },
+    {
+      "id": "S05",
+      "title": "cell 按 displayStyle 标识符复用，行高按样式缓存",
+      "observed": "makeViewForModelNode: 按 ULContainerModelNode displayStyle 分支，makeView(withIdentifier:) 用 @\"group\"/@\"container\" 两类标识符。heightForViewOfModelNode: 以 displayStyle NSNumber 为键查缓存字典（objectForKey → floatValue），缺省回落 outlineView.rowHeight。cell（ULContainerTableCellView）为 NSStackView + iconView + 文本/计数/goal 控件。",
+      "implication": "与中间列表 F01/F02 同一套路。Marple 用单一 SidebarOutlineCellView（NSStackView + 图标 + 标题 + 计数）+ 常量行高（section 22 / 行 30 / divider 专用），比测量缓存更简单。",
+      "marple": "SidebarTabOutlineView.outlineView(_:viewFor:) 用 makeView(withIdentifier:) 复用；SidebarOutlineCellView : NSTableCellView。",
+      "evidence": [
+        { "image": "app", "class_name": "ULContainerTableViewController", "selector": "makeViewForModelNode:", "address": "0x100244994" },
+        { "image": "app", "class_name": "ULContainerTableViewController", "selector": "heightForViewOfModelNode:", "address": "0x100244b68" }
+      ]
+    },
+    {
+      "id": "S06",
+      "title": "行观察生命周期随行视图增删挂接/摘除",
+      "observed": "didAddRowView:forModelNode: 设行视图 delegate、加入 observedContainerNodes 并观察 tintColor（macOS 26.0 版本检查门控）；didRemoveRowView: 对应移除观察。cell 侧另有 beginContentNodeObservationIfNeeded/end… 对 contentNodeCount（角标计数）观察。",
+      "implication": "只有已物化的行订阅模型变化（推送）。Marple 是拉取式：reload 轮内 updateContent 只重配 makeIfNecessary:false 拿得到的 cell，等价于只更新已物化行，且不需要挂接/摘除观察的生命周期管理。",
+      "marple": "updateContent(payload 变化行 → cell.refreshContent(iconChanged:))，仅当 row >= 0 且 cell 已存在。",
+      "evidence": [
+        { "image": "app", "class_name": "ULContainerTableViewController", "selector": "didAddRowView:forModelNode:", "address": "0x100244ff8" },
+        { "image": "app", "class_name": "ULContainerTableViewController", "selector": "didRemoveRowView:forModelNode:", "address": "0x100245108" },
+        { "image": "app", "class_name": "ULContainerTableCellView", "selector": "beginContentNodeObservationIfNeeded" }
+      ]
+    },
+    {
+      "id": "S07",
+      "title": "选中项自动保存，展开状态由树控制器恢复",
+      "observed": "ULExtendedOutlineView 有 autosaveSelectedItems/loadSelectedItems/saveSelectedItems 与 setAutosaveName:；ULTreeController 有 _updateExpandedTreeNodes/updateSelectedTreeNodes/scrollToNodeIfNeeded。",
+      "implication": "与 Marple 的 restoreExpansion + selectCurrentItem + capturedMultiSelectionPayloads（按稳定 payload 恢复多选）对应。Marple 另有按行身份+偏移的视口锚点（captureViewportAnchor），Ulysses 侧边栏路径未见对应物（其中间列表只存 y 坐标，见 ../ulysses-list F10）。",
+      "evidence": [
+        { "image": "app", "class_name": "ULExtendedOutlineView", "selector": "autosaveSelectedItems" },
+        { "image": "app", "class_name": "ULTreeController", "selector": "updateExpandedTreeNodes" }
+      ]
+    },
+    {
+      "id": "S08",
+      "title": "Marple 有而 Ulysses 未见的三处防御",
+      "observed": "Ulysses 差分无操作数上限（逐项 move/insert/remove 全量应用）；无 reduce-motion 门控证据；未发现无变化短路。",
+      "implication": "Marple reconcileTree 的 reloadAll 阈值（changes > 64 或 operations > 256）、动画阈值（≤ 24 操作且 window 存在且 !accessibilityDisplayShouldReduceMotion）与 ReloadSignature 短路，是对大规模导入/反转、动效偏好的额外保护，而非与 Ulysses 的差距。",
+      "marple": "SidebarTabOutlineView.reconcileTree（reloadAll/animate 阈值）；reload 入口 signature 短路。",
+      "evidence": [
+        { "image": "app", "class_name": "ULTreeController", "selector": "treeNode:replacedChildren:withChildren:animated:", "address": "0x1002cdaec", "note": "循环内无计数上限分支" }
+      ]
+    }
+  ],
+  "measurement": {
+    "date": "2026-11-04",
+    "host": "RamuX（笔记本，Apple silicon），Debug 测试包 build 760 = main 64f969b",
+    "test": "PerformanceBenchmarkTests/savedSessionNavigation（生产 SidebarOutlineView.Coordinator + 真实 NSOutlineView，无窗口绘制）",
+    "data": "本机真实会话：6 空间 / 714 标签（72/73/287 可见），vault 37,161 条索引",
+    "numbers_ms": {
+      "sidebar_tab_update_72_tabs": "median 5.71, max 6.00",
+      "sidebar_tab_update_73_tabs": "median 5.54, max 5.84",
+      "sidebar_tab_update_287_tabs": "median 3.99, max 4.14",
+      "sidebar_space_update": "median 31.66, max 49.47",
+      "middle_list_update_287_tabs": "median 2.69, max 2.89"
+    },
+    "interpretation": "同空间标签切换（走签名短路 + payload 局部刷新路径）稳定在 4–6 ms，不随标签数增长（287 标签反而更低），远低于 16.7 ms 帧预算。空间切换（全结构 reload + 展开恢复 + 视口锚点 + 过渡动画）31.7/49.5 ms，约 2–3 帧，是唯一超过单帧预算的路径；属一次性用户动作而非滚动，且 Ulysses 的对应动作（根节点整体替换 setRootTreeNodes:refreshImmediately:）同样不走差分。无窗口基准不含绘制，不能外推 FPS。",
+    "command": "cd apple && MARPLE_PERFORMANCE_BENCH=1 MARPLE_PERFORMANCE_STATE=<state.json> MARPLE_PERFORMANCE_VAULT=<vault> xcrun swift test --filter PerformanceBenchmarkTests/savedSessionNavigation"
+  },
+  "marple_sources": [
+    { "path": "apple/Sources/Marple/Sidebar/SidebarTabOutlineView.swift", "note": "reconcileTree 差分 + 阈值、updateContent 局部刷新、captureViewportAnchor、restoreExpansion/多选恢复、cell 复用。" },
+    { "path": "apple/Sources/Marple/Sidebar/SidebarChildDiff.swift", "note": "LIS 差分：removals/insertions/单移动，O(n log n)。" },
+    { "path": "apple/Tests/MarpleKitTests/SidebarPageSectionTests.swift", "note": "结构 reload 锚定、单/批量拖放位置保持等行为测试。" },
+    { "path": "apple/Tests/MarpleKitTests/PerformanceBenchmarkTests.swift", "note": "savedSessionNavigation：真实无窗口侧边栏基准。" }
+  ],
+  "limits": [
+    "Setapp 构建，与 ../ulysses-list 的直发版同版本号但哈希不同；提取脚本按本包哈希锁定。",
+    "静态机制对照，没有运行 Ulysses 或测量其 FPS/内存；不能断言 Ulysses 侧边栏在相同数据下更快或更慢。",
+    "ULTreeNode 包装节点跨更新轮次的恒定性（同一 representedObject 复用同一包装实例）由 diff 指针比较的存在性推断，未逐行核对其 canonicalization 缓存。",
+    "双指针 vs LIS 的复杂度差在侧边栏兄弟规模（数十）下无实际差别；结论不外推到中间列表规模（万级）。",
+    "基准为 Debug 构建、无窗口、本笔记本；帧预算结论对 Release/绘制路径需另测。"
+  ],
+  "reproduction": [
+    "python3 docs/experiments/ulysses-sidebar/inspect-ulysses-sidebar.py",
+    "原始反汇编与 evidence JSON 留在 /tmp/marple-ulysses-sidebar-static，不进入仓库。"
+  ]
+}
