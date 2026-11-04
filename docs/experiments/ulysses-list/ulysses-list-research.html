@@ -128,6 +128,12 @@
 <li>取消不会抢占已经开始的同步纯解析；结果不会发布，下一篇不会继续。</li>
 <li>下一步先分段测量大结果集投影、命中文稿 IO、匹配构建与发布，再决定是否引入摘要缓存、分批更新或共享并发限制。</li>
 </ul>
+<h3>安装验证与待查问题</h3><ul>
+<li>本机已安装签名 Release v0.2.20 build 758（代码提交 3adbb7d、86c41c5）。签名与内外二进制哈希核对通过；CLI ping 和侧边栏读取通过。最终以正常设置重启，移除临时 CLI 参数。</li>
+<li>第一次安装后启动曾在 VaultIndexer.reconcile 的 GRDB Row 读取中触发 NULL path 断言。随后直接检查 SQLite：37,156 条记录、path NULL 数为 0、mtime NULL 数为 0、PRAGMA quick_check 为 ok；后续启动未复现。没有修改索引数据；根因仍待查，不能宣称已修复。崩溃文件仅留本机 DiagnosticReports。</li>
+<li>CLI search 在 30 秒期限内没有返回。代码 AppModel+CLI.swift:12 会先 await cliRefreshIndex，后者等待 Catalog.refreshJoining。对运行进程做 2 秒采样：后台任务在 VaultIndexer.reconcile → indexedEntryForPath/buildIndexedEntry，主线程在 AppKit 事件循环等待。证据支持索引同步是本次等待阶段，不支持把它归因于列表刷新或把它泛化为应用内搜索框的延迟。采样峰值占用约 1.6 GB，仅为此运行时快照。</li>
+<li>下一步应单独测量启动 reconcile 的变更文件数量、耗时和内存，以及 CLI 新鲜度等待；同时为首次启动读取异常保留复现线索。本轮不改动索引器。</li>
+</ul>
 <h2>实施顺序与当前进度</h2>
 <article><h3>P1 · 搜索摘要计算移出 MainActor</h3>
 <p><strong>本轮最小修复已完成；单篇后台计算、串行等待、旧结果守卫。</strong></p>

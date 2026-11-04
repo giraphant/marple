@@ -37,6 +37,10 @@ if followup:
     parts.append(f'<p>{e(m["interpretation"])}</p><p>基准：<code>{e(m["test"])}</code></p><ul>')
     parts.extend(f'<li>{e(s)}</li>' for s in followup['remaining'])
     parts.append('</ul>')
+    if followup.get('runtime_observations'):
+        parts.append('<h3>安装验证与待查问题</h3><ul>')
+        parts.extend(f'<li>{e(s)}</li>' for s in followup['runtime_observations'])
+        parts.append('</ul>')
 parts.append('<h2>实施顺序与当前进度</h2>')
 for item in data['proposed_work']:
     parts.append(f'<article><h3>{e(item["priority"])} · {e(item["title"])}</h3>')
