@@ -2,7 +2,7 @@
   "title": "Ulysses 文稿列表：静态逆向与 Marple 优化对照",
   "date": "2026-11-04",
   "scope": "中间文稿列表及搜索匹配行。静态分析安装包，不启动 Ulysses，不读取用户文稿，不使用 Computer Use。网格缩略图和编辑器性能不在本轮结论范围内。",
-  "status": "侧边栏改动与索引启动修复已推送 origin/main；本报告仅为列表调查，未修改列表生产代码。",
+  "status": "第二轮：已实施搜索摘要后台计算与同结构内容局部刷新；结构差分、摘要缓存与分批发布尚未实施。",
   "marple_commit": "5830a853cd28119940e98b2b5fbbb14bfac42a1a",
   "delivered_commits": [
     "a364a2f",
@@ -19,7 +19,7 @@
     }
   },
   "method": "Objective-C 元数据 + arm64 调用/分支检查。提取 app 1018、core 544 个候选方法区间；这是候选提取量，不代表逐个完整审阅。结论以表内具体方法为依据。地址未加 ASLR slide，且各镜像独立。next-IMP 区间可能含 block helper，不能仅凭区间归属推断调用。",
-  "summary": "优先处理搜索摘要的主线程计算和内容变化引发的整表刷新。Marple 已有原生复用、固定行高、有界普通预览、搜索防抖、过期结果检查和前三条匹配折叠；不需要重写整个列表。",
+  "summary": "两项最小修复已落地：每篇正文的纯解析在后台完成，保留取消与查询校验；行身份及顺序未变时使用 AppKit 局部刷新，仅对元数据行高变化失效高度。继续保留结构变化的整表后备路径。",
   "findings": [
     {
       "id": "F01",
@@ -278,6 +278,66 @@
           "address": "0x100092cd8"
         }
       ]
+    },
+    {
+      "id": "F11",
+      "title": "索引队列限制并发，暂停先缓存尚未提交的任务",
+      "observed": "sharedIndexingQueue 的 provider 创建 NSOperationQueue，设置 maxConcurrentOperationCount；在处理器数至少为 2 的机器上，参数为 max(processorCount - 2, 1)，QoS 为 0x09（Background）。addOperation 在 suspendedOperations 非空时把新任务放入数组；resume 再逐个提交到共享队列并清空数组。",
+      "implication": "这是索引队列的并发限制，不是列表预览加载队列的并发上限。suspend 没有在已核对路径中取消或中断已提交的 operation。provider 的全局 block 位于 0x796208，invoke 字段解码指向 0x233444，已核对关联，非仅按 next-IMP 猜测。",
+      "marple": "本轮每个搜索查询串行等待一篇正文的后台解析，避免对全部命中同时创建任务。旧查询取消后，已经开始的单篇纯计算仍会结束，但结果丢弃且不继续下一篇；若快速多次切换查询仍有 CPU 压力，再考虑细粒度取消或共享限流。",
+      "evidence": [
+        {
+          "image": "core",
+          "class_name": "ULSearchIndexOperationQueue",
+          "selector": "sharedIndexingQueue",
+          "address": "0x23342c"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSearchIndexOperationQueue",
+          "selector": "addOperation:",
+          "address": "0x2334c8"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSearchIndexOperationQueue",
+          "selector": "suspend",
+          "address": "0x233588"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSearchIndexOperationQueue",
+          "selector": "resume",
+          "address": "0x233608"
+        }
+      ]
+    },
+    {
+      "id": "F12",
+      "title": "字符串索引缓存保留最近记录，并响应内存压力",
+      "observed": "_unprotectedSetStringIndex:forSheetHandle: 将索引写入 _cachedStringIndexes，并把 handle 写入 _recentIndexes[nextPurgableIndex % 10] 后递增计数；缓存数量达到非零 _entryLimit 时触发 flush。flush 枚举 _recentIndexes 的 value，只把仍有缓存的 handle/index 对复制到新的强引用 map。didReceiveMemoryWarning 的 write block 将 _entryLimit 设为当时缓存数量的一半（向下取整），再 flush。",
+      "implication": "可证明的策略是十个最近记录槽位及压力后收缩。它不是已证明的严格 LRU，也不是按字节精确计费的缓存。没有推断“整个应用永远只缓存十份文稿”；这是一个字符串索引缓存的清理路径。",
+      "marple": "搜索摘要目前没有跨查询缓存，本轮不增加。若后续测量支持添加缓存，应把版本失效与成本/内存压力处理一起设计，避免只增加一个无限增长的字典。",
+      "evidence": [
+        {
+          "image": "core",
+          "class_name": "ULSheetIndex",
+          "selector": "_unprotectedSetStringIndex:forSheetHandle:",
+          "address": "0x23cb64"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetIndex",
+          "selector": "_unprotectedFlushStringIndexCache",
+          "address": "0x23cdb4"
+        },
+        {
+          "image": "core",
+          "class_name": "ULSheetIndex",
+          "selector": "didReceiveMemoryWarning",
+          "address": "0x23cc94"
+        }
+      ]
     }
   ],
   "marple_sources": [
@@ -329,39 +389,66 @@
       "title": "搜索摘要计算移出 MainActor",
       "reason": "Catalog 标记 @MainActor，computeSearchMatches 的 Task 继承隔离；await entryText 返回后，同步的正文解析与逐行匹配仍占用主 actor。文件读取是否阻塞其他 executor 需另测，不能仅凭 async 签名判断。",
       "change": "对已读取的字符串快照，在后台执行 Frontmatter.split + bodyLineMatches；发布仍回主 actor，保留 query/取消守卫。先用串行后台工作避免大量文稿同时驻留；不要直接创建无上限 TaskGroup。",
-      "verify": "真实窗口记录主线程耗时和输入响应；覆盖 10 KB/1 MB 长文、多个搜索命中、快速改 query、清空搜索和离开页面。断言旧查询从不发布。"
+      "verify": "真实窗口记录主线程耗时和输入响应；覆盖 10 KB/1 MB 长文、多个搜索命中、快速改 query、清空搜索和离开页面。断言旧查询从不发布。",
+      "status": "本轮最小修复已完成；单篇后台计算、串行等待、旧结果守卫。"
     },
     {
       "priority": "P1",
       "title": "区分内容刷新与结构变化",
       "reason": "当前单条 Entry payload 变化也可使 itemsChanged 为真，触发整表 reloadData；每次 reload 都重建投影。",
       "change": "为 header/match/toggle/spacer 定义稳定身份（spacer 归属相邻文稿），分离 payload。结构不变时更新模型并只重配变动的已物化 cell；高度样式变化时精确失效行高。保留搜索模式切换等需要换 row class 的 fallback。",
-      "verify": "计数 buildItems、reloadData、cell 创建/配置、rootView 替换。单条同位置标题/评级/预览更新必须无整表 reload，保持多选与滚动，屏幕外行出现时使用新内容。"
+      "verify": "计数 buildItems、reloadData、cell 创建/配置、rootView 替换。单条同位置标题/评级/预览更新必须无整表 reload，保持多选与滚动，屏幕外行出现时使用新内容。",
+      "status": "本轮最小修复已完成；采用原生局部行刷新，未引入差分框架。"
     },
     {
       "priority": "P2",
       "title": "搜索展开及小规模结构变化使用增量行更新",
       "reason": "现在展开单篇匹配仍会重投影整个结果集并 reloadData。",
       "change": "在稳定身份的基础上做小差分并保留 fallback；同步恢复 SelectionKey，必要时保存顶部行身份与行内偏移。阈值通过测量确定，不直接移植侧边栏阈值。",
-      "verify": "覆盖首/中/末文稿展开收起、排序移动、删除被选中项、match ordinal 变化、连续键盘导航。记录 500/5,000/15,000 条结果的 p50/p95 主线程耗时。"
+      "verify": "覆盖首/中/末文稿展开收起、排序移动、删除被选中项、match ordinal 变化、连续键盘导航。记录 500/5,000/15,000 条结果的 p50/p95 主线程耗时。",
+      "status": "继续调研，尚未实施。"
     },
     {
       "priority": "P2",
       "title": "摘要缓存与分批发布按测量结果决定",
       "reason": "目前对命中集合逐文稿读取并全量发布；潜在首批结果延迟存在，但缓存收益尚未量化。",
       "change": "先测 IO、解析、发布各阶段。确有重复工作再使用文稿身份 + 正文版本 + query 作为缓存键，并设置成本上限与失效规则。批次发布应与 UI 增量更新配套。",
-      "verify": "编辑后不能展示旧摘要，重复 query 应可统计命中率，冷/热缓存分别测量；持续滚动与多轮搜索后检查驻留内存。"
+      "verify": "编辑后不能展示旧摘要，重复 query 应可统计命中率，冷/热缓存分别测量；持续滚动与多轮搜索后检查驻留内存。",
+      "status": "继续调研，尚未实施。"
     }
   ],
   "limits": [
     "没有运行 Ulysses 动态 profiler，没有测量 Ulysses FPS、内存或缓存命中率；静态机制不等于已测出的性能收益。",
-    "未确定全文搜索缓存全部键空间、内存预算、并发度、动画时长及 GPU 工作量。未将发现名称的图片预览缓存归因于文稿列表。",
+    "索引共享队列并发参数及一处字符串索引缓存收缩策略已核对；列表预览队列的并发度、全部缓存预算、动画时长及 GPU 工作量仍未确定。",
     "原始反汇编、Objective-C 转储和包含指令的 evidence JSON 留在 /tmp/marple-ulysses-list-static，不进入仓库。仓库仅保存原创结论、定位信息和复现脚本。",
-    "本轮没有实施列表优化，也没有声称所有性能问题已经解决。"
+    "已完成两项最小修复及合成响应测试；真实窗口帧率、长时间驻留内存和大库端到端搜索尚未测量，未声称所有性能问题已解决。"
   ],
   "reproduction": [
     "python3 docs/experiments/ulysses-list/inspect-ulysses-list.py",
     "python3 docs/experiments/ulysses-list/render-report.py",
     "使用相同安装包版本和 SHA-256；extractor 对版本变化直接停止，须重新校验元数据布局。"
-  ]
+  ],
+  "followup": {
+    "implementation": [
+      "Catalog.computeSearchMatches：await 读取后，将 Frontmatter.split + bodyLineMatches 放入 Task.detached；启动前、返回后检查取消，发布仍受当前 query 校验。",
+      "EntryListTable：同数量、同顺序、同身份且模式/快照/档案展开状态未变时，仅 reloadData(forRowIndexes:columnIndexes:) 更新 payload 变化行；元数据有无变化时精确失效行高。其余路径保留原有整表刷新。"
+    ],
+    "validation": "83 项测试、6 个 suite 通过，包括新增内容更新、屏幕外 payload、高度变化、多选/滚动/未变化 cell 保持、结构后备、搜索取消与新结果保护。另一个独立的合成响应基准通过。",
+    "measurement": {
+      "configuration": "Debug；Mac Mini RamuBots；20,000 行相同 Markdown，每种路径运行 3 次；主 actor 每 5 ms 请求一次唤醒，统计每次运行的最大实际间隔。无真实窗口绘制，非 FPS 测量。",
+      "control": "对照在 MainActor 执行同一 Frontmatter.split + bodyLineMatches；修复路径运行实际 Catalog.computeSearchMatches（StubVaultClient）。",
+      "control_max_gap_median_ms": 510.46,
+      "control_max_gap_worst_ms": 516.42,
+      "background_max_gap_median_ms": 7.63,
+      "background_max_gap_worst_ms": 7.63,
+      "test": "PerformanceBenchmarkTests/searchExcerptMainActorResponsiveness",
+      "interpretation": "验证耗时计算离开主 actor；不代表总搜索时间缩短相同比例，不用于外推实际库的 FPS 或吞吐。"
+    },
+    "remaining": [
+      "buildItems 与行比较仍遍历当前筛选结果，尚未实现结构增量投影。",
+      "改变 schema、搜索模式、档案展开状态、行身份或顺序时仍采用全量 fallback。",
+      "取消不会抢占已经开始的同步纯解析；结果不会发布，下一篇不会继续。",
+      "下一步先分段测量大结果集投影、命中文稿 IO、匹配构建与发布，再决定是否引入摘要缓存、分批更新或共享并发限制。"
+    ]
+  }
 }

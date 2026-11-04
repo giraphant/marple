@@ -16,7 +16,8 @@ parts = ['<!doctype html><html lang="zh-CN"><meta charset="utf-8">',
          f'<p>{e(data["status"])}</p><p>{e(data["scope"])}</p>',
          '<div class="flow"><span>模型 / 搜索结果</span><span>→ 变更通知</span><span>→ 行身份与布局类型</span><span>→ 复用 cell</span><span>→ 合并文本更新</span></div>',
          '<p><small>概念关系图；具体同步、异步与后备分支见各项证据，不表示单一调用栈。</small></p>',
-         '<h2>已核对的机制</h2>']
+         '<h2>已核对的机制</h2>',
+         '<p><small>F01–F10 的 Marple 对照为初次审阅基线；本轮修复与后续调查见下方进度。</small></p>']
 for f in data['findings']:
     parts.append(f'<article id="{e(f["id"])}"><h3>{e(f["id"])} · {e(f["title"])}</h3>')
     for label, key in [('观察', 'observed'), ('含义与边界', 'implication'), ('Marple 对照', 'marple')]:
@@ -25,9 +26,22 @@ for f in data['findings']:
     for ref in f['evidence']:
         parts.append(f'<li><code>{e(ref["image"])} {e(ref["address"])} [{e(ref["class_name"])} {e(ref["selector"])}]</code></li>')
     parts.append('</ul></details></article>')
-parts.append('<h2>建议实施顺序（尚未实施）</h2>')
+followup = data.get('followup')
+if followup:
+    parts.append('<h2>第二轮：最小修复与验证</h2><ul>')
+    parts.extend(f'<li>{e(s)}</li>' for s in followup['implementation'])
+    parts.append(f'</ul><p>{e(followup["validation"])}</p>')
+    m = followup['measurement']
+    parts.append(f'<p>{e(m["configuration"])}</p><p>{e(m["control"])}</p>')
+    parts.append(f'<p class="summary">每轮最大心跳间隔的中位数：主 actor 对照 {m["control_max_gap_median_ms"]} ms → 后台计算 {m["background_max_gap_median_ms"]} ms。</p>')
+    parts.append(f'<p>{e(m["interpretation"])}</p><p>基准：<code>{e(m["test"])}</code></p><ul>')
+    parts.extend(f'<li>{e(s)}</li>' for s in followup['remaining'])
+    parts.append('</ul>')
+parts.append('<h2>实施顺序与当前进度</h2>')
 for item in data['proposed_work']:
     parts.append(f'<article><h3>{e(item["priority"])} · {e(item["title"])}</h3>')
+    if 'status' in item:
+        parts.append(f'<p><strong>{e(item["status"])}</strong></p>')
     for label, key in [('原因', 'reason'), ('最小改动', 'change'), ('验收', 'verify')]:
         parts.append(f'<p><strong>{label}：</strong>{e(item[key])}</p>')
     parts.append('</article>')
