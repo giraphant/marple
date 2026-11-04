@@ -605,7 +605,26 @@ public struct Workspace: Sendable {
     public mutating func flattenTemporaryTabs() {
         let temporary = tabs.filter { !$0.pinned }.map(\.id)
         guard !temporary.isEmpty else { return }
-        for id in temporary { _ = Self.removeTab(id, from: &root) }
+        // Most sidebar edits already have a flat temporary suffix. Avoid both
+        // rebuilding it and normalizing the unchanged tree on every rename/move.
+        if root.count >= temporary.count,
+           zip(root.suffix(temporary.count), temporary).allSatisfy({ node, id in
+               if case .tab(let existing) = node { return existing == id }
+               return false
+           }) { return }
+        let temporaryIDs = Set(temporary)
+        func keepingFixed(_ nodes: [TabNode]) -> [TabNode] {
+            nodes.compactMap { node in
+                switch node {
+                case .tab(let id):
+                    return temporaryIDs.contains(id) ? nil : node
+                case .group(var group):
+                    group.children = keepingFixed(group.children)
+                    return .group(group)
+                }
+            }
+        }
+        root = keepingFixed(root)
         root.append(contentsOf: temporary.map(TabNode.tab))
         normalize()
     }

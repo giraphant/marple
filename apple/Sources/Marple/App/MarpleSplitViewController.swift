@@ -97,11 +97,14 @@ final class MarpleSplitViewController: NSSplitViewController {
     /// expand both; if both are already open, collapse just the sidebar.
     func toggleNavigation() {
         guard let sidebar = sidebarItem, let list = listItem else { return }
-        if sidebar.isCollapsed || list.isCollapsed {
-            sidebar.animator().isCollapsed = false
-            list.animator().isCollapsed = false
-        } else {
-            sidebar.animator().isCollapsed = true
+        let expand = sidebar.isCollapsed || list.isCollapsed
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = reduceMotion ? 0 : 0.16
+            let sidebarTarget = reduceMotion ? sidebar : sidebar.animator()
+            let listTarget = reduceMotion ? list : list.animator()
+            sidebarTarget.isCollapsed = !expand
+            if expand { listTarget.isCollapsed = false }
         }
     }
 

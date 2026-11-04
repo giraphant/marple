@@ -2,6 +2,36 @@ import Testing
 import Foundation
 @testable import MarpleKit
 
+@Suite struct WorkspaceSidebarFlattenTests {
+    @Test func flatteningPreservesNestedEmptyFoldersAndFixedOrder() throws {
+        var workspace = Workspace(initial: NavLocation(pane: .type(.book), openPath: "0.md"))
+        for index in 1..<5 {
+            workspace.newTab(NavLocation(pane: .type(.book), openPath: "\(index).md"))
+        }
+        let ids = workspace.tabs.map(\.id)
+        workspace.groupTabs([ids[0], ids[1]])
+        workspace.groupTabs([ids[2], ids[3]])
+        let parent = try #require(workspace.tabGroups.first?.id)
+        let child = try #require(workspace.tabGroups.last?.id)
+        workspace.moveGroup(child, intoGroup: parent)
+        workspace.setGroupCollapsed(child, collapsed: true)
+        workspace.togglePin(ids[0])
+        workspace.togglePin(ids[4])
+        let temporary = workspace.tabs.filter { !$0.pinned }.map(\.id)
+        let active = workspace.activeID
+        workspace.flattenTemporaryTabs()
+        #expect(workspace.rootNodes.suffix(temporary.count) == temporary.map(TabNode.tab))
+        #expect(workspace.tabGroups.map(\.id) == [parent, child])
+        #expect(workspace.tabGroups.last?.children.isEmpty == true)
+        #expect(workspace.tabGroups.last?.isCollapsed == true)
+        #expect(workspace.tabs.filter(\.pinned).map(\.id) == [ids[0], ids[4]])
+        #expect(workspace.activeID == active)
+        let before = workspace.sidebarState
+        workspace.flattenTemporaryTabs()
+        #expect(workspace.sidebarState == before)
+    }
+}
+
 @Suite struct NavHistoryTests {
     let a = NavLocation(pane: .type(.note))
     let b = NavLocation(pane: .type(.paper), openPath: "x.md")

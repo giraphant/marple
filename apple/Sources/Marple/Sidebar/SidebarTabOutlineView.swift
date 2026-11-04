@@ -46,11 +46,11 @@ private final class SidebarOutlineNode: NSObject {
     }
 
     let kind: Kind
-    let title: String
-    let count: Int?
+    var title: String
+    var count: Int?
     let iconName: String?
-    let pinned: Bool
-    let entryType: EntryType?
+    var pinned: Bool
+    var entryType: EntryType?
     let sourceSpaceID: WorkspaceSpace.ID?
     var children: [SidebarOutlineNode]
 
@@ -67,7 +67,7 @@ private final class SidebarOutlineNode: NSObject {
         self.children = children
     }
 
-    var payload: String? {
+    lazy var payload: String? = {
         switch kind {
         case .tab(let id):
             guard let sourceSpaceID else { return "tab:\(id.uuidString)" }
@@ -82,7 +82,7 @@ private final class SidebarOutlineNode: NSObject {
         case .section, .pane:
             return nil
         }
-    }
+    }()
 
     var firstTabID: NavTab.ID? {
         switch kind {
@@ -301,6 +301,20 @@ struct SidebarOutlineView: NSViewRepresentable {
                 selectCurrentItem(in: outline)
                 return
             }
+            if let previous = lastReloadSignature, signature.hasSameStructure(as: previous) {
+                let selection = capturedMultiSelectionPayloads(in: outline)
+                let anchor = captureViewportAnchor(in: outline)
+                updateContent(using: signature, in: outline)
+                if signature.tree != previous.tree {
+                    restoreExpansion(in: outline, animated: true)
+                    restoreViewportAnchor(anchor, in: outline)
+                    restoreMultiSelection(payloads: selection, in: outline)
+                }
+                lastReloadSignature = signature
+                selectCurrentItem(in: outline)
+                beginPendingFolderRename(in: outline)
+                return
+            }
             // Snapshot the multi-selection by stable payload before reloadData
             // wipes row indices. selectCurrentItem already keeps a multi-row
             // selection that covers the active row across no-op reloads — this
@@ -310,31 +324,124 @@ struct SidebarOutlineView: NSViewRepresentable {
                 && lastReloadSpaceID != model.activeSpaceID
             let viewportAnchor = spaceChanged ? nil : captureViewportAnchor(in: outline)
             let spaceTransition = sidebarSpaceTransition(in: outline)
-            let previousSignature = lastReloadSignature
+            let initialLoad = lastReloadSignature == nil
             lastReloadSignature = signature
             lastReloadSpaceID = model.activeSpaceID
             stickyRowDropTarget = nil
             if let spaceTransition, let clipView = outline.enclosingScrollView?.contentView {
                 clipView.layer?.add(spaceTransition, forKey: "space-switch")
             }
-            if let previousSignature,
-               previousSignature.types == signature.types,
-               previousSignature.counts == signature.counts,
-               previousSignature.views == signature.views,
-               let pinnedSection, let tabsSection {
-                // Navigation changes the pages, while object/view rows stay put.
-                pinnedSection.children = makePinnedRootItems()
-                tabsSection.children = makeTemporaryItems()
-            } else {
-                rootItems = makeRootItems()
-            }
-            // Temporary pages are root siblings of the divider, not its children.
-            outline.reloadData()
+            reconcileTree(in: outline, fullReload: initialLoad || spaceChanged)
+            updateContent(using: signature, in: outline)
             restoreExpansion(in: outline)
             restoreViewportAnchor(viewportAnchor, in: outline)
             restoreMultiSelection(payloads: preservedPayloads, in: outline)
             selectCurrentItem(in: outline)
             beginPendingFolderRename(in: outline)
+        }
+
+        private struct TreeSnapshot {
+            var nodes: [String: SidebarOutlineNode] = [:]
+            var children: [String: [String]] = [:]
+            var parents: [String] = []
+        }
+
+        private func treeSnapshot(_ roots: [SidebarOutlineNode]) -> TreeSnapshot {
+            var snapshot = TreeSnapshot()
+            func visit(_ nodes: [SidebarOutlineNode], parent: String) {
+                snapshot.parents.append(parent)
+                snapshot.children[parent] = nodes.compactMap(viewportKey)
+                for node in nodes {
+                    guard let key = viewportKey(for: node) else { continue }
+                    snapshot.nodes[key] = node
+                    switch node.kind {
+                    case .section where !node.isTabsSection, .group:
+                        visit(node.children, parent: key)
+                    default:
+                        break
+                    }
+                }
+            }
+            // Temporary pages are root siblings of the divider, not its children.
+            visit(roots.flatMap { $0.isTabsSection ? [$0] + $0.children : [$0] }, parent: "root")
+            return snapshot
+        }
+
+        private func reconcileTree(in outline: NSOutlineView, fullReload: Bool) {
+            let old = treeSnapshot(rootItems)
+            let proposedRoots = makeRootItems()
+            let proposed = treeSnapshot(proposedRoots)
+            let oldDivider = showsPageDivider
+            // Scope is part of each page/group key. The pool lives for one update,
+            // so deleted nodes and inactive spaces cannot accumulate here.
+            let nodes = proposed.nodes.mapValues { node in
+                viewportKey(for: node).flatMap { old.nodes[$0] } ?? node
+            }
+            let parentKeys = Set(old.parents).union(proposed.parents)
+            var changes: [String: SidebarChildDiff] = [:]
+            for key in parentKeys {
+                let before = old.children[key] ?? []
+                let after = proposed.children[key] ?? []
+                if before != after { changes[key] = SidebarChildDiff(from: before, to: after) }
+            }
+            let operations = changes.values.reduce(0) { $0 + $1.operationCount }
+            // Bound AppKit work separately from diff work. Large imports/reversals
+            // get the same identity and restoration guarantees without thousands
+            // of simultaneous row animations.
+            let reloadAll = fullReload || changes.count > 64 || operations > 256
+            let animate = !reloadAll && operations <= 24 && outline.window != nil
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            isUpdatingSelection = true
+            isRestoringExpansion = true
+            defer {
+                isUpdatingSelection = false
+                isRestoringExpansion = false
+            }
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = animate ? 0.12 : 0
+            if !reloadAll { outline.beginUpdates() }
+
+            // AppKit asks the data source for inserted values at endUpdates.
+            // Publish the complete new tree before sending the ordered operations.
+            for (key, children) in proposed.children where key != "root" {
+                nodes[key]?.children = children.compactMap { nodes[$0] }
+            }
+            for (key, node) in nodes { node.pinned = proposed.nodes[key]?.pinned ?? false }
+            rootItems = proposedRoots.compactMap { viewportKey(for: $0).flatMap { nodes[$0] } }
+            if let temporary = proposedRoots.first(where: \.isTabsSection) {
+                tabsSection?.children = temporary.children.compactMap {
+                    viewportKey(for: $0).flatMap { nodes[$0] }
+                }
+            }
+
+            if reloadAll {
+                outline.reloadData()
+            } else {
+                for key in old.parents.reversed() {
+                    guard let change = changes[key], change.move == nil,
+                          !change.removals.isEmpty else { continue }
+                    outline.removeItems(at: change.removals, inParent: old.nodes[key],
+                                        withAnimation: animate ? .effectFade : [])
+                }
+                for key in proposed.parents {
+                    guard let change = changes[key] else { continue }
+                    if let move = change.move {
+                        outline.moveItem(at: move.from, inParent: nodes[key],
+                                         to: move.to, inParent: nodes[key])
+                    } else if !change.insertions.isEmpty {
+                        outline.insertItems(at: change.insertions, inParent: nodes[key],
+                                            withAnimation: animate ? .slideDown : [])
+                    }
+                }
+                outline.endUpdates()
+                if oldDivider != showsPageDivider, let divider = tabsSection {
+                    // Refresh geometry, not cells: invalidating only the divider
+                    // leaves estimated offsets for uncached rows above the anchor.
+                    outline.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<outline.numberOfRows))
+                    outline.reloadItem(divider)
+                }
+            }
+            NSAnimationContext.endGrouping()
         }
 
         private func captureViewportAnchor(in outline: NSOutlineView) -> ViewportAnchor? {
@@ -355,9 +462,10 @@ struct SidebarOutlineView: NSViewRepresentable {
                 guard let node = outline.item(atRow: row) as? SidebarOutlineNode,
                       viewportKey(for: node) == anchor.key else { continue }
                 let clipView = scrollView.contentView
-                clipView.scroll(to: NSPoint(
-                    x: clipView.bounds.minX,
-                    y: outline.rect(ofRow: row).minY + anchor.offset))
+                let position = outline.convert(NSPoint(
+                    x: outline.visibleRect.minX,
+                    y: outline.rect(ofRow: row).minY + anchor.offset), to: clipView)
+                clipView.scroll(to: position)
                 scrollView.reflectScrolledClipView(clipView)
                 return
             }
@@ -436,7 +544,8 @@ struct SidebarOutlineView: NSViewRepresentable {
                 let id: NavTab.ID
                 let location: NavLocation
                 let pinned: Bool
-                let customTitle: String?
+                let title: String
+                let entryType: EntryType?
             }
             struct View: Equatable {
                 let id: UUID
@@ -451,6 +560,30 @@ struct SidebarOutlineView: NSViewRepresentable {
             let tree: [TabNode]
             let activeSpaceID: WorkspaceSpace.ID?
             let spaceIDs: [WorkspaceSpace.ID]
+
+            func hasSameStructure(as other: Self) -> Bool {
+                types == other.types
+                    && views.map(\.id) == other.views.map(\.id)
+                    && activeSpaceID == other.activeSpaceID
+                    && spaceIDs == other.spaceIDs
+                    && tabs.count == other.tabs.count
+                    && zip(tabs, other.tabs).allSatisfy { $0.id == $1.id && $0.pinned == $1.pinned }
+                    && Self.sameTreeStructure(tree, other.tree)
+            }
+
+            private static func sameTreeStructure(_ lhs: [TabNode], _ rhs: [TabNode]) -> Bool {
+                guard lhs.count == rhs.count else { return false }
+                return zip(lhs, rhs).allSatisfy { left, right in
+                    switch (left, right) {
+                    case (.tab(let a), .tab(let b)):
+                        return a == b
+                    case (.group(let a), .group(let b)):
+                        return a.id == b.id && sameTreeStructure(a.children, b.children)
+                    default:
+                        return false
+                    }
+                }
+            }
         }
 
         private func reloadSignature() -> ReloadSignature {
@@ -467,12 +600,69 @@ struct SidebarOutlineView: NSViewRepresentable {
                     .init(id: $0.id, name: $0.name, count: model.savedViewCounts[$0.id] ?? 0)
                 },
                 tabs: model.tabs.map {
-                    .init(id: $0.id, location: $0.identityLocation,
-                          pinned: $0.pinned, customTitle: $0.customTitle)
+                    let entry = model.catalog.entry(at: $0.identityLocation.openPath)
+                    return .init(id: $0.id, location: $0.identityLocation,
+                                 pinned: $0.pinned, title: tabTitle($0, entry: entry),
+                                 entryType: entry?.type ?? $0.cachedType)
                 },
                 tree: model.tabRootNodes,
                 activeSpaceID: model.activeSpaceID,
                 spaceIDs: model.spaces.map(\.id))
+        }
+
+        /// Content changes keep the outline's item identities and row geometry intact.
+        /// Update hidden nodes too, but only touch cells AppKit has already materialized.
+        private func updateContent(using signature: ReloadSignature, in outline: NSOutlineView) {
+            let tabs = Dictionary(uniqueKeysWithValues: signature.tabs.map { ($0.id, $0) })
+            let views = Dictionary(uniqueKeysWithValues: signature.views.map { ($0.id, $0) })
+            let counts = Dictionary(uniqueKeysWithValues: zip(signature.types, signature.counts))
+            var groupNames: [TabGroup.ID: String] = [:]
+            func collectGroups(_ nodes: [TabNode]) {
+                for case .group(let group) in nodes {
+                    groupNames[group.id] = group.name
+                    collectGroups(group.children)
+                }
+            }
+            collectGroups(signature.tree)
+
+            func update(_ nodes: [SidebarOutlineNode]) {
+                for node in nodes {
+                    var title = node.title
+                    var count = node.count
+                    var entryType = node.entryType
+                    switch node.kind {
+                    case .tab(let id):
+                        if let tab = tabs[id] {
+                            title = tab.title
+                            entryType = tab.entryType
+                        }
+                    case .group(let id):
+                        if let name = groupNames[id] { title = name }
+                    case .pane(.type(let type)):
+                        count = counts[type]
+                    case .pane(.savedView(let id)):
+                        if let view = views[id] {
+                            title = view.name
+                            count = view.count
+                        }
+                    case .section, .pane:
+                        break
+                    }
+                    if title != node.title || count != node.count || entryType != node.entryType {
+                        let iconChanged = entryType != node.entryType
+                        node.title = title
+                        node.count = count
+                        node.entryType = entryType
+                        let row = outline.row(forItem: node)
+                        if row >= 0, let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false)
+                            as? SidebarOutlineCellView {
+                            cell.refreshContent(iconChanged: iconChanged)
+                        }
+                    }
+                    update(node.children)
+                }
+            }
+            update(rootItems)
         }
 
         // MARK: - Node tree construction
@@ -514,9 +704,11 @@ struct SidebarOutlineView: NSViewRepresentable {
         }
 
         private func makePinnedRootItems() -> [SidebarOutlineNode] {
+            let roots = model.pinnedTabRootNodes
+            guard !roots.isEmpty else { return [] }
             let sourceSpaceID = model.activeSpaceID
             let tabsByID = Dictionary(uniqueKeysWithValues: model.tabs.map { ($0.id, $0) })
-            return model.pinnedTabRootNodes.compactMap {
+            return roots.compactMap {
                 outlineNode($0, sourceSpaceID: sourceSpaceID, tabsByID: tabsByID)
             }
         }
@@ -583,37 +775,63 @@ struct SidebarOutlineView: NSViewRepresentable {
 
         // MARK: - Expansion state
 
-        private func restoreExpansion(in outline: NSOutlineView) {
+        private func restoreExpansion(in outline: NSOutlineView, animated: Bool = false) {
+            isUpdatingSelection = true
             isRestoringExpansion = true
-            defer { isRestoringExpansion = false }
+            defer {
+                isUpdatingSelection = false
+                isRestoringExpansion = false
+            }
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = animated ? 0.12 : 0
+            defer { NSAnimationContext.endGrouping() }
             for section in rootItems {
-                if case .section(let s) = section.kind, collapsedSections.contains(s.key) {
-                    outline.collapseItem(section)
-                } else {
-                    outline.expandItem(section)
+                let collapsed: Bool
+                if case .section(let s) = section.kind { collapsed = collapsedSections.contains(s.key) }
+                else { collapsed = false }
+                if outline.isItemExpanded(section) == collapsed {
+                    if collapsed { outline.collapseItem(section) }
+                    else { outline.expandItem(section) }
                 }
             }
             // Group rows only exist while their section is expanded; a collapsed
             // 页面 section re-applies this lazily in outlineViewItemDidExpand.
             if !collapsedSections.contains(SidebarOutlineSection.pinned.key) {
-                applyExpansion(to: pinnedRootItems, in: outline)
+                applyExpansion(to: pinnedRootItems, in: outline, animated: animated)
             }
         }
 
         /// Recursively restore each group's expanded/collapsed state. Children rows
         /// only exist once their parent is expanded, so recurse only into expanded
         /// groups.
-        private func applyExpansion(to nodes: [SidebarOutlineNode], in outline: NSOutlineView) {
-            for node in nodes {
-                guard case .group(let id) = node.kind else { continue }
-                let collapsed = model.tabGroups.first { $0.id == id }?.isCollapsed ?? false
-                if collapsed {
-                    outline.collapseItem(node)
-                } else {
-                    outline.expandItem(node)
-                    applyExpansion(to: node.children, in: outline)
+        private func applyExpansion(to nodes: [SidebarOutlineNode], in outline: NSOutlineView, animated: Bool = false) {
+            let collapsedByID = Dictionary(uniqueKeysWithValues: model.tabGroups.map { ($0.id, $0.isCollapsed) })
+            let canAnimate = animated && outline.window != nil
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            func visibleCount(_ nodes: [SidebarOutlineNode]) -> Int {
+                var count = 0
+                for node in nodes {
+                    count += 1
+                    if case .group(let id) = node.kind, collapsedByID[id] != true {
+                        count += visibleCount(node.children)
+                    }
+                    if count > 24 { break }
+                }
+                return count
+            }
+            func apply(_ nodes: [SidebarOutlineNode]) {
+                for node in nodes {
+                    guard case .group(let id) = node.kind else { continue }
+                    let collapsed = collapsedByID[id] ?? false
+                    if outline.isItemExpanded(node) == collapsed {
+                        let target = canAnimate && visibleCount(node.children) <= 24 ? outline.animator() : outline
+                        if collapsed { target.collapseItem(node) }
+                        else { target.expandItem(node) }
+                    }
+                    if !collapsed { apply(node.children) }
                 }
             }
+            apply(nodes)
         }
 
         private var pinnedRootItems: [SidebarOutlineNode] {
@@ -2056,7 +2274,6 @@ private final class SidebarOutlineCellView: NSTableCellView {
         self.coordinator = coordinator
         self.outlineView = coordinator.outlineView
         objectValue = node
-        titleField.stringValue = node.title
         titleField.isEditable = false
         titleField.isSelectable = false
         titleField.delegate = nil
@@ -2065,16 +2282,20 @@ private final class SidebarOutlineCellView: NSTableCellView {
         titleField.textColor = textColor(for: node)
 
         iconContainer.isHidden = isSection(node)
-        configureIcon(for: node)
+        refreshContent(iconChanged: true)
+        clearMenus()
+    }
 
+    func refreshContent(iconChanged: Bool) {
+        guard let node else { return }
+        titleField.stringValue = node.title
+        if iconChanged { configureIcon(for: node) }
         if let count = node.count, !isSection(node) {
             countField.stringValue = "\(count)"
             countField.isHidden = false
         } else {
             countField.isHidden = true
         }
-
-        clearMenus()
     }
 
     func beginEditing(delegate: NSTextFieldDelegate) {

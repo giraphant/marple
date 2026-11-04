@@ -6,6 +6,253 @@ import Testing
 @Suite(.serialized)
 struct SidebarPageSectionTests {
     @MainActor
+    @Test(arguments: [80, 500, 5000])
+    func wideTreeMovesAndBulkFallbackPreserveNodes(count: Int) async throws {
+        let pages = (0..<count).map { entry(path: "books/\($0).md", title: "Page \($0)") }
+        let state = PersistedState(
+            browsePane: .type(.book), isBrowsing: false,
+            tabs: pages.map { PersistedTab(location: NavLocation(pane: .type(.book), openPath: $0.path),
+                                           pinned: false, cachedTitle: $0.title, cachedType: .book) },
+            activeIndex: 0, sortClauses: [], filterClauses: [], filterMatch: .all, browseMode: "list")
+        let outline = ContentReloadCountingOutlineView(frame: NSRect(x: 0, y: 0, width: 280, height: 160))
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 280, height: 160))
+        scroll.documentView = outline
+        let harness = try await makeHarness(hasFixed: false, hasTemporary: false, temporaryPages: pages,
+                                            outline: outline, stateStore: SidebarFixtureStateStore(state: state))
+        let model = harness.model
+        let ids = model.tabs.map(\.id)
+        let firstRow = outline.numberOfRows - count
+        let nodes = (0..<count).map { outline.item(atRow: firstRow + $0) as? NSObject }
+        let reloads = outline.fullReloads
+        var order = ids
+        var samples: [Double] = []
+        for _ in 0..<20 {
+            order.append(order.removeFirst())
+            model.setTabOrder(order)
+            let start = ContinuousClock.now
+            harness.coordinator.reload(outline)
+            let duration = start.duration(to: .now).components
+            samples.append(Double(duration.seconds) * 1000 + Double(duration.attoseconds) / 1e15)
+        }
+        #expect(outline.fullReloads == reloads)
+        #expect(outline.moves == 20)
+        samples.sort()
+        print("[sidebar] \(count) rows, 20 single moves: p50=\(samples[10]) ms p95=\(samples[18]) ms (debug, windowless)")
+
+        model.setTabOrder(Array(ids.reversed()))
+        harness.coordinator.reload(outline)
+        #expect(outline.fullReloads == reloads + (count >= 500 ? 1 : 0))
+        for index in 0..<count {
+            #expect(outline.item(atRow: firstRow + index) as? NSObject === nodes[count - index - 1])
+        }
+        #expect(scroll.documentView === outline)
+    }
+
+    @MainActor
+    @Test func structuralMovesKeepIdentitySelectionAndNavigation() async throws {
+        let outline = ContentReloadCountingOutlineView(frame: NSRect(x: 0, y: 0, width: 280, height: 600))
+        let pages = (0..<4).map { entry(path: "books/\($0).md", title: "Page \($0)") }
+        let harness = try await makeHarness(hasFixed: false, hasTemporary: true,
+                                            temporaryPages: pages, outline: outline)
+        let model = harness.model
+        let ids = model.tabs.map(\.id)
+        let nodes = try (0..<4).map {
+            let index = try #require(row(containing: "Page \($0)", in: outline))
+            return try #require(outline.item(atRow: index) as? NSObject)
+        }
+        let reloads = outline.fullReloads
+        model.setTabOrder([ids[3], ids[0], ids[1], ids[2]])
+        harness.coordinator.reload(outline)
+        #expect(outline.moves == 1)
+        model.groupTabs([ids[0], ids[1]])
+        harness.coordinator.reload(outline)
+        let group = try #require(model.tabGroups.first)
+        model.setPinned([ids[2]], to: true)
+        model.moveTab(ids[2], toGroup: group.id)
+        harness.coordinator.reload(outline)
+        outline.allowsMultipleSelection = true
+        outline.selectRowIndexes(IndexSet([outline.row(forItem: nodes[0]), outline.row(forItem: nodes[2])]),
+                                 byExtendingSelection: false)
+        let active = model.activeTabID
+        model.moveItemsToRoot([.tab(ids[0]), .tab(ids[2])], at: 0)
+        harness.coordinator.reload(outline)
+        #expect(model.activeTabID == active)
+        #expect(outline.selectedRowIndexes == IndexSet([outline.row(forItem: nodes[0]), outline.row(forItem: nodes[2])]))
+        for (index, node) in nodes.enumerated() {
+            let row = try #require(row(containing: "Page \(index)", in: outline))
+            #expect(outline.item(atRow: row) as? NSObject === node)
+        }
+        #expect(outline.fullReloads == reloads)
+        #expect(outline.insertions > 0)
+        #expect(outline.removals > 0)
+        await model.closeTab(ids[3])
+        harness.coordinator.reload(outline)
+        #expect(outline.row(forItem: nodes[3]) == -1)
+        #expect(outline.fullReloads == reloads)
+    }
+
+    @MainActor
+    @Test func parentCollapsePreservesDescendantIntentWithoutReload() async throws {
+        let outline = ContentReloadCountingOutlineView(frame: NSRect(x: 0, y: 0, width: 280, height: 600))
+        let harness = try await makeHarness(hasFixed: true, hasTemporary: true, outline: outline)
+        let model = harness.model
+        model.groupTabs(model.tabs.map(\.id))
+        var childID = try #require(model.tabGroups.first?.id)
+        let innermost = childID
+        for _ in 0..<7 {
+            model.createFolder()
+            let parent = try #require(model.pendingFolderRenameID)
+            model.finishFolderRenameRequest(parent)
+            model.moveGroup(childID, intoGroup: parent)
+            childID = parent
+        }
+        harness.coordinator.reload(outline)
+        let reloads = outline.fullReloads
+        let count = outline.numberOfRows
+        model.setTabGroup(childID, collapsed: true)
+        harness.coordinator.reload(outline)
+        #expect(outline.numberOfRows < count)
+        #expect(model.tabGroups.first { $0.id == innermost }?.isCollapsed == false)
+        model.setTabGroup(childID, collapsed: false)
+        harness.coordinator.reload(outline)
+        #expect(outline.numberOfRows == count)
+        #expect(outline.fullReloads == reloads)
+    }
+
+    @MainActor
+    @Test func collapsedGroupContentUpdatesPreserveHiddenChildren() async throws {
+        let outline = ContentReloadCountingOutlineView(frame: NSRect(x: 0, y: 0, width: 280, height: 600))
+        let harness = try await makeHarness(hasFixed: true, hasTemporary: true, outline: outline)
+        let model = harness.model
+        model.groupTabs(model.tabs.map(\.id))
+        let group = try #require(model.tabGroups.first)
+        model.setTabGroup(group.id, collapsed: true)
+        harness.coordinator.reload(outline)
+        let groupRow = try #require(row(containing: group.name, in: outline))
+        let groupNode = try #require(outline.item(atRow: groupRow) as? NSObject)
+        let child = harness.coordinator.outlineView(outline, child: 0, ofItem: groupNode) as AnyObject
+        let reloads = outline.fullReloads
+        model.renameTabGroup(group.id, to: "Renamed folder")
+        model.renameTab(try #require(model.tabs.first?.id), to: "Hidden renamed page")
+        harness.coordinator.reload(outline)
+
+        #expect(outline.fullReloads == reloads)
+        #expect(outline.item(atRow: groupRow) as? NSObject === groupNode)
+        #expect(!outline.isItemExpanded(groupNode))
+        #expect(outline.row(forItem: child) == -1)
+        #expect(harness.coordinator.outlineView(outline, child: 0, ofItem: groupNode) as AnyObject === child)
+        #expect(row(containing: "Renamed folder", in: outline) == groupRow)
+        // Expanding directly materializes the existing hidden node, without reload().
+        outline.expandItem(groupNode)
+        #expect(row(containing: "Hidden renamed page", in: outline) != nil)
+
+        harness.coordinator.reload(outline)
+        let beforeInsertion = outline.fullReloads
+        await model.openInNewTab("books/fixed.md")
+        harness.coordinator.reload(outline)
+        #expect(outline.fullReloads == beforeInsertion)
+        #expect(outline.numberOfRows > groupRow + 3)
+    }
+
+    @MainActor
+    @Test func bulkContentUpdatesPreserveViewportWithoutCreatingOffscreenCells() async throws {
+        let outline = ContentReloadCountingOutlineView(frame: NSRect(x: 0, y: 0, width: 280, height: 600))
+        let pages = (0..<80).map { entry(path: "books/page-\($0).md", title: "Page \($0)") }
+        let harness = try await makeHarness(hasFixed: false, hasTemporary: true,
+                                            temporaryPages: pages, outline: outline)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 280, height: 160))
+        scroll.documentView = outline
+        scroll.layoutSubtreeIfNeeded()
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 300))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        let origin = scroll.contentView.bounds.origin
+        #expect(origin.y > 0)
+        let lastRow = outline.numberOfRows - 1
+        let lastNode = try #require(outline.item(atRow: lastRow) as? NSObject)
+        let reloads = outline.fullReloads
+        let forcedViews = outline.forcedViewRequests
+        harness.model.catalog.mutateEntries { entries in
+            entries = entries.map { entry(path: $0.path, title: "Updated \($0.title ?? "")") }
+        }
+        harness.coordinator.reload(outline)
+
+        #expect(outline.fullReloads == reloads)
+        #expect(outline.forcedViewRequests == forcedViews)
+        #expect(scroll.contentView.bounds.origin == origin)
+        #expect(outline.item(atRow: lastRow) as? NSObject === lastNode)
+        let lastCell = try #require(outline.view(atColumn: 0, row: lastRow, makeIfNecessary: true))
+        #expect(descendants(of: NSTextField.self, in: lastCell).contains { $0.stringValue == "Updated Page 79" })
+    }
+
+    @MainActor
+    @Test func contentUpdatesPreserveRowsCellsAndSelection() async throws {
+        let outline = ContentReloadCountingOutlineView(frame: NSRect(x: 0, y: 0, width: 280, height: 600))
+        let harness = try await makeHarness(hasFixed: true, hasTemporary: true, outline: outline)
+        let model = harness.model
+        let savedView = model.createSavedView(named: "Reading")
+        await model.selectTab(try #require(model.tabs.last?.id))
+        harness.coordinator.reload(outline)
+        let fixedRow = try #require(row(containing: "Fixed", in: outline))
+        let temporaryRow = try #require(row(containing: "Temporary", in: outline))
+        let viewRow = try #require(row(containing: "Reading", in: outline))
+        let bookRow = try #require(row(containing: AppPresentation.entryTypeLabel(.book), in: outline))
+        let fixedCell = try #require(outline.view(atColumn: 0, row: fixedRow, makeIfNecessary: true))
+        let badge = try #require(descendants(of: NSView.self, in: fixedCell).first {
+            String(describing: type(of: $0)).hasPrefix("NSHostingView<")
+        })
+        outline.allowsMultipleSelection = true
+        let selection = IndexSet([fixedRow, temporaryRow])
+        outline.selectRowIndexes(selection, byExtendingSelection: false)
+        let nodes = (0..<outline.numberOfRows).map { outline.item(atRow: $0) as? NSObject }
+        let reloads = outline.fullReloads
+        model.renameTab(try #require(model.tabs.first?.id), to: "Renamed fixed")
+        model.renameSavedView(savedView.id, to: "Reading renamed")
+        model.catalog.counts[.book] = 42
+        model.catalog.savedViewCounts[savedView.id] = 17
+        harness.coordinator.reload(outline)
+
+        #expect(outline.fullReloads == reloads)
+        #expect(outline.selectedRowIndexes == selection)
+        for (row, node) in nodes.enumerated() {
+            #expect(outline.item(atRow: row) as? NSObject === node)
+        }
+        #expect(outline.view(atColumn: 0, row: fixedRow, makeIfNecessary: false) === fixedCell)
+        #expect(descendants(of: NSView.self, in: fixedCell).contains { $0 === badge })
+        #expect(row(containing: "Renamed fixed", in: outline) == fixedRow)
+        #expect(row(containing: "Reading renamed", in: outline) == viewRow)
+        let bookCell = try #require(outline.view(atColumn: 0, row: bookRow, makeIfNecessary: true))
+        let viewCell = try #require(outline.view(atColumn: 0, row: viewRow, makeIfNecessary: true))
+        #expect(descendants(of: NSTextField.self, in: bookCell).contains { $0.stringValue == "42" })
+        #expect(descendants(of: NSTextField.self, in: viewCell).contains { $0.stringValue == "17" })
+    }
+
+    @MainActor
+    @Test func sameSizeCatalogPublicationUpdatesTitleAndTypeWithoutReload() async throws {
+        let outline = ContentReloadCountingOutlineView(frame: NSRect(x: 0, y: 0, width: 280, height: 600))
+        let harness = try await makeHarness(hasFixed: true, hasTemporary: true, outline: outline)
+        let fixedRow = try #require(row(containing: "Fixed", in: outline))
+        let cell = try #require(outline.view(atColumn: 0, row: fixedRow, makeIfNecessary: true))
+        let node = try #require(outline.item(atRow: fixedRow) as? NSObject)
+        let reloads = outline.fullReloads
+        harness.model.catalog.mutateEntries { entries in
+            entries[0] = entry(path: entries[0].path, title: "Updated metadata")
+        }
+        harness.coordinator.reload(outline)
+        #expect(row(containing: "Updated metadata", in: outline) == fixedRow)
+        let oldBadge = try #require(descendants(of: NSView.self, in: cell).first {
+            String(describing: type(of: $0)).hasPrefix("NSHostingView<")
+        })
+        harness.model.catalog.mutateEntries { entries in
+            entries[0] = entry(path: entries[0].path, title: "Updated metadata", type: .paper)
+        }
+        harness.coordinator.reload(outline)
+        #expect(outline.fullReloads == reloads)
+        #expect(outline.item(atRow: fixedRow) as? NSObject === node)
+        #expect(outline.view(atColumn: 0, row: fixedRow, makeIfNecessary: false) === cell)
+        #expect(!descendants(of: NSView.self, in: cell).contains { $0 === oldBadge })
+    }
+
+    @MainActor
     @Test func hiddenBrowseSelectionClearsPreviousSingleTabHighlight() async throws {
         let harness = try await makeHarness(hasFixed: true, hasTemporary: true,
                                             collapsedSections: ["objects"])
@@ -234,7 +481,8 @@ extension SidebarPageSectionTests {
     private func makeHarness(hasFixed: Bool, hasTemporary: Bool,
                              temporaryPages: [Entry] = [],
                              collapsedSections: [String] = [],
-                             outline providedOutline: NSOutlineView? = nil) async throws -> Harness {
+                             outline providedOutline: NSOutlineView? = nil,
+                             stateStore: StateStore? = nil) async throws -> Harness {
         let fixed = entry(path: "books/fixed.md", title: "Fixed")
         let temporary = entry(path: "books/temporary.md", title: "Temporary")
         let pages = temporaryPages.isEmpty ? [temporary] : temporaryPages
@@ -244,7 +492,7 @@ extension SidebarPageSectionTests {
         }
         let model = AppModel(client: StubVaultClient(
             entries: [fixed] + pages,
-            texts: texts))
+            texts: texts), stateStore: stateStore)
         await model.loadIndex()
 
         if hasFixed {
@@ -353,9 +601,49 @@ extension SidebarPageSectionTests {
         }
     }
 
-    private func entry(path: String, title: String) -> Entry {
-        Entry(path: path, type: .book, title: title, author: [], year: nil,
+    private func entry(path: String, title: String, type: EntryType = .book) -> Entry {
+        Entry(path: path, type: type, title: title, author: [], year: nil,
               ratingScore: 0, themes: [], preview: "", hasPDF: false)
+    }
+}
+
+private struct SidebarFixtureStateStore: StateStore {
+    let state: PersistedState
+    func load() -> PersistedState? { state }
+    func save(_ state: PersistedState) {}
+}
+
+@MainActor
+private final class ContentReloadCountingOutlineView: NSOutlineView {
+    var fullReloads = 0
+    var forcedViewRequests = 0
+    var moves = 0
+    var insertions = 0
+    var removals = 0
+
+    override func moveItem(at fromIndex: Int, inParent oldParent: Any?, to toIndex: Int, inParent newParent: Any?) {
+        moves += 1
+        super.moveItem(at: fromIndex, inParent: oldParent, to: toIndex, inParent: newParent)
+    }
+
+    override func insertItems(at indexes: IndexSet, inParent parent: Any?, withAnimation animationOptions: NSTableView.AnimationOptions) {
+        insertions += indexes.count
+        super.insertItems(at: indexes, inParent: parent, withAnimation: animationOptions)
+    }
+
+    override func removeItems(at indexes: IndexSet, inParent parent: Any?, withAnimation animationOptions: NSTableView.AnimationOptions) {
+        removals += indexes.count
+        super.removeItems(at: indexes, inParent: parent, withAnimation: animationOptions)
+    }
+
+    override func reloadData() {
+        fullReloads += 1
+        super.reloadData()
+    }
+
+    override func view(atColumn column: Int, row: Int, makeIfNecessary: Bool) -> NSView? {
+        if makeIfNecessary { forcedViewRequests += 1 }
+        return super.view(atColumn: column, row: row, makeIfNecessary: makeIfNecessary)
     }
 }
 
