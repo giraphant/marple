@@ -17,7 +17,9 @@ public enum CloneCopy {
     public static let excludedNames: Set<String> = [
         ".marple", ".git", ".DS_Store",
         ".claude", ".codex", ".factory", ".antigravitycli", ".playwright-mcp", ".superset",
+        ".orca",      // Orca worktrees / agent session state — same category as .claude
         ".quasi",     // academic-pipeline cache / intermediate state (rebuildable)
+        ".pytest_cache",  // Python test cache — rebuildable, not vault content
         ".obsidian",  // editor config — not vault content; snapshot the library only
     ]
 

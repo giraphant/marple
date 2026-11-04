@@ -56,6 +56,8 @@ import Foundation
         #expect(CloneCopy.isExcluded(".claude"))
         #expect(CloneCopy.isExcluded(".superset"))
         #expect(CloneCopy.isExcluded(".codex"))
+        #expect(CloneCopy.isExcluded(".orca"))
+        #expect(CloneCopy.isExcluded(".pytest_cache"))
         #expect(CloneCopy.isExcluded(".quasi"))
         #expect(CloneCopy.isExcluded(".Ulysses-Group.plist"))
         #expect(CloneCopy.isExcluded(".Ulysses-ActivityHistory"))
