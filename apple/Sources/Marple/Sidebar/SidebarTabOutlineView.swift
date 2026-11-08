@@ -1275,6 +1275,10 @@ struct SidebarOutlineView: NSViewRepresentable {
             case .tab(let id):
                 guard let tab = model.tabs.first(where: { $0.id == id }) else { return [] }
                 var items = [menuItem(String(localized: "重命名"), action: #selector(renameFromMenu(_:)), node: node)]
+                if tab.location.openPath != nil {
+                    items.append(menuItem(String(localized: "在新窗口打开"),
+                                          action: #selector(openInNewWindowFromMenu(_:)), node: node))
+                }
                 items.append(.separator())
                 items.append(menuItem(String(localized: "复制分享清单"), action: #selector(copyShareManifestFromMenu(_:)), node: node))
                 items.append(.separator())
@@ -1352,6 +1356,13 @@ struct SidebarOutlineView: NSViewRepresentable {
             guard let node = sender.representedObject as? SidebarOutlineNode,
                   case .group(let id) = node.kind else { return }
             model.dissolveFolder(id)
+        }
+
+        @objc private func openInNewWindowFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarOutlineNode,
+                  case .tab(let id) = node.kind,
+                  let path = model.tabs.first(where: { $0.id == id })?.location.openPath else { return }
+            Task { await model.openInNewWindow(path, tab: id) }
         }
 
         @objc private func togglePinFromMenu(_ sender: NSMenuItem) {

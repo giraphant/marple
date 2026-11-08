@@ -24,9 +24,7 @@ extension Catalog {
         recomputeSavedViewCounts(savedViews: savedViews)
         themeIndex = themeCounts(entries)
         topicMembership = buildTopicMembership(entries)
-        if hasOpenDerivedInput {
-            recomputeOpenDerivedFromStoredInput()
-        }
+        refreshViewports()
         scheduleDeferredDerivedRebuild()
     }
 

@@ -26,9 +26,7 @@ extension Catalog {
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.derivedGeneration == generation else { return }
                     self.relationGraph = graph
-                    if self.hasOpenDerivedInput {
-                        self.recomputeOpenDerivedFromStoredInput()
-                    }
+                    self.refreshViewports()
                 }
                 // The search index can take seconds. Make the ready graph
                 // available first so navigation doesn't keep rebuilding it.

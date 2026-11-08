@@ -59,6 +59,9 @@ final class BrowseTableView: NSTableView {
             Task { for entry in entries { await model?.openInNewTab(entry.path) } }
         })
         if let entry = entries.first, entries.count == 1 {
+            menu.addItem(ActionItem(title: String(localized: "在新窗口打开")) { [weak model] in
+                Task { await model?.openInNewWindow(entry.path) }
+            })
             menu.addItem(ActionItem(title: String(localized: "新建批注")) { [weak model] in
                 Task { await model?.newAnnotation(for: entry) }
             })

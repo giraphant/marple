@@ -19,7 +19,9 @@ final class CLIServer: @unchecked Sendable {
     private var dispatchSource: DispatchSourceRead?
     // Captured once at start(); accessed only on @MainActor. Server isn't
     // restarted across vaults — boot rebuilds it each time.
-    @MainActor private var model: AppModel?
+    /// The window requests act on: the front window, opening one when none is
+    /// open (multi-window).
+    @MainActor private var model: (() -> AppModel?)?
     @MainActor private var indexer: VaultIndexer?
     @MainActor private var mutationReplay: CLIMutationReplayCache?
 
@@ -29,6 +31,11 @@ final class CLIServer: @unchecked Sendable {
 
     @MainActor
     func start(model: AppModel, indexer: VaultIndexer) throws {
+        try start(model: { model }, indexer: indexer)
+    }
+
+    @MainActor
+    func start(model: @escaping () -> AppModel?, indexer: VaultIndexer) throws {
         guard listenerFD < 0 else { return }
         self.model = model
         self.indexer = indexer
@@ -166,7 +173,7 @@ final class CLIServer: @unchecked Sendable {
 
     @MainActor
     private func dispatchOnMain(_ req: CLIRequest) async -> CLIResponse {
-        guard let model, let indexer else {
+        guard let model = model?(), let indexer else {
             return .failure(code: CLIErrorCode.internalError, message: "marple not ready")
         }
         if req.method == CLIMethod.mutate, let mutationReplay {

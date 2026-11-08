@@ -22,44 +22,61 @@ enum GeneralIndexRebuildResult: Equatable {
     case unavailable
 }
 
+/// One window: its browse controls, Spaces with their reading state, and the open
+/// document. Shared state (index, Space definitions, saved views, trash, note
+/// drafts…) lives in `library`; the forwarding properties below keep every
+/// `model.X` call site unchanged.
 @Observable @MainActor
 final class AppModel {
-    let client: VaultClient
+    let library: Library
+    var client: VaultClient { library.client }
     /// Facade onto the Catalog-owned snapshot (QUA-229: `entries` now lives in the
     /// L2 派生 owner). Read-only here — writes go through `catalog.publish` (refresh
     /// path) / `catalog.mutateEntries` (optimistic edits). All `model.entries` call
     /// sites stay unchanged, like the `counts`/`visibleEntries` facades below.
     var entries: [Entry] { catalog.entries }
-    var status: String = ""
-    private(set) var lastIndexFailure: String?
-    private(set) var isRebuildingGeneralIndex = false
+    var status: String {
+        get { library.status }
+        set { library.status = newValue }
+    }
+    var lastIndexFailure: String? { library.lastIndexFailure }
+    var isRebuildingGeneralIndex: Bool { library.isRebuildingGeneralIndex }
 
     /// Workspace root (parent of `vault/`), for schema snapshots and local originals.
     /// Empty in stub-backed tests.
-    let workspaceRoot: String
+    var workspaceRoot: String { library.workspaceRoot }
 
     /// The vault indexer, injected at boot. Lets the CLI surface self-heal the
     /// FSEvents watcher race: when an agent writes a vault file and immediately
     /// calls `open`/`read`/`search`, the 0.4s-debounced watcher hasn't reconciled
     /// yet, so the just-written file is absent from `entries`/the index. The CLI
     /// handlers trigger a synchronous reconcile through this. nil in stub tests.
-    var cliIndexer: VaultIndexer?
-    var termIndexController: TermIndexController?
+    var cliIndexer: VaultIndexer? {
+        get { library.cliIndexer }
+        set { library.cliIndexer = newValue }
+    }
+    var termIndexController: TermIndexController? {
+        get { library.termIndexController }
+        set { library.termIndexController = newValue }
+    }
 
     /// L2 编目层派生状态 owner (QUA-218 PR3a). 持全部派生缓存 + vault-变更管线的
     /// 统一 generation/单飞权威 (QUA-198/QUA-212 的 RefreshAuthority 合流单飞 +
     /// loadIndex staleness 2→1)，经 catalog.refresh/refreshJoining 暴露唯一入口。
-    let catalog = Catalog()
+    var catalog: Catalog { library.catalog }
+
+    /// This window's list + open-document derived state over the shared Catalog.
+    let viewport: CatalogViewport
 
     /// The vault's self-describing schema snapshot, reloaded on every index load.
     /// nil when the vault has no `.quasi/schema.json` (or it's stale/unreadable) —
     /// in which case the conformance feature stays dark. See [[SchemaSnapshot]].
-    private(set) var schemaSnapshot: SchemaSnapshot?
+    var schemaSnapshot: SchemaSnapshot? { library.schemaSnapshot }
 
     /// The vault's Chinese-translation index (`.quasi/localise/cndouban.json`),
     /// reloaded on every index load. nil when the sidecar is absent/unreadable —
     /// the 译本 inspector row then stays dark. See [[CnDoubanIndex]].
-    private(set) var localisation: CnDoubanIndex?
+    var localisation: CnDoubanIndex? { library.localisation }
 
     /// Required-field conformance for one entry, or nil when the vault has no
     /// schema opinion on it (no snapshot, or an unmodeled type). Read-only,
@@ -76,73 +93,25 @@ final class AppModel {
     /// from "loaded but empty vault, show empty state" (QUA-105). The bare
     /// `entries.isEmpty` check those views used before was ambiguous between
     /// the two and would have rendered drop-zones during cold start.
-    private(set) var isBootstrapping: Bool = true
+    var isBootstrapping: Bool { library.isBootstrapping }
 
     /// True when this session has no reusable index sidecar.
-    let isFirstRun: Bool
+    var isFirstRun: Bool { library.isFirstRun }
 
-    /// True while a post-bootstrap background reconcile + reload is running
-    /// (deferred reconcile on the fast path, FSEvents watcher, future user-
-    /// triggered refresh). Counter-backed so two reconciles overlapping don't
-    /// race the future refresh affordance off and on.
-    private var refreshingCount: Int = 0
-    var isRefreshing: Bool { refreshingCount > 0 }
-    func beginRefreshing() { refreshingCount += 1 }
-    func endRefreshing() { refreshingCount = max(0, refreshingCount - 1) }
+    /// True while a post-bootstrap background reconcile + reload is running.
+    var isRefreshing: Bool { library.isRefreshing }
+    func beginRefreshing() { library.beginRefreshing() }
+    func endRefreshing() { library.endRefreshing() }
 
-    /// One reconcile→reload pass — the body every `catalog.refresh` runner executes
-    /// (watcher signal, trailing rerun, CLI self-heal). `myPass` is the current
-    /// refresh generation, threaded into loadIndex for stale-publish dropping.
-    /// No-op when no indexer is wired (stub-backed tests).
-    func refreshBody(_ myPass: Int) async {
-        termIndexController?.scheduleRefresh()
-        guard !archiveCollectionBusy, let indexer = cliIndexer else { return }
-        beginRefreshing()
-        defer { endRefreshing() }
-        let stats: ReconcileStats?
-        do { stats = try await Task.detached { try indexer.reconcile() }.value }
-        catch {
-            recordIndexFailure(error, context: String(localized: "增量更新失败"))
-            print("[marple] reconcile failed: \(error)")
-            stats = nil
-        }
-        guard !archiveCollectionBusy else { return }
-        await reloadArchiveCollections()
-        // A watcher may already have reconciled a collection move while UI
-        // publication was suppressed. A zero-change pass still owes a reload.
-        guard let stats, archiveCollectionNeedsIndexReload || stats.upserted + stats.removed > 0 else { return }
-        await loadIndex(pass: myPass)
-        await reloadOpen()
-    }
+    /// One reconcile→reload pass (see `Library.refreshBody`).
+    func refreshBody(_ myPass: Int) async { await library.refreshBody(myPass) }
 
-    /// User-initiated recovery for the ordinary SQLite index. `buildFull` writes
-    /// a temporary DB and publishes it in a SQLite transaction, so a failed
-    /// rebuild leaves the previous readable index intact.
     func rebuildGeneralIndex() async -> GeneralIndexRebuildResult {
-        guard !isRebuildingGeneralIndex else { return .alreadyRunning }
-        guard let indexer = cliIndexer else { return .unavailable }
-
-        isRebuildingGeneralIndex = true
-        status = String(localized: "正在清除并重建普通索引…")
-        defer { isRebuildingGeneralIndex = false }
-
-        do {
-            let count = try await Task.detached { try indexer.buildFull() }.value
-            lastIndexFailure = nil
-            await loadIndex()
-            if let failure = lastIndexFailure { return .failure(failure) }
-            return .success(count)
-        } catch {
-            recordIndexFailure(error, context: String(localized: "完整重建失败"))
-            return .failure(lastIndexFailure ?? String(describing: error))
-        }
+        await library.rebuildGeneralIndex()
     }
 
     func recordIndexFailure(_ error: any Error, context: String) {
-        let detail = String(describing: error)
-        let message = String(localized: "\(context)：\(detail)")
-        lastIndexFailure = message
-        status = message
+        library.recordIndexFailure(error, context: context)
     }
 
     var generalIndexStatusDescription: String {
@@ -170,15 +139,30 @@ final class AppModel {
     // Arc-style Spaces: each Space owns an independent document-tab workspace.
     // The computed workspace/isBrowsing properties below preserve the previous
     // single-workspace call sites by pointing them at the active Space.
-    var archiveCollections: [ArchiveCollection] = []
+    var archiveCollections: [ArchiveCollection] {
+        get { library.archiveCollections }
+        set { library.archiveCollections = newValue }
+    }
     var expandedArchiveCollections: Set<String> = []
     var archiveCollectionRenamePath: String?
     var archiveCollectionRenameName = ""
-    var archiveCollectionNeedsIndexReload = false
-    var archiveCollectionBusy = false
-    var archiveCollectionError: String?
+    var archiveCollectionNeedsIndexReload: Bool {
+        get { library.archiveCollectionNeedsIndexReload }
+        set { library.archiveCollectionNeedsIndexReload = newValue }
+    }
+    var archiveCollectionBusy: Bool {
+        get { library.archiveCollectionBusy }
+        set { library.archiveCollectionBusy = newValue }
+    }
+    var archiveCollectionError: String? {
+        get { library.archiveCollectionError }
+        set { library.archiveCollectionError = newValue }
+    }
 
-    private(set) var spaces: [WorkspaceSpace] = [] { didSet { persist() } }
+    /// Identifies this window in saved state (multi-window).
+    private(set) var windowID = UUID()
+
+    private(set) var spaces: [WorkspaceSpace] = [] { didSet { spacesDidChange() } }
     private(set) var activeSpaceID: WorkspaceSpace.ID? { didSet { persist() } }
     private(set) var pendingFolderRenameID: TabGroup.ID?
 
@@ -311,11 +295,9 @@ final class AppModel {
     // Saved smart-folder views (QUA-127). Each carries its own filter+sort,
     // edited write-through while browsing it; the global clauses above belong
     // to the type/theme buckets and are untouched by view edits (拍板: 视图自带、桶用全局).
-    private(set) var savedViews: [SavedView] = [] {
-        didSet {
-            persist()
-            catalog.recomputeSavedViewCounts(savedViews: savedViews)
-        }
+    private(set) var savedViews: [SavedView] {
+        get { library.savedViews }
+        set { library.savedViews = newValue }
     }
     /// Live row counts per saved view for the sidebar (computed like the type
     /// bucket counts, over the browse universe).
@@ -349,7 +331,7 @@ final class AppModel {
     private(set) var searchText: String = ""
     private(set) var listSearchMode: SearchMode = .balanced
     private(set) var isSearching = false
-    @ObservationIgnored private let searchDefaults: UserDefaults
+    private var searchDefaults: UserDefaults { library.searchDefaults }
     private var browseSearchText = ""
     private var pinnedSearchText = ""
     private var searchHits: [SearchHit] = []
@@ -357,13 +339,13 @@ final class AppModel {
 
     /// Per-result matched body lines for the current list search (keyed by path).
     /// Populated off-main after the search settles; rows read from it.
-    var searchMatches: [String: BodyMatches] { catalog.searchMatches }
+    var searchMatches: [String: BodyMatches] { viewport.searchMatches }
     /// The query `searchMatches` was computed for. A matched-line tap uses THIS
     /// (not the live `searchText`) so a tap during the debounce window stays
     /// self-consistent — anchor/ordinal/query always describe the same search.
-    var searchMatchQuery: String { catalog.searchMatchQuery }
+    var searchMatchQuery: String { viewport.searchMatchQuery }
     /// Result rows whose "再显示 N 个匹配项" expander has been opened.
-    var matchExpanded: Set<String> { catalog.matchExpanded }
+    var matchExpanded: Set<String> { viewport.matchExpanded }
 
     // Derived caches — recomputed only when their inputs change, never in a view body.
     var counts: [EntryType: Int] { catalog.counts }
@@ -371,7 +353,7 @@ final class AppModel {
     var topicMembership: TopicMembership { catalog.topicMembership }
     var visibleEntries: [Entry] {
         guard isPinnedListContext else {
-            let visible = catalog.visibleEntries
+            let visible = viewport.visibleEntries
             guard pane == .type(.archive) else { return visible }
             let grouped = Set(archiveCollections.flatMap(\.members))
             let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -411,7 +393,10 @@ final class AppModel {
     var searchIndex: SearchIndex { catalog.searchIndex }
 
     // Trash list (loaded lazily; sidebar badge reads .count).
-    private(set) var trashItems: [TrashItem] = []
+    private(set) var trashItems: [TrashItem] {
+        get { library.trashItems }
+        set { library.trashItems = newValue }
+    }
 
     // Reading state
     var openBlocks: [RenderBlock] = []
@@ -420,29 +405,22 @@ final class AppModel {
     // forwarders so views keep reading `model.X`. `openBody` stays here — it's the
     // loaded text set by loadDoc and an INPUT to recomputeOpenDerived.
     private(set) var openBody: String = ""
-    var openEntry: Entry? { catalog.openEntry }
-    var openOutline: [OutlineItem] { catalog.openOutline }
-    var openStats: DocStats? { catalog.openStats }
-    var openRelations: Relations? { catalog.openRelations }
-    var openBook: BookContext? { catalog.openBook }
-    var openTopic: TopicContext? { catalog.openTopic }
+    var openEntry: Entry? { viewport.openEntry }
+    var openOutline: [OutlineItem] { viewport.openOutline }
+    var openStats: DocStats? { viewport.openStats }
+    var openRelations: Relations? { viewport.openRelations }
+    var openBook: BookContext? { viewport.openBook }
+    var openTopic: TopicContext? { viewport.openTopic }
 
     // Inspector note editor state. This is intentionally separate from `openPath`:
     // selecting a note in the right rail must not replace the document in the reader.
     private(set) var inspectorSelectedNotePath: String?
     private(set) var inspectorSelectedNoteEntry: Entry?
-    private(set) var inspectorNoteDraft: String = ""
-    private(set) var inspectorNoteOriginal: String = ""
-    private(set) var inspectorNoteStatus: InspectorNoteStatus = .idle
-    private(set) var inspectorNoteDrafts: [String: String] = [:]
-    private var inspectorNoteOriginals: [String: String] = [:]
-    private(set) var inspectorNoteStatuses: [String: InspectorNoteStatus] = [:]
+    // Drafts are shared by every window showing the note (Library.notes).
+    var inspectorNoteDrafts: [String: String] { library.notes.drafts }
+    var inspectorNoteStatuses: [String: InspectorNoteStatus] { library.notes.statuses }
     var inspectorNoteHeights: [String: Double] = [:]
     var inspectorFocusedNotePath: String?
-    @ObservationIgnored private var inspectorNoteSaveTask: Task<Void, Never>?
-    @ObservationIgnored private var inspectorNoteSaveTasks: [String: Task<Void, Never>] = [:]
-    @ObservationIgnored private var inspectorNoteLoadTasks: [String: Task<Void, Never>] = [:]
-    @ObservationIgnored private var inspectorNoteLoadGeneration = 0
 
     var inspectorAnnotationNotes: [Entry] {
         var notes = (openRelations?.annotations ?? []).sorted(by: inspectorNoteComesBefore)
@@ -582,213 +560,171 @@ final class AppModel {
     private(set) var savingField: String?
     var writeError: String?
 
-    private let stateStore: StateStore?
-    private var semantic: (any SemanticBackend)?
-    private let readerAIRunner: ReaderAIRunner
-    /// Publishes open tabs to the synced folder for the iOS companion. nil without
-    /// a workspace root (e.g. tests).
-    private let sessionWriter: SessionWriter?
-    private let metadataWriter: MetadataWriter
+    private var semantic: (any SemanticBackend)? { library.semantic }
+    private var readerAIRunner: ReaderAIRunner { library.readerAIRunner }
+    private var metadataWriter: MetadataWriter { library.metadataWriter }
 
     /// True when the vector index and MLX runtime are present, so 深度 can run.
     var semanticAvailable: Bool { semantic != nil }
 
     func installSemanticBackend(_ semantic: (any SemanticBackend)?) {
-        self.semantic = semantic
+        library.semantic = semantic
     }
 
     /// User-customised sidebar type order. Defaults to the canonical order; persisted
     /// separately from workspace state via UserDefaults.
-    private(set) var typeOrder: [EntryType] = EntryType.modeled {
-        didSet { persistTypeOrder() }
+    private(set) var typeOrder: [EntryType] {
+        get { library.typeOrder }
+        set { library.typeOrder = newValue }
     }
 
     /// Sidebar-hidden type buckets (QUA-127). Display-only: ⌘T, search, open tabs
     /// and saved views still reach a hidden type's entries — only the 物件 row
     /// disappears. Persisted like `typeOrder`, separate from workspace state.
-    private(set) var hiddenTypes: Set<EntryType> = [] {
-        didSet { persistHiddenTypes() }
+    private(set) var hiddenTypes: Set<EntryType> {
+        get { library.hiddenTypes }
+        set { library.hiddenTypes = newValue }
     }
 
     /// The type buckets the sidebar actually shows, in user order.
     var visibleTypeOrder: [EntryType] { typeOrder.filter { !hiddenTypes.contains($0) } }
 
-    init(client: VaultClient, stateStore: StateStore? = nil,
-         semantic: (any SemanticBackend)? = nil, isFirstRun: Bool = false,
-         workspaceRoot: String = "",
-         searchDefaults: UserDefaults = .standard,
-         readerAIRunner: ReaderAIRunner = ReaderAIRunner()) {
-        self.client = client
-        self.searchDefaults = searchDefaults
-        self.metadataWriter = MetadataWriter(client: client)
-        self.workspaceRoot = workspaceRoot
-        self.stateStore = stateStore
-        self.semantic = semantic
-        self.readerAIRunner = readerAIRunner
-        self.sessionWriter = workspaceRoot.isEmpty ? nil : SessionWriter(workspaceRoot: workspaceRoot)
-        self.isFirstRun = isFirstRun
-        let loaded = stateStore?.loadResult()
-        // Set before the restore below: its property setters already persist.
-        allowsStateSaving = loaded?.allowsSaving ?? true
-        if let s = loaded?.state {
-            // QUA-105: seed `loadedCountsSnapshot` BEFORE the property setters
-            // below trigger `persist()` via didSet. Otherwise the first persist
-            // (from `browsePane = ...`) writes `counts: nil` back to disk,
-            // wiping the user's restored type counts before we'd had a chance
-            // to round-trip them.
-            if let restored = s.counts {
-                catalog.seedCounts(restored)
-                loadedCountsSnapshot = restored
-            }
-            // Restore views BEFORE browsePane: its didSet persists, and a
-            // .savedView pane needs the list present to resolve (same ordering
-            // discipline as the counts snapshot above).
-            savedViews = s.savedViews ?? []
-            browsePane = s.browsePane
+    /// A window over `library`. `window` is a saved window to reopen; nil opens a
+    /// fresh one whose Spaces show the shared pinned pages at their anchors.
+    init(library: Library, restoring window: RestoredWindow? = nil) {
+        self.library = library
+        self.viewport = CatalogViewport(catalog: library.catalog)
+        if let window {
+            windowID = window.id
+            windowFrame = window.frame
+            browsePane = window.browsePane
             // A stale .savedView reference (view deleted, blob raced) degrades
             // to the first bucket instead of an unfiltered everything-list.
             if case .savedView(let id) = browsePane, savedView(id) == nil {
                 browsePane = .type(.paper)
             }
-            var restoredSpaces = s.makeSpaces()
-            for index in restoredSpaces.spaces.indices {
-                guard var restored = restoredSpaces.spaces[index].workspace else { continue }
+            var restoredSpaces = window.spaces
+            for index in restoredSpaces.indices {
+                guard var restored = restoredSpaces[index].workspace else { continue }
                 restored.flattenTemporaryTabs()
-                restoredSpaces.spaces[index].workspace = restored
+                restoredSpaces[index].workspace = restored
             }
-            spaces = restoredSpaces.spaces
-            activeSpaceID = restoredSpaces.activeID
+            spaces = restoredSpaces
+            activeSpaceID = window.activeSpaceID
             if workspace == nil { isBrowsing = true }
-            sortClauses = s.sortClauses
-            filterClauses = s.filterClauses
-            filterMatch = s.filterMatch
-            browseMode = BrowseMode(rawValue: s.browseMode) ?? .grid
+            sortClauses = window.sortClauses
+            filterClauses = window.filterClauses
+            filterMatch = window.filterMatch
+            browseMode = BrowseMode(rawValue: window.browseMode) ?? .grid
+        } else {
+            spaces = library.spaceDefinitions.map { WorkspaceSpace(definition: $0) }
+            activeSpaceID = spaces.first { !$0.isArchived }?.id ?? spaces.first?.id
         }
         if spaces.isEmpty {
             let initial = WorkspaceSpace(name: String(localized: "空间 1"), workspace: nil, isBrowsing: true)
             spaces = [initial]
             activeSpaceID = initial.id
         }
-        loadTypeOrder()
-        loadHiddenTypes()
-        if let loaded, loaded.hadErrors {
-            let backup = loaded.backupURL?.path ?? String(localized: "（备份失败）")
-            flash(loaded.allowsSaving
-                  ? String(localized: "部分空间或页面无法读取，已跳过。原始数据备份：\(backup)")
-                  : String(localized: "无法读取已保存的空间，本次不会保存改动。原始数据备份：\(backup)"),
-                  symbol: "exclamationmark.triangle.fill")
+        isRestoring = false
+        library.register(self)
+        if let warning = library.takeLoadWarning() {
+            flash(warning, symbol: "exclamationmark.triangle.fill")
         }
     }
 
-    /// False when saved state could not be read: saving would replace it with
-    /// this (empty or partial) session, so the session is left unsaved instead.
-    @ObservationIgnored private var allowsStateSaving = true
+    /// One window over its own Library (tests and single-window callers): restores
+    /// the first saved window, if any.
+    convenience init(client: VaultClient, stateStore: StateStore? = nil,
+                     semantic: (any SemanticBackend)? = nil, isFirstRun: Bool = false,
+                     workspaceRoot: String = "",
+                     searchDefaults: UserDefaults = .standard,
+                     readerAIRunner: ReaderAIRunner = ReaderAIRunner()) {
+        let library = Library(client: client, stateStore: stateStore, semantic: semantic,
+                              isFirstRun: isFirstRun, workspaceRoot: workspaceRoot,
+                              searchDefaults: searchDefaults, readerAIRunner: readerAIRunner)
+        self.init(library: library, restoring: library.takeRestoredWindow())
+    }
 
-    /// Last-session sidebar counts, restored from PersistedState in init. Kept
-    /// so `persist()` can round-trip them during the bootstrap window — without
-    /// this, every persist before the first loadIndex would overwrite the
-    /// stored counts with an empty `[:]` (because didSet on browsePane etc.
-    /// fires during AppModel.init, well before entries are loaded). Once
-    /// bootstrap completes, the live `counts` is authoritative. QUA-105.
-    private var loadedCountsSnapshot: [EntryType: Int]?
+    /// True while init restores this window: its setters must not save or sync yet.
+    @ObservationIgnored private var isRestoring = true
 
-    @ObservationIgnored private var persistenceDepth = 0
-    @ObservationIgnored private var persistencePending = false
+    /// Where this window sits on screen (`NSWindow.frameDescriptor`), saved with it.
+    var windowFrame: String? { didSet { if windowFrame != oldValue { persist() } } }
 
     /// Finish synchronous navigation state changes before saving; never span a document read.
     private func withPersistenceBatch(_ update: () -> Void) {
-        persistenceDepth += 1
-        defer {
-            persistenceDepth -= 1
-            if persistenceDepth == 0, persistencePending {
-                persistencePending = false
-                persist()
+        library.withPersistenceBatch(update)
+    }
+
+    /// Saving is the Library's (single writer for every window).
+    private func persist() {
+        guard !isRestoring else { return }
+        library.persist()
+    }
+
+    private func spacesDidChange() {
+        guard !isRestoring else { return }
+        library.windowDidChangeSpaces(self)
+        persist()
+    }
+
+    /// Another window changed the shared part of the Spaces: lay it over this
+    /// window's own reading state, leaving a Space that is gone or archived.
+    func adoptSharedSpaces(_ definitions: [SpaceDefinition]) {
+        let previousActiveTab = activeTabID
+        let previousOpenPath = openPath
+        let previousPinnedContext = isPinnedListContext
+        withPersistenceBatch {
+            spaces = spaces.adopting(definitions)
+            if pendingFolderRenameID.map({ id in !tabGroups.contains { $0.id == id } }) == true {
+                pendingFolderRenameID = nil
             }
         }
-        update()
-    }
-
-    /// Save the current place (browse category + Spaces + doc tabs + controls).
-    /// Only retain metadata for open tabs, not a copy of the entire vault index.
-    private func persist() {
-        guard allowsStateSaving, let stateStore else { return }
-        guard persistenceDepth == 0 else {
-            persistencePending = true
+        if !spaces.contains(where: { $0.id == activeSpaceID && !$0.isArchived }) {
+            fallBackToVisibleSpace()
             return
         }
-        func persistedTab(_ tab: NavTab) -> PersistedTab {
-            // Title + type snapshot: prefer the live entry; if entries haven't
-            // loaded (bootstrap window) or the path no longer resolves (file
-            // was deleted), carry over whatever we previously cached so the
-            // next launch's sidebar still shows the right title AND the right
-            // type icon. Falls to nil only if no source has ever produced one.
-            let location = tab.identityLocation
-            let liveEntry = catalog.entry(at: location.openPath)
-            let cachedTitle = liveEntry?.title ?? tab.cachedTitle
-            let cachedType = liveEntry?.type ?? tab.cachedType
-            return PersistedTab(location: location, pinned: tab.pinned,
-                                customTitle: tab.customTitle,
-                                cachedTitle: cachedTitle,
-                                cachedType: cachedType)
+        if activeTabID != previousActiveTab || openPath != previousOpenPath
+            || isPinnedListContext != previousPinnedContext {
+            Task { await syncToActiveLocation(from: previousPinnedContext) }
         }
-        let savedSpaces = spaces.map { space -> PersistedWorkspaceSpace in
-            let ws = space.workspace
-            let savedTabs = ws?.tabs.map(persistedTab) ?? []
-            let idx = ws.flatMap { w in
-                w.activeID.flatMap { activeID in w.tabs.firstIndex { $0.id == activeID } }
-            } ?? 0
-            return PersistedWorkspaceSpace(id: space.id,
-                                           name: space.name,
-                                           isBrowsing: ws?.tabs.isEmpty != false ? true : space.isBrowsing,
-                                           tabs: savedTabs,
-                                           activeIndex: idx,
-                                           iconName: space.iconName,
-                                           isArchived: space.isArchived,
-                                           tree: ws?.treeSnapshot)
+    }
+
+    /// A new window's starting point (⌘⇧N, 在新窗口打开): this window's Space,
+    /// browse controls and folder collapse; no temporary pages; browsing.
+    func newWindowState() -> RestoredWindow {
+        RestoredWindow(id: UUID(),
+                       spaces: spaces.map {
+                           WorkspaceSpace(definition: $0.definition,
+                                          collapsedGroupIDs: $0.workspace?.collapsedGroupIDs ?? [])
+                       },
+                       activeSpaceID: activeSpaceID, browsePane: browsePane,
+                       sortClauses: sortClauses, filterClauses: filterClauses,
+                       filterMatch: filterMatch, browseMode: browseMode.rawValue)
+    }
+
+    /// Open `path` in a new window. From a pinned page (`tab`), the new window
+    /// reads it through the same pinned page; otherwise as a temporary page.
+    func openInNewWindow(_ path: String, tab: NavTab.ID? = nil) async {
+        guard let window = library.openWindow?(self) else { return }
+        if let tab, window.tabs.contains(where: { $0.id == tab && $0.pinned }) {
+            await window.selectTab(tab)
+            if window.openPath != path { await window.open(path) }
+        } else {
+            await window.openInNewTab(path)
         }
-        let activeSavedSpace = activeSpaceID.flatMap { id in savedSpaces.first { $0.id == id } } ?? savedSpaces.first
-        // Mirror every Space's open tab forest (names + icons + groups + nesting) to
-        // the synced folder for the iOS companion (debounced + dedup'd in the writer).
-        // Archived Spaces stay out of the iOS "Mac 上打开的" list.
-        sessionWriter?.publish(spaces: savedSpaces.filter { !$0.isArchived })
-        // Same round-trip discipline for counts — during bootstrap, write back
-        // the loaded snapshot rather than the still-empty `counts` dict.
-        let persistedCounts: [EntryType: Int]? =
-            isBootstrapping ? loadedCountsSnapshot : counts
-        stateStore.save(PersistedState(
-            browsePane: browsePane,
-            isBrowsing: activeSavedSpace?.isBrowsing ?? true,
-            tabs: activeSavedSpace?.tabs ?? [],
-            activeIndex: activeSavedSpace?.activeIndex ?? 0,
-            sortClauses: sortClauses,
-            filterClauses: filterClauses,
-            filterMatch: filterMatch,
-            browseMode: browseMode.rawValue,
-            currentSpace: activeSavedSpace,
-            spaces: savedSpaces,
-            activeSpaceID: activeSavedSpace?.id,
-            counts: persistedCounts,
-            savedViews: savedViews))
     }
 
-    // MARK: type order persistence
-
-    private static let typeOrderKey = "marple.typeOrder"
-
-    private func loadTypeOrder() {
-        guard let data = UserDefaults.standard.data(forKey: Self.typeOrderKey),
-              let decoded = try? JSONDecoder().decode([EntryType].self, from: data) else { return }
-        // Drop any persisted types no longer modeled as browse categories (e.g.
-        // a `transcript` saved by an earlier build), then append new modeled types.
-        var order = decoded.filter { EntryType.modeled.contains($0) }
-        for t in EntryType.modeled where !order.contains(t) { order.append(t) }
-        typeOrder = order
+    /// This window's reading state, as saved (shared definitions are saved once).
+    func persistedWindow(cache: (NavLocation) -> (title: String?, type: EntryType?)) -> PersistedWindow {
+        PersistedWindow(id: windowID, frame: windowFrame, activeSpaceID: activeSpaceID,
+                        browsePane: browsePane,
+                        sortClauses: sortClauses, filterClauses: filterClauses,
+                        filterMatch: filterMatch, browseMode: browseMode.rawValue,
+                        spaces: spaces.map { PersistedSpaceSession(space: $0, cache: cache) })
     }
 
-    private func persistTypeOrder() {
-        guard let data = try? JSONEncoder().encode(typeOrder) else { return }
-        UserDefaults.standard.set(data, forKey: Self.typeOrderKey)
-    }
+    // MARK: type order
 
     func setTypeOrder(_ order: [EntryType]) {
         guard order != typeOrder else { return }
@@ -809,20 +745,7 @@ final class AppModel {
         undoManager.setActionName(actionName)
     }
 
-    // MARK: hidden types persistence (QUA-127)
-
-    private static let hiddenTypesKey = "marple.hiddenTypes"
-
-    private func loadHiddenTypes() {
-        guard let data = UserDefaults.standard.data(forKey: Self.hiddenTypesKey),
-              let decoded = try? JSONDecoder().decode(Set<EntryType>.self, from: data) else { return }
-        hiddenTypes = decoded.intersection(EntryType.modeled)
-    }
-
-    private func persistHiddenTypes() {
-        guard let data = try? JSONEncoder().encode(hiddenTypes) else { return }
-        UserDefaults.standard.set(data, forKey: Self.hiddenTypesKey)
-    }
+    // MARK: hidden types (QUA-127)
 
     func setTypeHidden(_ type: EntryType, hidden: Bool) {
         guard hiddenTypes.contains(type) != hidden else { return }
@@ -867,14 +790,14 @@ final class AppModel {
     ///   the reading view's relations panel and the Cmd-K palette, neither of
     ///   which is exercised in the first few hundred ms after launch)
     private func rebuildIndexDerived() {
-        catalog.rebuildIndexDerived(savedViews: savedViews)
+        library.rebuildIndexDerived(except: self)
     }
 
     /// Recompute the open document's open-doc derived caches. Routes to Catalog;
     /// `openPath`/`openBody`/`openBlocks` are shell inputs (the outline is built
     /// from the font-free `openBlocks`, so no render-style constants cross over).
     private func recomputeOpenDerived() {
-        catalog.recomputeOpenDerived(openPath: openPath, openBody: openBody,
+        viewport.recomputeOpenDerived(openPath: openPath, openBody: openBody,
                                      openBlocks: openBlocks)
     }
 
@@ -884,9 +807,9 @@ final class AppModel {
     /// keeps clearing search / switching panes off the keystroke so text input never
     /// blocks — mirrors NetNewsWire/FSNotes/CodeEdit list-search discipline (don't
     /// re-filter synchronously in the input handler).
-    private func recomputeVisible() {
+    func recomputeVisible() {
         guard !isPinnedListContext else { return }
-        catalog.recomputeVisible(searchText: searchText, searchHits: searchHits,
+        viewport.recomputeVisible(searchText: searchText, searchHits: searchHits,
                                  pane: pane, entries: entries,
                                  filters: activeFilterClauses, match: activeFilterMatch,
                                  sorts: activeSortClauses)
@@ -1149,51 +1072,20 @@ final class AppModel {
     /// kicks a deferred reconcile that calls loadIndex on completion, the FSEvents
     /// watcher calls loadIndex on every debounced vault change, and the in-progress
     /// QUA-105 startup flow adds a background "full hydration" path. Staleness is
-    /// now the Catalog's unified per-pass generation (QUA-218 2→1): a refresh pass
-    /// passes its `myPass` in; standalone callers (restoreTrash, boot first load,
-    /// tests) take a fresh pass via `catalog.beginStandalonePass()`. After every
-    /// suspension point we recheck `catalog.isStale(myPass)` — if a newer pass has
-    /// begun, the older one drops its result instead of overwriting freshly-
-    /// published `entries`/`trashItems`. Same shape as `derivedGeneration` in
-    /// `scheduleDeferredDerivedRebuild` (which stays its own independent counter).
+    /// the Catalog's unified per-pass generation (QUA-218 2→1); the shared pipeline
+    /// lives in `Library.loadIndex`, which publishes once and then lets every window
+    /// refresh its own list and open document.
     func loadIndex() async {
-        await loadIndex(pass: catalog.beginStandalonePass())
+        await library.loadIndex()
     }
 
     func loadIndex(pass myPass: Int) async {
-        let fetched: [Entry]
-        do {
-            fetched = try await client.index()
-        } catch {
-            // Only the latest call publishes failure state — an older stale
-            // failure shouldn't clobber a newer call's "n entries" status.
-            if !catalog.isStale(myPass) {
-                recordIndexFailure(error, context: String(localized: "读取索引失败"))
-                status = String(localized: "读取索引失败：\(error)")
-                isBootstrapping = false
-                print("[marple] index FAILED: \(error)")
-            }
-            return
-        }
-        guard !archiveCollectionBusy, catalog.publish(fetched, pass: myPass) else {
-            print("[marple] loadIndex pass \(myPass) stale after index() (latest \(catalog.pass)), dropping")
-            return
-        }
-        archiveCollectionNeedsIndexReload = false
-        await reloadArchiveCollections()
-        isBootstrapping = false
-        status = String(localized: "已索引 \(entries.count) 个条目")
-        // Refresh the conformance snapshot on the same cadence as the index. The
-        // file is tiny and rarely changes; an absent/stale one simply leaves the
-        // feature dark. Loaded here (not watched) since `.quasi/` is a sibling of
-        // the watched `vault/` dir.
-        schemaSnapshot = SchemaSnapshot.load(workspaceRoot: workspaceRoot)
-        VaultSchema.active = VaultSchema.load(workspaceRoot: workspaceRoot)
-        // 译本 index — same cadence/rationale as the schema snapshot above:
-        // a tiny `.quasi/` sidecar, loaded (not watched) since it's a sibling of
-        // the watched `vault/` dir and maintained by `quasi-helpers localise`.
-        localisation = CnDoubanIndex.load(workspaceRoot: workspaceRoot)
-        rebuildIndexDerived()
+        await library.loadIndex(pass: myPass)
+    }
+
+    /// The index-wide snapshot changed: rebuild this window's list (and keep its
+    /// temporary page's list context in step).
+    func indexDidChange() {
         if !isBrowsing, let active = workspace?.activeTab,
            !active.pinned, active.location.listContext == nil {
             applyActiveListContext()
@@ -1202,34 +1094,11 @@ final class AppModel {
         } else {
             runSearch()
         }
-        // QUA-105: explicitly persist right after the first snapshot publishes.
-        // `entries` and `counts` are not `didSet`-instrumented (changing them
-        // is too hot a path to fire a UserDefaults write on every reload), so
-        // a "boot and quit without interaction" session would otherwise never
-        // round-trip live titles/counts into PersistedState — defeating the
-        // whole point of caching them for next launch's bootstrap window.
-        persist()
-        if openPath != loadedDocPath {
-            await loadDoc(openPath)
-            guard !catalog.isStale(myPass) else {
-                print("[marple] loadIndex pass \(myPass) stale after loadDoc, dropping trash refresh")
-                return
-            }
-        }
-        // Inline the trash fetch instead of `await loadTrash()` so we can guard
-        // the publish point against a newer loadIndex (the public `loadTrash()`
-        // is also called from user actions where this guard would be wrong).
-        do {
-            let trash = try await client.listTrash()
-            guard !catalog.isStale(myPass) else {
-                print("[marple] loadIndex pass \(myPass) stale after listTrash, dropping trash result")
-                return
-            }
-            trashItems = trash
-        } catch {
-            print("[marple] listTrash FAILED: \(error)")
-        }
-        print("[marple] index loaded: \(entries.count) entries (pass \(myPass))")
+    }
+
+    /// After an index publish: load the active page's document if it isn't loaded.
+    func loadDocumentIfStale() async {
+        if openPath != loadedDocPath { await loadDoc(openPath) }
     }
 
     func select(pane newPane: Pane) {
@@ -1435,7 +1304,7 @@ final class AppModel {
                 self?.searchHits = hits
                 self?.recomputeVisible()
                 guard let self else { return }
-                self.catalog.computeSearchMatches(
+                self.viewport.computeSearchMatches(
                     query: q, paths: self.visibleEntries.map(\.path), client: self.client,
                     currentSearchText: { [weak self] in self?.searchText ?? "" })
                 print("[marple] search '\(q)' -> \(hits.count) hits")
@@ -1449,12 +1318,12 @@ final class AppModel {
     }
 
     private func clearSearchMatches() {
-        catalog.clearSearchMatches()
+        viewport.clearSearchMatches()
     }
 
     /// Toggle a result row's "再显示 N 个匹配项" expander.
     func toggleMatchExpanded(_ path: String) {
-        catalog.toggleMatchExpanded(path)
+        viewport.toggleMatchExpanded(path)
     }
 
     /// Open `path` from a clicked search matched-line: opens browser-style (in-place
@@ -2269,6 +2138,15 @@ final class AppModel {
 
     func tabIsDoc(_ tab: NavTab) -> Bool { tab.location.openPath != nil }
 
+    /// Names this window outside it (Dock menu, Window menu, Mission Control): the
+    /// document being read and the Space, or just the Space while browsing.
+    var windowTitle: String {
+        let space = activeSpace?.name ?? "Marple"
+        guard !isBrowsing, let tab = workspace?.activeTab else { return space }
+        let document = openPath.flatMap { catalog.entry(at: $0)?.title } ?? tabTitle(tab)
+        return "\(document) — \(space)"
+    }
+
     // MARK: share manifest
 
     /// Markdown manifest for a single tab (one bullet, no header). Nil if the tab is gone.
@@ -2350,46 +2228,9 @@ final class AppModel {
     // MARK: inspector note editing
 
     func ensureInspectorNoteLoaded(_ note: Entry) async {
-        guard canEditInspectorNote(note), inspectorNoteDrafts[note.path] == nil else { return }
-        let path = note.path
-        if let task = inspectorNoteLoadTasks[path] {
-            await task.value
-            return
-        }
-        let generation = inspectorNoteLoadGeneration
-        inspectorNoteStatuses[path] = .loading
-        let task = Task {
-            defer {
-                if generation == inspectorNoteLoadGeneration { inspectorNoteLoadTasks[path] = nil }
-            }
-            do {
-                let raw = try await client.entryText(path: path)
-                guard generation == inspectorNoteLoadGeneration, !Task.isCancelled else { return }
-                // A save may already have established a newer disk baseline.
-                guard inspectorNoteOriginals[path] == nil else { return }
-                let body = Frontmatter.split(raw).body
-                inspectorNoteOriginals[path] = body
-                if let draft = inspectorNoteDrafts[path] {
-                    // Preserve edits made while reading, including clearing the note.
-                    if inspectorNoteStatuses[path] != .saving {
-                        inspectorNoteStatuses[path] = draft == body ? .saved : .dirty
-                        if draft != body { scheduleInspectorNoteSave(path: path) }
-                    }
-                } else {
-                    inspectorNoteDrafts[path] = body
-                    inspectorNoteStatuses[path] = .idle
-                }
-                syncLegacyInspectorNoteState(path: path)
-            } catch {
-                guard generation == inspectorNoteLoadGeneration, !Task.isCancelled,
-                      inspectorNoteDrafts[path] == nil else { return }
-                inspectorNoteStatuses[path] = .failed("\(error)")
-                writeError = "\(error)"
-                print("[marple] load note FAILED \(path): \(error)")
-            }
-        }
-        inspectorNoteLoadTasks[path] = task
-        await task.value
+        guard canEditInspectorNote(note) else { return }
+        library.notes.retain(note.path, by: self)
+        if let failure = await library.notes.load(note.path) { writeError = failure }
     }
 
     func inspectorNoteDraft(for path: String) -> String { inspectorNoteDrafts[path] ?? "" }
@@ -2401,7 +2242,6 @@ final class AppModel {
             inspectorFocusedNotePath = note.path
             inspectorSelectedNotePath = note.path
             inspectorSelectedNoteEntry = note
-            syncLegacyInspectorNoteState(path: note.path)
         } else if inspectorFocusedNotePath == note.path {
             inspectorFocusedNotePath = nil
         }
@@ -2409,36 +2249,19 @@ final class AppModel {
 
     func setInspectorNoteDraft(_ text: String, for note: Entry) {
         guard canEditInspectorNote(note) else { return }
-        let path = note.path
-        if inspectorNoteDrafts[path] == text { return }
-        inspectorNoteDrafts[path] = text
-        inspectorSelectedNotePath = path
+        library.notes.retain(note.path, by: self)
+        inspectorSelectedNotePath = note.path
         inspectorSelectedNoteEntry = note
-        let original = inspectorNoteOriginals[path] ?? ""
-        if text == original {
-            inspectorNoteStatuses[path] = .saved
-            inspectorNoteSaveTasks[path]?.cancel(); inspectorNoteSaveTasks[path] = nil
-        } else {
-            inspectorNoteStatuses[path] = .dirty
-            scheduleInspectorNoteSave(path: path)
-        }
-        syncLegacyInspectorNoteState(path: path)
+        library.notes.setDraft(text, for: note.path)
     }
 
     func saveInspectorNoteDraft(_ text: String, for note: Entry) {
         guard canEditInspectorNote(note) else { return }
         let path = note.path
-        inspectorNoteDrafts[path] = text
+        library.notes.retain(path, by: self)
         inspectorSelectedNotePath = path
         inspectorSelectedNoteEntry = note
-        let original = inspectorNoteOriginals[path] ?? ""
-        if text == original {
-            inspectorNoteStatuses[path] = .saved
-            syncLegacyInspectorNoteState(path: path)
-            return
-        }
-        inspectorNoteStatuses[path] = .dirty
-        syncLegacyInspectorNoteState(path: path)
+        guard library.notes.stage(text, for: path) else { return }
         Task { await flushInspectorNoteSave(path: path) }
     }
 
@@ -2447,52 +2270,19 @@ final class AppModel {
         await flushInspectorNoteSave(path: path)
     }
 
-    /// Unsaved staged edits — the quit hook only delays termination when true.
-    var hasDirtyInspectorNotes: Bool {
-        inspectorNoteDrafts.contains { inspectorNoteOriginals[$0.key] != $0.value }
-    }
+    /// Unsaved staged edits in any window — the quit hook only delays termination when true.
+    var hasDirtyInspectorNotes: Bool { library.notes.hasDirty }
 
+    /// Save the notes this window shows (doc switch, new note). Other windows'
+    /// notes keep their own flush points, so their typing never triggers a reindex.
     func flushAllInspectorNoteSaves() async {
-        let paths = Array(inspectorNoteDrafts.keys)
-        for path in paths { await flushInspectorNoteSave(path: path) }
+        for path in library.notes.paths(heldBy: self) { await flushInspectorNoteSave(path: path) }
     }
 
     private func flushInspectorNoteSave(path: String) async {
-        inspectorNoteSaveTasks[path]?.cancel(); inspectorNoteSaveTasks[path] = nil
-        guard canEditInspectorNotePath(path), let text = inspectorNoteDrafts[path] else { return }
-        let original = inspectorNoteOriginals[path] ?? ""
-        guard text != original else {
-            if inspectorNoteStatuses[path] != .loading { inspectorNoteStatuses[path] = .saved }
-            syncLegacyInspectorNoteState(path: path)
-            return
-        }
-        inspectorNoteStatuses[path] = .saving
-        syncLegacyInspectorNoteState(path: path)
+        guard canEditInspectorNotePath(path) else { return }
         writeError = nil
-        do {
-            let raw = try await client.entryText(path: path)
-            let patched = MarkdownBody.replace(in: raw, with: text)
-            try await client.writeFile(path: path, text: patched)
-            inspectorNoteOriginals[path] = text
-            inspectorNoteStatuses[path] = (inspectorNoteDrafts[path] == text) ? .saved : .dirty
-            syncLegacyInspectorNoteState(path: path)
-            let preview = Self.notePreview(from: text)
-            catalog.mutateEntries { entries in
-                if let i = entries.firstIndex(where: { $0.path == path }) {
-                    entries[i] = entries[i].with(preview: preview)
-                }
-            }
-            // No eager rebuildIndexDerived/recomputeVisible/recomputeOpenDerived
-            // here: the FSEvents pass triggered by this very write redoes all of
-            // them moments later, and running the full index-wide recomputes on
-            // every autosave is what made typing stutter (issue #87).
-            print("[marple] saved inspector note \(path)")
-        } catch {
-            inspectorNoteStatuses[path] = .failed("\(error)")
-            syncLegacyInspectorNoteState(path: path)
-            writeError = "\(error)"
-            print("[marple] save inspector note FAILED \(path): \(error)")
-        }
+        if let failure = await library.notes.flush(path) { writeError = failure }
     }
 
     func createInlineAnnotationForOpenDoc() async {
@@ -2511,16 +2301,12 @@ final class AppModel {
             inspectorSelectedNotePath = entry.path
             inspectorSelectedNoteEntry = entry
             inspectorFocusedNotePath = entry.path
-            let body = Frontmatter.split(initialText).body
-            inspectorNoteDrafts[entry.path] = body
-            inspectorNoteOriginals[entry.path] = body
-            inspectorNoteStatuses[entry.path] = .saved
-            syncLegacyInspectorNoteState(path: entry.path)
+            library.notes.retain(entry.path, by: self)
+            library.notes.seed(entry.path, body: Frontmatter.split(initialText).body)
             flash(String(localized: "已新建笔记"))
             print("[marple] created inline note \(draft.path)")
         } catch {
             writeError = "\(error)"
-            inspectorNoteStatus = .failed("\(error)")
             print("[marple] create inline note FAILED \(draft.path): \(error)")
         }
     }
@@ -2532,41 +2318,11 @@ final class AppModel {
     }
 
     private func clearInspectorNoteSelection() {
-        inspectorNoteLoadGeneration += 1
-        inspectorNoteLoadTasks.values.forEach { $0.cancel() }
-        inspectorNoteLoadTasks = [:]
-        inspectorNoteSaveTask?.cancel(); inspectorNoteSaveTask = nil
-        inspectorNoteSaveTasks.values.forEach { $0.cancel() }
-        inspectorNoteSaveTasks = [:]
+        library.notes.release(self)
         inspectorSelectedNotePath = nil
         inspectorSelectedNoteEntry = nil
         inspectorFocusedNotePath = nil
-        inspectorNoteDraft = ""
-        inspectorNoteOriginal = ""
-        inspectorNoteStatus = .idle
-        inspectorNoteDrafts = [:]
-        inspectorNoteOriginals = [:]
-        inspectorNoteStatuses = [:]
         inspectorNoteHeights = [:]
-    }
-
-    private func scheduleInspectorNoteSave(path: String) {
-        inspectorNoteSaveTasks[path]?.cancel()
-        inspectorNoteSaveTasks[path] = Task { [weak self] in
-            // Safety net only: the primary flush points are blur, doc switch,
-            // and quit. Writing while the user types kicks off a full vault
-            // reindex mid-IME-composition (issue #87), so keep this long.
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
-            guard !Task.isCancelled else { return }
-            await self?.flushInspectorNoteSave(path: path)
-        }
-    }
-
-    private func syncLegacyInspectorNoteState(path: String) {
-        guard inspectorSelectedNotePath == path else { return }
-        inspectorNoteDraft = inspectorNoteDrafts[path] ?? ""
-        inspectorNoteOriginal = inspectorNoteOriginals[path] ?? ""
-        inspectorNoteStatus = inspectorNoteStatuses[path] ?? .idle
     }
 
     private func inspectorNoteComesBefore(_ a: Entry, _ b: Entry) -> Bool {
@@ -2585,12 +2341,6 @@ final class AppModel {
 
     private func canEditInspectorNotePath(_ path: String) -> Bool {
         path.hasPrefix("vault/notes/")
-    }
-
-    private static func notePreview(from text: String) -> String {
-        text.split(whereSeparator: \.isNewline)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty } ?? ""
     }
 
     var openCitationEntry: Entry? {
@@ -2816,8 +2566,7 @@ final class AppModel {
     // MARK: trash
 
     func loadTrash() async {
-        do { trashItems = try await client.listTrash() }
-        catch { print("[marple] listTrash FAILED: \(error)") }
+        await library.loadTrash()
     }
 
     /// Soft-delete `path`: backend moves it to .trash, then optimistically drop
@@ -3020,13 +2769,7 @@ final class AppModel {
 // Archive collections are physical directories, independent of sidebar folders.
 extension AppModel {
     func reloadArchiveCollections() async {
-        let store = ArchiveCollections(workspaceRoot: workspaceRoot)
-        do {
-            let inventory = try await Task.detached { try store.inventory() }.value
-            archiveCollections = inventory.collections
-            archiveCollectionError = inventory.issues.isEmpty ? nil : inventory.issues.joined(separator: "\n")
-            expandedArchiveCollections.formIntersection(archiveCollections.map(\.path))
-        } catch { archiveCollectionError = String(describing: error) }
+        await library.reloadArchiveCollections()
     }
 
     func performArchiveCollection(_ supplied: ArchiveCollectionCommand) async throws -> ArchiveCollectionResult {
@@ -3038,33 +2781,38 @@ extension AppModel {
         let writes = !command.dryRun && !["list", "status"].contains(command.action)
         archiveCollectionBusy = true
         defer { archiveCollectionBusy = false }
-        if writes { await flushAllInspectorNoteSaves() }
+        if writes { await library.notes.flushAll() }
         let store = ArchiveCollections(workspaceRoot: workspaceRoot)
         let request = command
         let result = try await Task.detached(priority: .userInitiated) { try store.execute(request) }.value
         if writes && !result.replayed {
             archiveCollectionNeedsIndexReload = true
-            searchTask?.cancel()
             catalog.remapArchivePaths(result.moves)
-            searchHits = searchHits.map { hit in
-                let path = result.moves.first(where: { $0.remap(hit.entry.path) != hit.entry.path })?.remap(hit.entry.path) ?? hit.entry.path
-                return SearchHit(entry: hit.entry.with(path: path), score: hit.score, snippet: hit.snippet, source: hit.source)
-            }
+            for window in library.windows { window.remapArchivePaths(result.moves) }
             rebuildIndexDerived()
-            withPersistenceBatch {
-                for i in spaces.indices { spaces[i].workspace?.remapArchivePaths(result.moves) }
-            }
-            expandedArchiveCollections = Set(expandedArchiveCollections.map { path in
-                result.moves.reduce(path) { $1.remap($0) }
-            })
             archiveCollections = result.inventory.collections
-            attachmentPreviewURL = nil
-            loadedDocPath = nil
             archiveCollectionBusy = false
             await cliRefreshIndex()
-            await reloadOpen()
+            await library.reloadOpenDocuments()
         }
         return result
+    }
+
+    /// Confirmed archive moves: re-point this window's pages, history and list state.
+    func remapArchivePaths(_ moves: [ArchiveCollectionChange]) {
+        searchTask?.cancel()
+        searchHits = searchHits.map { hit in
+            let path = moves.first(where: { $0.remap(hit.entry.path) != hit.entry.path })?.remap(hit.entry.path) ?? hit.entry.path
+            return SearchHit(entry: hit.entry.with(path: path), score: hit.score, snippet: hit.snippet, source: hit.source)
+        }
+        withPersistenceBatch {
+            for i in spaces.indices { spaces[i].workspace?.remapArchivePaths(moves) }
+        }
+        expandedArchiveCollections = Set(expandedArchiveCollections.map { path in
+            moves.reduce(path) { $1.remap($0) }
+        })
+        attachmentPreviewURL = nil
+        loadedDocPath = nil
     }
 
     func moveArchives(_ paths: [String], to directory: String) {

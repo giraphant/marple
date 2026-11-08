@@ -59,7 +59,7 @@ import Testing
             #expect(saved?.filterClauses == contexts[target].filters)
             #expect(saved?.filterMatch == contexts[target].filterMatch)
             #expect(saved?.sortClauses == contexts[target].sorts)
-            #expect(saved?.makeWorkspace()?.activeTab?.location.openPath == entries[target].path)
+            #expect(saved?.frontWorkspace?.activeTab?.location.openPath == entries[target].path)
             #expect(saved?.activeSpaceID == (action == 4 ? second.id : first.id))
             if target == 0 { await gate.release() }
             await selection.value
@@ -88,8 +88,8 @@ import Testing
         var before = store.saveCount
         await model.selectTab(firstTab)
         #expect(store.saveCount - before == 1)
-        #expect(store.load()?.activeIndex == 0)
-        #expect(store.load()?.tabs.map(\.cachedTitle) == ["a", "b"])
+        #expect(store.load()?.frontWorkspace?.activeID == firstTab)
+        #expect(store.load()?.windows?.first?.spaces.first?.temporaryTabs.map(\.cachedTitle) == ["a", "b"])
 
         model.addSpace()
         await model.openInNewTab(entries[1].path)
@@ -97,7 +97,7 @@ import Testing
         await model.selectSpace(firstSpace)
         #expect(store.saveCount - before == 1)
         #expect(store.load()?.activeSpaceID == firstSpace)
-        #expect(store.load()?.makeWorkspace()?.activeTab?.location.openPath == entries[0].path)
+        #expect(store.load()?.frontWorkspace?.activeTab?.location.openPath == entries[0].path)
     }
 }
 

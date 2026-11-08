@@ -2,14 +2,16 @@ import SwiftUI
 import AppKit
 import MarpleKit
 
-/// The 页面 menu: tab + history shortcuts. The main window is AppKit-owned, which
-/// SwiftUI's `@FocusedValue` can't reach, so these read the global `ActiveModel`
-/// (Marple is single-window). Actions are guarded, so always-enabled items are safe.
+/// The 页面 menu: tab + history shortcuts. Main windows are AppKit-owned, which
+/// SwiftUI's `@FocusedValue` can't reach, so these act on `ActiveModel.current`
+/// (the front-most main window). Actions are guarded, so always-enabled items are safe.
 struct TabCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("新建笔记") { run { await $0.newIdeaNote() } }
                 .keyboardShortcut("n", modifiers: .command)
+            Button("新建窗口") { AppDelegate.shared?.newWindow(nil) }
+                .keyboardShortcut("n", modifiers: [.shift, .command])
         }
 
         // Global search lives next to 新建笔记 in 文件 (the Ulysses quick-open

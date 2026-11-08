@@ -39,8 +39,9 @@ Sources/MarpleKit/
 │                  SemanticIndexer · TextEmbedder · HFTokenizer(语义写侧)
 │                  TermParser(术语表提取,保留直接对应关系与出处)
 ├── Catalog/       L2:派生编目层(唯一派生 owner)。"图书馆目录"隐喻:从馆藏派生、可重编、多路检索、带交叉引用。
-│                  Catalog(@Observable 派生状态本体)
-│                  Catalog+IndexDerived/+DeferredDerived/+Visible/+OpenDoc/+Refresh(按关注点拆的重算扩展)
+│                  Catalog(@Observable 全库派生状态本体,全应用一份)
+│                  Catalog+IndexDerived/+DeferredDerived/+Refresh(按关注点拆的重算扩展)
+│                  CatalogViewport(每窗口一份:可见列表、列表匹配、开档派生;登记到 Catalog 接收全库缓存更新)
 │                  RefreshAuthority(actor:统一 generation/单飞)· RefreshAuthority 之上的 pass + 独立 derivedGeneration 轴
 │                  NameResolver(规则①解析端:统一两级名字归一)· RelationGraph · RelationsIndex(annotationAnchor 章→书 remap 例外)
 │                  Containers(规则②:同 slug 容器)· BookContext · TopicContext · TopicIndex · ThemeIndex
@@ -51,6 +52,7 @@ Sources/MarpleKit/
 │                  Wikilink · TableAttachment · TalkTimeline · Platform
 ├── Nav/           L4:导航 + 状态持久化
 │                  Navigation(Workspace/NavTab/NavHistory/Group/TabGroup)· PersistedState
+│                  SpaceDefinition(多窗口共享的 Space 部分 + Workspace 抽取/rebase)· PersistedWindow(每窗口存档与恢复)
 │                  SessionSnapshot · TabShareManifest · StateStore(协议)/UserDefaultsStateStore
 ├── Session/       L4:会话落盘 + 元数据写回(写侧 primitive)
 │                  SessionWriter(<vaultRoot>/session/*.json)· MetadataWriter · SessionResolver
@@ -63,8 +65,10 @@ Sources/MarpleKit/
 
 ```
 Sources/Marple/
-├── App/           应用外壳 + 中枢 view-model + 窗口
-│                  MarpleApp(@main + 组装点)· AppModel(@Observable 中枢)· SetupView(首次选文库)
+├── App/           应用外壳 + 共享资料库 + 每窗口 view-model + 窗口
+│                  MarpleApp(@main + 组装点:AppState 持服务,AppDelegate 管窗口集合)
+│                  Library(应用级共享:Catalog、Space 定义、视图、回收站、唯一存档写者)· NoteDraftStore(右栏笔记草稿,跨窗口共享)
+│                  AppModel(@Observable 每窗口 facade,共享状态转发到 Library)· SetupView(首次选文库)
 │                  MarpleWindowController · MarpleSplitViewController(AppKit split 外壳)
 │                  MainToolbar · CommandPalettePanel · MemoryWatchdog
 │                  TermIndexController(启动/文件变更/CLI/设置的术语刷新合流与状态)
@@ -112,7 +116,7 @@ Mobile/MarpleiOS/
 
 ## QUA-218 终态关键事实
 
-- **Catalog 是唯一 L2 状态 owner**:`entries` 源快照(QUA-229)+ counts/themeIndex/visibleEntries/relationGraph/searchIndex 派生都算在它身上,壳只读(以 `var entries { catalog.entries }` facade 转发)。`entries` 只能经 `catalog.publish`(陈旧守卫,refresh 路径)/ `catalog.mutateEntries`(乐观编辑)改。
+- **Catalog 是唯一 L2 全库状态 owner**:`entries` 源快照(QUA-229)+ counts/themeIndex/relationGraph/searchIndex 派生都算在它身上,壳只读(以 `var entries { catalog.entries }` facade 转发)。按视口的派生(可见列表、列表匹配、开档派生)在每窗口一份的 `CatalogViewport`;全库缓存变化时 Catalog 通知已登记的视口刷新开档派生。多窗口共用一个 Catalog,不复制索引或刷新调度(见 docs/multi-window-design.md)。`entries` 只能经 `catalog.publish`(陈旧守卫,refresh 路径)/ `catalog.mutateEntries`(乐观编辑)改。
 - **统一 generation / 单飞**:`RefreshAuthority`(actor)给每趟 reconcile→reload 发 `pass`,陈旧 pass 发布即丢弃;`derivedGeneration` 是独立轴(乐观单条编辑等 refresh 之外的触发也能让后台派生重算)。
 - **NameResolver = 全库唯一两级名字匹配**:wikilink 解析与实体引用共用它(第一级逐字保旧命中,第二级共用 foldedKey 兜底)。
 - **规则① 实体引用 / 规则② 容器** 两套引擎 + 具名例外:`RelationsIndex.annotationAnchor`(annotation 章→书 remap)、`SourceResolver` PDF 源的 Jaccard 模糊匹配。
@@ -131,8 +135,8 @@ QUA-229 把最后一块真共享的状态——`entries` 源快照 + 陈旧守�
   Mac 没有)。统一它要么把 client/indexer 连带 CLIServer/boot 接线搬进核,要么散成几个 hook
   闭包——耦合量不降反升。
 - **post-publish 反应**两端共享零行,因为是「两种交互形状各自的反应」,不是同一逻辑写两遍:
-  macOS 发布后刷新它的物化列表(`recomputeVisible`,NSCollectionView data source 的硬需求)、
-  读 schema/译本、`persist()`、重载开档、刷回收站;iOS 只 `loadSession`(解析 **Mac 的**标签页
+  macOS 发布后由 `Library` 做一次共享反应(读 schema/译本、`persist()`、刷回收站),再让每个
+  窗口刷新自己的物化列表(`recomputeVisible`,NSCollectionView data source 的硬需求)与开档;iOS 只 `loadSession`(解析 **Mac 的**标签页
   来只读显示)。iOS 结构上不产生这些反应所消费的活输入(无当前 pane / 无自己的 Spaces /
   无回收站),强行让它跑 = 编造无意义输入 + 背死状态。
 - **`persist()`** 写 Workspace/Spaces/UserDefaults,纯壳状态,Catalog(MarpleKit)不该认识这些

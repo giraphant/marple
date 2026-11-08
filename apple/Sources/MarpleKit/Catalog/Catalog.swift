@@ -71,34 +71,23 @@ public final class Catalog {
     // incl. optimistic edits; do NOT fold into pass.
     var derivedGeneration: Int = 0
 
-    // 可见列表 + 列表搜索匹配缓存（QUA-218 PR3a Task 4）
-    public internal(set) var visibleEntries: [Entry] = []
-    /// Per-result matched body lines for the current list search (keyed by path).
-    /// Populated off-main after the search settles; rows read from it.
-    public internal(set) var searchMatches: [String: BodyMatches] = [:]
-    /// The query `searchMatches` was computed for. A matched-line tap uses THIS
-    /// (not the live `searchText`) so a tap during the debounce window stays
-    /// self-consistent — anchor/ordinal/query always describe the same search.
-    public internal(set) var searchMatchQuery: String = ""
-    /// Result rows whose "再显示 N 个匹配项" expander has been opened.
-    public var matchExpanded: Set<String> = []
-    /// filter/sort 防抖轴（独立，不并入统一 generation）
-    var recomputeTask: Task<Void, Never>?
-    /// 搜索匹配加载防抖轴（独立，不并入统一 generation）
-    var matchTask: Task<Void, Never>?
+    /// Every window's `CatalogViewport` (weak): told when index-wide caches they
+    /// derive from change, and remapped on confirmed archive moves.
+    @ObservationIgnored private var viewportRefs: [WeakViewport] = []
 
-    // 开档派生缓存（open / reload / metadata 写时重算，非每帧）（QUA-218 PR3a Task 5）
-    public internal(set) var openEntry: Entry?
-    public internal(set) var openOutline: [OutlineItem] = []
-    public internal(set) var openStats: DocStats?
-    public internal(set) var openRelations: Relations?
-    public internal(set) var openBook: BookContext?
-    public internal(set) var openTopic: TopicContext?
-    /// Last shell-supplied open-doc inputs. Catalog owns the derived outputs, so it
-    /// keeps the inputs needed to refresh them when deferred index-wide caches land.
-    var openDerivedPath: String?
-    var openDerivedBody: String = ""
-    var openDerivedBlocks: [RenderBlock] = []
+    var viewports: [CatalogViewport] {
+        viewportRefs.removeAll { $0.value == nil }
+        return viewportRefs.compactMap(\.value)
+    }
+
+    func register(_ viewport: CatalogViewport) {
+        viewportRefs.append(WeakViewport(value: viewport))
+    }
+
+    /// Open-document caches in every window read the index-wide caches.
+    func refreshViewports() {
+        for viewport in viewports { viewport.refreshOpenDerived() }
+    }
 
     // MARK: - 统一刷新权威 (QUA-218 PR3a Task 7)
     // vault-变更管线的唯一 generation/单飞：RefreshAuthority（合流单飞，QUA-198 OOM
@@ -117,4 +106,8 @@ public final class Catalog {
     /// the first rebuildIndexDerived. Calling it afterwards overwrites live counts
     /// with stale restored data. Not a general setter.
     public func seedCounts(_ restored: [EntryType: Int]) { counts = restored }
+}
+
+private struct WeakViewport {
+    weak var value: CatalogViewport?
 }

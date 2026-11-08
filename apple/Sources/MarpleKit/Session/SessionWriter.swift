@@ -98,3 +98,67 @@ public final class SessionWriter {
         }
     }
 }
+
+public extension SessionWriter {
+    /// Fold every open window into the per-Space mirror `publish` takes: each
+    /// Space's shared pinned forest (folders expanded, aliases kept, repeated
+    /// references kept), then the temporary documents open in any window, once per
+    /// path and only when no pinned page already points there. Windows are walked
+    /// in creation order so the list does not jump when focus moves; the active
+    /// path comes from the front window's session for that Space.
+    static func mirror(definitions: [SpaceDefinition], windows: [[WorkspaceSpace]],
+                       front: [WorkspaceSpace]?,
+                       cache: (NavLocation) -> (title: String?, type: EntryType?)) -> [PersistedWorkspaceSpace] {
+        definitions.map { definition in
+            let items = definition.items
+            var tabs = items.map { item in
+                let cached = cache(item.home)
+                return PersistedTab(id: item.id, location: item.home, pinned: true,
+                                    customTitle: item.customTitle,
+                                    cachedTitle: cached.title ?? item.cachedTitle,
+                                    cachedType: cached.type ?? item.cachedType)
+            }
+            let indexByID = Dictionary(items.enumerated().map { ($0.element.id, $0.offset) },
+                                       uniquingKeysWith: { first, _ in first })
+            func convert(_ nodes: [SpaceDefinition.Node]) -> [WorkspaceTreeSnapshot.Node] {
+                nodes.compactMap { node in
+                    switch node {
+                    case .item(let item):
+                        return indexByID[item.id].map(WorkspaceTreeSnapshot.Node.tab)
+                    case .group(let group):
+                        return .group(.init(id: group.id, name: group.name, isCollapsed: false,
+                                            children: convert(group.children)))
+                    }
+                }
+            }
+            var roots = convert(definition.roots)
+            var indexByPath: [String: Int] = [:]
+            for (index, item) in items.enumerated() {
+                if let path = item.home.openPath, indexByPath[path] == nil { indexByPath[path] = index }
+            }
+            for spaces in windows {
+                guard let space = spaces.first(where: { $0.id == definition.id }) else { continue }
+                for tab in space.workspace?.tabs ?? [] where !tab.pinned {
+                    guard let path = tab.location.openPath, indexByPath[path] == nil else { continue }
+                    let cached = cache(tab.location)
+                    indexByPath[path] = tabs.count
+                    roots.append(.tab(tabs.count))
+                    tabs.append(PersistedTab(id: tab.id, location: tab.location, pinned: false,
+                                             customTitle: tab.customTitle,
+                                             cachedTitle: cached.title ?? tab.cachedTitle,
+                                             cachedType: cached.type ?? tab.cachedType))
+                }
+            }
+            let session = front?.first { $0.id == definition.id }
+            let active = session?.workspace?.activeTab
+            let activeIndex = active.flatMap { tab in
+                tab.pinned ? indexByID[tab.id] : tab.location.openPath.flatMap { indexByPath[$0] }
+            }
+            return PersistedWorkspaceSpace(id: definition.id, name: definition.name,
+                                           isBrowsing: session?.isBrowsing ?? true,
+                                           tabs: tabs, activeIndex: activeIndex ?? -1,
+                                           iconName: definition.iconName, isArchived: definition.isArchived,
+                                           tree: WorkspaceTreeSnapshot(roots: roots))
+        }
+    }
+}

@@ -182,80 +182,85 @@ import Synchronization
 
     @Test func recomputeVisibleSearchActiveUsesHits() {
         let c = Catalog()
+        let v = CatalogViewport(catalog: c)
         let hit = SearchHit(entry: mk("vault/papers/a.md", "paper"), score: 1,
                             snippet: nil, source: "test")
         // Non-empty searchText → search-active branch: visibleEntries = the hits,
         // synchronously (no off-main task).
-        c.recomputeVisible(searchText: "embodiment", searchHits: [hit], pane: .type(.paper),
+        v.recomputeVisible(searchText: "embodiment", searchHits: [hit], pane: .type(.paper),
                            entries: [], filters: [], match: .all, sorts: [])
-        #expect(c.visibleEntries.map(\.path) == ["vault/papers/a.md"])
+        #expect(v.visibleEntries.map(\.path) == ["vault/papers/a.md"])
     }
 
     @Test func recomputeVisibleBrowseFiltersAndSorts() async {
         let c = Catalog()
+        let v = CatalogViewport(catalog: c)
         let p1 = mk("vault/papers/a.md", "paper")
         let p2 = mk("vault/papers/b.md", "paper")
         let note = mk("vault/notes/n.md", "note")
         // Empty searchText → browse branch: pane .type(.paper) keeps only papers,
         // off-main, applied on main.
-        c.recomputeVisible(searchText: "", searchHits: [], pane: .type(.paper),
+        v.recomputeVisible(searchText: "", searchHits: [], pane: .type(.paper),
                            entries: [p1, p2, note],
                            filters: [], match: .all, sorts: [])
-        await c.recomputeTask?.value
-        #expect(Set(c.visibleEntries.map(\.path)) == Set(["vault/papers/a.md", "vault/papers/b.md"]))
+        await v.recomputeTask?.value
+        #expect(Set(v.visibleEntries.map(\.path)) == Set(["vault/papers/a.md", "vault/papers/b.md"]))
     }
 
     @Test func toggleAndClearSearchMatches() {
         let c = Catalog()
-        c.toggleMatchExpanded("vault/papers/a.md")
-        #expect(c.matchExpanded.contains("vault/papers/a.md"))
-        c.toggleMatchExpanded("vault/papers/a.md")
-        #expect(!c.matchExpanded.contains("vault/papers/a.md"))
+        let v = CatalogViewport(catalog: c)
+        v.toggleMatchExpanded("vault/papers/a.md")
+        #expect(v.matchExpanded.contains("vault/papers/a.md"))
+        v.toggleMatchExpanded("vault/papers/a.md")
+        #expect(!v.matchExpanded.contains("vault/papers/a.md"))
 
-        c.matchExpanded = ["x"]
-        c.clearSearchMatches()
-        #expect(c.searchMatches.isEmpty)
-        #expect(c.searchMatchQuery.isEmpty)
-        #expect(c.matchExpanded.isEmpty)
+        v.matchExpanded = ["x"]
+        v.clearSearchMatches()
+        #expect(v.searchMatches.isEmpty)
+        #expect(v.searchMatchQuery.isEmpty)
+        #expect(v.matchExpanded.isEmpty)
     }
 
     @Test func searchMatchesParseBodyAndRejectChangedQuery() async {
         let c = Catalog()
+        let v = CatalogViewport(catalog: c)
         let client = StubVaultClient(entries: [], texts: ["a": "---\ntitle: needle\n---\n# needle in body"])
-        c.computeSearchMatches(query: "needle", paths: ["missing", "a"], client: client,
+        v.computeSearchMatches(query: "needle", paths: ["missing", "a"], client: client,
                                currentSearchText: { "needle" })
-        await c.matchTask?.value
-        #expect(c.searchMatchQuery == "needle")
-        #expect(c.searchMatches["a"]?.totalMatches == 1)
-        #expect(c.searchMatches["a"]?.lines.first?.anchor == "needle in body")
-        c.clearSearchMatches()
-        c.computeSearchMatches(query: "needle", paths: ["a"], client: client,
+        await v.matchTask?.value
+        #expect(v.searchMatchQuery == "needle")
+        #expect(v.searchMatches["a"]?.totalMatches == 1)
+        #expect(v.searchMatches["a"]?.lines.first?.anchor == "needle in body")
+        v.clearSearchMatches()
+        v.computeSearchMatches(query: "needle", paths: ["a"], client: client,
                                currentSearchText: { "changed before publish" })
-        await c.matchTask?.value
-        #expect(c.searchMatches.isEmpty)
-        #expect(c.searchMatchQuery.isEmpty)
+        await v.matchTask?.value
+        #expect(v.searchMatches.isEmpty)
+        #expect(v.searchMatchQuery.isEmpty)
     }
 
     @Test(arguments: [false, true])
     func cancelledSearchCannotOverwriteNewResults(clearOnly: Bool) async {
         let c = Catalog()
+        let v = CatalogViewport(catalog: c)
         let client = StubVaultClient(entries: [], texts: [
             "old": String(repeating: "needle in **long text**\n", count: 5000),
             "new": "needle in the new result"])
-        c.computeSearchMatches(query: "needle", paths: ["old"], client: client,
+        v.computeSearchMatches(query: "needle", paths: ["old"], client: client,
                                currentSearchText: { "needle" })
-        let oldTask = c.matchTask
+        let oldTask = v.matchTask
         await Task.yield()
-        c.clearSearchMatches()
+        v.clearSearchMatches()
         if !clearOnly {
             // The query is identical: cancellation must also protect a new hit set.
-            c.computeSearchMatches(query: "needle", paths: ["new"], client: client,
+            v.computeSearchMatches(query: "needle", paths: ["new"], client: client,
                                    currentSearchText: { "needle" })
-            await c.matchTask?.value
+            await v.matchTask?.value
         }
         await oldTask?.value
-        #expect(Set(c.searchMatches.keys) == (clearOnly ? [] : ["new"]))
-        #expect(c.searchMatchQuery == (clearOnly ? "" : "needle"))
+        #expect(Set(v.searchMatches.keys) == (clearOnly ? [] : ["new"]))
+        #expect(v.searchMatchQuery == (clearOnly ? "" : "needle"))
     }
 
     // MARK: - open-doc derive (QUA-218 PR3a Task 5)
@@ -263,44 +268,47 @@ import Synchronization
     /// Opening a chapter surfaces its book context (overview + ordered chapters).
     @Test func openDerivedChapterBuildsBookContext() {
         let c = Catalog()
+        let v = CatalogViewport(catalog: c)
         let overview = mk("vault/books/being-time/00-overview.md", "book")
         let ch1 = mk("vault/books/being-time/01-intro.md", "chapter", book: "being-time")
         let ch2 = mk("vault/books/being-time/02-care.md", "chapter", book: "being-time")
         let entries = [overview, ch1, ch2]
         c.entries = entries
 
-        c.recomputeOpenDerived(openPath: ch1.path, openBody: "# Intro\n\nbody",
+        v.recomputeOpenDerived(openPath: ch1.path, openBody: "# Intro\n\nbody",
                                openBlocks: MarkdownModel.blocks(from: "# Intro\n\nbody"))
 
-        #expect(c.openEntry?.path == ch1.path)
-        #expect(c.openBook?.slug == "being-time")
-        #expect(c.openBook?.overview?.path == overview.path)
-        #expect(c.openBook?.chapters.map(\.path) == [ch1.path, ch2.path])
-        #expect(c.openStats != nil)                    // non-empty body → stats
-        #expect(c.openTopic == nil)                    // not a topic page
+        #expect(v.openEntry?.path == ch1.path)
+        #expect(v.openBook?.slug == "being-time")
+        #expect(v.openBook?.overview?.path == overview.path)
+        #expect(v.openBook?.chapters.map(\.path) == [ch1.path, ch2.path])
+        #expect(v.openStats != nil)                    // non-empty body → stats
+        #expect(v.openTopic == nil)                    // not a topic page
     }
 
     /// Opening a topic overview surfaces its topic context (sibling pages).
     @Test func openDerivedTopicBuildsTopicContext() {
         let c = Catalog()
+        let v = CatalogViewport(catalog: c)
         let overview = mk("vault/topics/embodiment/00-overview.md", "topic")
         let resources = mk("vault/topics/embodiment/01-resources.md", "topic")
         let entries = [overview, resources]
         c.entries = entries
 
-        c.recomputeOpenDerived(openPath: overview.path, openBody: "# 本专题",
+        v.recomputeOpenDerived(openPath: overview.path, openBody: "# 本专题",
                                openBlocks: MarkdownModel.blocks(from: "# 本专题"))
 
-        #expect(c.openEntry?.path == overview.path)
-        #expect(c.openTopic?.slug == "embodiment")
-        #expect(c.openTopic?.overview?.path == overview.path)
-        #expect(c.openTopic?.pages.map(\.path) == [resources.path])
-        #expect(c.openBook == nil)                     // not a book/chapter
+        #expect(v.openEntry?.path == overview.path)
+        #expect(v.openTopic?.slug == "embodiment")
+        #expect(v.openTopic?.overview?.path == overview.path)
+        #expect(v.openTopic?.pages.map(\.path) == [resources.path])
+        #expect(v.openBook == nil)                     // not a book/chapter
     }
 
     /// Opening an author page surfaces their works via catalog.relationGraph.
     @Test func openDerivedAuthorWorksViaRelationGraph() {
         let c = Catalog()
+        let v = CatalogViewport(catalog: c)
         let author = mk("vault/authors/pb.md", "author", title: "Pierre Bourdieu")
         let p1 = mk("vault/papers/distinction.md", "paper", author: "Pierre Bourdieu", rating: 5)
         let p2 = mk("vault/papers/habitus.md", "paper", author: "Pierre Bourdieu", rating: 3)
@@ -310,40 +318,42 @@ import Synchronization
         // reads it rather than the empty-graph fallback.
         c.relationGraph = RelationGraph.build(entries)
 
-        c.recomputeOpenDerived(openPath: author.path, openBody: "# Pierre Bourdieu",
+        v.recomputeOpenDerived(openPath: author.path, openBody: "# Pierre Bourdieu",
                                openBlocks: MarkdownModel.blocks(from: "# Pierre Bourdieu"))
 
-        #expect(c.openEntry?.path == author.path)
+        #expect(v.openEntry?.path == author.path)
         // works ordered by rating desc.
-        #expect(c.openRelations?.works.map(\.path) == [p1.path, p2.path])
+        #expect(v.openRelations?.works.map(\.path) == [p1.path, p2.path])
     }
 
     /// Deferred relation-graph publication refreshes the stored open-doc inputs
     /// inside Catalog; no shell callback is needed for annotation-backed relations.
     @Test func deferredDerivedRefreshesStoredOpenDocRelations() async {
         let c = Catalog()
+        let v = CatalogViewport(catalog: c)
         let book = mk("vault/books/being-time/00-overview.md", "book", title: "Being and Time")
         let note = mk("vault/notes/annotation.md", "note", rating: 5, annotates: book.path)
         let entries = [book, note]
         c.entries = entries
 
-        c.recomputeOpenDerived(openPath: book.path, openBody: "# Being and Time",
+        v.recomputeOpenDerived(openPath: book.path, openBody: "# Being and Time",
                                openBlocks: MarkdownModel.blocks(from: "# Being and Time"))
-        #expect(c.openRelations?.annotations.isEmpty == true)
+        #expect(v.openRelations?.annotations.isEmpty == true)
 
         c.rebuildIndexDerived(savedViews: [])
 
         for _ in 0..<20 {
-            if c.openRelations?.annotations.map(\.path) == [note.path] { break }
+            if v.openRelations?.annotations.map(\.path) == [note.path] { break }
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
-        #expect(c.openRelations?.annotations.map(\.path) == [note.path])
+        #expect(v.openRelations?.annotations.map(\.path) == [note.path])
     }
 
     /// An index refresh must not leave the relations panel backed by the
     /// previous snapshot while the deferred graph is being rebuilt.
     @Test func rebuildIndexDerivedRefreshesOpenRelationsImmediately() {
         let c = Catalog()
+        let v = CatalogViewport(catalog: c)
         let current = mk("vault/papers/current.md", "paper", author: "Jane Doe",
                          themes: ["t1", "t2"])
         let oldSibling = mk("vault/papers/old.md", "paper", author: "Jane Doe",
@@ -353,31 +363,32 @@ import Synchronization
 
         c.entries = [current, oldSibling]
         c.relationGraph = RelationGraph.build(c.entries)
-        c.recomputeOpenDerived(openPath: current.path, openBody: "# Current",
+        v.recomputeOpenDerived(openPath: current.path, openBody: "# Current",
                                openBlocks: MarkdownModel.blocks(from: "# Current"))
-        #expect(c.openRelations?.siblings.map(\.path) == [oldSibling.path])
-        #expect(c.openRelations?.similar.map(\.path) == [oldSibling.path])
+        #expect(v.openRelations?.siblings.map(\.path) == [oldSibling.path])
+        #expect(v.openRelations?.similar.map(\.path) == [oldSibling.path])
 
         c.entries = [current, newSibling]
         c.rebuildIndexDerived(savedViews: [])
 
-        #expect(c.openRelations?.siblings.map(\.path) == [newSibling.path])
-        #expect(c.openRelations?.similar.map(\.path) == [newSibling.path])
+        #expect(v.openRelations?.siblings.map(\.path) == [newSibling.path])
+        #expect(v.openRelations?.similar.map(\.path) == [newSibling.path])
     }
 
     /// No open path → entry/relations/book/topic clear; outline/stats reflect body.
     @Test func openDerivedNoOpenClears() {
         let c = Catalog()
+        let v = CatalogViewport(catalog: c)
         let entries = [mk("vault/papers/a.md", "paper")]
         c.entries = entries
-        c.recomputeOpenDerived(openPath: nil, openBody: "",
+        v.recomputeOpenDerived(openPath: nil, openBody: "",
                                openBlocks: MarkdownModel.blocks(from: ""))
-        #expect(c.openEntry == nil)
-        #expect(c.openRelations == nil)
-        #expect(c.openBook == nil)
-        #expect(c.openTopic == nil)
-        #expect(c.openStats == nil)        // empty body
-        #expect(c.openOutline.isEmpty)
+        #expect(v.openEntry == nil)
+        #expect(v.openRelations == nil)
+        #expect(v.openBook == nil)
+        #expect(v.openTopic == nil)
+        #expect(v.openStats == nil)        // empty body
+        #expect(v.openOutline.isEmpty)
     }
 
     // MARK: - 统一刷新权威 (QUA-218 PR3a Task 7) — 2→1 单飞 + per-pass generation

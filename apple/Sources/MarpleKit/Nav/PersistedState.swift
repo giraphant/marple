@@ -10,6 +10,9 @@ import Foundation
 /// returns nil against an empty entries array). Decoded as nil on legacy state
 /// that predates this field, falling through to the existing filename fallback.
 public struct PersistedTab: Codable, Sendable, Equatable {
+    /// Stable page id (the shared ItemID for pinned pages). Absent in state saved
+    /// before multi-window; restore then assigns one, kept from the next save on.
+    public var id: UUID?
     public var location: NavLocation
     public var pinned: Bool
     public var customTitle: String?
@@ -20,10 +23,11 @@ public struct PersistedTab: Codable, Sendable, Equatable {
     /// falling back to the default `list.bullet` while `entries` is empty.
     /// Decoded as nil on legacy state predating this field. QUA-105.
     public var cachedType: EntryType?
-    public init(location: NavLocation, pinned: Bool,
+    public init(id: UUID? = nil, location: NavLocation, pinned: Bool,
                 customTitle: String? = nil,
                 cachedTitle: String? = nil,
                 cachedType: EntryType? = nil) {
+        self.id = id
         self.location = location
         self.pinned = pinned
         self.customTitle = customTitle
@@ -115,6 +119,13 @@ public struct PersistedState: Codable, Sendable, Equatable {
     /// Saved smart-folder views (QUA-127). App state like workspaces/tabs —
     /// UserDefaults, never SQLite. Optional so blobs predating the field decode.
     public var savedViews: [SavedView]?
+    /// Open windows, front first (multi-window). nil in state saved before
+    /// multi-window: `restoredSession()` then migrates the fields above into one
+    /// window. When present, `spaces` hold only the shared part (pinned pages +
+    /// folders); temporary pages and selection live in each window's session.
+    public var windows: [PersistedWindow]?
+    /// The last window the user closed, for reopening from the Dock.
+    public var recentlyClosedWindow: PersistedWindow?
 
     public init(browsePane: Pane, isBrowsing: Bool, tabs: [PersistedTab], activeIndex: Int,
                 sortClauses: [SortClause], filterClauses: [FilterClause],
@@ -137,7 +148,8 @@ public struct PersistedState: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case browsePane, isBrowsing, tabs, activeIndex, sortClauses, filterClauses,
-             filterMatch, browseMode, currentSpace, spaces, activeSpaceID, counts, savedViews
+             filterMatch, browseMode, currentSpace, spaces, activeSpaceID, counts, savedViews,
+             windows, recentlyClosedWindow
     }
 
     // Every field degrades on its own (see StateDecoding.swift): another build's
@@ -159,20 +171,29 @@ public struct PersistedState: Codable, Sendable, Equatable {
         activeSpaceID = c.lenient(UUID.self, forKey: .activeSpaceID, in: decoder)
         counts = c.lenient([EntryType: Int].self, forKey: .counts, in: decoder)
         savedViews = c.lossyArray(SavedView.self, forKey: .savedViews, in: decoder)?.values
+        windows = c.lossyArray(PersistedWindow.self, forKey: .windows, in: decoder)?.values
+        recentlyClosedWindow = c.lenient(PersistedWindow.self, forKey: .recentlyClosedWindow, in: decoder)
     }
 
     public func makeWorkspace() -> Workspace? {
+        var seenIDs = Set<UUID>()
         if let spaces, !spaces.isEmpty {
             let active = activeSpaceID.flatMap { id in spaces.first { $0.id == id } } ?? spaces.first
-            return active.flatMap { Self.makeWorkspace(tabs: $0.tabs, activeIndex: $0.activeIndex, space: $0) }
+            return active.flatMap {
+                Self.makeWorkspace(tabs: $0.tabs, activeIndex: $0.activeIndex, space: $0, seenIDs: &seenIDs)
+            }
         }
-        return Self.makeWorkspace(tabs: tabs, activeIndex: activeIndex, space: currentSpace)
+        return Self.makeWorkspace(tabs: tabs, activeIndex: activeIndex, space: currentSpace, seenIDs: &seenIDs)
     }
 
     public func makeSpaces() -> (spaces: [WorkspaceSpace], activeID: UUID?) {
+        // Page ids must be unique across Spaces (pages move between them); a
+        // repeated or missing id gets a fresh one.
+        var seenIDs = Set<UUID>()
         if let spaces, !spaces.isEmpty {
             let restored = spaces.map { space in
-                let workspace = Self.makeWorkspace(tabs: space.tabs, activeIndex: space.activeIndex, space: space)
+                let workspace = Self.makeWorkspace(tabs: space.tabs, activeIndex: space.activeIndex,
+                                                   space: space, seenIDs: &seenIDs)
                 return WorkspaceSpace(id: space.id, name: space.name,
                                       workspace: workspace,
                                       isBrowsing: workspace?.tabs.isEmpty != false ? true : space.isBrowsing,
@@ -187,22 +208,27 @@ public struct PersistedState: Codable, Sendable, Equatable {
         }
         let id = currentSpace?.id ?? UUID()
         let name = currentSpace?.name ?? "默认 Space"
-        let space = WorkspaceSpace(id: id, name: name, workspace: makeWorkspace(), isBrowsing: isBrowsing,
+        let workspace = Self.makeWorkspace(tabs: tabs, activeIndex: activeIndex, space: currentSpace,
+                                           seenIDs: &seenIDs)
+        let space = WorkspaceSpace(id: id, name: name, workspace: workspace, isBrowsing: isBrowsing,
                                    iconName: currentSpace?.iconName)
         return ([space], id)
     }
 
-    private static func makeWorkspace(tabs: [PersistedTab], activeIndex: Int, space: PersistedWorkspaceSpace?) -> Workspace? {
-        let restoring = tabs.map {
-            (location: $0.location, pinned: $0.pinned,
-             customTitle: $0.customTitle,
-             cachedTitle: $0.cachedTitle,
-             cachedType: $0.cachedType)
+    private static func makeWorkspace(tabs: [PersistedTab], activeIndex: Int, space: PersistedWorkspaceSpace?,
+                                      seenIDs: inout Set<UUID>) -> Workspace? {
+        let restoring = tabs.map { tab -> NavTab in
+            let id = tab.id.flatMap { seenIDs.contains($0) ? nil : $0 } ?? UUID()
+            seenIDs.insert(id)
+            return NavTab(id: id, location: tab.location, pinned: tab.pinned,
+                          customTitle: tab.customTitle,
+                          cachedTitle: tab.cachedTitle,
+                          cachedType: tab.cachedType)
         }
         if let tree = space?.tree {
-            return Workspace(restoring: restoring, activeIndex: activeIndex, tree: tree)
+            return Workspace(restoringTabs: restoring, activeIndex: activeIndex, tree: tree)
         }
-        return Workspace(restoring: restoring, activeIndex: activeIndex, groups: space?.groups ?? [])
+        return Workspace(restoringTabs: restoring, activeIndex: activeIndex, groups: space?.groups ?? [])
     }
 }
 

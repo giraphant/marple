@@ -63,17 +63,11 @@ extension Catalog {
     public func remapArchivePaths(_ moves: [ArchiveCollectionChange]) {
         guard !moves.isEmpty else { return }
         _ = beginStandalonePass()
-        recomputeTask?.cancel()
-        matchTask?.cancel()
-        func path(_ value: String) -> String { ArchiveCollectionReferences.remap(value, moves: moves) }
-        func entry(_ value: Entry) -> Entry {
-            let next = path(value.path)
+        entries = entries.map { value in
+            let next = ArchiveCollectionReferences.remap(value.path, moves: moves)
             return next == value.path ? value : value.with(path: next)
         }
-        entries = entries.map(entry)
-        visibleEntries = visibleEntries.map(entry)
-        searchMatches = Dictionary(searchMatches.map { (path($0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
-        matchExpanded = Set(matchExpanded.map(path))
+        for viewport in viewports { viewport.remapArchivePaths(moves) }
     }
 
     /// 乐观单条编辑 / 建删条目(QUA-229)：壳侧**同步**用户动作直接改 entries(无 staleness

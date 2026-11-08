@@ -14,14 +14,14 @@ import Testing
         for background in [false, true] {
             var gaps: [Double] = []
             for _ in 0..<3 {
-                let catalog = Catalog()
+                let viewport = CatalogViewport(catalog: Catalog())
                 var finished = false
                 let work = Task {
                     if background {
-                        catalog.computeSearchMatches(query: "needle", paths: ["long.md"], client: client,
-                                                     currentSearchText: { "needle" })
-                        await catalog.matchTask?.value
-                        #expect(catalog.searchMatches["long.md"]?.totalMatches == 20_000)
+                        viewport.computeSearchMatches(query: "needle", paths: ["long.md"], client: client,
+                                                      currentSearchText: { "needle" })
+                        await viewport.matchTask?.value
+                        #expect(viewport.searchMatches["long.md"]?.totalMatches == 20_000)
                     } else {
                         // Control: the same CPU work on the main actor, as before the fix.
                         let matches = bodyLineMatches(body: Frontmatter.split(text).body, query: "needle")
@@ -76,7 +76,7 @@ import Testing
         _ = NSApplication.shared
         for count in [500, 5_000, 15_000] {
             let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
-            model.catalog.visibleEntries = (0..<count).map {
+            model.viewport.visibleEntries = (0..<count).map {
                 Entry(path: "paper-\($0).md", type: .paper, title: "Paper \($0)", author: [],
                       year: nil, ratingScore: 0, themes: [], preview: "Preview text \($0)", hasPDF: false)
             }
@@ -111,8 +111,8 @@ import Testing
             samples = []
             var layoutSamples: [Double] = []
             for i in 0..<6 {
-                model.catalog.visibleEntries[count / 2] =
-                    model.catalog.visibleEntries[count / 2].with(title: "Renamed \(i)")
+                model.viewport.visibleEntries[count / 2] =
+                    model.viewport.visibleEntries[count / 2].with(title: "Renamed \(i)")
                 let start = ContinuousClock.now
                 coordinator.reload(table)
                 samples.append(milliseconds(start.duration(to: .now)))
@@ -126,25 +126,25 @@ import Testing
             // Search mode: every 4th entry carries 8 match lines (cap 3 + toggle).
             var matches: [String: BodyMatches] = [:]
             for index in stride(from: 0, to: count, by: 4) {
-                let path = model.catalog.visibleEntries[index].path
+                let path = model.viewport.visibleEntries[index].path
                 matches[path] = BodyMatches(lines: (0..<8).map { line in
                     BodyMatchLine(lineIndex: line, excerpt: "match line \(line) keywords 中文",
                                   spans: [], matchOrdinal: line, anchor: "keywords")
                 }, totalMatches: 8)
             }
             let enter = ContinuousClock.now
-            model.catalog.searchMatches = matches
+            model.viewport.searchMatches = matches
             coordinator.reload(table)
             scroll.layoutSubtreeIfNeeded()
             report("list search-mode enter + layout, \(count) rows", samples: [milliseconds(enter.duration(to: .now))])
 
             // Expand/collapse one middle entry: structural full-reload path.
-            let target = model.catalog.visibleEntries[(count / 2 / 4) * 4].path
+            let target = model.viewport.visibleEntries[(count / 2 / 4) * 4].path
             samples = []
             layoutSamples = []
             for i in 0..<8 {
-                if i.isMultiple(of: 2) { model.catalog.matchExpanded.insert(target) }
-                else { model.catalog.matchExpanded.remove(target) }
+                if i.isMultiple(of: 2) { model.viewport.matchExpanded.insert(target) }
+                else { model.viewport.matchExpanded.remove(target) }
                 let start = ContinuousClock.now
                 coordinator.reload(table)
                 samples.append(milliseconds(start.duration(to: .now)))
@@ -409,15 +409,16 @@ import Testing
         catalog.relationGraph = RelationGraph.build(corpus)
         let body = "# Benchmark\n\nShort document."
         let blocks = MarkdownModel.blocks(from: body)
+        let viewport = CatalogViewport(catalog: catalog)
         measure("open-document derived state") {
-            catalog.recomputeOpenDerived(openPath: entry.path, openBody: body, openBlocks: blocks)
+            viewport.recomputeOpenDerived(openPath: entry.path, openBody: body, openBlocks: blocks)
         }
-        #expect(catalog.openEntry?.path == entry.path)
+        #expect(viewport.openEntry?.path == entry.path)
         var related: Relations?
         measure("open-document relations") {
             related = relations(for: entry, in: corpus, graph: catalog.relationGraph)
         }
-        #expect(related == catalog.openRelations)
+        #expect(related == viewport.openRelations)
         if let chapter = corpus.first(where: { $0.type == .chapter && !($0.book ?? "").isEmpty }) {
             var context: BookContext?
             measure("book context") { context = bookContext(for: chapter, in: corpus) }

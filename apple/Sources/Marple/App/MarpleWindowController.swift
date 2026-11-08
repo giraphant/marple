@@ -2,19 +2,38 @@ import AppKit
 import SwiftUI
 import MarpleKit
 
-/// Holds the booted model for app-wide menu commands. Marple is single-window, and
-/// an AppKit-owned window isn't reached by SwiftUI's `@FocusedValue`, so a global
-/// reference replaces it (see TabCommands).
-@MainActor enum ActiveModel { static var current: AppModel? }
+/// Routes app-wide menu commands to a window. AppKit-owned windows aren't reached
+/// by SwiftUI's `@FocusedValue`, so commands ask here (see TabCommands). The target
+/// is the front-most main window, computed from AppKit's window order like
+/// NetNewsWire — Settings and panels never count.
+@MainActor enum ActiveModel {
+    /// Open main windows, kept by the app delegate.
+    static var controllers: [MarpleWindowController] = []
 
-/// Owns the main `NSWindow` (AppKit, like Notes / Mail / CodeEdit) so the
+    static var current: AppModel? { orderedControllers.lazy.compactMap(\.model).first }
+
+    /// Main windows, front first.
+    static var orderedControllers: [MarpleWindowController] {
+        let order = Dictionary(NSApp.orderedWindows.enumerated().map { (ObjectIdentifier($0.element), $0.offset) },
+                               uniquingKeysWith: { first, _ in first })
+        return controllers.enumerated().sorted { a, b in
+            let ra = a.element.window.flatMap { order[ObjectIdentifier($0)] } ?? Int.max
+            let rb = b.element.window.flatMap { order[ObjectIdentifier($0)] } ?? Int.max
+            return ra == rb ? a.offset < b.offset : ra < rb
+        }.map(\.element)
+    }
+}
+
+/// Owns one main `NSWindow` (AppKit, like Notes / Mail / CodeEdit) so the
 /// `NSSplitViewController` can be the window's `contentViewController`. The content
-/// swaps through setup → progress → the split shell as the app boots.
+/// is the setup view until a vault is chosen, then the split shell over one
+/// `AppModel` (this window's session on the shared `Library`).
 @MainActor
 final class MarpleWindowController: NSWindowController, NSWindowDelegate {
-    private let appState = AppState()
     private let toolbarController = MarpleToolbarController()
-    private let sidebarUndoManager = UndoManager()
+    private(set) var model: AppModel?
+    /// Called once the window has closed (not when the app quits with it open).
+    var onClose: ((MarpleWindowController) -> Void)?
 
     convenience init() {
         let window = NSWindow(
@@ -22,25 +41,103 @@ final class MarpleWindowController: NSWindowController, NSWindowDelegate {
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
         window.minSize = NSSize(width: 960, height: 600)   // fit sidebar + list + reader at min
-        window.setFrameAutosaveName("MarpleMainWindow")
+        window.isReleasedWhenClosed = false
         self.init(window: window)
         window.delegate = self
     }
 
-    func start() {
-        let restored = window?.setFrameUsingName("MarpleMainWindow") ?? false
-        route()
-        // Use the user's saved frame if it's valid; otherwise a screen-relative default
-        // (so it's generous on big displays and still fits small laptops).
-        if let window, !restored || window.frame.width < 960 || window.frame.height < 600 {
-            window.setFrame(Self.defaultFrame(for: window), display: false)
-        }
+    /// First-run: pick the vault folder in this window.
+    func showSetup(onPicked: @escaping (String) -> Void) {
+        placeWindow(frame: nil, cascadeFrom: nil)
+        setContent(boxed(SetupView(onPicked: onPicked)))
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
     }
 
+    func showBootError(_ message: String) {
+        setContent(boxed(ContentUnavailableView("启动失败", systemImage: "exclamationmark.triangle",
+                                                description: Text(message))))
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Mount the split shell for `model`, placed at its saved frame or cascaded
+    /// from `cascadeFrom` (the window it was opened from).
+    func show(_ model: AppModel, cascadeFrom source: NSWindow?) {
+        self.model = model
+        placeWindow(frame: model.windowFrame, cascadeFrom: source)
+        model.undoManager = model.library.undoManager
+        applyTheme()
+        window?.titleVisibility = .hidden
+        window?.titlebarAppearsTransparent = false
+        window?.toolbarStyle = .unified
+        let split = MarpleSplitViewController(model: model)
+        setContent(split)
+        toolbarController.model = model
+        toolbarController.shell = split
+        toolbarController.splitView = split.splitView   // we own this split → tracking separators are safe
+        window?.toolbar = toolbarController.makeToolbar()
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+        rememberFrame()
+        trackTitle()
+    }
+
+    /// Keep the (hidden) window title current: it names this window in the Dock
+    /// menu, the Window menu and Mission Control.
+    private func trackTitle() {
+        guard let model else { return }
+        let title = withObservationTracking { model.windowTitle } onChange: { [weak self] in
+            Task { @MainActor in self?.trackTitle() }
+        }
+        if window?.title != title { window?.title = title }
+    }
+
     func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
-        sidebarUndoManager
+        model?.library.undoManager
+    }
+
+    func windowDidMove(_ notification: Notification) { rememberFrame() }
+    func windowDidEndLiveResize(_ notification: Notification) { rememberFrame() }
+
+    func windowWillClose(_ notification: Notification) {
+        onClose?(self)
+    }
+
+    private func rememberFrame() {
+        // Full screen would replace the windowed frame with the screen's.
+        guard let window, let model, !window.styleMask.contains(.fullScreen) else { return }
+        model.windowFrame = window.frameDescriptor
+    }
+
+    private func placeWindow(frame descriptor: String?, cascadeFrom source: NSWindow?) {
+        guard let window else { return }
+        if let descriptor {
+            // Put the window back exactly where it was while that spot is still on
+            // a screen; `setFrame(from:)` alone re-homes it onto the main screen,
+            // which piles every window onto one display.
+            let numbers = descriptor.split(separator: " ").compactMap { Double($0) }
+            let saved = numbers.count >= 4
+                ? NSRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3]) : .zero
+            if NSScreen.screens.contains(where: { $0.visibleFrame.intersects(saved) }) {
+                window.setFrame(saved, display: false)
+            } else {
+                window.setFrame(from: descriptor)
+            }
+        } else if let source {
+            window.setFrame(source.frame, display: false)
+            window.setFrameTopLeftPoint(window.cascadeTopLeft(from: NSPoint(x: source.frame.minX,
+                                                                            y: source.frame.maxY)))
+        } else if !window.setFrameUsingName("MarpleMainWindow") {
+            // The single-window build's saved frame seeds the first window.
+            window.setFrame(Self.defaultFrame(for: window), display: false)
+        }
+        // Use the saved frame only while it's valid; otherwise a screen-relative
+        // default (generous on big displays, still fits small laptops).
+        if window.frame.width < 960 || window.frame.height < 600
+            || !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(window.frame) }) {
+            window.setFrame(Self.defaultFrame(for: window), display: false)
+        }
     }
 
     private static func defaultFrame(for window: NSWindow) -> NSRect {
@@ -69,50 +166,6 @@ final class MarpleWindowController: NSWindowController, NSWindowDelegate {
         let hc = NSHostingController(rootView: view)
         hc.sizingOptions = []
         return hc
-    }
-
-    private func route() {
-        let root = UserDefaults.standard.string(forKey: "marple.workspaceRoot") ?? ""
-        guard !root.isEmpty, let ws = try? resolveWorkspace(pickedPath: root) else {
-            setContent(boxed(SetupView { [weak self] picked in
-                UserDefaults.standard.set(picked, forKey: "marple.workspaceRoot")
-                self?.route()
-            }))
-            return
-        }
-        boot(paths: VaultPaths(workspaceRoot: ws.workspaceRoot, vaultDir: ws.vaultDir))
-    }
-
-    private func boot(paths: VaultPaths) {
-        // QUA-105: `AppState.boot` is now synchronous (no awaits inside, the
-        // data load is dispatched onto a background Task internally). We mount
-        // the split chrome immediately so it's the window's content when
-        // `showWindow` is called below — no "ProgressView for several seconds"
-        // wait, no spinner→split-swap flash. Views render with
-        // `model.isBootstrapping=true` and show skeleton state until the
-        // first loadIndex completes.
-        appState.boot(paths: paths)
-        guard let model = appState.model else {
-            if let err = appState.bootError {
-                setContent(boxed(
-                    ContentUnavailableView("启动失败", systemImage: "exclamationmark.triangle",
-                                           description: Text(err))))
-            }
-            return
-        }
-        sidebarUndoManager.removeAllActions()
-        model.undoManager = sidebarUndoManager
-        ActiveModel.current = model
-        applyTheme()
-        window?.titleVisibility = .hidden
-        window?.titlebarAppearsTransparent = false
-        window?.toolbarStyle = .unified
-        let split = MarpleSplitViewController(model: model)
-        setContent(split)
-        toolbarController.model = model
-        toolbarController.shell = split
-        toolbarController.splitView = split.splitView   // we own this split → tracking separators are safe
-        window?.toolbar = toolbarController.makeToolbar()
     }
 
     private func applyTheme() {

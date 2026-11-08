@@ -88,10 +88,11 @@ struct ArchiveCollectionRefreshTests {
         let entry = Entry(path: "vault/archives/a/archive.md", type: .archive, title: "A", author: [], year: nil, ratingScore: 0, themes: [], preview: "", hasPDF: false)
         let pass = catalog.beginStandalonePass()
         catalog.publish([entry], pass: pass)
-        catalog.recomputeVisible(searchText: "A", searchHits: [.init(entry: entry, score: 1, snippet: nil, source: "test")], pane: .type(.archive), entries: [entry], filters: [], match: .all, sorts: [])
+        let viewport = CatalogViewport(catalog: catalog)
+        viewport.recomputeVisible(searchText: "A", searchHits: [.init(entry: entry, score: 1, snippet: nil, source: "test")], pane: .type(.archive), entries: [entry], filters: [], match: .all, sorts: [])
         catalog.remapArchivePaths([.init(from: "vault/archives/a", to: "vault/archives/group/a")])
-        #expect(catalog.visibleEntries.first?.path == "vault/archives/group/a/archive.md")
-        #expect(catalog.entries.first?.path == catalog.visibleEntries.first?.path)
+        #expect(viewport.visibleEntries.first?.path == "vault/archives/group/a/archive.md")
+        #expect(catalog.entries.first?.path == viewport.visibleEntries.first?.path)
         #expect(!catalog.publish([entry], pass: pass))
     }
 

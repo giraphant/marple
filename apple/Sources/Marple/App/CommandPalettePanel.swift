@@ -62,9 +62,11 @@ final class CommandPalettePanel: NSPanel {
 @MainActor
 enum CommandPalettePresenter {
     private static var panel: CommandPalettePanel?
+    /// The window the open panel searches for; another window gets a fresh panel.
+    private static weak var panelModel: AppModel?
 
     static func toggle(model: AppModel) {
-        if let panel, panel.isVisible {
+        if let panel, panel.isVisible, panelModel === model {
             if NSApp.isActive && panel.isKeyWindow {
                 panel.close()
                 Self.panel = nil
@@ -100,5 +102,6 @@ enum CommandPalettePresenter {
         if !NSApp.isActive { NSApp.activate() }
         panel.makeKeyAndOrderFront(nil)
         Self.panel = panel
+        Self.panelModel = model
     }
 }

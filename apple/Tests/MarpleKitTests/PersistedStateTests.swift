@@ -373,7 +373,7 @@ private struct LegacyNavLocation: Encodable {
         #expect(workspace.tabs.isEmpty)
         #expect(workspace.activeID == nil)
         #expect(workspace.tabGroups.map(\.name) == ["Reading"])
-        #expect(workspace.treeSnapshot == tree)
+        #expect(workspace.treeSnapshot.withoutIDs == tree)
     }
 
     @Test func userDefaultsStoreRoundTrips() throws {

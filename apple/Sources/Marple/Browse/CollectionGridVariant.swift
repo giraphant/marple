@@ -162,6 +162,8 @@ struct CollectionGridVariant: NSViewRepresentable {
                 Task { await self?.model.open(entry.path) } })
             menu.addItem(ClosureMenuItem(title: String(localized: "新标签打开")) { [weak self] in
                 Task { await self?.model.openInNewTab(entry.path) } })
+            menu.addItem(ClosureMenuItem(title: String(localized: "在新窗口打开")) { [weak self] in
+                Task { await self?.model.openInNewWindow(entry.path) } })
             menu.addItem(.separator())
             let spacesItem = NSMenuItem(title: String(localized: "在空间中打开"), action: nil, keyEquivalent: "")
             let submenu = NSMenu()

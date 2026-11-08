@@ -313,7 +313,7 @@ import Testing
 
         let onDisk = try #require(store.load())
         // Tab cachedTitle should now carry the live entry title.
-        #expect(onDisk.tabs.first?.cachedTitle == "Real Title")
+        #expect(onDisk.windows?.first?.spaces.first?.temporaryTabs.first?.cachedTitle == "Real Title")
         // counts should reflect the live distribution (one note).
         #expect(onDisk.counts == [.note: 1])
         _ = model
@@ -573,8 +573,8 @@ import Testing
 
         #expect(state.activeSpaceID == secondID)
         #expect(state.spaces?.map(\.id) == [firstID, secondID])
-        #expect(state.spaces?.map { $0.tabs.map(\.location.openPath) } == [["alpha.md"], ["beta.md"]])
-        #expect(state.tabs.map(\.location.openPath) == ["beta.md"])
+        #expect(state.frontWindow?.spaces.map { $0.workspace?.tabs.map(\.location.openPath) } == [["alpha.md"], ["beta.md"]])
+        #expect(state.frontWindow?.activeSpaceID == secondID)
     }
 
     @MainActor

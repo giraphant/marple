@@ -3,9 +3,11 @@ import AppKit
 import MarpleKit
 import MarpleEmbeddings
 
+/// App-level services for the open vault: the shared `Library` plus the indexer,
+/// watcher, CLI socket and backups. Started once; windows come and go on top.
 @MainActor
 final class AppState: ObservableObject {
-    @Published var model: AppModel?
+    @Published var library: Library?
     @Published var booting = false
     @Published var bootError: String?
     private var indexer: VaultIndexer?
@@ -20,13 +22,16 @@ final class AppState: ObservableObject {
     private var backupWatcher: VaultWatcher?
     private var semanticIndexController: SemanticIndexRefreshController?
 
+    /// Opens a window when one is needed and none exists (CLI / URL requests).
+    var windowProvider: (() -> AppModel?)?
+
     /// Synchronous (no awaits inside) since Phase A — the heavy reconcile +
     /// loadIndex moved to a background Task at the bottom of this method. Lets
-    /// `MarpleWindowController.start()` mount the split chrome BEFORE the
-    /// window is ordered front, eliminating the brief "blank window" flash
-    /// that an async boot would leave between `showWindow` and the split mount.
+    /// the first window mount the split chrome BEFORE it is ordered front,
+    /// eliminating the brief "blank window" flash that an async boot would leave
+    /// between `showWindow` and the split mount.
     func boot(paths: VaultPaths) {
-        guard model == nil, !booting else { return }
+        guard library == nil, !booting else { return }
         booting = true; bootError = nil
         let indexer = VaultIndexer(workspaceRoot: paths.workspaceRoot)
         self.indexer = indexer
@@ -48,10 +53,10 @@ final class AppState: ObservableObject {
         let semanticIndexAvailable = Self.semanticIndexAvailable(marpleDir: marpleDir)
         let semantic: (any SemanticBackend)? = semanticRuntimeAvailable && semanticIndexAvailable
             ? MLXSemanticBackend(dir: marpleDir) : nil
-        let m = AppModel(client: client, stateStore: UserDefaultsStateStore(),
-                         semantic: semantic, isFirstRun: !canSkip,
-                         workspaceRoot: paths.workspaceRoot)
-        self.model = m
+        let m = Library(client: client, stateStore: UserDefaultsStateStore(),
+                        semantic: semantic, isFirstRun: !canSkip,
+                        workspaceRoot: paths.workspaceRoot)
+        self.library = m
         m.cliIndexer = indexer
         m.termIndexController = TermIndexController(workspaceRoot: paths.workspaceRoot)
         if semanticRuntimeAvailable {
@@ -160,7 +165,7 @@ final class AppState: ObservableObject {
                         }
                         if let s = stats, s.upserted + s.removed > 0 {
                             await m.loadIndex(pass: myPass)
-                            await m.reloadOpen()
+                            await m.reloadOpenDocuments()
                         }
                         m.endRefreshing()
                     }
@@ -170,11 +175,11 @@ final class AppState: ObservableObject {
     }
 
     private func applyCLISetting() {
-        guard let cliServer, let model, let indexer else { return }
+        guard let cliServer, library != nil, let indexer else { return }
         let wanted = UserDefaults.standard.bool(forKey: SettingsKeys.cliServerEnabled)
         if wanted {
             do {
-                try cliServer.start(model: model, indexer: indexer)
+                try cliServer.start(model: { [weak self] in self?.windowProvider?() }, indexer: indexer)
             } catch {
                 print("[marple] CLI server start failed: \(error)")
             }
@@ -250,30 +255,149 @@ struct MarpleApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var windowController: MarpleWindowController?
+    /// SwiftUI owns the real `NSApp.delegate` (adaptor), so menu commands reach
+    /// this one through here.
+    private(set) static weak var shared: AppDelegate?
+    private let appState = AppState()
     private let memoryPressureMonitor = MemoryPressureMonitor()
     private let memoryWatchdog = MemoryWatchdog()
+    /// Set once quitting starts: windows AppKit closes from here on are not
+    /// "closed by the user" and stay in the saved session.
+    private var isTerminating = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDelegate.shared = self
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
-        let wc = MarpleWindowController()
-        windowController = wc
-        wc.start()
+        appState.windowProvider = { [weak self] in self?.frontModelOpeningIfNeeded() }
+        route()
         memoryPressureMonitor.start()
         memoryWatchdog.start()
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// Pick the vault (first run) or boot it and reopen the saved windows.
+    private func route() {
+        let root = UserDefaults.standard.string(forKey: "marple.workspaceRoot") ?? ""
+        guard !root.isEmpty, let ws = try? resolveWorkspace(pickedPath: root) else {
+            let controller = ActiveModel.controllers.first ?? makeController()
+            controller.showSetup { [weak self] picked in
+                UserDefaults.standard.set(picked, forKey: "marple.workspaceRoot")
+                self?.route()
+            }
+            return
+        }
+        // QUA-105: `AppState.boot` is synchronous (the data load runs on a
+        // background Task), so windows mount their split chrome immediately and
+        // render skeleton state until the first loadIndex completes.
+        appState.boot(paths: VaultPaths(workspaceRoot: ws.workspaceRoot, vaultDir: ws.vaultDir))
+        guard let library = appState.library else {
+            let controller = ActiveModel.controllers.first ?? makeController()
+            controller.showBootError(appState.bootError ?? "")
+            return
+        }
+        library.frontToBack = { models in
+            let order = ActiveModel.orderedControllers.compactMap(\.model)
+            return order.filter { model in models.contains { $0 === model } }
+        }
+        library.openWindow = { [weak self] source in self?.openWindow(cloning: source) }
+        var restored: [RestoredWindow?] = []
+        while let window = library.takeRestoredWindow() { restored.append(window) }
+        if restored.isEmpty { restored = [nil] }   // first launch: one fresh window
+        // A setup window (first run) becomes the first main window.
+        let setup = ActiveModel.controllers.first { $0.model == nil }
+        // Back to front, so the saved front window ends up in front.
+        for (index, window) in restored.enumerated().reversed() {
+            let model = AppModel(library: library, restoring: window)
+            let controller = index == 0 ? (setup ?? makeController()) : makeController()
+            controller.show(model, cascadeFrom: nil)
+        }
+    }
+
+    private func makeController() -> MarpleWindowController {
+        let controller = MarpleWindowController()
+        controller.onClose = { [weak self] closed in self?.windowDidClose(closed) }
+        ActiveModel.controllers.append(controller)
+        return controller
+    }
+
+    /// A new main window. `source` (the window it was opened from) gives its Space,
+    /// browse controls and folder collapse; nil reopens the last closed window
+    /// when there is one, else a fresh window.
+    @discardableResult
+    func openWindow(cloning source: AppModel?) -> AppModel? {
+        guard let library = appState.library else { return nil }
+        let restoring = source?.newWindowState() ?? library.takeRecentlyClosedWindow()
+        let model = AppModel(library: library, restoring: restoring)
+        let sourceWindow = source.flatMap { model in
+            ActiveModel.controllers.first { $0.model === model }?.window
+        }
+        makeController().show(model, cascadeFrom: sourceWindow)
+        return model
+    }
+
+    @objc func newWindow(_ sender: Any?) {
+        openWindow(cloning: ActiveModel.current)
+    }
+
+    @objc private func newNote(_ sender: Any?) {
+        guard let model = frontModelOpeningIfNeeded() else { return }
+        Task { await model.newIdeaNote() }
+    }
+
+    /// Dock menu: the app's own actions. AppKit lists the open windows above them
+    /// by title (see `AppModel.windowTitle`).
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        guard appState.library != nil else { return nil }
+        let menu = NSMenu()
+        for (title, action) in [(String(localized: "新建窗口"), #selector(newWindow(_:))),
+                                (String(localized: "新建笔记"), #selector(newNote(_:)))] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    private func frontModelOpeningIfNeeded() -> AppModel? {
+        ActiveModel.current ?? openWindow(cloning: nil)
+    }
+
+    private func windowDidClose(_ controller: MarpleWindowController) {
+        ActiveModel.controllers.removeAll { $0 === controller }
+        guard let model = controller.model, let library = appState.library else { return }
+        if isTerminating { return }
+        library.windowDidClose(model)
+    }
+
+    /// Closing the last window keeps Marple (and its services) running; the Dock
+    /// icon or 新建窗口 brings a window back.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !flag else { return true }
+        guard appState.library != nil else {
+            // The setup window was closed before a vault was chosen.
+            if ActiveModel.controllers.isEmpty { route() }
+            return false
+        }
+        if let controller = ActiveModel.orderedControllers.first {
+            controller.window?.makeKeyAndOrderFront(nil)   // minimized / hidden
+        } else {
+            openWindow(cloning: nil)
+        }
+        return false
+    }
 
     /// Inline-note edits are staged in memory while typing (issue #87) and
     /// normally flushed on blur/doc-switch; quitting mid-edit must not lose them.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let model = ActiveModel.current, model.hasDirtyInspectorNotes else {
+        isTerminating = true
+        appState.library?.persist()
+        guard let notes = appState.library?.notes, notes.hasDirty else {
             return .terminateNow
         }
         Task { @MainActor in
-            await model.flushAllInspectorNoteSaves()
+            await notes.flushAll()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -284,18 +408,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `marple-cli open <path>` can launch Marple and open a document page.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            Task { @MainActor in await Self.handle(url: url) }
+            Task { @MainActor in await self.handle(url: url) }
         }
     }
 
-    private static func handle(url: URL) async {
-        // Cold-start race: the URL can arrive before AppModel is ready.
+    private func handle(url: URL) async {
+        // Cold-start race: the URL can arrive before the library is ready.
         // Poll briefly (≤ 5s) and bail rather than queue indefinitely.
         let deadline = Date().addingTimeInterval(5.0)
-        while ActiveModel.current == nil, Date() < deadline {
+        while appState.library == nil, Date() < deadline {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
-        guard let model = ActiveModel.current else { return }
+        guard let model = frontModelOpeningIfNeeded() else { return }
 
         let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let host = url.host(percentEncoded: false) ?? ""

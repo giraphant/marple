@@ -110,6 +110,11 @@ struct NoteMarkdownEditor: NSViewRepresentable {
         private var localDirty = false
         private var lastExternalText: String
         private var saveTask: Task<Void, Never>?
+        /// The editor's own undo stack: typing must not land on the window's
+        /// (app-wide, shared by every window) organization undo stack.
+        private let textUndoManager = UndoManager()
+
+        func undoManager(for view: NSTextView) -> UndoManager? { textUndoManager }
 
         init(text: String, height: Binding<CGFloat>, isFocused: Binding<Bool>,
              onDebouncedChange: @escaping (String) -> Void,
@@ -150,6 +155,9 @@ struct NoteMarkdownEditor: NSViewRepresentable {
             isApplying = true
             apply(text, to: textView)
             isApplying = false
+            // The text came from elsewhere (another window, a save): earlier
+            // typing no longer applies to it.
+            textUndoManager.removeAllActions()
         }
 
         func apply(_ text: String, to textView: NSTextView) {

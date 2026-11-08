@@ -186,20 +186,24 @@ public struct WorkspaceTreeSnapshot: Codable, Sendable, Equatable {
     }
 
     public struct Group: Codable, Sendable, Equatable {
+        /// Stable folder id. Absent in state saved before multi-window.
+        public var id: UUID?
         public var name: String
         public var isCollapsed: Bool
         public var children: [Node]
 
-        public init(name: String, isCollapsed: Bool, children: [Node]) {
+        public init(id: UUID? = nil, name: String, isCollapsed: Bool, children: [Node]) {
+            self.id = id
             self.name = name
             self.isCollapsed = isCollapsed
             self.children = children
         }
 
-        private enum CodingKeys: String, CodingKey { case name, isCollapsed, children }
+        private enum CodingKeys: String, CodingKey { case id, name, isCollapsed, children }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = c.lenient(UUID.self, forKey: .id, in: decoder)
             name = try c.decode(String.self, forKey: .name)
             isCollapsed = try c.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? false
             children = c.lossyArray(Node.self, forKey: .children, in: decoder)?.values ?? []
@@ -316,13 +320,18 @@ public struct Workspace: Sendable {
                                    cachedType: EntryType?)],
                  activeIndex: Int,
                  groups: [WorkspaceGroupSnapshot] = []) {
-        guard !tabs.isEmpty else { return nil }
-        let built = tabs.map {
+        self.init(restoringTabs: tabs.map {
             NavTab(location: $0.location, pinned: $0.pinned,
                    customTitle: $0.customTitle,
                    cachedTitle: $0.cachedTitle,
                    cachedType: $0.cachedType)
-        }
+        }, activeIndex: activeIndex, groups: groups)
+    }
+
+    /// Restore from already-built tabs (carrying their saved ids) + legacy groups.
+    public init?(restoringTabs built: [NavTab], activeIndex: Int,
+                 groups: [WorkspaceGroupSnapshot]) {
+        guard !built.isEmpty else { return nil }
         self.tabs = built
         let idx = built.indices.contains(activeIndex) ? activeIndex : 0
         self.activeID = built[idx].id
@@ -344,12 +353,16 @@ public struct Workspace: Sendable {
                                    cachedType: EntryType?)],
                  activeIndex: Int,
                  tree: WorkspaceTreeSnapshot) {
-        let built = tabs.map {
+        self.init(restoringTabs: tabs.map {
             NavTab(location: $0.location, pinned: $0.pinned,
                    customTitle: $0.customTitle,
                    cachedTitle: $0.cachedTitle,
                    cachedType: $0.cachedType)
-        }
+        }, activeIndex: activeIndex, tree: tree)
+    }
+
+    /// Restore from already-built tabs (carrying their saved ids) + the v2 tree.
+    public init?(restoringTabs built: [NavTab], activeIndex: Int, tree: WorkspaceTreeSnapshot) {
         let builtRoot = Self.buildRoot(treeNodes: tree.roots, tabs: built)
         guard !built.isEmpty || !builtRoot.isEmpty else { return nil }
         self.tabs = built
@@ -420,7 +433,8 @@ public struct Workspace: Sendable {
                     guard let i = indexByID[id] else { return nil }
                     return .tab(i)
                 case .group(let g):
-                    return .group(.init(name: g.name, isCollapsed: g.isCollapsed, children: convert(g.children)))
+                    return .group(.init(id: g.id, name: g.name, isCollapsed: g.isCollapsed,
+                                        children: convert(g.children)))
                 }
             }
         }
@@ -1433,11 +1447,125 @@ public struct Workspace: Sendable {
                 guard tabs.indices.contains(i) else { return nil }
                 return .tab(tabs[i].id)
             case .group(let g):
-                return .group(TabGroup(name: migratedGroupName(g.name),
+                return .group(TabGroup(id: g.id ?? UUID(), name: migratedGroupName(g.name),
                                        children: buildRoot(treeNodes: g.children, tabs: tabs),
                                        isCollapsed: g.isCollapsed))
             }
         }
+    }
+}
+
+// MARK: - shared definition (multi-window)
+
+public extension Workspace {
+    /// The pinned pages and folders, reduced to what every window shares.
+    var sharedRoots: [SpaceDefinition.Node] {
+        let byID = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
+        func convert(_ nodes: [TabNode]) -> [SpaceDefinition.Node] {
+            nodes.compactMap { node in
+                switch node {
+                case .tab(let id):
+                    guard let tab = byID[id], tab.pinned else { return nil }
+                    return .item(.init(id: id, home: tab.identityLocation,
+                                       customTitle: tab.customTitle,
+                                       cachedTitle: tab.cachedTitle,
+                                       cachedType: tab.cachedType))
+                case .group(let group):
+                    return .group(.init(id: group.id, name: group.name,
+                                        children: convert(group.children)))
+                }
+            }
+        }
+        return convert(root)
+    }
+
+    /// Lay this window's copy over a new shared pinned forest. Pinned pages keep
+    /// their history and selection by id; temporary pages and folder collapse stay
+    /// as they are. A pinned page the shared forest dropped survives as a temporary
+    /// page (fresh id) when this window moved off its anchor or is showing it —
+    /// otherwise it simply leaves. `defaultCollapsed` covers folders this copy has
+    /// not seen before.
+    mutating func rebase(onto shared: [SpaceDefinition.Node], defaultCollapsed: Set<UUID> = []) {
+        let live = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
+        let collapsed = Dictionary(uniqueKeysWithValues: tabGroups.map { ($0.id, $0.isCollapsed) })
+        var placed = Set<NavTab.ID>()
+        var rebuilt: [NavTab] = []
+        func build(_ nodes: [SpaceDefinition.Node]) -> [TabNode] {
+            nodes.compactMap { node in
+                switch node {
+                case .item(let item):
+                    guard placed.insert(item.id).inserted else { return nil }
+                    var tab = live[item.id] ?? NavTab(id: item.id, location: item.home)
+                    tab.pinned = true
+                    tab.pinnedLocation = item.home
+                    tab.customTitle = item.customTitle
+                    // Exact copy, so this window's extracted definition equals the
+                    // shared one (no echo back to other windows).
+                    tab.cachedTitle = item.cachedTitle
+                    tab.cachedType = item.cachedType
+                    rebuilt.append(tab)
+                    return .tab(item.id)
+                case .group(let group):
+                    return .group(TabGroup(id: group.id, name: group.name,
+                                           children: build(group.children),
+                                           isCollapsed: collapsed[group.id] ?? defaultCollapsed.contains(group.id)))
+                }
+            }
+        }
+        var nextRoot = build(shared)
+        var nextActive = activeID
+        for tab in tabs where !placed.contains(tab.id) {
+            guard tab.pinned else {
+                rebuilt.append(tab)
+                nextRoot.append(.tab(tab.id))
+                continue
+            }
+            let anchor = tab.identityLocation
+            guard tab.id == activeID || tab.location != anchor || tab.history.entries.count > 1 else { continue }
+            var temporary = NavTab(location: tab.location, customTitle: tab.customTitle,
+                                   cachedTitle: tab.cachedTitle, cachedType: tab.cachedType)
+            temporary.history = tab.history
+            if tab.id == activeID { nextActive = temporary.id }
+            rebuilt.append(temporary)
+            nextRoot.append(.tab(temporary.id))
+        }
+        tabs = rebuilt
+        root = nextRoot
+        activeID = nextActive
+        normalize()
+        flattenTemporaryTabs()
+    }
+
+    /// A window's saved session for one Space, laid over the shared forest.
+    init(shared: [SpaceDefinition.Node], collapsed: Set<UUID>,
+         pinnedLocations: [UUID: NavLocation], temporary: [NavTab], activeID: UUID?) {
+        self.init()
+        rebase(onto: shared, defaultCollapsed: collapsed)
+        for index in tabs.indices {
+            guard let location = pinnedLocations[tabs[index].id] else { continue }
+            tabs[index].history = NavHistory(location)
+        }
+        var taken = Set(tabs.map(\.id))
+        for var tab in temporary {
+            tab.pinned = false
+            tab.pinnedLocation = nil
+            if !taken.insert(tab.id).inserted {
+                let history = tab.history
+                tab = NavTab(location: tab.location, customTitle: tab.customTitle,
+                             cachedTitle: tab.cachedTitle, cachedType: tab.cachedType)
+                tab.history = history
+                taken.insert(tab.id)
+            }
+            tabs.append(tab)
+            root.append(.tab(tab.id))
+        }
+        self.activeID = activeID
+        normalize()
+    }
+
+    /// Ids of this copy's collapsed folders (window-owned state).
+    var collapsedGroupIDs: Set<UUID> {
+        Set(tabGroups.lazy.filter(\.isCollapsed).map(\.id))
     }
 }
 

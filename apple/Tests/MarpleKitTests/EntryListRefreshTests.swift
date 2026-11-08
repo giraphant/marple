@@ -12,8 +12,8 @@ struct EntryListRefreshTests {
         let untouched = try #require(table.view(atColumn: 0, row: 4, makeIfNecessary: true))
         let origin = scroll.contentView.bounds.origin
         let reloads = table.fullReloads
-        model.catalog.visibleEntries[1] = model.visibleEntries[1].with(title: "Renamed")
-        model.catalog.visibleEntries[60] = model.visibleEntries[60].with(ratingScore: 5, preview: "New preview")
+        model.viewport.visibleEntries[1] = model.visibleEntries[1].with(title: "Renamed")
+        model.viewport.visibleEntries[60] = model.visibleEntries[60].with(ratingScore: 5, preview: "New preview")
 
         coordinator.reload(table)
 
@@ -36,11 +36,11 @@ struct EntryListRefreshTests {
     @Test func reorderAndRowCountChangesKeepFullReloadFallback() {
         let (model, coordinator, table, scroll) = fixture()
         let reloads = table.fullReloads
-        model.catalog.visibleEntries.swapAt(0, 1)
+        model.viewport.visibleEntries.swapAt(0, 1)
         coordinator.reload(table)
         #expect(table.fullReloads == reloads + 1)
         #expect(coordinator.dropEntry(at: 0)?.path == "paper-1.md")
-        model.catalog.visibleEntries.removeLast()
+        model.viewport.visibleEntries.removeLast()
         coordinator.reload(table)
         #expect(table.fullReloads == reloads + 2)
         #expect(table.numberOfRows == 157)
@@ -50,21 +50,21 @@ struct EntryListRefreshTests {
     @Test func matchContentRefreshesLocallyButIdentityAndModeChangesReload() {
         let (model, coordinator, table, scroll) = fixture()
         let path = model.visibleEntries[0].path
-        model.catalog.searchMatches = [path: matches("old", ordinal: 0)]
+        model.viewport.searchMatches = [path: matches("old", ordinal: 0)]
         coordinator.reload(table)
         let reloads = table.fullReloads
-        model.catalog.searchMatches[path] = matches("new", ordinal: 0)
+        model.viewport.searchMatches[path] = matches("new", ordinal: 0)
         coordinator.reload(table)
         #expect(table.fullReloads == reloads)
         #expect(table.partialRows == IndexSet(integer: 1))
-        model.catalog.searchMatches[path] = matches("new", ordinal: 1)
+        model.viewport.searchMatches[path] = matches("new", ordinal: 1)
         coordinator.reload(table)
         #expect(table.fullReloads == reloads + 1)
         // Same rows, but switching search mode still needs the full fallback.
-        model.catalog.searchMatches = [path: .empty]
+        model.viewport.searchMatches = [path: .empty]
         coordinator.reload(table)
         let beforeClear = table.fullReloads
-        model.catalog.searchMatches = [:]
+        model.viewport.searchMatches = [:]
         coordinator.reload(table)
         #expect(table.fullReloads == beforeClear + 1)
         #expect(scroll.documentView === table)
@@ -78,7 +78,7 @@ struct EntryListRefreshTests {
     private func fixture() -> (AppModel, EntryListTable.Coordinator, ListReloadCountingTable, NSScrollView) {
         _ = NSApplication.shared
         let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
-        model.catalog.visibleEntries = (0..<80).map {
+        model.viewport.visibleEntries = (0..<80).map {
             Entry(path: "paper-\($0).md", type: .paper, title: "Paper \($0)", author: [],
                   year: nil, ratingScore: 0, themes: [], preview: "Preview", hasPDF: false)
         }
