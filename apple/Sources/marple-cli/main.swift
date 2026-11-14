@@ -189,7 +189,7 @@ struct MarpleCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "marple-cli",
         abstract: "Search, read, open, and organize Marple documents from agent workflows.",
-        subcommands: [Search.self, Read.self, Open.self, Ping.self, Tabs.self, Folders.self, Collections.self, Terms.self]
+        subcommands: [Search.self, Read.self, Open.self, Ping.self, Spaces.self, Tabs.self, Folders.self, Collections.self, Terms.self]
     )
 }
 
@@ -222,9 +222,12 @@ struct Open: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Open a document in Marple's Pages workspace.")
     @Argument(help: "Workspace-relative or absolute path of the document.")
     var path: String
+    @Option(name: .long, help: "Target Space UUID from spaces list.")
+    var space: String?
 
     func run() throws {
-        let code = runOpenWithFallback(path)
+        let code = space.map { runRequest(CLIRequest(method: CLIMethod.openInSpace, path: path, spaceID: $0)) }
+            ?? runOpenWithFallback(path)
         if code != 0 { throw ExitCode(code) }
     }
 }

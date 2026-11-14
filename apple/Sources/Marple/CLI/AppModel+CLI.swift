@@ -39,12 +39,19 @@ extension AppModel {
         return (split.frontmatter ?? "", split.body)
     }
 
-    func cliOpenDocument(path inputPath: String) async throws {
+    func cliOpenDocument(path inputPath: String, spaceID: UUID? = nil) async throws {
         guard let path = cliRelativePath(inputPath),
               await cliEnsureIndexed(path: path) else {
             throw CLIBackendError.notFound(inputPath)
         }
-        if let existing = tabs.first(where: { $0.location.openPath == path }) {
+        if let spaceID, spaceID != activeSpaceID {
+            guard let space = spaces.first(where: { $0.id == spaceID }) else {
+                throw CLIOrganizationError(code: CLIErrorCode.notFound, message: "Space not found: \(spaceID)")
+            }
+            if space.workspace?.tabs.contains(where: { $0.location.openPath == path }) != true {
+                await openInSpace(path, space: spaceID)
+            }
+        } else if let existing = tabs.first(where: { $0.location.openPath == path }) {
             await selectTab(existing.id)
         } else {
             await openInNewTab(path)

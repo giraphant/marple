@@ -14,6 +14,9 @@ extension OrganizationCommand {
 }
 
 struct MutationOptions: ParsableArguments {
+    @Option(name: .long, help: "Target Space UUID from spaces list (defaults to the front window's Space).")
+    var space: String?
+
     @Option(name: .customLong("retry-request"), help: "Recover the original mutation using its request UUID; an unknown request is never executed again.")
     var retryRequest: String?
 
@@ -48,8 +51,9 @@ struct MoveOptions: ParsableArguments {
     @Flag(name: .long, help: "Append to the fixed pages section at the root.")
     var root = false
 
-    func request(method: String) -> CLIRequest {
-        CLIRequest(method: method, ids: ids, parent: parent, before: before, after: after, root: root)
+    func request(method: String, spaceID: String?) -> CLIRequest {
+        CLIRequest(method: method, ids: ids, parent: parent, before: before, after: after, root: root,
+                   spaceID: spaceID)
     }
 }
 
@@ -61,7 +65,11 @@ struct Tabs: ParsableCommand {
     struct List: OrganizationCommand {
         static let configuration = CommandConfiguration(
             abstract: "Return the sidebar tree, IDs, titles, paths, and pinned state as JSON.")
-        var request: CLIRequest { CLIRequest(method: CLIMethod.tabsList) }
+        @Option(name: .long, help: "Target Space UUID from spaces list.")
+        var space: String?
+        var request: CLIRequest {
+            CLIRequest(method: space == nil ? CLIMethod.tabsList : CLIMethod.tabsListInSpace, spaceID: space)
+        }
     }
 
     struct Rename: OrganizationMutationCommand {
@@ -73,7 +81,7 @@ struct Tabs: ParsableCommand {
         var title: String?
         @Flag(name: .long, help: "Restore the document's default title.")
         var reset = false
-        var request: CLIRequest { CLIRequest(method: CLIMethod.tabsRename, id: id, title: title, reset: reset) }
+        var request: CLIRequest { CLIRequest(method: CLIMethod.tabsRename, id: id, title: title, reset: reset, spaceID: recovery.space) }
     }
 
     struct Move: OrganizationMutationCommand {
@@ -81,7 +89,7 @@ struct Tabs: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Move tabs using exactly one of --parent, --root, --before, or --after.")
         @OptionGroup var options: MoveOptions
-        var request: CLIRequest { options.request(method: CLIMethod.tabsMove) }
+        var request: CLIRequest { options.request(method: CLIMethod.tabsMove, spaceID: recovery.space) }
     }
 }
 
@@ -101,7 +109,7 @@ struct Folders: ParsableCommand {
         @Option(name: .long, parsing: .upToNextOption, help: "Tab and folder IDs to place inside; tabs become pinned.")
         var items: [String] = []
         var request: CLIRequest {
-            CLIRequest(method: CLIMethod.foldersCreate, ids: items, title: title, parent: parent)
+            CLIRequest(method: CLIMethod.foldersCreate, ids: items, title: title, parent: parent, spaceID: recovery.space)
         }
     }
 
@@ -112,7 +120,7 @@ struct Folders: ParsableCommand {
         var id: String
         @Argument(help: "New folder name.")
         var title: String
-        var request: CLIRequest { CLIRequest(method: CLIMethod.foldersRename, id: id, title: title) }
+        var request: CLIRequest { CLIRequest(method: CLIMethod.foldersRename, id: id, title: title, spaceID: recovery.space) }
     }
 
     struct Move: OrganizationMutationCommand {
@@ -120,7 +128,7 @@ struct Folders: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Move folders using exactly one of --parent, --root, --before, or --after.")
         @OptionGroup var options: MoveOptions
-        var request: CLIRequest { options.request(method: CLIMethod.foldersMove) }
+        var request: CLIRequest { options.request(method: CLIMethod.foldersMove, spaceID: recovery.space) }
     }
 
     struct Dissolve: OrganizationMutationCommand {
@@ -128,6 +136,15 @@ struct Folders: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Remove a folder, promoting its children in place.")
         @Argument(help: "Full folder ID from tabs list.")
         var id: String
-        var request: CLIRequest { CLIRequest(method: CLIMethod.foldersDissolve, id: id) }
+        var request: CLIRequest { CLIRequest(method: CLIMethod.foldersDissolve, id: id, spaceID: recovery.space) }
+    }
+}
+
+struct Spaces: ParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "List Spaces and their IDs.", subcommands: [List.self])
+
+    struct List: OrganizationCommand {
+        static let configuration = CommandConfiguration(abstract: "Return Spaces as JSON.")
+        var request: CLIRequest { CLIRequest(method: CLIMethod.spacesList) }
     }
 }

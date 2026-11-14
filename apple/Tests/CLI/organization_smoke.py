@@ -13,8 +13,18 @@ binary = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).re
 first = "11111111-1111-1111-1111-111111111111"
 second = "22222222-2222-2222-2222-222222222222"
 folder = "33333333-3333-3333-3333-333333333333"
+space = "44444444-4444-4444-4444-444444444444"
 cases = [
     (["tabs", "list"], {"method": "tabs.list"}),
+    (["spaces", "list"], {"method": "spaces.list"}),
+    (["tabs", "list", "--space", space], {"method": "tabs.listInSpace", "spaceID": space}),
+    (["open", "notes/a.md", "--space", space], {"method": "open.inSpace", "path": "notes/a.md", "spaceID": space}),
+    (["tabs", "rename", first, "Title", "--space", space], {"method": "tabs.rename", "id": first, "title": "Title", "reset": False, "spaceID": space}),
+    (["tabs", "move", first, "--parent", folder, "--space", space], {"method": "tabs.move", "ids": [first], "parent": folder, "root": False, "spaceID": space}),
+    (["folders", "create", "Tutoring", "--parent", folder, "--space", space], {"method": "folders.create", "title": "Tutoring", "ids": [], "parent": folder, "spaceID": space}),
+    (["folders", "rename", folder, "Title", "--space", space], {"method": "folders.rename", "id": folder, "title": "Title", "spaceID": space}),
+    (["folders", "move", folder, "--root", "--space", space], {"method": "folders.move", "ids": [folder], "root": True, "spaceID": space}),
+    (["folders", "dissolve", folder, "--space", space], {"method": "folders.dissolve", "id": folder, "spaceID": space}),
     (["tabs", "rename", first, "读书笔记"], {"method": "tabs.rename", "id": first, "title": "读书笔记", "reset": False}),
     (["tabs", "rename", first, "--reset"], {"method": "tabs.rename", "id": first, "reset": True}),
     (["tabs", "move", second, first, "--after", folder], {"method": "tabs.move", "ids": [second, first], "after": folder, "root": False}),
@@ -48,10 +58,10 @@ with tempfile.TemporaryDirectory(prefix="cli-home-", dir="/tmp") as home:
                     connection.settimeout(5)
                     with connection.makefile("rb") as stream:
                         actual = json.loads(stream.readline())
-                    if expected["method"] not in ("ping", "tabs.list"):
+                    if expected["method"] in ("tabs.rename", "tabs.move", "folders.create", "folders.rename", "folders.move", "folders.dissolve"):
                         key = actual.get("requestID")
                         assert key and str(uuid.UUID(key)).upper() == key, actual
-                        expected = {**expected, "method": "mutate", "operation": expected["method"],
+                        expected = {**expected, "method": "mutate.inSpace" if "spaceID" in expected else "mutate", "operation": expected["method"],
                                     "requestID": key, "retryOnly": False}
                         response = {**response, "requestID": key}
                     connection.sendall(json.dumps(response).encode() + b"\n")

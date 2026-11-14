@@ -24,6 +24,7 @@ public struct CLIRequest: Codable, Sendable {
     public let before: String?
     public let after: String?
     public let root: Bool?
+    public let spaceID: String?
     public let operation: String?
     public let requestID: String?
     public let retryOnly: Bool?
@@ -35,7 +36,7 @@ public struct CLIRequest: Codable, Sendable {
                 id: String? = nil, ids: [String]? = nil,
                 title: String? = nil, reset: Bool? = nil,
                 parent: String? = nil, before: String? = nil,
-                after: String? = nil, root: Bool? = nil,
+                after: String? = nil, root: Bool? = nil, spaceID: String? = nil,
                 operation: String? = nil, requestID: String? = nil, retryOnly: Bool? = nil) {
         self.method = method
         self.collection = collection
@@ -50,6 +51,7 @@ public struct CLIRequest: Codable, Sendable {
         self.before = before
         self.after = after
         self.root = root
+        self.spaceID = spaceID
         self.operation = operation
         self.requestID = requestID
         self.retryOnly = retryOnly
@@ -57,17 +59,26 @@ public struct CLIRequest: Codable, Sendable {
 
     /// The separate method makes older servers reject before applying a write.
     public func asMutation(requestID: String, retryOnly: Bool) -> CLIRequest {
-        CLIRequest(method: CLIMethod.mutate, path: path, query: query, limit: limit,
+        CLIRequest(method: spaceID == nil ? CLIMethod.mutate : CLIMethod.mutateInSpace,
+                   path: path, query: query, limit: limit,
                    id: id, ids: ids, title: title, reset: reset, parent: parent,
-                   before: before, after: after, root: root,
+                   before: before, after: after, root: root, spaceID: spaceID,
                    operation: method, requestID: requestID, retryOnly: retryOnly)
     }
 
-    public var organizationMethod: String { method == CLIMethod.mutate ? (operation ?? "") : method }
+    public var organizationMethod: String {
+        [CLIMethod.mutate, CLIMethod.mutateInSpace].contains(method) ? (operation ?? "") : method
+    }
 }
 
 public enum CLIMethod {
     public static let mutate = "mutate"
+    // Separate methods make old servers reject scoped requests instead of
+    // silently ignoring the Space ID and acting on the current window.
+    public static let mutateInSpace = "mutate.inSpace"
+    public static let spacesList = "spaces.list"
+    public static let tabsListInSpace = "tabs.listInSpace"
+    public static let openInSpace = "open.inSpace"
     public static let search = "search"
     public static let read = "read"
     public static let open = "open"
@@ -144,13 +155,14 @@ public struct CLIResponseData: Codable, Sendable {
     public let spaceID: UUID?
     public let activeTabID: UUID?
     public let createdID: UUID?
+    public let spaces: [CLISpace]?
 
     public init(collection: ArchiveCollectionResult? = nil, entries: [EntryDigest]? = nil,
                 entry: EntryDetail? = nil,
                 opened: Bool? = nil,
                 pong: String? = nil,
                 tree: [CLITabNode]? = nil, spaceID: UUID? = nil,
-                activeTabID: UUID? = nil, createdID: UUID? = nil,
+                activeTabID: UUID? = nil, createdID: UUID? = nil, spaces: [CLISpace]? = nil,
                 termStatus: TermIndexStatus? = nil, termMatches: [TermMatch]? = nil) {
         self.termStatus = termStatus
         self.termMatches = termMatches
@@ -163,6 +175,21 @@ public struct CLIResponseData: Codable, Sendable {
         self.spaceID = spaceID
         self.activeTabID = activeTabID
         self.createdID = createdID
+        self.spaces = spaces
+    }
+}
+
+public struct CLISpace: Codable, Sendable {
+    public let id: UUID
+    public let name: String
+    public let isArchived: Bool
+    public let isCurrent: Bool
+
+    public init(id: UUID, name: String, isArchived: Bool, isCurrent: Bool) {
+        self.id = id
+        self.name = name
+        self.isArchived = isArchived
+        self.isCurrent = isCurrent
     }
 }
 

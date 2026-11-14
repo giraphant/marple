@@ -253,15 +253,18 @@ final class AppModel {
     }
 
     /// Publish a validated CLI edit as one persisted, undoable sidebar operation.
-    func cliApplyWorkspace(_ updated: Workspace, actionName: String) {
-        let before = (workspace ?? Workspace()).sidebarState
+    func cliApplyWorkspace(_ updated: Workspace, actionName: String, spaceID: WorkspaceSpace.ID) {
+        guard let index = spaces.firstIndex(where: { $0.id == spaceID }) else { return }
+        let before = (spaces[index].workspace ?? Workspace()).sidebarState
         let previousPinnedContext = isPinnedListContext
         var updated = updated
         updated.flattenTemporaryTabs()
         guard updated.sidebarState != before else { return }
-        workspace = updated.isEmpty ? nil : updated
-        if workspace?.tabs.isEmpty != false { isBrowsing = true }
-        registerSidebarUndo(before, actionName: actionName)
+        var space = spaces[index]
+        space.workspace = updated.isEmpty ? nil : updated
+        if space.workspace?.tabs.isEmpty != false { space.isBrowsing = true }
+        spaces[index] = space
+        registerSidebarUndo(before, actionName: actionName, spaceID: spaceID)
         if previousPinnedContext != isPinnedListContext {
             applyActiveListContext(from: previousPinnedContext)
         }

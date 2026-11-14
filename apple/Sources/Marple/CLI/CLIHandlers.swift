@@ -17,16 +17,33 @@ enum CLIHandlers {
             case CLIMethod.read:
                 return try await read(req: req, model: model)
             case CLIMethod.open:
+                guard req.spaceID == nil else {
+                    return .failure(code: CLIErrorCode.badRequest, message: "Space ID requires a scoped request")
+                }
                 return try await open(req: req, model: model)
+            case CLIMethod.openInSpace:
+                let spaceID = try model.cliSpaceID(req.spaceID)
+                guard let path = req.path else {
+                    return .failure(code: CLIErrorCode.badRequest, message: "missing path")
+                }
+                try await model.cliOpenDocument(path: path, spaceID: spaceID)
+                return .success(CLIResponseData(opened: true, spaceID: spaceID))
+            case CLIMethod.spacesList:
+                return .success(CLIResponseData(spaces: model.spaces.map {
+                    CLISpace(id: $0.id, name: $0.name, isArchived: $0.isArchived,
+                             isCurrent: $0.id == model.activeSpaceID)
+                }))
             case CLIMethod.termsStatus, CLIMethod.termsLookup, CLIMethod.termsRefresh:
                 return try await terms(req: req, model: model)
-            case CLIMethod.tabsList, CLIMethod.tabsRename, CLIMethod.tabsMove,
+            case CLIMethod.tabsList, CLIMethod.tabsListInSpace, CLIMethod.tabsRename, CLIMethod.tabsMove,
                  CLIMethod.foldersCreate, CLIMethod.foldersRename,
                  CLIMethod.foldersMove, CLIMethod.foldersDissolve:
                 return handleOrganization(req, model: model)
             default:
                 return .failure(code: CLIErrorCode.badRequest, message: "unknown method: \(req.method)")
             }
+        } catch let error as CLIOrganizationError {
+            return .failure(code: error.code, message: error.message)
         } catch let error as ArchiveCollectionError {
             return .failure(code: error.code, message: error.description)
         } catch let e as CLIBackendError {

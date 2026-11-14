@@ -49,14 +49,20 @@ contains your `.md` library). The choice is persisted in
 
 ## Organize tabs from the CLI
 
-With Marple running and its CLI server enabled, `marple-cli tabs list` returns
-the current Space's sidebar tree as JSON, including each item's `id`, `kind`,
+With Marple running and its CLI server enabled, `marple-cli spaces list` returns
+the available Spaces and their IDs. `marple-cli tabs list` returns the front
+window's current Space; add `--space SPACE_ID` to inspect or edit a specific
+Space without changing window focus. The sidebar tree includes each item's `id`, `kind`,
 `title`, document `path`, pinned state, and nested `children`. Use those full
 UUIDs in subsequent commands; tab and folder IDs are valid for the running
 session and should be fetched again after restarting Marple.
 
 ```sh
 marple-cli tabs list
+marple-cli spaces list
+marple-cli tabs list --space SPACE_ID
+marple-cli open vault/papers/example.md --space SPACE_ID
+marple-cli folders create 'Research' --parent FOLDER_ID --space SPACE_ID
 marple-cli tabs rename TAB_ID 'Reading notes'
 marple-cli tabs rename TAB_ID --reset
 marple-cli tabs move TAB_C TAB_A --after TAB_B
@@ -69,6 +75,12 @@ marple-cli folders move FOLDER_ID --before OTHER_FOLDER_ID
 marple-cli tabs move TAB_ID --root
 marple-cli folders dissolve FOLDER_ID
 ```
+
+`--space SPACE_ID` is supported by `open` and all `tabs` and `folders`
+subcommands. Supply it on every operation in a scripted workflow; otherwise a
+focus change can select a different Space. Scoped commands require a matching
+version of the app and CLI; older app versions reject them without editing the
+current Space.
 
 Each move takes exactly one destination: `--parent FOLDER_ID`, `--root`,
 `--before ITEM_ID`, or `--after ITEM_ID`. Before/after uses the anchor's parent

@@ -29,7 +29,7 @@ final class CLIMutationReplayCache {
     /// Organization writes do not suspend on MainActor. Capture their result
     /// before socket delivery so a lost response cannot cause a second write.
     func respond(to request: CLIRequest, perform: () -> CLIResponse) -> CLIResponse {
-        guard request.method == CLIMethod.mutate,
+        guard [CLIMethod.mutate, CLIMethod.mutateInSpace].contains(request.method),
               CLIMethod.isOrganizationMutation(request.organizationMethod),
               let suppliedID = request.requestID, let uuid = UUID(uuidString: suppliedID) else {
             return CLIResponse.failure(code: CLIErrorCode.badRequest,

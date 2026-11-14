@@ -176,7 +176,7 @@ final class CLIServer: @unchecked Sendable {
         guard let model = model?(), let indexer else {
             return .failure(code: CLIErrorCode.internalError, message: "marple not ready")
         }
-        if req.method == CLIMethod.mutate, let mutationReplay {
+        if [CLIMethod.mutate, CLIMethod.mutateInSpace].contains(req.method), let mutationReplay {
             return mutationReplay.respond(to: req) {
                 CLIHandlers.handleOrganization(req, model: model)
             }

@@ -11,10 +11,28 @@ struct CLIOrganizationError: Error {
 }
 
 extension AppModel {
+    func cliSpaceID(_ value: String?) throws -> UUID {
+        guard let value, let id = UUID(uuidString: value) else {
+            throw CLIOrganizationError.invalid("--space requires a full Space UUID from spaces list")
+        }
+        guard spaces.contains(where: { $0.id == id }) else {
+            throw CLIOrganizationError(code: CLIErrorCode.notFound, message: "Space not found: \(value)")
+        }
+        return id
+    }
+
     func cliOrganize(_ request: CLIRequest) throws -> CLIResponse {
-        let method = request.organizationMethod
-        if method == CLIMethod.tabsList { return .success(cliTree()) }
-        var edited = workspace ?? Workspace()
+        let scoped = [CLIMethod.tabsListInSpace, CLIMethod.mutateInSpace].contains(request.method)
+        guard scoped || request.spaceID == nil else {
+            throw CLIOrganizationError.invalid("Space ID requires a scoped request")
+        }
+        let spaceID = try scoped ? cliSpaceID(request.spaceID) : activeSpaceID
+        guard let spaceID, let space = spaces.first(where: { $0.id == spaceID }) else {
+            throw CLIOrganizationError(code: CLIErrorCode.notFound, message: "no current Space")
+        }
+        let method = request.method == CLIMethod.tabsListInSpace ? CLIMethod.tabsList : request.organizationMethod
+        if method == CLIMethod.tabsList { return .success(cliTree(space)) }
+        var edited = space.workspace ?? Workspace()
         var createdID: UUID?
         let actionName: String
         switch method {
@@ -83,12 +101,12 @@ extension AppModel {
         default:
             throw CLIOrganizationError.invalid("unknown method: \(method)")
         }
-        cliApplyWorkspace(edited, actionName: actionName)
-        return .success(cliTree(createdID: createdID))
+        cliApplyWorkspace(edited, actionName: actionName, spaceID: spaceID)
+        return .success(cliTree(spaces.first { $0.id == spaceID }!, createdID: createdID))
     }
 
-    private func cliTree(createdID: UUID? = nil) -> CLIResponseData {
-        let byID = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
+    private func cliTree(_ space: WorkspaceSpace, createdID: UUID? = nil) -> CLIResponseData {
+        let byID = Dictionary(uniqueKeysWithValues: (space.workspace?.tabs ?? []).map { ($0.id, $0) })
         func nodes(_ source: [TabNode]) -> [CLITabNode] {
             source.compactMap { node in
                 switch node {
@@ -103,8 +121,8 @@ extension AppModel {
                 }
             }
         }
-        return CLIResponseData(tree: nodes(tabRootNodes), spaceID: activeSpaceID,
-                               activeTabID: activeTabID, createdID: createdID)
+        return CLIResponseData(tree: nodes(space.workspace?.rootNodes ?? []), spaceID: space.id,
+                               activeTabID: space.isBrowsing ? nil : space.workspace?.activeID, createdID: createdID)
     }
 
     private func cliTitle(_ title: String?) throws -> String {

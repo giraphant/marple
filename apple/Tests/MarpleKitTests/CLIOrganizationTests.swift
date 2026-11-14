@@ -5,6 +5,82 @@ import Testing
 
 @Suite @MainActor
 struct CLIOrganizationTests {
+    @Test func scopedRequestsOrganizeAnotherSpaceWithoutChangingWindowSelection() async throws {
+        let model = await fixture()
+        let first = try #require(model.activeSpaceID)
+        let original = model.workspace?.sidebarState
+        model.addSpace()
+        let target = try #require(model.activeSpaceID)
+        model.createFolder()
+        let parent = try #require(model.tabGroups.first?.id)
+        let otherWindow = AppModel(library: model.library)
+        await otherWindow.selectSpace(first)
+
+        let listed = try await request(CLIMethod.spacesList, model: otherWindow)
+        #expect(listed.data?.spaces?.map(\.id) == [first, target])
+        #expect(listed.data?.spaces?.first?.isCurrent == true)
+        let tree = try await request(CLIMethod.tabsListInSpace, ["spaceID": target.uuidString], model: otherWindow)
+        #expect(tree.data?.spaceID == target)
+        #expect(tree.data?.tree?.first?.id == parent)
+
+        let undo = model.library.undoManager
+        undo.groupsByEvent = false
+        otherWindow.undoManager = undo
+        let cache = CLIMutationReplayCache()
+        let request = CLIRequest(method: CLIMethod.foldersCreate, title: "Tutoring",
+                                 parent: parent.uuidString, spaceID: target.uuidString)
+            .asMutation(requestID: UUID().uuidString, retryOnly: false)
+        #expect(request.method == CLIMethod.mutateInSpace)
+        #expect(request.spaceID == target.uuidString)
+        undo.beginUndoGrouping()
+        let response = cache.respond(to: request) { CLIHandlers.handleOrganization(request, model: otherWindow) }
+        undo.endUndoGrouping()
+        let created = try #require(response.data?.createdID)
+        #expect(response.ok)
+        #expect(response.data?.spaceID == target)
+        #expect(otherWindow.activeSpaceID == first)
+        #expect(otherWindow.workspace?.sidebarState == original)
+        #expect(model.workspace?.group(created)?.name == "Tutoring")
+        let replay = cache.respond(to: request) { Issue.record("must not replay"); return .success() }
+        #expect(replay.data?.createdID == created)
+        undo.undo()
+        #expect(model.workspace?.group(created) == nil)
+        #expect(otherWindow.activeSpaceID == first)
+        undo.redo()
+        #expect(model.workspace?.group(created)?.name == "Tutoring")
+    }
+
+    @Test func scopedOpenAndInvalidSpaceNeverActOnTheFrontSpace() async throws {
+        let model = await fixture()
+        let first = try #require(model.activeSpaceID)
+        let original = model.workspace?.sidebarState
+        model.addSpace()
+        let target = try #require(model.activeSpaceID)
+        await model.selectSpace(first)
+        let indexer = VaultIndexer(workspaceRoot: "/tmp")
+        let open = CLIRequest(method: CLIMethod.openInSpace, path: "notes/a.md", spaceID: target.uuidString)
+        #expect((await CLIHandlers.handle(open, model: model, indexer: indexer)).ok)
+        #expect((await CLIHandlers.handle(open, model: model, indexer: indexer)).ok)
+        #expect(model.activeSpaceID == first)
+        #expect(model.workspace?.sidebarState == original)
+        #expect(model.spaces.first { $0.id == target }?.workspace?.tabs.count == 1)
+
+        for value in ["invalid", UUID().uuidString] {
+            let bad = CLIRequest(method: CLIMethod.openInSpace, path: "notes/b.md", spaceID: value)
+            #expect(!(await CLIHandlers.handle(bad, model: model, indexer: indexer)).ok)
+            let tree = try await request(CLIMethod.tabsListInSpace, ["spaceID": value], model: model)
+            #expect(!tree.ok)
+        }
+        let unsafe = try await request(CLIMethod.tabsList, ["spaceID": target.uuidString], model: model)
+        #expect(unsafe.error?.code == CLIErrorCode.badRequest)
+        let unsafeWrite = CLIRequest(method: CLIMethod.mutate, title: "Wrong space", spaceID: target.uuidString,
+                                     operation: CLIMethod.foldersCreate, requestID: UUID().uuidString)
+        #expect(CLIHandlers.handleOrganization(unsafeWrite, model: model).error?.code == CLIErrorCode.badRequest)
+        let unsafeOpen = CLIRequest(method: CLIMethod.open, path: "notes/b.md", spaceID: target.uuidString)
+        #expect((await CLIHandlers.handle(unsafeOpen, model: model, indexer: indexer)).error?.code == CLIErrorCode.badRequest)
+        #expect(model.workspace?.sidebarState == original)
+    }
+
     @Test func listReturnsCurrentSpaceTreeWithUsableIDs() async throws {
         let model = await fixture()
         let ids = model.tabs.map(\.id)

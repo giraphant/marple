@@ -127,6 +127,45 @@ import Darwin
     }
 
     @MainActor
+    @Test func scopedMutationRoundTripsAndRetryCannotChangeSpace() async throws {
+        let dir = URL(fileURLWithPath: "/tmp/cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let socketPath = dir.appendingPathComponent("s.sock").path
+        let model = AppModel(client: StubVaultClient(entries: [], texts: [:]))
+        let first = try #require(model.activeSpaceID)
+        model.addSpace()
+        let target = try #require(model.activeSpaceID)
+        await model.selectSpace(first)
+        let server = CLIServer(socketPath: socketPath)
+        try server.start(model: model, indexer: VaultIndexer(workspaceRoot: dir.path))
+        defer { server.stop() }
+
+        let requestID = UUID().uuidString
+        let write = CLIRequest(method: CLIMethod.foldersCreate, title: "Target", spaceID: target.uuidString)
+        let retry = write.asMutation(requestID: requestID, retryOnly: true)
+        let firstWrite = write.asMutation(requestID: requestID, retryOnly: false)
+        let conflicting = CLIRequest(method: CLIMethod.foldersCreate, title: "Target", spaceID: first.uuidString)
+            .asMutation(requestID: requestID, retryOnly: true)
+        let created = try await Task.detached {
+            try Self.roundTrip(firstWrite, socketPath: socketPath)
+        }.value
+        #expect(created.ok)
+        #expect(created.data?.spaceID == target)
+        let replay = try await Task.detached {
+            try Self.roundTrip(retry, socketPath: socketPath)
+        }.value
+        #expect(replay.data?.createdID == created.data?.createdID)
+        let conflict = try await Task.detached {
+            try Self.roundTrip(conflicting, socketPath: socketPath)
+        }.value
+        #expect(conflict.error?.code == "request_conflict")
+        #expect(model.activeSpaceID == first)
+        #expect(model.tabGroups.isEmpty)
+        #expect(model.spaces.first { $0.id == target }?.workspace?.tabGroups.count == 1)
+    }
+
+    @MainActor
     @Test func pingDoesNotCrossMainActorFromAcceptQueue() throws {
         let dir = URL(fileURLWithPath: "/tmp/cli-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
