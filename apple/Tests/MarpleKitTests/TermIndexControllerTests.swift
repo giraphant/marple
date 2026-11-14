@@ -1,10 +1,48 @@
 import Foundation
+import GRDB
 import Testing
 @testable import Marple
 @testable import MarpleKit
 
 @Suite @MainActor
 struct TermIndexControllerTests {
+    @Test func settingsRebuildRecoversCorruptPairsWithoutChangingDatabasePath() async throws {
+        let fixture = TermIndexTests()
+        let root = try fixture.workspace()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try fixture.write(root, "a.md", "| 能动性 | agency | 行动 |")
+        try fixture.makeCorruptPairsDatabase(root)
+        let controller = TermIndexController(workspaceRoot: root.path)
+        let path = controller.index.databasePath
+        await #expect(throws: (any Error).self) { try await controller.refresh() }
+        #expect(controller.lastError != nil && !controller.isRunning)
+        let rebuilt = try await controller.refresh(rebuild: true)
+        #expect(rebuilt.relations == 1 && rebuilt.scannedDocuments == 1)
+        #expect(controller.status == rebuilt && controller.lastError == nil && !controller.isRunning)
+        #expect(controller.index.databasePath == path)
+        #expect(try await controller.index.lookup("agency").first?.term == "能动性")
+        try await DatabaseQueue(path: path).read { db in
+            let result = try String.fetchAll(db, sql: "PRAGMA integrity_check")
+            #expect(result == ["ok"])
+        }
+    }
+
+    @Test func rebuildReportsAnUnreadableDatabaseHeaderWithoutOverwritingIt() async throws {
+        let fixture = TermIndexTests()
+        let root = try fixture.workspace()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try fixture.write(root, "a.md", "| 能动性 | agency | 行动 |")
+        let directory = root.appendingPathComponent(".marple")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let path = directory.appendingPathComponent("terms.sqlite")
+        let contents = Data("not a sqlite database".utf8)
+        try contents.write(to: path)
+        let controller = TermIndexController(workspaceRoot: root.path)
+        await #expect(throws: (any Error).self) { try await controller.refresh(rebuild: true) }
+        #expect(controller.lastError != nil && !controller.isRunning)
+        #expect(try Data(contentsOf: path) == contents)
+    }
+
     @Test func cliAndAutomaticRefreshUseSameIndex() async throws {
         let fixture = TermIndexTests()
         let root = try fixture.workspace()

@@ -34,8 +34,13 @@ public actor TermIndex {
         var config = Configuration()
         config.busyMode = .timeout(5)
         let pool = try DatabasePool(path: databasePath, configuration: config)
-        try pool.write { db in
-            try db.execute(sql: """
+        try pool.write(Self.createSchema)
+        self.pool = pool
+        return pool
+    }
+
+    private static func createSchema(_ db: Database) throws {
+        try db.execute(sql: """
                 CREATE TABLE IF NOT EXISTS files (
                     path TEXT PRIMARY KEY, mtime REAL NOT NULL, size INTEGER NOT NULL
                 );
@@ -52,9 +57,6 @@ public actor TermIndex {
                 CREATE INDEX IF NOT EXISTS pairs_english ON pairs(english_key);
                 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 """)
-        }
-        self.pool = pool
-        return pool
     }
 
     public func status() throws -> TermIndexStatus? {
@@ -82,8 +84,23 @@ public actor TermIndex {
             }
         }
         if let walkError { throw walkError }
-        let pool = try database()
-        return try pool.write { db in
+        // Build a fresh database for an explicit rebuild; do not read the old
+        // index until the replacement is ready to publish.
+        let temporaryPath = rebuild
+            ? FileManager.default.temporaryDirectory.appendingPathComponent("marple-terms-\(UUID().uuidString).sqlite").path
+            : nil
+        if temporaryPath != nil {
+            try FileManager.default.createDirectory(
+                atPath: (databasePath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        }
+        let temporary = try temporaryPath.map { try DatabaseQueue(path: $0) }
+        defer {
+            try? temporary?.close()
+            if let temporaryPath { try? FileManager.default.removeItem(atPath: temporaryPath) }
+        }
+        let writer: any DatabaseWriter = try temporary ?? database()
+        let status = try writer.write { db in
+            if rebuild { try Self.createSchema(db) }
             let version = try String.fetchOne(db, sql: "SELECT value FROM meta WHERE key = 'parser_version'")
             let full = rebuild || version != String(TermParser.version)
             if full { try db.execute(sql: "DELETE FROM files") }
@@ -138,6 +155,22 @@ public actor TermIndex {
             }
             return try Self.readStatus(db)!
         }
+        if let temporary {
+            try Task.checkCancellation()
+            // Let SQLite publish the new pages without replacing an open file
+            // or separating it from its WAL, even if the old pairs tree is corrupt.
+            let destination: DatabasePool
+            if let pool {
+                destination = pool
+            } else {
+                var config = Configuration()
+                config.busyMode = .timeout(5)
+                destination = try DatabasePool(path: databasePath, configuration: config)
+            }
+            try temporary.backup(to: destination)
+            self.pool = destination
+        }
+        return status
     }
 
     public func lookup(_ term: String) throws -> [TermMatch] {

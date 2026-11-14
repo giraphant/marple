@@ -32,7 +32,8 @@ final class TermIndexController {
         let task = Task { @MainActor in
             defer { self.running = nil; self.isRunning = false }
             do {
-                if status == nil { status = try await index.status() }
+                // A corrupt index must not block the explicit rebuild action.
+                if status == nil && !pendingRebuild { status = try await index.status() }
                 repeat {
                     let rebuild = pendingRebuild
                     pendingRefresh = false

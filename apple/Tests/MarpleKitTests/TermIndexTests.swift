@@ -140,6 +140,40 @@ struct TermIndexTests {
         try text.write(to: root.appendingPathComponent("vault/" + path), atomically: true, encoding: .utf8)
     }
 
+    func makeCorruptPairsDatabase(_ root: URL) throws {
+        let directory = root.appendingPathComponent(".marple")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let path = directory.appendingPathComponent("terms.sqlite").path
+        let queue = try DatabaseQueue(path: path)
+        let location = try queue.write { db in
+            try db.execute(sql: """
+                CREATE TABLE files (path TEXT PRIMARY KEY, mtime REAL NOT NULL, size INTEGER NOT NULL);
+                CREATE TABLE pairs (
+                    path TEXT NOT NULL REFERENCES files(path) ON DELETE CASCADE,
+                    line INTEGER NOT NULL, chinese TEXT NOT NULL, english TEXT NOT NULL,
+                    chinese_key TEXT NOT NULL, english_key TEXT NOT NULL,
+                    chinese_cell TEXT NOT NULL, english_cell TEXT NOT NULL, definition TEXT,
+                    PRIMARY KEY (path, line, chinese_key, english_key));
+                CREATE INDEX pairs_chinese ON pairs(chinese_key);
+                CREATE INDEX pairs_english ON pairs(english_key);
+                CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                INSERT INTO files VALUES ('vault/a.md', 1, 1);
+                INSERT INTO pairs VALUES ('vault/a.md', 1, '旧术语', 'old term',
+                    '旧术语', 'old term', '旧术语', 'old term', NULL);
+                INSERT INTO meta VALUES ('updated_at', '1');
+                INSERT INTO meta VALUES ('parser_version', '2');
+                """)
+            return (try Int.fetchOne(db, sql: "SELECT rootpage FROM sqlite_master WHERE name='pairs'")!,
+                    try Int.fetchOne(db, sql: "PRAGMA page_size")!)
+        }
+        // Deliberately corrupt only the pairs B-tree, with no SQLite connection open.
+        try queue.close()
+        let file = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+        defer { try? file.close() }
+        try file.seek(toOffset: UInt64((location.0 - 1) * location.1))
+        try file.write(contentsOf: Data([0xFF]))
+    }
+
     @Test func incrementalChangesRetainOtherSourcesAndSurviveReopening() async throws {
         let root = try workspace()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -175,6 +209,49 @@ struct TermIndexTests {
         try "No glossary anymore".write(to: root.appendingPathComponent("vault/a.md"), atomically: true, encoding: .utf8)
         let empty = try await index.refresh()
         #expect(empty.terms == 0 && empty.scannedDocuments == 1 && empty.sourceDocuments == 0)
+    }
+
+    @Test func rebuildCreatesAnIndexWhenNoneExists() async throws {
+        let root = try workspace()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write(root, "a.md", "| 能动性 | agency | 行动 |")
+        let index = TermIndex(workspaceRoot: root.path)
+        let rebuilt = try await index.refresh(rebuild: true)
+        #expect(rebuilt.relations == 1 && rebuilt.scannedDocuments == 1)
+        #expect(try await index.lookup("agency").first?.term == "能动性")
+    }
+
+    @Test func rebuildKeepsAnExistingReaderOnItsSnapshot() async throws {
+        let root = try workspace()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write(root, "a.md", "| 旧术语 | old term | 旧 |")
+        let index = TermIndex(workspaceRoot: root.path)
+        _ = try await index.refresh()
+        let reader = try DatabaseQueue(path: index.databasePath)
+        let started = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let snapshot = Task.detached {
+            try reader.read { db in
+                let before = try String.fetchOne(db, sql: "SELECT english FROM pairs")
+                started.signal()
+                guard release.wait(timeout: .now() + 10) == .success else { throw CocoaError(.fileReadUnknown) }
+                return [before, try String.fetchOne(db, sql: "SELECT english FROM pairs")]
+            }
+        }
+        defer { release.signal() }
+        let readerStarted = await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(returning: started.wait(timeout: .now() + 5) == .success)
+            }
+        }
+        try #require(readerStarted)
+        try write(root, "a.md", "| 新术语 | new term | 新 |")
+        let rebuilt = try await index.refresh(rebuild: true)
+        #expect(rebuilt.relations == 1)
+        release.signal()
+        #expect(try await snapshot.value == ["old term", "old term"])
+        #expect(try await index.lookup("new term").first?.term == "新术语")
+        #expect(try await index.lookup("old term").isEmpty)
     }
 
     @Test func failedRebuildRollsBackAndMissingVaultDoesNotEraseIndex() async throws {
