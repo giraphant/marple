@@ -129,7 +129,29 @@ final class Library {
                 loadedCountsSnapshot = restored
             }
             savedViews = s.savedViews ?? []
-            let session = s.restoredSession()
+            var session = s.restoredSession()
+            // Older versions kept temporary tabs per window. Preserve their union
+            // before presenting the same set in every restored window.
+            if !session.windows.isEmpty {
+                var shared = session.windows[0].spaces
+                for window in session.windows.dropFirst() {
+                    for index in shared.indices {
+                        guard let other = window.spaces.first(where: { $0.id == shared[index].id })?.workspace else { continue }
+                        var workspace = shared[index].workspace ?? Workspace()
+                        workspace.mergeTemporaryTabs(from: other)
+                        shared[index].workspace = workspace.isEmpty ? nil : workspace
+                    }
+                }
+                for index in session.windows.indices {
+                    for spaceIndex in session.windows[index].spaces.indices {
+                        let id = session.windows[index].spaces[spaceIndex].id
+                        guard let workspace = shared.first(where: { $0.id == id })?.workspace else { continue }
+                        var local = session.windows[index].spaces[spaceIndex].workspace ?? Workspace()
+                        local.adoptTabs(from: workspace)
+                        session.windows[index].spaces[spaceIndex].workspace = local.isEmpty ? nil : local
+                    }
+                }
+            }
             spaceDefinitions = session.definitions
             pendingWindows = session.windows
             recentlyClosedWindow = s.recentlyClosedWindow
@@ -199,15 +221,22 @@ final class Library {
         persist()
     }
 
-    /// A window changed its Spaces. When the shared part moved, every other
-    /// window lays the new definitions over its own reading state.
-    func windowDidChangeSpaces(_ source: AppModel) {
+    /// Prevent changes applied to another window from echoing back to the source.
+    @ObservationIgnored private var isSharingSpaces = false
+
+    /// Share Space and tab organization while each window keeps its reading state.
+    func windowDidChangeSpaces(_ source: AppModel, previous: [WorkspaceSpace]) {
+        guard !isSharingSpaces else { return }
         guard windowRefs.contains(where: { $0.value === source }) else { return }
         let definitions = source.spaces.map(\.definition)
-        guard definitions != spaceDefinitions else { return }
+        let oldStructure = previous.map { $0.workspace?.sharedTabStructure }
+        let newStructure = source.spaces.map { $0.workspace?.sharedTabStructure }
+        guard definitions != spaceDefinitions || oldStructure != newStructure else { return }
         spaceDefinitions = definitions
+        isSharingSpaces = true
+        defer { isSharingSpaces = false }
         for window in windows where window !== source {
-            window.adoptSharedSpaces(definitions)
+            window.adoptSharedSpaces(source.spaces)
         }
     }
 

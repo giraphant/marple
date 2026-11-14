@@ -162,7 +162,7 @@ final class AppModel {
     /// Identifies this window in saved state (multi-window).
     private(set) var windowID = UUID()
 
-    private(set) var spaces: [WorkspaceSpace] = [] { didSet { spacesDidChange() } }
+    private(set) var spaces: [WorkspaceSpace] = [] { didSet { spacesDidChange(from: oldValue) } }
     private(set) var activeSpaceID: WorkspaceSpace.ID? { didSet { persist() } }
     private(set) var pendingFolderRenameID: TabGroup.ID?
 
@@ -590,7 +590,7 @@ final class AppModel {
     var visibleTypeOrder: [EntryType] { typeOrder.filter { !hiddenTypes.contains($0) } }
 
     /// A window over `library`. `window` is a saved window to reopen; nil opens a
-    /// fresh one whose Spaces show the shared pinned pages at their anchors.
+    /// fresh one with the shared tabs and independent browsing state.
     init(library: Library, restoring window: RestoredWindow? = nil) {
         self.library = library
         self.viewport = CatalogViewport(catalog: library.catalog)
@@ -617,13 +617,20 @@ final class AppModel {
             filterMatch = window.filterMatch
             browseMode = BrowseMode(rawValue: window.browseMode) ?? .grid
         } else {
-            spaces = library.spaceDefinitions.map { WorkspaceSpace(definition: $0) }
+            spaces = library.windows.first?.spaces.map { space in
+                var copy = space
+                copy.isBrowsing = true
+                return copy
+            } ?? library.spaceDefinitions.map { WorkspaceSpace(definition: $0) }
             activeSpaceID = spaces.first { !$0.isArchived }?.id ?? spaces.first?.id
         }
         if spaces.isEmpty {
             let initial = WorkspaceSpace(name: String(localized: "空间 1"), workspace: nil, isBrowsing: true)
             spaces = [initial]
             activeSpaceID = initial.id
+        }
+        if let shared = library.windows.first {
+            adoptSharedSpaces(shared.spaces)
         }
         isRestoring = false
         library.register(self)
@@ -662,20 +669,37 @@ final class AppModel {
         library.persist()
     }
 
-    private func spacesDidChange() {
+    private func spacesDidChange(from previous: [WorkspaceSpace]) {
         guard !isRestoring else { return }
-        library.windowDidChangeSpaces(self)
+        library.windowDidChangeSpaces(self, previous: previous)
         persist()
     }
 
     /// Another window changed the shared part of the Spaces: lay it over this
     /// window's own reading state, leaving a Space that is gone or archived.
-    func adoptSharedSpaces(_ definitions: [SpaceDefinition]) {
+    func adoptSharedSpaces(_ source: [WorkspaceSpace]) {
         let previousActiveTab = activeTabID
         let previousOpenPath = openPath
         let previousPinnedContext = isPinnedListContext
         withPersistenceBatch {
-            spaces = spaces.adopting(definitions)
+            let existing = Dictionary(spaces.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let localTabs = Dictionary(spaces.flatMap { $0.workspace?.tabs ?? [] }.map { ($0.id, $0) },
+                                       uniquingKeysWith: { first, _ in first })
+            spaces = source.map { shared in
+                var localSpace = existing[shared.id] ?? WorkspaceSpace(definition: shared.definition)
+                localSpace.name = shared.name
+                localSpace.iconName = shared.iconName
+                localSpace.isArchived = shared.isArchived
+                if let sharedWorkspace = shared.workspace {
+                    var local = localSpace.workspace ?? Workspace()
+                    local.adoptTabs(from: sharedWorkspace, preserving: localTabs)
+                    localSpace.workspace = local.isEmpty ? nil : local
+                } else {
+                    localSpace.workspace = nil
+                }
+                if localSpace.workspace?.tabs.isEmpty != false { localSpace.isBrowsing = true }
+                return localSpace
+            }
             if pendingFolderRenameID.map({ id in !tabGroups.contains { $0.id == id } }) == true {
                 pendingFolderRenameID = nil
             }
@@ -691,23 +715,23 @@ final class AppModel {
     }
 
     /// A new window's starting point (⌘⇧N, 在新窗口打开): this window's Space,
-    /// browse controls and folder collapse; no temporary pages; browsing.
+    /// browse controls, tabs and folder collapse; browsing independently.
     func newWindowState() -> RestoredWindow {
         RestoredWindow(id: UUID(),
-                       spaces: spaces.map {
-                           WorkspaceSpace(definition: $0.definition,
-                                          collapsedGroupIDs: $0.workspace?.collapsedGroupIDs ?? [])
+                       spaces: spaces.map { space in
+                           var copy = space
+                           copy.isBrowsing = true
+                           return copy
                        },
                        activeSpaceID: activeSpaceID, browsePane: browsePane,
                        sortClauses: sortClauses, filterClauses: filterClauses,
                        filterMatch: filterMatch, browseMode: browseMode.rawValue)
     }
 
-    /// Open `path` in a new window. From a pinned page (`tab`), the new window
-    /// reads it through the same pinned page; otherwise as a temporary page.
+    /// Open `path` in a new window, selecting the shared tab when supplied.
     func openInNewWindow(_ path: String, tab: NavTab.ID? = nil) async {
         guard let window = library.openWindow?(self) else { return }
-        if let tab, window.tabs.contains(where: { $0.id == tab && $0.pinned }) {
+        if let tab, window.tabs.contains(where: { $0.id == tab }) {
             await window.selectTab(tab)
             if window.openPath != path { await window.open(path) }
         } else {
@@ -985,11 +1009,13 @@ final class AppModel {
         let previousActiveID = activeTabID
         let previousPinnedContext = isPinnedListContext
 
+        var updated = spaces
         for state in old {
-            guard let index = spaces.firstIndex(where: { $0.id == state.id }) else { continue }
-            spaces[index].workspace = state.workspace?.replacingTabValues(from: liveTabs)
-            if spaces[index].workspace == nil { spaces[index].isBrowsing = true }
+            guard let index = updated.firstIndex(where: { $0.id == state.id }) else { continue }
+            updated[index].workspace = state.workspace?.replacingTabValues(from: liveTabs)
+            if updated[index].workspace == nil { updated[index].isBrowsing = true }
         }
+        spaces = updated
         registerSpaceSidebarUndo(redo, actionName: actionName)
         if activeTabID != previousActiveID || previousPinnedContext != isPinnedListContext {
             Task { await syncToActiveLocation(from: previousPinnedContext) }
@@ -1022,15 +1048,21 @@ final class AppModel {
         guard let destinationID = activeSpaceID else { return }
         let before = captureSpaceSidebarStates([sourceSpaceID, destinationID])
         let previousPinnedContext = isPinnedListContext
+        var updated = spaces
+        guard let sourceIndex = updated.firstIndex(where: { $0.id == sourceSpaceID }),
+              let destinationIndex = updated.firstIndex(where: { $0.id == destinationID }) else { return }
         var bundle = WorkspaceTransferBundle(tabs: [], nodes: [])
-        mutateSpace(sourceSpaceID) { source in
+        do {
+            var source = updated[sourceIndex]
             guard var ws = source.workspace else { return }
             bundle = ws.extractItemsForTransfer(items)
             source.workspace = ws.isEmpty ? nil : ws
             if source.workspace?.tabs.isEmpty != false { source.isBrowsing = true }
+            updated[sourceIndex] = source
         }
         guard !bundle.tabs.isEmpty else { return }
-        mutateSpace(destinationID) { destination in
+        do {
+            var destination = updated[destinationIndex]
             if destination.workspace == nil {
                 var ws = Workspace()
                 ws.insertTransferBundleToRoot(bundle, at: index)
@@ -1040,7 +1072,9 @@ final class AppModel {
             }
             if let moved = firstMovedTabID(in: bundle) { destination.workspace?.select(moved) }
             destination.isBrowsing = false
+            updated[destinationIndex] = destination
         }
+        spaces = updated
         registerSpaceSidebarUndo(before, actionName: String(localized: "移动页面"))
         Task { await syncToActiveLocation(from: previousPinnedContext) }
     }
@@ -1051,19 +1085,27 @@ final class AppModel {
               spaces.first(where: { $0.id == destinationID })?.workspace?.tabGroups.contains(where: { $0.id == groupID }) == true else { return }
         let before = captureSpaceSidebarStates([sourceSpaceID, destinationID])
         let previousPinnedContext = isPinnedListContext
+        var updated = spaces
+        guard let sourceIndex = updated.firstIndex(where: { $0.id == sourceSpaceID }),
+              let destinationIndex = updated.firstIndex(where: { $0.id == destinationID }) else { return }
         var bundle = WorkspaceTransferBundle(tabs: [], nodes: [])
-        mutateSpace(sourceSpaceID) { source in
+        do {
+            var source = updated[sourceIndex]
             guard var ws = source.workspace else { return }
             bundle = ws.extractItemsForTransfer(items)
             source.workspace = ws.isEmpty ? nil : ws
             if source.workspace?.tabs.isEmpty != false { source.isBrowsing = true }
+            updated[sourceIndex] = source
         }
         guard !bundle.tabs.isEmpty else { return }
-        mutateSpace(destinationID) { destination in
+        do {
+            var destination = updated[destinationIndex]
             destination.workspace?.insertTransferBundle(bundle, toGroup: groupID, at: childIndex)
             if let moved = firstMovedTabID(in: bundle) { destination.workspace?.select(moved) }
             destination.isBrowsing = false
+            updated[destinationIndex] = destination
         }
+        spaces = updated
         registerSpaceSidebarUndo(before, actionName: String(localized: "移动页面"))
         Task { await syncToActiveLocation(from: previousPinnedContext) }
     }

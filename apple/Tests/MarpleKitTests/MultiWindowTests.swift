@@ -45,8 +45,8 @@ import Testing
         await b.openInNewTab(Self.paths[1])
         #expect(a.openPath == Self.paths[0])
         #expect(b.openPath == Self.paths[1])
-        #expect(a.tabs.map(\.location.openPath) == [Self.paths[0]])
-        #expect(b.tabs.map(\.location.openPath) == [Self.paths[1]])
+        #expect(a.tabs.map(\.location.openPath) == [Self.paths[0], Self.paths[1]])
+        #expect(b.tabs.map(\.location.openPath) == [Self.paths[0], Self.paths[1]])
 
         a.setSearchText("needle")
         #expect(b.searchText == "")
@@ -76,11 +76,69 @@ import Testing
 
         a.togglePin(pinned)
 
-        #expect(!b.tabs.contains { $0.id == pinned })
-        let kept = try #require(b.tabs.first { $0.location.openPath == Self.paths[1] })
+        let kept = try #require(b.tabs.first { $0.id == pinned })
         #expect(!kept.pinned)
         #expect(b.activeTabID == kept.id)
         #expect(b.openPath == Self.paths[1])
+    }
+
+    @Test func temporaryTabChangesAreSharedButNavigationIsLocal() async throws {
+        let library = makeLibrary()
+        let a = AppModel(library: library)
+        await a.loadIndex()
+        let b = AppModel(library: library)
+        await a.openInNewTab(Self.paths[0])
+        let first = try #require(a.activeTabID)
+        await b.selectTab(first)
+        await b.open(Self.paths[1])
+        #expect(a.openPath == Self.paths[0])
+        #expect(b.openPath == Self.paths[1])
+        #expect(b.canGoBack)
+
+        await a.openInNewTab(Self.paths[2])
+        let second = try #require(a.activeTabID)
+        a.renameTab(second, to: "Shared")
+        a.moveTabToRoot(second, beforeTab: first)
+        #expect(b.tabs.map(\.id) == [second, first])
+        #expect(b.tabs.first?.customTitle == "Shared")
+        #expect(b.activeTabID == first)
+        #expect(b.openPath == Self.paths[1])
+
+        await a.closeTab(first)
+        #expect(b.tabs.map(\.id) == [second])
+        try await waitUntil { b.openPath == Self.paths[2] }
+    }
+
+    @Test func movingATabBetweenSpacesPreservesOtherWindowsHistory() async throws {
+        let library = makeLibrary()
+        let a = AppModel(library: library)
+        await a.loadIndex()
+        let b = AppModel(library: library)
+        let source = try #require(a.activeSpaceID)
+        await a.openInNewTab(Self.paths[0])
+        let tab = try #require(a.activeTabID)
+        await b.selectTab(tab)
+        await b.open(Self.paths[1])
+        a.addSpace()
+        let destination = try #require(a.activeSpaceID)
+        let undo = library.undoManager
+        undo.groupsByEvent = false
+        a.undoManager = undo
+        undo.beginUndoGrouping()
+        a.moveItems([.tab(tab)], from: source)
+        undo.endUndoGrouping()
+
+        await b.selectSpace(destination)
+        await b.selectTab(tab)
+        #expect(b.openPath == Self.paths[1])
+        #expect(b.canGoBack)
+        await b.goBack()
+        #expect(b.openPath == Self.paths[0])
+        undo.undo()
+        await b.selectSpace(source)
+        await b.selectTab(tab)
+        #expect(b.openPath == Self.paths[0])
+        #expect(b.canGoForward)
     }
 
     @Test func foldersAreSharedButCollapseIsPerWindow() async throws {
@@ -192,9 +250,40 @@ import Testing
         #expect(ra.windowID == a.windowID)
         #expect(rb.windowID == b.windowID)
         #expect(rb.windowFrame == b.windowFrame)
-        #expect(ra.tabs.map(\.id) == [pinned])
+        #expect(ra.tabs.map(\.id) == [pinned, bTemporary])
         #expect(rb.tabs.map(\.id) == [pinned, bTemporary])
         #expect(rb.activeTabID == bTemporary)
+    }
+
+    @Test func oldPerWindowTemporaryTabsAreMergedOnRestore() throws {
+        let suite = testDefaultsSuite("marple-multiwindow-migration-")
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsStateStore(defaults: defaults)
+        let space = SpaceDefinition(id: UUID(), name: "Work")
+        let ids = [UUID(), UUID()]
+        let windowIDs = [UUID(), UUID()]
+        let windows = (0..<2).map { index in
+            PersistedWindow(id: windowIDs[index], activeSpaceID: space.id, browsePane: .type(.paper),
+                            sortClauses: [], filterClauses: [], filterMatch: .all, browseMode: "grid",
+                            spaces: [PersistedSpaceSession(
+                                spaceID: space.id, isBrowsing: false, activeTabID: ids[index],
+                                temporaryTabs: [PersistedTab(id: ids[index],
+                                    location: NavLocation(pane: .type(.paper), openPath: Self.paths[index]),
+                                    pinned: false)], pinnedLocations: [], collapsedGroupIDs: [])])
+        }
+        store.save(PersistedState(definitions: [space], windows: windows, counts: nil,
+                                  savedViews: nil, cache: { _ in (nil, nil) }))
+
+        let library = makeLibrary(store: store)
+        let a = AppModel(library: library, restoring: library.takeRestoredWindow())
+        let b = AppModel(library: library, restoring: library.takeRestoredWindow())
+        #expect(a.tabs.map(\.id) == ids)
+        #expect(b.tabs.map(\.id) == ids)
+        #expect(a.activeTabID == ids[0])
+        #expect(b.activeTabID == ids[1])
+        #expect(a.openPath == Self.paths[0])
+        #expect(b.openPath == Self.paths[1])
     }
 
     @Test func closedWindowCanBeReopenedAndIsNotRestoredAsOpen() async throws {
@@ -220,7 +309,7 @@ import Testing
         #expect(library.windows.count == 2)
     }
 
-    @Test func newWindowStartsFromTheSourceSpaceWithoutItsTemporaryPages() async throws {
+    @Test func newWindowStartsFromTheSourceSpaceWithItsTemporaryPages() async throws {
         let (library, a, _, pinned) = try await twoWindowsWithPinnedPage()
         await a.openInNewTab(Self.paths[2])
         a.addSpace()
@@ -229,7 +318,7 @@ import Testing
         #expect(window.windowID != a.windowID)
         #expect(window.activeSpaceID == space)
         let first = try #require(window.spaces.first?.workspace)
-        #expect(first.tabs.map(\.id) == [pinned])
+        #expect(first.tabs.map(\.id) == [pinned, try #require(a.spaces.first?.workspace?.tabs.last?.id)])
     }
 
     @Test func windowTitleNamesTheDocumentAndSpace() async throws {

@@ -2,8 +2,9 @@ import Foundation
 
 /// The part of a Space every window shares: its name/icon/archive flag and the
 /// pinned-page forest (pinned tabs + folders, with stable ids). Reading state —
-/// histories, selection, temporary pages, folder collapse — is NOT here; each
-/// window keeps that in its own `Workspace` copy. See docs/multi-window-design.md.
+/// histories, selection and folder collapse — is NOT here; each window keeps
+/// those in its own `Workspace` copy. Temporary tabs are synchronized separately
+/// across those copies. See docs/multi-window-design.md.
 public struct SpaceDefinition: Identifiable, Hashable, Sendable {
     /// A pinned page. `id` is the `NavTab.id` the page carries in every window.
     public struct Item: Hashable, Sendable {

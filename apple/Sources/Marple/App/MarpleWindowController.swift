@@ -65,6 +65,9 @@ final class MarpleWindowController: NSWindowController, NSWindowDelegate {
     /// from `cascadeFrom` (the window it was opened from).
     func show(_ model: AppModel, cascadeFrom source: NSWindow?) {
         self.model = model
+        let identifier = "MarpleWindow.\(model.windowID.uuidString)"
+        window?.identifier = NSUserInterfaceItemIdentifier(identifier)
+        window?.setAccessibilityIdentifier(identifier)
         placeWindow(frame: model.windowFrame, cascadeFrom: source)
         model.undoManager = model.library.undoManager
         applyTheme()
@@ -91,6 +94,7 @@ final class MarpleWindowController: NSWindowController, NSWindowDelegate {
             Task { @MainActor in self?.trackTitle() }
         }
         if window?.title != title { window?.title = title }
+        if window?.accessibilityTitle() != title { window?.setAccessibilityTitle(title) }
     }
 
     func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {

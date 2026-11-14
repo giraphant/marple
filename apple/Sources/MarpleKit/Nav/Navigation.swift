@@ -1458,6 +1458,53 @@ public struct Workspace: Sendable {
 // MARK: - shared definition (multi-window)
 
 public extension Workspace {
+    /// Shared organization, excluding each window's navigation and folder collapse.
+    var sharedTabStructure: WorkspaceSidebarState {
+        func expanded(_ nodes: [TabNode]) -> [TabNode] {
+            nodes.map { node in
+                guard case .group(var group) = node else { return node }
+                group.isCollapsed = false
+                group.children = expanded(group.children)
+                return .group(group)
+            }
+        }
+        var state = sidebarState
+        state.root = expanded(state.root)
+        return state
+    }
+
+    /// Apply shared tabs and ordering while keeping this window's reading history,
+    /// selection and collapsed folders for tabs that still exist.
+    mutating func adoptTabs(from shared: Workspace, preserving otherTabs: [NavTab.ID: NavTab] = [:]) {
+        let live = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
+        let collapsed = Dictionary(uniqueKeysWithValues: tabGroups.map { ($0.id, $0.isCollapsed) })
+        func localCollapse(_ nodes: [TabNode]) -> [TabNode] {
+            nodes.map { node in
+                guard case .group(var group) = node else { return node }
+                group.isCollapsed = collapsed[group.id] ?? group.isCollapsed
+                group.children = localCollapse(group.children)
+                return .group(group)
+            }
+        }
+        tabs = shared.tabs.map { tab in
+            var copy = tab
+            if let existing = live[tab.id] ?? otherTabs[tab.id] { copy.history = existing.history }
+            return copy
+        }
+        root = localCollapse(shared.root)
+        normalize()
+    }
+
+    /// Include old per-window temporary pages during the shared-tabs migration.
+    mutating func mergeTemporaryTabs(from other: Workspace) {
+        var ids = Set(tabs.map(\.id))
+        for tab in other.tabs where !tab.pinned && ids.insert(tab.id).inserted {
+            tabs.append(tab)
+            root.append(.tab(tab.id))
+        }
+        normalize()
+    }
+
     /// The pinned pages and folders, reduced to what every window shares.
     var sharedRoots: [SpaceDefinition.Node] {
         let byID = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
