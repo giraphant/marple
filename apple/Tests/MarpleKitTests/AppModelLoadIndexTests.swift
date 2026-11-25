@@ -137,6 +137,46 @@ import Testing
     }
 
     @MainActor
+    @Test func userRebuildRecoversAfterLoadIndexFailsWithCorruptDatabase() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CorruptIndexRebuildTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let papers = root.appendingPathComponent("vault/papers")
+        let marpleDir = root.appendingPathComponent(".marple")
+        try FileManager.default.createDirectory(at: papers, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: marpleDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("sources"), withIntermediateDirectories: true)
+        try """
+        ---
+        type: paper
+        title: Bourdieu
+        ---
+        Distinction
+        """.write(to: papers.appendingPathComponent("bourdieu.md"),
+                  atomically: true, encoding: .utf8)
+
+        let dbURL = marpleDir.appendingPathComponent("index.sqlite")
+        try Data("corrupted index file".utf8).write(to: dbURL)
+
+        let indexer = VaultIndexer(workspaceRoot: root.path)
+        let database = IndexDatabase(indexDBPath: dbURL.path)
+        let client = LocalVaultClient(workspaceRoot: root.path, index: database)
+        let model = AppModel(client: client, workspaceRoot: root.path)
+        model.cliIndexer = indexer
+
+        await model.loadIndex()
+        #expect(model.lastIndexFailure != nil)
+        #expect(model.entries.isEmpty)
+
+        #expect(await model.rebuildGeneralIndex() == .success(1))
+        #expect(model.lastIndexFailure == nil)
+        #expect(model.entries.first?.title == "Bourdieu")
+        let hits = try database.search("Bourdieu", type: nil, minRating: nil, theme: nil, limit: 10)
+        #expect(hits.first?.entry.title == "Bourdieu")
+    }
+
+    @MainActor
     @Test func staleLoadIndexDoesNotResetBootstrapping() async throws {
         // Same race as `staleLoadIndexDoesNotOverwriteFresherEntries`, but the
         // invariant we're pinning is the bootstrap flag — once a newer call

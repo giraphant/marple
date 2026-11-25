@@ -766,4 +766,89 @@ struct VaultIndexerTests {
         #expect(entries.count == 1)
         #expect(entries[0].path == "vault/papers/a.md")
     }
+
+    // MARK: - Corrupt index recovery (SQLITE_NOTADB / SQLITE_CORRUPT)
+
+    @Test("buildFull replaces a non-database index.sqlite (SQLite error 26) and existing reader recovers")
+    func buildFullRecoversFromNotADatabase() throws {
+        let ws = try makeTempWorkspace()
+        defer { try? FileManager.default.removeItem(atPath: ws) }
+        try write(at: ws + "/vault/papers/bourdieu.md", type: "paper", title: "Bourdieu", body: "Distinction")
+
+        let marpleDir = ws + "/.marple"
+        try FileManager.default.createDirectory(atPath: marpleDir, withIntermediateDirectories: true)
+        let indexPath = marpleDir + "/index.sqlite"
+        let cachePath = marpleDir + "/entries.cache"
+        try Data("definitely not a sqlite database".utf8).write(to: URL(fileURLWithPath: indexPath))
+        try Data("corrupt wal".utf8).write(to: URL(fileURLWithPath: indexPath + "-wal"))
+        try Data("corrupt shm".utf8).write(to: URL(fileURLWithPath: indexPath + "-shm"))
+        try Data("stale cache".utf8).write(to: URL(fileURLWithPath: cachePath))
+
+        // Simulate an already-open IndexDatabase that cached a connection to the corrupt inode.
+        let reader = openDB(ws)
+        #expect(throws: (any Error).self) { _ = try reader.loadEntries() }
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        #expect(indexer.canSkipFullBuild() == false)
+        let count = try indexer.buildFull()
+        #expect(count == 1)
+        #expect(!FileManager.default.fileExists(atPath: cachePath))
+
+        let entries = try reader.loadEntries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.title == "Bourdieu")
+        let hits = try reader.search("Bourdieu", type: nil, minRating: nil, theme: nil, limit: 10)
+        #expect(hits.first?.entry.title == "Bourdieu")
+
+        let fresh = try DatabaseQueue(path: indexPath)
+        let mode = try fresh.read { try String.fetchOne($0, sql: "PRAGMA journal_mode") }
+        let check = try fresh.read { try String.fetchOne($0, sql: "PRAGMA quick_check") }
+        #expect(mode?.lowercased() == "wal")
+        #expect(check == "ok")
+    }
+
+    @Test("buildFull replaces a corrupt SQLite database whose header still reports page_size")
+    func buildFullRecoversFromCorruptInteriorPages() throws {
+        let ws = try makeTempWorkspace()
+        defer { try? FileManager.default.removeItem(atPath: ws) }
+        try write(at: ws + "/vault/papers/bourdieu.md", type: "paper", title: "Bourdieu")
+
+        let indexer = VaultIndexer(workspaceRoot: ws)
+        _ = try indexer.buildFull()
+
+        // Corrupt bytes after the 100-byte SQLite header so PRAGMA page_size still
+        // succeeds, while reading sqlite_master / meta fails with SQLITE_CORRUPT.
+        let indexPath = ws + "/.marple/index.sqlite"
+        for sidecar in [indexPath + "-wal", indexPath + "-shm"] {
+            try? FileManager.default.removeItem(atPath: sidecar)
+        }
+        var bytes = try Data(contentsOf: URL(fileURLWithPath: indexPath))
+        let corruptRange = 100..<min(bytes.count, 4096)
+        bytes.replaceSubrange(corruptRange, with: Data(repeating: 0xFF, count: corruptRange.count))
+        try bytes.write(to: URL(fileURLWithPath: indexPath))
+
+        let count = try indexer.buildFull()
+        #expect(count == 1)
+
+        let entries = try openDB(ws).loadEntries()
+        #expect(entries.first?.title == "Bourdieu")
+        let fresh = try DatabaseQueue(path: indexPath)
+        #expect(try fresh.read { try String.fetchOne($0, sql: "PRAGMA quick_check") } == "ok")
+    }
+
+    @Test("reconcile recovers automatically from a non-database index.sqlite (SQLite error 26)")
+    func reconcileRecoversFromNotADatabase() throws {
+        let ws = try makeTempWorkspace()
+        defer { try? FileManager.default.removeItem(atPath: ws) }
+        try write(at: ws + "/vault/papers/bourdieu.md", type: "paper", title: "Bourdieu")
+
+        let marpleDir = ws + "/.marple"
+        try FileManager.default.createDirectory(atPath: marpleDir, withIntermediateDirectories: true)
+        try Data("not a sqlite db".utf8).write(to: URL(fileURLWithPath: marpleDir + "/index.sqlite"))
+
+        let stats = try VaultIndexer(workspaceRoot: ws).reconcile()
+        #expect(stats.upserted == 1)
+        #expect(stats.removed == 0)
+        #expect(try openDB(ws).loadEntries().first?.title == "Bourdieu")
+    }
 }

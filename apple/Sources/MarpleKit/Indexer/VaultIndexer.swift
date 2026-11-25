@@ -86,6 +86,10 @@ public final class VaultIndexer: @unchecked Sendable {
     /// Mirrors `build_sqlite_index` (:247-311) + `write_sqlite_index` (:1160-1281).
     @discardableResult
     public func buildFull() throws -> Int {
+        try buildFull(forceReplace: false)
+    }
+
+    private func buildFull(forceReplace: Bool) throws -> Int {
         // 1. Walk + parse (outside the lock — slow phase).
         let files = try walkMarkdown(vaultPath)
         let sourceSlugs = loadSourceSlugs(sourcesDir: sourcesPath)
@@ -133,7 +137,10 @@ public final class VaultIndexer: @unchecked Sendable {
             return at < bt
         }
 
-        // 3. Ensure the index DB directory exists.
+        // 3. Ensure the index DB directory exists, and probe the live DB's page
+        // size when healthy so SQLite backup into WAL matches it. If the live DB
+        // is missing or corrupt (e.g. SQLITE_NOTADB / SQLITE_CORRUPT), build with
+        // the default page size and replace the file in step 5 instead of aborting.
         let marpleDir = indexDBDir
         try FileManager.default.createDirectory(
             atPath: marpleDir, withIntermediateDirectories: true, attributes: nil)
@@ -141,37 +148,66 @@ public final class VaultIndexer: @unchecked Sendable {
         var liveConfig = Configuration()
         liveConfig.label = "MarpleIndexer.rebuild"
         liveConfig.busyMode = .timeout(5)
-        let liveQueue = try DatabaseQueue(path: indexDBPath, configuration: liveConfig)
-        let pageSize = try liveQueue.read { db in
-            try Int.fetchOne(db, sql: "PRAGMA page_size")!
-        }
+        let livePageSize = forceReplace ? nil : try probeLivePageSize(liveConfig: liveConfig)
 
         // 4. Build off to the side with journaling disabled. Each build owns its
         // temp file; the live database remains readable throughout this phase.
         let tmpPath = indexDBPath + ".\(UUID().uuidString).tmp"
-        let tmpQueue = try DatabaseQueue(path: tmpPath)
+        var tmpQueue: DatabaseQueue? = try DatabaseQueue(path: tmpPath)
         defer {
-            try? tmpQueue.close()
+            try? tmpQueue?.close()
             try? FileManager.default.removeItem(atPath: tmpPath)
         }
-        try tmpQueue.writeWithoutTransaction { db in
-            // SQLite backup into WAL requires matching page sizes.
-            try db.execute(sql: "PRAGMA page_size=\(pageSize)")
+        try tmpQueue!.writeWithoutTransaction { db in
+            if let pageSize = livePageSize {
+                // SQLite backup into WAL requires matching page sizes.
+                try db.execute(sql: "PRAGMA page_size=\(pageSize)")
+            }
             try db.execute(sql: "PRAGMA journal_mode=OFF")
             try db.execute(sql: "PRAGMA synchronous=OFF")
         }
-        try tmpQueue.write { db in
+        try tmpQueue!.write { db in
             try IndexWriter.createSchema(db)
             for entry in entries {
                 try IndexWriter.insert(db, entry)
             }
         }
 
-        // 5. Publish through SQLite, which keeps existing WAL readers attached
-        // to a valid snapshot. Unlinking the live file can mispair it with an
-        // old connection's WAL, even when the replacement file is complete.
+        // 5. Publish through SQLite when the live DB is healthy, keeping existing
+        // WAL readers attached to a valid snapshot. When the live DB is absent or
+        // corrupt, replace it with the freshly built temp DB so recovery succeeds.
         writeLock.lock()
         defer { writeLock.unlock() }
+        if !forceReplace, livePageSize != nil, FileManager.default.fileExists(atPath: indexDBPath) {
+            do {
+                try publishViaBackup(from: tmpQueue!, liveConfig: liveConfig)
+            } catch where Self.isSQLiteCorruptionError(error) {
+                try replaceLiveDatabase(from: &tmpQueue, tmpPath: tmpPath, liveConfig: liveConfig)
+            }
+        } else {
+            try replaceLiveDatabase(from: &tmpQueue, tmpPath: tmpPath, liveConfig: liveConfig)
+        }
+        try? FileManager.default.removeItem(atPath: indexDBDir + "/entries.cache")
+
+        return entries.count
+    }
+
+    private func probeLivePageSize(liveConfig: Configuration) throws -> Int? {
+        guard FileManager.default.fileExists(atPath: indexDBPath) else { return nil }
+        do {
+            let liveQueue = try DatabaseQueue(path: indexDBPath, configuration: liveConfig)
+            defer { try? liveQueue.close() }
+            return try liveQueue.read { db in
+                try Int.fetchOne(db, sql: "PRAGMA page_size")
+            }
+        } catch where Self.isSQLiteCorruptionError(error) {
+            return nil
+        }
+    }
+
+    private func publishViaBackup(from tmpQueue: DatabaseQueue, liveConfig: Configuration) throws {
+        let liveQueue = try DatabaseQueue(path: indexDBPath, configuration: liveConfig)
+        defer { try? liveQueue.close() }
         let nextRevision = try liveQueue.read { db in
             db.clearSchemaCache()
             return try IndexWriter.entriesRevision(db) &+ 1
@@ -186,9 +222,45 @@ public final class VaultIndexer: @unchecked Sendable {
             try db.execute(sql: "PRAGMA journal_mode=WAL")
         }
         try tmpQueue.backup(to: liveQueue)
-        try? FileManager.default.removeItem(atPath: indexDBDir + "/entries.cache")
+    }
 
-        return entries.count
+    private func replaceLiveDatabase(
+        from tmpQueue: inout DatabaseQueue?,
+        tmpPath: String,
+        liveConfig: Configuration
+    ) throws {
+        try tmpQueue?.write { db in
+            try db.execute(
+                sql: "INSERT OR REPLACE INTO meta(key, value) VALUES ('entries_revision', ?)",
+                arguments: ["1"]
+            )
+        }
+        try tmpQueue?.close()
+        tmpQueue = nil
+
+        let fm = FileManager.default
+        for path in [indexDBPath, indexDBPath + "-wal", indexDBPath + "-shm", indexDBPath + "-journal"] {
+            if fm.fileExists(atPath: path) {
+                try fm.removeItem(atPath: path)
+            }
+        }
+        try fm.moveItem(atPath: tmpPath, toPath: indexDBPath)
+
+        let liveQueue = try DatabaseQueue(path: indexDBPath, configuration: liveConfig)
+        defer { try? liveQueue.close() }
+        try liveQueue.writeWithoutTransaction { db in
+            try db.execute(sql: "PRAGMA journal_mode=WAL")
+        }
+    }
+
+    private static func isSQLiteCorruptionError(_ error: any Error) -> Bool {
+        guard let dbError = error as? DatabaseError else { return false }
+        switch dbError.resultCode {
+        case .SQLITE_CORRUPT, .SQLITE_NOTADB:
+            return true
+        default:
+            return false
+        }
     }
 
     // MARK: - canSkipFullBuild
@@ -237,6 +309,25 @@ public final class VaultIndexer: @unchecked Sendable {
             }
         }
 
+        do {
+            return try reconcileDelta(
+                fsMap: fsMap,
+                unavailablePaths: unavailablePaths,
+                sourceSlugs: sourceSlugs,
+                sourceIndex: sourceIndex
+            )
+        } catch where Self.isSQLiteCorruptionError(error) {
+            let count = try buildFull(forceReplace: true)
+            return ReconcileStats(upserted: count, removed: 0, unchanged: 0)
+        }
+    }
+
+    private func reconcileDelta(
+        fsMap: [String: Int64],
+        unavailablePaths: Set<String>,
+        sourceSlugs: Set<String>,
+        sourceIndex: SourceSlugIndex
+    ) throws -> ReconcileStats {
         // Take the write lock for the entire delta (mirrors :382-424).
         writeLock.lock()
         defer { writeLock.unlock() }
@@ -246,6 +337,7 @@ public final class VaultIndexer: @unchecked Sendable {
         config.label = "MarpleIndexer.reconcile"
         config.busyMode = .timeout(5)
         let pool = try DatabasePool(path: indexDBPath, configuration: config)
+        defer { try? pool.close() }
 
         // Indexed fingerprints: path → mtime (nil means mtime column was NULL).
         let indexed: [String: Int64?] = try pool.read { db in
@@ -410,32 +502,35 @@ public final class VaultIndexer: @unchecked Sendable {
         ]
 
         var config = Configuration()
-        config.readonly = true
+        // NOT read-only: a read-only connection cannot attach/create the WAL
+        // -shm on a closed-writer DB (SQLITE_CANTOPEN). See IndexDatabase.openQueue.
         config.busyMode = .timeout(5)
-        // Use DatabasePool — a read-only DatabaseQueue cannot attach the WAL
-        // -shm on a closed-writer DB (CANTOPEN). See IndexDatabase for the same
-        // reason.
-        let pool = try DatabasePool(path: indexDBPath, configuration: config)
-        return try pool.read { db in
-            var columns = Set<String>()
-            let rows = try Row.fetchAll(db, sql: "PRAGMA table_info(entries)")
-            for row in rows {
-                if let name: String = row["name"] {
-                    columns.insert(name)
+        do {
+            let queue = try DatabaseQueue(path: indexDBPath, configuration: config)
+            defer { try? queue.close() }
+            return try queue.read { db in
+                var columns = Set<String>()
+                let rows = try Row.fetchAll(db, sql: "PRAGMA table_info(entries)")
+                for row in rows {
+                    if let name: String = row["name"] {
+                        columns.insert(name)
+                    }
                 }
-            }
-            guard required.isSubset(of: columns) else { return false }
+                guard required.isSubset(of: columns) else { return false }
 
-            // QUA-102 schema bump: presence of `entry_search` (the dropped
-            // 12-column FTS5 table) means this DB was built by an older marple
-            // and is now ~660 MB heavier than necessary. Trigger a full rebuild.
-            let hasRetiredEntrySearch = try Bool.fetchOne(db, sql: """
-                SELECT EXISTS(
-                  SELECT 1 FROM sqlite_master
-                  WHERE type IN ('table','view') AND name = 'entry_search'
-                )
-                """) ?? false
-            return !hasRetiredEntrySearch
+                // QUA-102 schema bump: presence of `entry_search` (the dropped
+                // 12-column FTS5 table) means this DB was built by an older marple
+                // and is now ~660 MB heavier than necessary. Trigger a full rebuild.
+                let hasRetiredEntrySearch = try Bool.fetchOne(db, sql: """
+                    SELECT EXISTS(
+                      SELECT 1 FROM sqlite_master
+                      WHERE type IN ('table','view') AND name = 'entry_search'
+                    )
+                    """) ?? false
+                return !hasRetiredEntrySearch
+            }
+        } catch where Self.isSQLiteCorruptionError(error) {
+            return false
         }
     }
 
