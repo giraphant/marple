@@ -35,7 +35,7 @@ targets:
         # iPhone only (TARGETED_DEVICE_FAMILY 1) — matches the iPhone-only scope.
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "27"
+        CURRENT_PROJECT_VERSION: "28"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         # Supported orientations (iPhone): portrait + both landscapes.
@@ -46,6 +46,7 @@ targets:
         # Baked-in team so `xcodegen generate` doesn't wipe the signing selection.
         DEVELOPMENT_TEAM: 2E5N3Q45BG
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: MarpleiOS/MarpleiOS.entitlements
 
   MarpleiOSTests:
     type: bundle.unit-test

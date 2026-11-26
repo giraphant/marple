@@ -21,6 +21,8 @@ final class AppState: ObservableObject {
     private var backupScheduler: BackupScheduler?
     private var backupWatcher: VaultWatcher?
     private var semanticIndexController: SemanticIndexRefreshController?
+    private(set) var cloudSync: CloudSyncCoordinator?
+    private var activeAppObserver: NSObjectProtocol?
 
     /// Opens a window when one is needed and none exists (CLI / URL requests).
     var windowProvider: (() -> AppModel?)?
@@ -104,6 +106,20 @@ final class AppState: ObservableObject {
         ActiveBackup.scheduler = scheduler
         self.backupWatcher = VaultWatcher(vaultDirectory: URL(fileURLWithPath: paths.workspaceRoot))
         applyBackupSetting()
+
+        // CloudKit Private DB sync for Spaces, tabs, views, and whitelisted settings.
+        // Gracefully degrades to local-only when running an unsigned/ad-hoc build.
+        let cloudSync = CloudSyncCoordinator(library: m)
+        m.onSyncStateChanged = { [weak cloudSync] in cloudSync?.noteLibraryChanged() }
+        self.cloudSync = cloudSync
+        ActiveCloudSync.coordinator = cloudSync
+        cloudSync.start()
+        self.activeAppObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil, queue: .main
+        ) { [weak cloudSync] _ in
+            Task { @MainActor in cloudSync?.fetchOnForeground() }
+        }
 
         // QUA-107: construct the CLI socket holder now, but defer the actual
         // listen + UserDefaults observer until the first loadIndex publishes
@@ -393,11 +409,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         isTerminating = true
         appState.library?.persist()
-        guard let notes = appState.library?.notes, notes.hasDirty else {
+        let notes = appState.library?.notes
+        let hasDirtyNotes = notes?.hasDirty ?? false
+        let cloudSync = appState.cloudSync
+        guard hasDirtyNotes || cloudSync != nil else {
             return .terminateNow
         }
         Task { @MainActor in
-            await notes.flushAll()
+            if let notes, hasDirtyNotes {
+                await notes.flushAll()
+            }
+            if let cloudSync {
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask { await cloudSync.flush() }
+                    group.addTask { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+                    _ = await group.next()
+                    group.cancelAll()
+                }
+            }
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

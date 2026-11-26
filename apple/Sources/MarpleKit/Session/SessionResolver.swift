@@ -83,4 +83,60 @@ public enum SessionResolver {
                                         activePath: space.activePath)
         }
     }
+
+    /// Resolve a CloudKit `CloudSyncSnapshot` directly against local `entries`,
+    /// using each document's live `entry.title` whenever a tab has no custom alias.
+    /// Archived Spaces, non-document tabs, unresolved docs, and empty groups/Spaces
+    /// are pruned. Temporary document tabs already pinned in the same Space are
+    /// deduped by path.
+    public static func resolve(_ snapshot: CloudSyncSnapshot, entries: [Entry]) -> [ResolvedSessionSpace] {
+        let byPath = Dictionary(entries.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
+        let activeMap = snapshot.activeSession?.activePathBySpace ?? [:]
+
+        return snapshot.orderedSpaces().compactMap { space in
+            guard !space.definition.isArchived else { return nil }
+            var pinnedPaths = Set<String>()
+
+            func resolveNodes(_ nodes: [SpaceDefinition.Node], prefix: String) -> [ResolvedSessionNode] {
+                var used: [String: Int] = [:]
+                return nodes.compactMap { node -> ResolvedSessionNode? in
+                    switch node {
+                    case .item(let item):
+                        guard let path = item.home.openPath, let entry = byPath[path] else { return nil }
+                        pinnedPaths.insert(path)
+                        let id = "\(prefix)/\(path)#\(used[path, default: 0])"
+                        used[path, default: 0] += 1
+                        return .doc(id: id, entry: entry, label: item.customTitle ?? entry.title ?? (path as NSString).lastPathComponent)
+                    case .group(let group):
+                        let key = "g:\(group.name)"
+                        let id = "\(prefix)/\(key)#\(used[key, default: 0])"
+                        let kids = resolveNodes(group.children, prefix: id)
+                        guard !kids.isEmpty else { return nil }
+                        used[key, default: 0] += 1
+                        return .group(id: id, name: group.name, isCollapsed: false, children: kids)
+                    }
+                }
+            }
+
+            var roots = resolveNodes(space.definition.roots, prefix: space.id.uuidString)
+            var seenTempPaths = pinnedPaths
+            var tempUsed: [String: Int] = [:]
+            for temp in space.temporaryTabs {
+                guard let path = temp.openPath,
+                      seenTempPaths.insert(path).inserted,
+                      let entry = byPath[path] else { continue }
+                let id = "\(space.id.uuidString)/tmp/\(path)#\(tempUsed[path, default: 0])"
+                tempUsed[path, default: 0] += 1
+                roots.append(.doc(id: id, entry: entry, label: temp.customTitle ?? entry.title ?? (path as NSString).lastPathComponent))
+            }
+            guard !roots.isEmpty else { return nil }
+            return ResolvedSessionSpace(
+                id: space.id,
+                name: space.definition.name,
+                iconName: space.definition.iconName,
+                roots: roots,
+                activePath: activeMap[space.id.uuidString]
+            )
+        }
+    }
 }

@@ -36,6 +36,10 @@ final class ReaderModel {
     private(set) var statusLabel: String = ""
     private var client: IOSVaultClient?
     private var workspaceRoot: String?
+    /// Read-only CloudKit sync engine sharing the Mac's Spaces & active tabs.
+    /// Falls back to `session/open-tabs.json` in Simulator/Demo builds without iCloud.
+    private let cloudSync = CloudKitSyncEngine(mode: .readOnly)
+    private var cloudSyncStarted = false
     /// The security-scoped URL we currently hold access to. Released before we
     /// acquire a new one so repeated picks/launches don't leak kernel handles.
     private var scopedURL: URL?
@@ -176,6 +180,7 @@ final class ReaderModel {
     /// showing the progress screen.
     func refresh() async {
         guard case .ready = phase, let root = workspaceRoot else { return }
+        if cloudSyncStarted { cloudSync.fetchNow() }
         await backgroundSync(root: root, dbPath: containerDBPath)
     }
 
@@ -252,16 +257,42 @@ final class ReaderModel {
     /// hides). Unresolved docs, groups that end up empty, and Spaces whose forest
     /// resolves to empty are pruned.
     private func loadSession(root: String) async {
+        ensureCloudSyncStarted()
+        if applyCloudSyncSpaces() { return }
         let url = SessionFile.url(workspaceRoot: root)
         try? await ICloudMaterializer.ensureDownloaded(url)
         guard let data = try? Data(contentsOf: url),
               let snap = try? JSONDecoder().decode(SessionSnapshot.self, from: data) else {
-            openOnMacSpaces = []
-            openTabsUpdatedAt = nil
+            // Preserve the last good sidebar on transient iCloud file failure.
             return
         }
         openTabsUpdatedAt = Date(timeIntervalSince1970: Double(snap.updatedAtMs) / 1000)
         openOnMacSpaces = SessionResolver.resolve(snap, entries: entries)
+    }
+
+    private func ensureCloudSyncStarted() {
+        guard !cloudSyncStarted else { return }
+        cloudSyncStarted = true
+        cloudSync.onRemoteChange = { [weak self] _ in
+            _ = self?.applyCloudSyncSpaces()
+        }
+        cloudSync.onInitialFetchComplete = { [weak self] _ in
+            _ = self?.applyCloudSyncSpaces()
+        }
+        cloudSync.start()
+    }
+
+    @discardableResult
+    private func applyCloudSyncSpaces() -> Bool {
+        let snap = cloudSync.currentSnapshot
+        guard !snap.spacesByID.isEmpty else { return false }
+        openOnMacSpaces = SessionResolver.resolve(snap, entries: entries)
+        if let ms = snap.activeSession?.updatedAtMs {
+            openTabsUpdatedAt = Date(timeIntervalSince1970: Double(ms) / 1000)
+        } else if case .idle(let date) = cloudSync.status, let date {
+            openTabsUpdatedAt = date
+        }
+        return true
     }
 
     /// Force-download the vault's `.md` files from iCloud, concurrently, in

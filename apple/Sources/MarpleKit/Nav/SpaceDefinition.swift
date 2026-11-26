@@ -5,9 +5,9 @@ import Foundation
 /// histories, selection and folder collapse — is NOT here; each window keeps
 /// those in its own `Workspace` copy. Temporary tabs are synchronized separately
 /// across those copies. See docs/multi-window-design.md.
-public struct SpaceDefinition: Identifiable, Hashable, Sendable {
+public struct SpaceDefinition: Identifiable, Hashable, Sendable, Codable {
     /// A pinned page. `id` is the `NavTab.id` the page carries in every window.
-    public struct Item: Hashable, Sendable {
+    public struct Item: Hashable, Sendable, Codable {
         public var id: UUID
         public var home: NavLocation
         public var customTitle: String?
@@ -22,9 +22,31 @@ public struct SpaceDefinition: Identifiable, Hashable, Sendable {
             self.cachedTitle = cachedTitle
             self.cachedType = cachedType
         }
+
+        private enum CodingKeys: String, CodingKey {
+            case id, home, customTitle, cachedTitle, cachedType
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(UUID.self, forKey: .id)
+            home = try c.decode(NavLocation.self, forKey: .home)
+            customTitle = try c.decodeIfPresent(String.self, forKey: .customTitle)
+            cachedTitle = try c.decodeIfPresent(String.self, forKey: .cachedTitle)
+            cachedType = try c.decodeIfPresent(EntryType.self, forKey: .cachedType)
+        }
+
+        /// Omit derived cache fields (`cachedTitle`/`cachedType`) when encoding so
+        /// index refreshes never produce spurious sync diffs.
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(id, forKey: .id)
+            try c.encode(home, forKey: .home)
+            try c.encodeIfPresent(customTitle, forKey: .customTitle)
+        }
     }
 
-    public struct Group: Hashable, Sendable {
+    public struct Group: Hashable, Sendable, Codable {
         public var id: UUID
         public var name: String
         public var children: [Node]
@@ -36,7 +58,7 @@ public struct SpaceDefinition: Identifiable, Hashable, Sendable {
         }
     }
 
-    public enum Node: Hashable, Sendable {
+    public enum Node: Hashable, Sendable, Codable {
         case item(Item)
         case group(Group)
     }

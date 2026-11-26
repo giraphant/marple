@@ -213,6 +213,14 @@ PLIST
 # .icns) are data, not code, so they need no separate signing.
 if [ "${SIGN:-}" = "1" ]; then
     : "${CODESIGN_IDENTITY:?SIGN=1 requires CODESIGN_IDENTITY (set DEVELOPER_ID_IDENTITY in Makefile.local)}"
+    PROVISIONING_PROFILE="${PROVISIONING_PROFILE:-$HOME/.appstoreconnect/profiles/Marple_macOS_Developer_ID.provisionprofile}"
+    if [ -f "$PROVISIONING_PROFILE" ]; then
+        echo "Embedding provisioning profile (CloudKit enabled): $PROVISIONING_PROFILE"
+        cp "$PROVISIONING_PROFILE" "$APP/embedded.provisionprofile"
+        ENTITLEMENTS="Resources/Marple.cloudkit.entitlements"
+    else
+        echo "WARNING: provisioning profile not found at $PROVISIONING_PROFILE — signing without CloudKit entitlements." >&2
+    fi
     echo "Signing with: $CODESIGN_IDENTITY"
     # Strip resource forks / Finder info / quarantine xattrs that codesign
     # rejects ("resource fork, Finder information, or similar detritus").

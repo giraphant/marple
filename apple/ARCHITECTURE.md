@@ -56,6 +56,8 @@ Sources/MarpleKit/
 │                  SessionSnapshot · TabShareManifest · StateStore(协议)/UserDefaultsStateStore
 ├── Session/       L4:会话落盘 + 元数据写回(写侧 primitive)
 │                  SessionWriter(<vaultRoot>/session/*.json)· MetadataWriter · SessionResolver
+├── Sync/          L4:跨设备 CloudKit 同步(CKSyncEngine + 严格白名单设置 + 运行时 entitlement 守卫)
+│                  CloudSyncModels · CloudSyncCodec · CloudSyncEntitlement · CloudSyncEngine
 ├── Localisation/  本地化辅助:CnDoubanIndex(中文豆瓣索引)
 ├── CLI/           CLI 协议类型(壳侧 socket host 用):CLIProtocol(请求/响应/方法/错误码)
 └── Backup/        备份引擎:CloneCopy · SnapshotStore · RetentionPolicy(UI/调度在壳)

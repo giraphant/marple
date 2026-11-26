@@ -15,7 +15,24 @@ xcodebuild archive -project MarpleiOS.xcodeproj -scheme MarpleiOS \
   -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
   -quiet
 echo "▸ exporting + uploading…"
-cat > /tmp/MarpleExportOptions.plist <<PLIST
+PROFILE_NAME="${IOS_APPSTORE_PROFILE:-Marple Mini App Store com.quasifish.marpleios}"
+if grep -ql "$PROFILE_NAME" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"*.mobileprovision 2>/dev/null; then
+  cat > /tmp/MarpleExportOptions.plist <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>method</key><string>app-store-connect</string>
+  <key>destination</key><string>upload</string>
+  <key>teamID</key><string>2E5N3Q45BG</string>
+  <key>signingStyle</key><string>manual</string>
+  <key>signingCertificate</key><string>Apple Distribution</string>
+  <key>provisioningProfiles</key><dict>
+    <key>com.quasifish.marpleios</key><string>${PROFILE_NAME}</string>
+  </dict>
+</dict></plist>
+PLIST
+else
+  cat > /tmp/MarpleExportOptions.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -25,6 +42,7 @@ cat > /tmp/MarpleExportOptions.plist <<PLIST
   <key>signingStyle</key><string>automatic</string>
 </dict></plist>
 PLIST
+fi
 xcodebuild -exportArchive -archivePath "$ARCH" -exportPath /tmp/marple-export \
   -exportOptionsPlist /tmp/MarpleExportOptions.plist -allowProvisioningUpdates \
   -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"

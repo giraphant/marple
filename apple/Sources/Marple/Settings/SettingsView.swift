@@ -180,8 +180,11 @@ private struct IndexSettings: View {
 /// bottom switcher; here they can be restored or permanently deleted. Reaches the
 /// live model via `ActiveModel.current`, same as the other model-backed panes.
 private struct SpacesSettings: View {
+    @State private var syncCoordinator = ActiveCloudSync.coordinator
+
     var body: some View {
         Form {
+            CloudSyncSection(coordinator: syncCoordinator)
             Section("已封存的空间") {
                 if let model = ActiveModel.current {
                     let archived = model.archivedSpaces
@@ -206,6 +209,90 @@ private struct SpacesSettings: View {
             }
         }
         .formStyle(.grouped)
+        .onReceive(NotificationCenter.default.publisher(for: ActiveCloudSync.didChangeNotification)) { _ in
+            syncCoordinator = ActiveCloudSync.coordinator
+        }
+    }
+}
+
+private struct CloudSyncSection: View {
+    let coordinator: CloudSyncCoordinator?
+
+    var body: some View {
+        Section("iCloud 同步") {
+            if let coordinator {
+                CloudSyncStatusRow(coordinator: coordinator)
+            } else {
+                Text("主窗口尚未就绪。").foregroundStyle(.secondary)
+            }
+            Text("通过 iCloud (CloudKit) 同步空间结构、标签页、保存视图、类型顺序与阅读外观设置；文库文档保留在本地文件夹，本机路径与密钥不会上传。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct CloudSyncStatusRow: View {
+    @ObservedObject var coordinator: CloudSyncCoordinator
+
+    var body: some View {
+        switch coordinator.status {
+        case .needsInitialChoice(let localSpaces, let remoteSpaces):
+            VStack(alignment: .leading, spacing: 8) {
+                Label("首次连接 iCloud：本机（\(localSpaces) 个空间）与云端（\(remoteSpaces) 个空间）均有数据，已暂停自动覆盖",
+                      systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                HStack {
+                    Button("以本机为准") {
+                        coordinator.resolveInitialConflictUseLocal()
+                    }
+                    Button("合并保留两份") {
+                        coordinator.resolveInitialConflictMergeBoth()
+                    }
+                    Button("以云端为准") {
+                        coordinator.resolveInitialConflictUseRemote()
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        default:
+            HStack {
+                switch coordinator.status {
+                case .disabled(let reason):
+                    Label(reason, systemImage: "icloud.slash")
+                        .foregroundStyle(.secondary)
+                case .syncing:
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在与 iCloud 同步…")
+                    }
+                case .idle(let date):
+                    if let date {
+                        Label {
+                            Text("已同步 · \(date, format: .relative(presentation: .named))")
+                        } icon: {
+                            Image(systemName: "checkmark.icloud")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Label("iCloud 同步已就绪", systemImage: "icloud")
+                            .foregroundStyle(.secondary)
+                    }
+                case .error(let message):
+                    Label(message, systemImage: "exclamationmark.icloud")
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                case .needsInitialChoice:
+                    EmptyView()
+                }
+                Spacer()
+                if case .disabled = coordinator.status {
+                    EmptyView()
+                } else {
+                    Button("立即同步") { coordinator.syncNow() }
+                        .disabled(coordinator.status == .syncing)
+                }
+            }
+        }
     }
 }
 

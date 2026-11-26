@@ -69,6 +69,12 @@ final class Library {
 
     /// The shared part of every Space, in switcher order.
     private(set) var spaceDefinitions: [SpaceDefinition] = []
+    /// Shared temporary tabs per Space (preserved even when the last window closes).
+    @ObservationIgnored private(set) var sharedTemporaryTabs: [UUID: [PersistedTab]] = [:]
+    /// Hook invoked when synced state changes locally (CloudKit coordinator).
+    @ObservationIgnored var onSyncStateChanged: (() -> Void)?
+    /// Suppresses echo notifications while adopting a remote CloudKit snapshot.
+    @ObservationIgnored private var isApplyingRemoteSync = false
 
     // MARK: windows
 
@@ -153,6 +159,9 @@ final class Library {
                 }
             }
             spaceDefinitions = session.definitions
+            if let firstSpaces = session.windows.first?.spaces {
+                sharedTemporaryTabs = Self.extractTemporaryTabs(from: firstSpaces)
+            }
             pendingWindows = session.windows
             recentlyClosedWindow = s.recentlyClosedWindow
         }
@@ -183,6 +192,7 @@ final class Library {
         if recentlyClosedWindow?.id == window.windowID { recentlyClosedWindow = nil }
         if spaceDefinitions.isEmpty {
             spaceDefinitions = window.spaces.map(\.definition)
+            sharedTemporaryTabs = Self.extractTemporaryTabs(from: window.spaces)
         }
         persist()
     }
@@ -233,6 +243,7 @@ final class Library {
         let newStructure = source.spaces.map { $0.workspace?.sharedTabStructure }
         guard definitions != spaceDefinitions || oldStructure != newStructure else { return }
         spaceDefinitions = definitions
+        sharedTemporaryTabs = Self.extractTemporaryTabs(from: source.spaces)
         isSharingSpaces = true
         defer { isSharingSpaces = false }
         for window in windows where window !== source {
@@ -256,7 +267,7 @@ final class Library {
     /// Save shared definitions once and each open window's reading state, and
     /// mirror the open pages for the iOS companion.
     func persist() {
-        guard !isRestoring, allowsStateSaving, let stateStore else { return }
+        guard !isRestoring, allowsStateSaving else { return }
         guard persistenceDepth == 0 else {
             persistencePending = true
             return
@@ -271,15 +282,138 @@ final class Library {
             windows: windows.map(\.spaces),
             front: ordered.first.map(\.spaces),
             cache: cache))
-        // During bootstrap, write back the loaded counts rather than the empty ones.
-        let counts = isBootstrapping ? loadedCountsSnapshot : catalog.counts
-        stateStore.save(PersistedState(
-            definitions: spaceDefinitions,
-            windows: ordered.map { $0.persistedWindow(cache: cache) },
-            recentlyClosedWindow: recentlyClosedWindow,
-            counts: counts,
+        if let stateStore {
+            // During bootstrap, write back the loaded counts rather than the empty ones.
+            let counts = isBootstrapping ? loadedCountsSnapshot : catalog.counts
+            stateStore.save(PersistedState(
+                definitions: spaceDefinitions,
+                windows: ordered.map { $0.persistedWindow(cache: cache) },
+                recentlyClosedWindow: recentlyClosedWindow,
+                counts: counts,
+                savedViews: savedViews,
+                cache: cache))
+        }
+        if !isApplyingRemoteSync {
+            onSyncStateChanged?()
+        }
+    }
+
+    // MARK: CloudKit sync bridge
+
+    /// True when the local library holds user-created Space/view state worth
+    /// seeding into an empty CloudKit zone (as opposed to a brand-new install
+    /// showing a single empty default Space).
+    var hasNonTrivialSpaces: Bool {
+        if !savedViews.isEmpty || !hiddenTypes.isEmpty || typeOrder != EntryType.modeled {
+            return true
+        }
+        if spaceDefinitions.count > 1 { return true }
+        guard let only = spaceDefinitions.first else { return false }
+        if only.isArchived || !only.roots.isEmpty || only.iconName != nil { return true }
+        if only.name != "默认 Space" && only.name != "空间 1" { return true }
+        return !(sharedTemporaryTabs[only.id] ?? []).isEmpty
+    }
+
+    func syncedSpacePayloads() -> [SyncedSpacePayload] {
+        let validIDs = Set(spaceDefinitions.map(\.id))
+        sharedTemporaryTabs = sharedTemporaryTabs.filter { validIDs.contains($0.key) }
+        return spaceDefinitions.map { def in
+            let temps = (sharedTemporaryTabs[def.id] ?? []).map(SyncedTemporaryTab.init(tab:))
+            return SyncedSpacePayload(definition: def, temporaryTabs: temps)
+        }
+    }
+
+    func syncedLibraryMeta() -> SyncedLibraryMeta {
+        SyncedLibraryMeta(
+            spaceOrder: spaceDefinitions.map(\.id),
             savedViews: savedViews,
-            cache: cache))
+            typeOrder: typeOrder,
+            hiddenTypes: Array(hiddenTypes)
+        )
+    }
+
+    func syncedActiveSession() -> SyncedActiveSession {
+        let front = orderedWindows.first?.spaces ?? []
+        var activeBySpace: [String: String] = [:]
+        for space in front where !space.isArchived {
+            if let path = space.workspace?.activeTab?.location.openPath {
+                activeBySpace[space.id.uuidString] = path
+            }
+        }
+        return SyncedActiveSession(
+            updatedAtMs: Int64(Date().timeIntervalSince1970 * 1000),
+            activePathBySpace: activeBySpace
+        )
+    }
+
+    /// Adopt a remote CloudKit snapshot into this Library and every open window,
+    /// preserving each window's reading history, selection, and folder collapse.
+    func applyRemoteSync(_ snapshot: CloudSyncSnapshot) {
+        let ordered = snapshot.orderedSpaces()
+        let newDefinitions = ordered.map(\.definition)
+        let newTempTabs: [UUID: [PersistedTab]] = Dictionary(
+            ordered.map { ($0.id, $0.temporaryTabs.map(\.persistedTab)) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        var newSavedViews = savedViews
+        var newTypeOrder = typeOrder
+        var newHiddenTypes = hiddenTypes
+        if let meta = snapshot.libraryMeta {
+            newSavedViews = meta.savedViews
+            var order = meta.typeOrder.filter { EntryType.modeled.contains($0) }
+            for t in EntryType.modeled where !order.contains(t) { order.append(t) }
+            newTypeOrder = order
+            newHiddenTypes = Set(meta.hiddenTypes).intersection(EntryType.modeled)
+        }
+
+        let spacesChanged = !ordered.isEmpty && ordered != syncedSpacePayloads()
+        let metaChanged = newSavedViews != savedViews ||
+            newTypeOrder != typeOrder ||
+            newHiddenTypes != hiddenTypes
+        guard spacesChanged || metaChanged else { return }
+
+        isApplyingRemoteSync = true
+        isSharingSpaces = true
+        defer {
+            isSharingSpaces = false
+            isApplyingRemoteSync = false
+        }
+
+        withPersistenceBatch {
+            if spacesChanged {
+                spaceDefinitions = newDefinitions
+                sharedTemporaryTabs = newTempTabs
+                let rebuilt = ordered.map { $0.makeWorkspaceSpace() }
+                for window in windows {
+                    window.adoptSharedSpaces(rebuilt)
+                }
+            }
+            if newSavedViews != savedViews {
+                savedViews = newSavedViews
+            }
+            if newTypeOrder != typeOrder {
+                typeOrder = newTypeOrder
+            }
+            if newHiddenTypes != hiddenTypes {
+                hiddenTypes = newHiddenTypes
+            }
+        }
+        // Existing undo closures capture pre-sync workspace snapshots and could
+        // resurrect deleted remote nodes; clear organization undo at sync boundary.
+        undoManager.removeAllActions()
+    }
+
+    private static func extractTemporaryTabs(from spaces: [WorkspaceSpace]) -> [UUID: [PersistedTab]] {
+        var result: [UUID: [PersistedTab]] = [:]
+        for space in spaces {
+            let temps = (space.workspace?.tabs ?? []).filter { !$0.pinned }.map { tab in
+                PersistedTab(id: tab.id, location: NavLocation(pane: tab.location.pane, openPath: tab.location.openPath),
+                             pinned: false, customTitle: tab.customTitle)
+            }
+            result[space.id] = temps
+        }
+        return result
     }
 
     // MARK: type order / hidden types persistence
@@ -288,7 +422,7 @@ final class Library {
     private static let hiddenTypesKey = "marple.hiddenTypes"
 
     private func loadTypeOrder() {
-        guard let data = UserDefaults.standard.data(forKey: Self.typeOrderKey),
+        guard let data = searchDefaults.data(forKey: Self.typeOrderKey),
               let decoded = try? JSONDecoder().decode([EntryType].self, from: data) else { return }
         // Drop any persisted types no longer modeled as browse categories (e.g.
         // a `transcript` saved by an earlier build), then append new modeled types.
@@ -299,18 +433,20 @@ final class Library {
 
     private func persistTypeOrder() {
         guard let data = try? JSONEncoder().encode(typeOrder) else { return }
-        UserDefaults.standard.set(data, forKey: Self.typeOrderKey)
+        searchDefaults.set(data, forKey: Self.typeOrderKey)
+        if !isRestoring, !isApplyingRemoteSync { onSyncStateChanged?() }
     }
 
     private func loadHiddenTypes() {
-        guard let data = UserDefaults.standard.data(forKey: Self.hiddenTypesKey),
+        guard let data = searchDefaults.data(forKey: Self.hiddenTypesKey),
               let decoded = try? JSONDecoder().decode(Set<EntryType>.self, from: data) else { return }
         hiddenTypes = decoded.intersection(EntryType.modeled)
     }
 
     private func persistHiddenTypes() {
         guard let data = try? JSONEncoder().encode(hiddenTypes) else { return }
-        UserDefaults.standard.set(data, forKey: Self.hiddenTypesKey)
+        searchDefaults.set(data, forKey: Self.hiddenTypesKey)
+        if !isRestoring, !isApplyingRemoteSync { onSyncStateChanged?() }
     }
 
     // MARK: index pipeline
